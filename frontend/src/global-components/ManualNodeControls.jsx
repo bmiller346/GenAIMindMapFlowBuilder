@@ -8,7 +8,11 @@ import {
     parseFlowSnapshot,
     stringifyFlowSnapshot
 } from '../utils/flowSnapshots';
-import { createWorkspaceNode } from '../utils/manualNodes';
+import {
+    createWorkspaceNode,
+    getRootFocusViewport,
+    getRootPosition
+} from '../utils/manualNodes';
 import useActivityStore from '../stores/activityStore';
 import useAutomationStore from '../stores/automationStore';
 
@@ -31,11 +35,6 @@ const ManualNodeControls = () => {
     const setActivityEvents = useActivityStore((state) => state.setActivityEvents);
     const recordActivity = useActivityStore((state) => state.recordActivity);
     const setAutomations = useAutomationStore((state) => state.setAutomations);
-
-    const nextPosition = (baseNodes) => ({
-        x: baseNodes.length * 80,
-        y: baseNodes.length * 48
-    });
 
     const createBlankWorkspace = async () => {
         setWorkspaceMessage('Creating a blank workspace...');
@@ -138,13 +137,13 @@ const ManualNodeControls = () => {
 
         const focusNewRoot = () => {
             const currentViewport = getViewport();
-            const zoom = Math.min(Math.max(currentViewport?.zoom || 0.85, 0.65), 1);
             setViewport(
-                {
-                    x: window.innerWidth / 2 - (manualNode.position?.x || 0) * zoom - 180,
-                    y: window.innerHeight / 2 - (manualNode.position?.y || 0) * zoom - 70,
-                    zoom
-                },
+                getRootFocusViewport({
+                    position: manualNode.position,
+                    viewport: currentViewport,
+                    width: window.innerWidth,
+                    height: window.innerHeight
+                }),
                 { duration: 240 }
             );
         };
@@ -169,7 +168,7 @@ const ManualNodeControls = () => {
             const manualNode = createWorkspaceNode({
                 title,
                 nodeType,
-                position: nextPosition(baseNodes),
+                position: getRootPosition(baseNodes),
                 df
             });
             appendManualNode(baseNodes, manualNode);

@@ -1,3 +1,5 @@
+import { getWorkspaceNodeData } from '../utils/manualNodes.js';
+
 const TASK_CAPABLE_TYPES = new Set([
     'task',
     'procedure',
@@ -39,6 +41,21 @@ const firstSourceRef = (node) => {
     return refs[0] || {};
 };
 
+const tableRows = (node) => {
+    const nestedData = getNestedData(node);
+    const rows = node?.data?.df ?? nestedData.df;
+
+    return Array.isArray(rows) ? rows : [];
+};
+
+const tableColumns = (rows) =>
+    Array.from(
+        rows.reduce((columns, row) => {
+            Object.keys(row || {}).forEach((key) => columns.add(key));
+            return columns;
+        }, new Set())
+    );
+
 const hasSourceDocument = (sourceRef) => Boolean(sourceRef?.document_id);
 
 const hasCompleteSourceRef = (sourceRef) =>
@@ -68,8 +85,11 @@ const sourceRefIssues = (sourceRef) => {
 };
 
 export const normalizeGraphNode = (node) => {
+    const workspaceData = getWorkspaceNodeData(node);
     const sourceRef = firstSourceRef(node);
+    const rows = tableRows(node);
     const nodeType =
+        workspaceData.nodeType ||
         firstValue(node, ['node_type', 'component_type', 'name']) ||
         (node?.type === 'pdfResponse' || node?.type === 'response'
             ? 'concept'
@@ -77,20 +97,28 @@ export const normalizeGraphNode = (node) => {
 
     return {
         id: node?.id || '',
-        title: firstValue(
-            node,
-            ['title', 'question', 'content', 'prompt', 'answer', 'summ'],
-            node?.type || 'Untitled Node'
-        ),
-        summary: firstValue(node, ['summary', 'summ', 'answer']),
+        title:
+            workspaceData.title ||
+            firstValue(
+                node,
+                ['title', 'question', 'content', 'prompt', 'answer', 'summ'],
+                node?.type || 'Untitled Node'
+            ),
+        summary: workspaceData.body || firstValue(node, ['summary', 'summ', 'answer']),
         node_type: nodeType,
-        status: firstValue(node, ['status'], 'ai_generated'),
-        priority: firstValue(node, ['priority']),
-        owner_id: firstValue(node, ['owner_id', 'assignee', 'owner']),
-        due_date: firstValue(node, ['due_date']),
-        confidence: firstValue(node, ['confidence'], sourceRef.confidence || ''),
+        status: workspaceData.status || firstValue(node, ['status'], 'ai_generated'),
+        priority: workspaceData.priority || firstValue(node, ['priority']),
+        owner_id: workspaceData.ownerId || firstValue(node, ['owner_id', 'assignee', 'owner']),
+        due_date: workspaceData.dueDate || firstValue(node, ['due_date']),
+        confidence:
+            workspaceData.confidence ||
+            firstValue(node, ['confidence'], sourceRef.confidence || ''),
         source_ref: sourceRef,
-        source_refs: sourceRefs(node),
+        source_refs: workspaceData.sourceRefs.length ? workspaceData.sourceRefs : sourceRefs(node),
+        table_rows: workspaceData.df.length ? workspaceData.df : rows,
+        table_columns: tableColumns(workspaceData.df.length ? workspaceData.df : rows),
+        is_manual: workspaceData.manual,
+        display: workspaceData.display,
         react_flow_type: node?.type || ''
     };
 };

@@ -1,3 +1,8 @@
+import {
+    normalizeWorkspaceEdges,
+    normalizeWorkspaceNodes
+} from './manualNodes.js';
+
 export const EMPTY_FLOW_SNAPSHOT = {
     nodes: [],
     edges: [],
@@ -15,9 +20,15 @@ export const parseFlowSnapshot = (flowJson) => {
 
     try {
         const parsed = JSON.parse(flowJson);
+        const nodes = normalizeWorkspaceNodes(
+            Array.isArray(parsed.nodes) ? parsed.nodes : []
+        );
         return {
-            nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
-            edges: Array.isArray(parsed.edges) ? parsed.edges : [],
+            nodes,
+            edges: normalizeWorkspaceEdges(
+                nodes,
+                Array.isArray(parsed.edges) ? parsed.edges : []
+            ),
             viewport: parsed.viewport || {},
             workspace_brief: parsed.workspace_brief || {},
             source_library: Array.isArray(parsed.source_library)
@@ -43,40 +54,57 @@ export const createFlowSnapshot = ({
     sourceLibrary = [],
     activityEvents = [],
     automations = []
-}) => ({
-    ...flowObject,
-    nodes,
-    edges,
-    viewport: viewport || flowObject.viewport || {},
-    workspace_brief: workspaceBrief || {},
-    source_library: Array.isArray(sourceLibrary) ? sourceLibrary : [],
-    activity_events: Array.isArray(activityEvents) ? activityEvents : [],
-    automations: Array.isArray(automations) ? automations : []
-});
+}) => {
+    const normalizedNodes = normalizeWorkspaceNodes(nodes);
+    const nodeIds = new Set(normalizedNodes.map((node) => node.id));
+    const connectedEdges = normalizeWorkspaceEdges(normalizedNodes, edges).filter(
+        (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
+    );
+
+    return {
+        ...flowObject,
+        nodes: normalizedNodes,
+        edges: connectedEdges,
+        viewport: viewport || flowObject.viewport || {},
+        workspace_brief: workspaceBrief || {},
+        source_library: Array.isArray(sourceLibrary) ? sourceLibrary : [],
+        activity_events: Array.isArray(activityEvents) ? activityEvents : [],
+        automations: Array.isArray(automations) ? automations : []
+    };
+};
 
 export const stringifyFlowSnapshot = (snapshot) =>
-    JSON.stringify({
-        ...EMPTY_FLOW_SNAPSHOT,
-        ...(snapshot || {}),
-        nodes: snapshot?.nodes || [],
-        edges: snapshot?.edges || [],
-        viewport: snapshot?.viewport || {},
-        workspace_brief: snapshot?.workspace_brief || {},
-        source_library: Array.isArray(snapshot?.source_library)
-            ? snapshot.source_library
-            : [],
-        activity_events: Array.isArray(snapshot?.activity_events)
-            ? snapshot.activity_events.map((event) => ({
-                  ...event,
-                  undo: undefined
-              }))
-            : [],
-        automations: Array.isArray(snapshot?.automations)
-            ? snapshot.automations.map((automation) => ({
-                  ...automation,
-                  run_history: Array.isArray(automation.run_history)
-                      ? automation.run_history
-                      : []
-              }))
-            : []
-    });
+    JSON.stringify(
+        (() => {
+            const activityEvents = Array.isArray(snapshot?.activity_events)
+                ? snapshot.activity_events.map((event) => ({
+                      ...event,
+                      undo: undefined
+                  }))
+                : [];
+            const automations = Array.isArray(snapshot?.automations)
+                ? snapshot.automations.map((automation) => ({
+                      ...automation,
+                      run_history: Array.isArray(automation.run_history)
+                          ? automation.run_history
+                          : []
+                  }))
+                : [];
+
+            return createFlowSnapshot({
+                flowObject: {
+                    ...EMPTY_FLOW_SNAPSHOT,
+                    ...(snapshot || {}),
+                    activity_events: activityEvents,
+                    automations
+                },
+                nodes: snapshot?.nodes || [],
+                edges: snapshot?.edges || [],
+                viewport: snapshot?.viewport || {},
+                workspaceBrief: snapshot?.workspace_brief || {},
+                sourceLibrary: snapshot?.source_library || [],
+                activityEvents,
+                automations
+            });
+        })()
+    );

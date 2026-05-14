@@ -1,6 +1,7 @@
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
+import { updateWorkspaceNode } from '../utils/manualNodes';
 
 const getColumns = (rows) =>
     Array.from(
@@ -27,16 +28,16 @@ const ManualTableEditor = ({ nodeId, rows }) => {
                     return node;
                 }
 
-                return {
-                    ...node,
+                return updateWorkspaceNode(node, {
                     data: {
                         ...node.data,
+                        df: nextRows,
                         data: {
-                            ...node.data.data,
+                            ...node.data?.data,
                             df: nextRows
                         }
                     }
-                };
+                });
             })
         );
         setSaveStatus('dirty');

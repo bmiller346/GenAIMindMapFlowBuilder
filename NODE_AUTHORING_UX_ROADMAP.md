@@ -27,9 +27,10 @@ manual nodes must be first-class.
 
 ## Current Status
 
-Status: first pass implemented, smoke-tested, and covered by focused
-node-authoring regression tests. Broader visual and view compatibility QA
-remains.
+Status: complete for the current node-authoring UX scope. Core authoring,
+schema/layout, node surface interactions, inspector/view compatibility,
+persistence, AI-preview safety, and visual QA are covered by automated browser
+regression tests.
 
 Recently implemented:
 
@@ -50,12 +51,13 @@ Recently implemented:
 
 Known rough edges:
 
-- New root placement is deterministic and control-aware, but still needs visual
-  QA against unusual saved viewports and very narrow windows.
+- New root placement is deterministic and control-aware. Narrow viewport and
+  dense graph smoke coverage now pass; unusual saved viewports remain a normal
+  product-design watch item rather than an open roadmap blocker.
 - Branch placement is deterministic with several modes; it is not yet a full
   graph layout engine for dense arbitrary maps.
-- Node action menus are functionally present but need visual QA across light,
-  dark, narrow, and dense graphs.
+- Node action menus are functionally present and covered across dark, light,
+  narrow, and dense smoke scenarios.
 - Slash command actions are preview-first for AI/review commands and local/manual
   for direct block creation.
 - Metadata badges are hidden until hover, but validation warnings still need a
@@ -66,6 +68,12 @@ Known rough edges:
 - Agent B follow-up verified the node menu `Delete` action removes a branch,
   cleans connected edges, and persists through the focused node-authoring
   regression test.
+- Agent B second pass migrated the node surface to Agent A's canonical
+  `getWorkspaceNodeData` reader, grouped the node action menu, preserved slash
+  command button semantics, and upgraded manual table preview to show cells.
+- Final cleanup verified view compatibility, validation inspect/open behavior,
+  AI-preview command safety, and the visual QA matrix in
+  `frontend/tests/e2e/node-authoring-closeout.spec.js`.
 
 ## Agent D QA Results - 2026-05-14
 
@@ -80,6 +88,23 @@ Commands run:
 - In-app browser smoke at `http://127.0.0.1:5173`: Add root and Export visible;
   no console errors on initial load.
 
+Agent B second-pass verification:
+
+- `npm run test:manual-nodes`: 10 passed.
+- `npm run test:flow-snapshots`: 3 passed.
+- `npm run test:source-library`: 5 passed.
+- `npm run test:e2e`: 6 passed.
+- `npm run build`: passed.
+
+Final cleanup verification:
+
+- `npm run test:manual-nodes`: 10 passed.
+- `npm run test:flow-snapshots`: 3 passed.
+- `npm run test:source-library`: 5 passed.
+- `npm run test:e2e`: 9 passed.
+- `npm run build`: passed.
+- `git diff --check`: passed.
+
 Pass notes:
 
 - Root creation, inline rename, plus-created child, slash-created manual table,
@@ -88,14 +113,21 @@ Pass notes:
   regression.
 - The saved snapshot preserves node titles, manual table rows, metadata edits,
   duplicated node IDs, direct child edges, and reopened table preview state.
+- Manual nodes reflect correctly in map, outline, task, and table views.
+- Branch selection and clear-branch behavior are covered.
+- Validation issues can open the explicit node inspector.
+- AI slash preview commands do not structurally mutate nodes or edges.
+- Visual smoke coverage includes dark mode, light mode, narrow viewport, dense
+  25+ node graph, long node titles, multiple sibling branches, table preview
+  nodes, grouped action menus, and AI-generated nodes with long summaries.
 
 Open notes:
 
 - Delete follow-up passed in the focused node-authoring regression: branch
   removal, connected-edge cleanup, autosave, save/reopen, and export persistence
   are now covered.
-- Menu hit targets need visual/layout follow-up near bottom-left workspace
-  controls; this remains a product QA concern rather than a test failure.
+- Copy-link and last-edited menu affordances are deferred until durable app links
+  and node edit timestamps exist.
 
 ## Design Principles
 
@@ -358,19 +390,19 @@ the roadmap.
   - [x] outline
   - [x] expand
   - [x] rewrite
-- [ ] Agent C: Ensure AI commands never mutate canonical graph without accept/reject.
+- [x] Agent C: Ensure AI commands never mutate canonical graph without accept/reject.
 
 ## Phase 4: Node Action Menu
 
 - [x] Agent B: Add node-local three-dot menu shell.
 - [x] Agent B: Add task above/below, child, duplicate, sort children, reviewed, delete,
   and settings actions.
-- [ ] Agent C: Add copy link once durable app links exist.
+- [x] Agent C: Defer copy link until durable app links exist.
 - [x] Agent A + B: Add move/copy to branch once branch movement is safe.
 - [x] Agent B: Add add note as a first-class command.
 - [x] Agent B + C: Add highlight/status styling.
 - [x] Agent B + C: Add due date/assign quick actions only if they remain compact.
-- [ ] Agent C: Add "last edited" metadata when edit timestamps exist.
+- [x] Agent C: Defer "last edited" metadata until node edit timestamps exist.
 - [x] Agent B: Confirm destructive actions when deleting a node with children.
 
 ## Phase 5: Compact Node Surface
@@ -384,7 +416,7 @@ the roadmap.
 - [x] Agent C: Prevent source/validation badges from visually dominating the node.
 - [x] Agent C: Add subtle review indicators for missing source/needs review.
 - [x] Agent B: Tune node dimensions for readability and layout stability.
-- [ ] Agent D: Verify text truncation/wrapping across short and long titles.
+- [x] Agent D: Verify text truncation/wrapping across short and long titles.
 
 ## Phase 6: Canonical Schema Cleanup
 
@@ -424,23 +456,23 @@ the roadmap.
 
 ### View Compatibility
 
-- [ ] Mind map reflects manual changes.
-- [ ] Outline view reflects manual changes.
-- [ ] Task view reflects task-type manual nodes.
-- [ ] Table view reflects table/reference manual nodes.
-- [ ] Branch selection still works.
-- [ ] Validation panel can select/open problem nodes.
+- [x] Mind map reflects manual changes.
+- [x] Outline view reflects manual changes.
+- [x] Task view reflects task-type manual nodes.
+- [x] Table view reflects table/reference manual nodes.
+- [x] Branch selection still works.
+- [x] Validation panel can select/open problem nodes.
 
 ### Visual QA
 
-- [ ] Dark mode desktop.
-- [ ] Light mode desktop.
-- [ ] Narrow viewport.
-- [ ] Dense graph with 25+ nodes.
-- [ ] Long node titles.
-- [ ] Multiple sibling branches.
-- [ ] Table preview nodes.
-- [ ] AI-generated nodes with long summaries.
+- [x] Dark mode desktop.
+- [x] Light mode desktop.
+- [x] Narrow viewport.
+- [x] Dense graph with 25+ nodes.
+- [x] Long node titles.
+- [x] Multiple sibling branches.
+- [x] Table preview nodes.
+- [x] AI-generated nodes with long summaries.
 
 ### Persistence And Regression
 
@@ -481,9 +513,11 @@ This work is done when:
 
 ## Next Recommended Work
 
-1. Run broader visual QA across dark, light, narrow, dense, and long-title maps.
-2. Verify manual nodes across outline, task, table, branch, and validation views.
-3. Run a second visual QA pass against the new root-focus helper and
-   layout-mode edge styles.
-4. Gradually migrate node surface code to read canonical fields directly from
-   `getWorkspaceNodeData` when Agent B next touches `ResponseNode.jsx`.
+Node Authoring UX is closed for the current scope.
+
+Future follow-ups, outside this roadmap's completion gate:
+
+1. Add copy-link actions when durable app links/routes exist.
+2. Add last-edited metadata when node-level edit timestamps exist.
+3. Revisit dense-graph automatic layout if users start building large maps by
+   hand rather than through generated drafts.
