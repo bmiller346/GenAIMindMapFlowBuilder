@@ -1,0 +1,85 @@
+{
+  "name": "docmap-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron desktop launcher for the DocMap FastAPI and React app.",
+  "author": "DocMap",
+  "main": "electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run desktop:dev",
+    "desktop:dev": "node scripts/desktop-dev.mjs",
+    "desktop:start": "electron .",
+    "desktop:build:frontend": "node scripts/build-frontend.mjs",
+    "desktop:prepare": "node scripts/prepare-desktop-resources.mjs",
+    "desktop:prepare:self-contained": "node scripts/prepare-desktop-resources.mjs --include-venv",
+    "desktop:build": "npm run desktop:build:frontend && npm run desktop:prepare && electron-builder -c",
+    "desktop:build:self-contained": "npm run desktop:build:frontend && npm run desktop:prepare:self-contained && electron-builder -c",
+    "desktop:check": "node --check electron/main.js && node --check electron/preload.js && node --check scripts/desktop-dev.mjs && node --check scripts/build-frontend.mjs && node --check scripts/prepare-desktop-resources.mjs",
+    "infra:mongo:up": "docker-compose -f docker-compose.yml up -d mongo",
+    "infra:mongo:down": "docker-compose -f docker-compose.yml down",
+    "infra:mongo:logs": "docker-compose -f docker-compose.yml logs -f mongo"
+  },
+  "devDependencies": {
+    "electron": "^38.1.2",
+    "electron-builder": "^26.0.12",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.docmap.desktop",
+    "productName": "DocMap",
+    "npmRebuild": false,
+    "electronLanguages": [
+      "en-US"
+    ],
+    "files": [
+      "electron/**",
+      "package.json",
+      "!node_modules/**"
+    ],
+    "extraResources": [
+      {
+        "from": "electron/assets",
+        "to": "electron/assets"
+      },
+      {
+        "from": "frontend/dist",
+        "to": "frontend/dist"
+      },
+      {
+        "from": ".desktop-resources/backend",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "README.md",
+        "to": "README.md"
+      },
+      {
+        "from": "ROADMAP.md",
+        "to": "ROADMAP.md"
+      }
+    ],
+    "win": {
+      "icon": "electron/assets/docmap.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "DocMap"
+    },
+    "portable": {
+      "requestExecutionLevel": "user"
+    }
+  }
+}

@@ -48,7 +48,7 @@ When working as an agent in this repo:
 1. Read only the files needed for the task.
 2. Summarize before widening scope.
 3. Do not paste giant prompts or long generated JSON into planning docs.
-4. Prefer updating this file, `AGENTS.md`, and `README.md` with concise decisions over repeating history in chat.
+4. Keep `ROADMAP.md` current when phase status or integration priorities change.
 5. Record only durable decisions, active constraints, and next milestones.
 
 ## Architecture North Star
@@ -75,14 +75,38 @@ When working as an agent in this repo:
 - monday.com board, groups, items, and subitems export
 - Status/comment pullback only after export mappings are durable
 
-## Next Roadmap
-1. Stabilize document ingestion around PDF/DOCX/MD/TXT only.
-2. Normalize graph persistence so view transforms stop duplicating state.
-3. Add source refs, review states, and `external_refs` to node details.
-4. Add neutral exports: rich JSON, Markdown, CSV task list, and OPML.
-5. Add Miro export with branch-level export first and full-board export second.
-6. Add monday.com task export with preview/confirm flow.
-7. Migrate legacy OpenAI beta assistant calls to a cleaner current SDK pattern.
+## Shared Validation Contracts
+Agents should treat these contracts as coordination rules across ingestion, graph validation, review UI, and integrations:
+
+1. Source refs must be evidence-backed. Do not fabricate `source_refs`; leave ungrounded generated nodes with `source_refs: []` so graph validation can mark them `needs_review`.
+2. AI-generated/reviewable nodes without `source_refs` are expected to become `needs_review`; this is a review signal, not a graph-invalid state.
+3. Low-confidence AI-generated/reviewable nodes below the backend threshold are also expected to become `needs_review`.
+4. `reference` nodes are exempt from missing-source and low-confidence `needs_review` repair.
+5. If an agent creates `external_refs.miro` or `external_refs.monday`, the ref should be integration-backed and durable: include `board_id`, `item_id`, `export_batch_id`, and `last_pushed_at`. Incomplete Miro/monday refs are allowed to persist, but validation will surface warnings in the UI.
+
+## Roadmap Source Of Truth
+Use `ROADMAP.md` as the living project tracker.
+
+Current phase: Phase 1.5, graph reliability layer.
+
+Next best work:
+1. Attach source refs to AI-generated nodes where possible.
+2. Mark low-confidence generated nodes as `needs_review`.
+3. Add environment-based API key handling and document required variables.
+4. Add export snapshot tests for neutral, Miro, and monday payloads.
+5. Implement selected-branch export to a Miro frame using shapes/connectors.
+6. Implement monday task export to an existing board/group after auth configuration is in place.
+
+## Parallel Work Lanes
+Use the detailed ownership map in `ROADMAP.md`.
+
+- Agent A: document reliability, source metadata, chunking, upload safety.
+- Agent B: graph contracts, schema validation, graph repair/report data.
+- Agent C: review UI, node inspector citations, validation panel.
+- Agent D: local graph projections, outline/task/table views, branch preview.
+- Agent E: neutral exports, Miro/monday bridge payloads, export confirmation.
+
+Before editing, each agent should state its lane and avoid another lane's owned files unless coordination is explicit.
 
 ## Definition of Better
 - Smaller prompts

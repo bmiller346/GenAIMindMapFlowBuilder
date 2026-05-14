@@ -1,245 +1,339 @@
 # DocMap Workspace
 
-This fork is being reshaped from a broad AI demo into a document-to-structured-workspace engine.
+DocMap is a local document-to-structured-workspace app. It ingests technical documents, generates a reviewable graph, preserves source references, and projects the same canonical graph into mind maps, outlines, task lists, exports, and future Miro/monday.com workflows.
 
-## Product Goal
-
-Upload `PDF`, `DOCX`, `Markdown`, or `TXT`, extract structure with AI, and persist one normalized workspace graph that can be rendered as multiple views:
-
-- Mind map
-- Outline
-- Task list
-- Table
-- Markdown export
-
-The key architectural rule is simple:
-
-`one persistent graph -> many views`
-
-Mind map data should not become a second silo. Tasks should not be copied into a separate truth source. Views should be projections of the same workspace model.
-
-## Platform Fit
-
-This fork is best positioned as the missing middle layer in a company stack that already uses Miro and monday.com:
-
-- This app: document ingestion, structure extraction, normalized graph, source citations
-- Miro: visual collaboration and SME review
-- monday.com: task execution and status tracking
-
-That means this product should optimize for export and sync bridges, not try to replace either platform.
-
-## Current Direction
-
-This repo still contains upstream demo-era capabilities such as web, media, SQL, and Gemini paths. Those remain in the codebase, but the fork direction is now centered on the DocMap MVP:
-
-1. Upload one `pdf` or `docx`
-2. Extract text and structure
-3. Generate a hierarchical graph
-4. Render an editable mind map
-5. Preserve source references
-6. Convert selected branches into task-oriented views
-7. Export JSON, Markdown, and PNG
-
-## OpenAI Model Strategy
-
-The project now treats OpenAI as the primary model path for document workflows.
-
-- Supported selectable models in the persona UI: `gpt-5.4`, `gpt-5.5`
-- Default generation model: `gpt-5.5`
-- Default reasoning/support model: `gpt-5.4`
-- Default embedding model: `text-embedding-3-large`
-
-These defaults are controlled in `backend/app.py` through environment variables:
-
-```env
-openai_default_model=gpt-5.5
-openai_reasoning_model=gpt-5.4
-openai_embedding_model=text-embedding-3-large
-```
-
-The current backend still uses legacy assistant-style OpenAI flows in several places. That is now a modernization target rather than the desired long-term architecture.
-
-## Product Spec Snapshot
-
-### Source of truth
+The architectural rule is:
 
 ```text
-Workspace
-├── Source Documents
-├── Document Chunks
-├── Nodes
-├── Edges
-├── Source References
-├── Tasks
-├── External Refs
-└── View State
+one persistent graph -> many views -> controlled exports
 ```
 
-### View projections
+Miro and monday.com are endpoints. DocMap remains the canonical structure and traceability engine.
+
+## Current Product Focus
+
+The MVP lane is intentionally narrow:
+
+- Upload `PDF`, `DOCX`, `Markdown`, or `TXT`.
+- Extract text with source-aware metadata where possible.
+- Chunk documents deterministically.
+- Generate schema-valid graph JSON.
+- Flag generated nodes without source references as `needs_review`.
+- Edit and save the workspace.
+- Export reviewable JSON, Markdown, CSV, OPML, Mermaid, MMD JSON, PNG, and SVG.
+- Preview or push selected graph projections to Miro and monday.com when configured.
+
+The repo still contains upstream demo-era surfaces such as media, SQL, web, Gemini, and AWS paths. Keep those treated as legacy/optional unless they are part of a specific roadmap slice.
+
+## Repository Layout
 
 ```text
-Normalized Graph
-├── Mind Map View
-├── Outline View
-├── Task List View
-├── Table View
-└── Markdown Export
+backend/      FastAPI app, graph validation, ingestion, exports, integrations
+frontend/     React + Vite app
+electron/     Desktop shell for local standalone use
+scripts/      Desktop build and launch helpers
+ROADMAP.md    Living engineering roadmap
+DESKTOP.md    Detailed Electron packaging notes
+AGENT.md      Compact guide for agentic development work
 ```
 
-### Integration projections
+## Prerequisites
 
-```text
-Normalized Graph
-├── Miro Board / Frame Export
-├── monday.com Board / Group / Item Export
-├── MMD-compatible JSON
-├── OPML with attributes
-└── CSV task export
+- Windows PowerShell
+- Node.js 20 or newer
+- Python 3.11
+- Poetry available through `python -m poetry`
+- Docker Desktop for MongoDB-backed document uploads
+
+MongoDB is required for source document metadata, document chunks, and source references. Basic workspace listing can fall back to a local JSON store during development, but document ingestion should be tested with MongoDB running.
+
+## One-Time Setup
+
+Install root desktop dependencies:
+
+```powershell
+npm install
 ```
 
-### Controlled node types
+Install frontend dependencies:
 
-```text
-category
-concept
-standard
-workflow
-procedure
-decision
-risk
-requirement
-task
-reference
-definition
-question
-dependency
-needs_review
-```
-
-## MVP Acceptance Criteria
-
-1. User uploads one PDF or DOCX.
-2. System extracts document text.
-3. System generates a hierarchical node graph.
-4. User sees an editable mind map.
-5. Nodes can retain source references.
-6. User can convert a selected branch into task-oriented output.
-7. User can export PNG and Markdown.
-8. User can save and reopen a workspace.
-
-## Integration Direction
-
-### Miro first
-
-Miro is the best first external integration because it extends the visual review workflow you liked without forcing Miro to become the system of record.
-
-Recommended export order:
-
-1. Selected branch to Miro frame
-2. Whole workspace to Miro board
-3. Native mind map export where viable
-4. Fallback shapes and connectors export
-
-Each exported object should preserve the internal node ID and app backlink so later sync is possible.
-
-### monday.com second
-
-monday.com should receive only the actionable subset of the graph:
-
-- `task`
-- `procedure`
-- `needs_review`
-- optionally review-ready `workflow` nodes
-
-Recommended export order:
-
-1. Branch-to-task preview
-2. Export tasks to existing board/group
-3. Create board from workspace template
-4. Pull status back into the app
-
-### MMD / OPML compatibility
-
-Miro Mind Map Downloader style exports are useful compatibility targets, especially:
-
-- MMD-compatible JSON
-- OPML with attributes
-- Hierarchy CSV
-
-These should be treated as bridge formats, not the internal canonical model.
-
-## Roadmap
-
-### Phase 1
-- Narrow ingestion around `pdf`, `docx`, `md`, and `txt`
-- Improve graph generation contracts
-- Replace hardcoded model choices with GPT-5.4 / GPT-5.5 defaults and selection
-- Add stable internal IDs and neutral export scaffolding
-
-### Phase 2
-- Normalize workspace persistence for nodes, edges, refs, and tasks
-- Add source citation panels and review states
-- Add true outline and table projections from the same graph
-- Add JSON, Markdown, CSV, and OPML exports
-
-### Phase 3
-- Add branch-to-task preview and acceptance flow
-- Add Miro export with shapes/connectors fallback
-- Store `external_refs` for Miro objects
-- Reduce or retire duplicate legacy flows
-
-### Phase 4
-- Add monday.com task export and board mapping
-- Pull monday statuses back into the app
-- Pull Miro review metadata/comments where feasible
-- Migrate legacy assistant-style OpenAI calls to cleaner modern OpenAI patterns
-
-## Repo Notes
-
-- [`AGENT.md`](./AGENT.md): compact operating guide for future agentic work
-- [`AGENTS.md`](./AGENTS.md): short rules for tooling-aware agents
-- `backend/app.py`: current backend integration hub
-- `frontend/src/prompts/promptsModel.js`: persona prompts and selectable OpenAI models
-
-## Setup
-
-### Backend
-
-```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install poetry
-poetry install
-uvicorn app:app --reload
-```
-
-### Frontend
-
-```bash
+```powershell
 cd frontend
 npm install
-npm run dev
+cd ..
 ```
 
-## Environment Variables
+Install backend dependencies:
 
-Create `backend/.env`:
+```powershell
+cd backend
+python -m poetry install
+cd ..
+```
+
+Start MongoDB when you need document uploads:
+
+```powershell
+npm run infra:mongo:up
+```
+
+Stop MongoDB when you are done:
+
+```powershell
+npm run infra:mongo:down
+```
+
+## Configuration
+
+For standalone/local use, users should enter their own API keys through the app Settings UI instead of editing `.env` files. The current development build forwards local user settings to the backend per request.
+
+Use `backend/.env` only for developer defaults, integration testing, or hosted/company-managed deployments.
+
+Common backend variables:
 
 ```env
-mongo_db_url=
+mongo_db_url=mongodb://127.0.0.1:27017
 openai_api_key=
 openai_default_model=gpt-5.5
 openai_reasoning_model=gpt-5.4
 openai_embedding_model=text-embedding-3-large
+DOCMAP_MAX_UPLOAD_BYTES=26214400
+miro_api_token=
+monday_api_token=
+```
 
+Optional legacy variables:
+
+```env
 gemini_api_key=
 gcp_project_id=
+gcp_service_account_file=./ai-interview-poc-2b5cf8540f16.json
 aws_access_key_id=
 aws_secret_access_key=
 bucket_name=
 ```
 
-## Important Caveat
+OpenAI-backed endpoints return `503` with the missing setting name when no key is available. Upload validation restricts extensions, sanitizes filenames, hashes file bytes, and defaults to a 25 MB upload limit when `DOCMAP_MAX_UPLOAD_BYTES` is omitted.
 
-This fork now has a clearer target than the upstream project, but the backend is still carrying legacy implementation patterns and a wide feature surface. The intended next step is consolidation, not more sprawl.
+## Start The App
+
+### Recommended Desktop Development
+
+From the repo root:
+
+```powershell
+npm run infra:mongo:up
+npm run dev
+```
+
+This launches:
+
+- MongoDB at `127.0.0.1:27017`
+- FastAPI at `http://127.0.0.1:8000`
+- Vite at `http://127.0.0.1:5173`
+- Electron pointed at the Vite app
+
+`npm run dev` is an alias for `npm run desktop:dev`.
+
+### Browser Development
+
+Use this when you want the app in a normal browser instead of Electron.
+
+Terminal 1:
+
+```powershell
+cd backend
+python -m poetry run uvicorn app:app --reload --host 127.0.0.1 --port 8000
+```
+
+Terminal 2:
+
+```powershell
+cd frontend
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173/
+```
+
+### Production-Like Local Desktop Launch
+
+```powershell
+npm run desktop:build:frontend
+npm run infra:mongo:up
+npm run desktop:start
+```
+
+This loads the built frontend from `frontend/dist` and starts the backend locally.
+
+## Build
+
+Build the frontend:
+
+```powershell
+cd frontend
+npm run build
+```
+
+Check Electron scripts:
+
+```powershell
+npm run desktop:check
+```
+
+Build Windows desktop artifacts:
+
+```powershell
+npm run desktop:build
+```
+
+Build a self-contained desktop artifact that includes the current backend virtual environment:
+
+```powershell
+npm run desktop:build:self-contained
+```
+
+The self-contained build is much larger because it stages `backend/.venv`. See [`DESKTOP.md`](DESKTOP.md) before relying on it for distribution.
+
+## Testing
+
+Run all backend tests:
+
+```powershell
+cd backend
+python -m poetry run pytest
+```
+
+Run focused graph/export/integration tests:
+
+```powershell
+cd backend
+python -m poetry run pytest tests/test_source_trace_pipeline.py tests/test_export_batch_schema.py tests/test_miro_frame_export.py tests/test_monday_existing_group_export.py -q
+```
+
+Compile-check important backend entry points:
+
+```powershell
+python -m py_compile backend/app.py backend/config.py backend/Models/model.py backend/export/workspace_graph.py
+```
+
+Run frontend lint:
+
+```powershell
+cd frontend
+npm run lint
+```
+
+Run the minimum pre-handoff validation:
+
+```powershell
+cd frontend
+npm run build
+cd ..
+npm run desktop:check
+cd backend
+python -m poetry run pytest tests/test_source_trace_pipeline.py tests/test_export_batch_schema.py -q
+```
+
+## VS Code Tasks
+
+The repo includes tasks in `.vscode/tasks.json`.
+
+- `DocMap: Dev App` starts backend and frontend together.
+- `DocMap: Backend API` runs FastAPI on `127.0.0.1:8000`.
+- `DocMap: Frontend UI` runs Vite on `127.0.0.1:5173`.
+- `DocMap: Build Frontend` runs the Vite production build.
+- `DocMap: Lint Frontend` runs ESLint.
+- `DocMap: Test Backend` runs pytest.
+- `DocMap: Desktop Dev` launches the Electron development shell.
+- `DocMap: Build Desktop Self-Contained` packages a bundled desktop build.
+
+Use `Terminal > Run Build Task...` or `Ctrl+Shift+B` to launch the default dev task.
+
+## API Surface
+
+Core workspace exports:
+
+```text
+GET  /api/workspaces/{id}/exports/json
+GET  /api/workspaces/{id}/exports/markdown
+GET  /api/workspaces/{id}/exports/csv
+GET  /api/workspaces/{id}/exports/opml
+GET  /api/workspaces/{id}/exports/mmd-json
+GET  /api/workspaces/{id}/exports/mermaid
+GET  /api/workspaces/{id}/branches/{node_id}/exports/json
+```
+
+Miro and monday.com projection endpoints:
+
+```text
+POST /api/workspaces/{id}/export/miro
+POST /api/workspaces/{id}/branches/{node_id}/export/miro
+POST /api/workspaces/{id}/export/monday
+POST /api/workspaces/{id}/branches/{node_id}/export/monday
+```
+
+These endpoints normalize saved React Flow data into the DocMap graph shape before exporting. Prefer dry-run/preview flows before pushing to external tools.
+
+## Development Rules
+
+- Keep `ROADMAP.md` current when priorities or acceptance checkpoints change.
+- Treat the graph schema as the source of truth; do not create separate state silos for mind map, task, or export-only data.
+- Any AI-generated node without a source reference must be marked `needs_review`.
+- Any AI operation that mutates the canonical graph should produce a preview diff and require user acceptance before persistence.
+- Use branch-level previews before Miro or monday.com pushes.
+- Prefer adding tests around graph validation, source traceability, export snapshots, and integration payloads.
+
+## Troubleshooting
+
+### Hamburger Menu Shows 500 Or Network Error
+
+Make sure the backend is running:
+
+```powershell
+cd backend
+python -m poetry run uvicorn app:app --reload --host 127.0.0.1 --port 8000
+```
+
+Then refresh `http://127.0.0.1:5173/`.
+
+### Uploads Fail
+
+Start MongoDB:
+
+```powershell
+npm run infra:mongo:up
+```
+
+Then verify `mongo_db_url` is set or defaults to `mongodb://127.0.0.1:27017`.
+
+### OpenAI Calls Return 503
+
+Open the app Settings UI and add an OpenAI API key, or set `openai_api_key` in `backend/.env` for developer-managed runs.
+
+### Electron Opens To A Black Screen
+
+Run the browser development path first to confirm backend and frontend are healthy. Then run:
+
+```powershell
+npm run desktop:check
+npm run dev
+```
+
+If the production-like Electron path is black, rebuild the frontend:
+
+```powershell
+npm run desktop:build:frontend
+npm run desktop:start
+```
+
+### Vite Reports Large Assets
+
+The build is currently chunked to avoid JavaScript chunk warnings, but bundled demo media assets are still large. That is expected until the old landing/demo media is moved out of the app bundle or loaded lazily from an external asset location.
+
+## Roadmap
+
+The living roadmap is [`ROADMAP.md`](ROADMAP.md). Use it as the source of truth for phase status, agent ownership lanes, acceptance checkpoints, and next best work.

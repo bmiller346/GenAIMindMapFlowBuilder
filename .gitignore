@@ -8,6 +8,7 @@ env
 .env
 backend\env
 backend\.env
+backend/docmap_flows.json
 backend\ai-interview-poc-2b5cf8540f16.json
 ai-interview-poc-2b5cf8540f16.json
 
@@ -23,11 +24,14 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.desktop-resources/
 *.local
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
 .idea
 .DS_Store
 *.suo
