@@ -6,9 +6,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from integrations.monday.client import MondayClient
 from integrations.monday.persistence import (
-    apply_monday_status_updates_to_flow_json,
+    apply_monday_status_projection_to_flow_json,
     monday_refs_from_flow_json,
-    monday_status_updates_from_result,
+    monday_status_projections_from_result,
 )
 
 
@@ -41,7 +41,7 @@ def test_monday_status_pull_dry_run_operations_snapshot():
     }
 
 
-def test_monday_status_result_maps_and_applies_review_state():
+def test_monday_status_result_maps_and_applies_external_projection():
     flow_json = json.dumps(
         {
             "nodes": [
@@ -114,28 +114,37 @@ def test_monday_status_result_maps_and_applies_review_state():
         ],
     }
 
-    updates = monday_status_updates_from_result(
+    projections = monday_status_projections_from_result(
         result,
         refs,
         "2026-05-14T12:00:00Z",
     )
-    updated = json.loads(apply_monday_status_updates_to_flow_json(flow_json, updates))
+    updated = json.loads(
+        apply_monday_status_projection_to_flow_json(flow_json, projections)
+    )
 
-    assert updates == {
+    assert projections == {
         "task-1": {
-            "status": "accepted",
+            "projected_status": "accepted",
             "monday_status": "Done",
             "monday_item_id": "item-1",
             "last_pulled_at": "2026-05-14T12:00:00Z",
         },
         "task-2": {
-            "status": "needs_review",
+            "projected_status": "needs_review",
             "monday_status": "Stuck",
             "monday_item_id": "item-2",
             "last_pulled_at": "2026-05-14T12:00:00Z",
         },
     }
-    assert updated["nodes"][0]["data"]["status"] == "accepted"
+    assert updated["nodes"][0]["data"]["status"] == "needs_review"
+    assert updated["nodes"][0]["data"]["external_status_projections"]["monday"] == {
+        "projected_status": "accepted",
+        "status": "Done",
+        "item_id": "item-1",
+        "last_pulled_at": "2026-05-14T12:00:00Z",
+    }
     assert updated["nodes"][0]["data"]["external_refs"]["monday"]["export_batch_id"] == "batch-1"
     assert updated["nodes"][0]["data"]["external_refs"]["monday"]["status"] == "Done"
-    assert updated["nodes"][1]["data"]["status"] == "needs_review"
+    assert updated["nodes"][0]["data"]["external_refs"]["monday"]["projected_status"] == "accepted"
+    assert updated["nodes"][1]["data"]["status"] == "in_review"

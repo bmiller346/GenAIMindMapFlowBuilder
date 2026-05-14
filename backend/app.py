@@ -129,10 +129,10 @@ from integrations.monday.exporter import (
 )
 from integrations.monday.persistence import (
     apply_monday_external_refs_to_flow_json,
-    apply_monday_status_updates_to_flow_json,
+    apply_monday_status_projection_to_flow_json,
     monday_item_refs_from_result,
     monday_refs_from_flow_json,
-    monday_status_updates_from_result,
+    monday_status_projections_from_result,
 )
 from documents.ingestion import (
     chunk_source_segments,
@@ -2010,8 +2010,8 @@ def pull_monday_status_to_workspace(
     flow = get_workspace_flow_or_404(flow_id)
     refs_by_node_id = monday_refs_from_flow_json(flow.get("flow_json", ""))
     client = MondayClient(
-        token=os.getenv("monday_api_token", ""),
-        base_url=os.getenv("monday_api_base_url", "https://api.monday.com/v2"),
+        token=get_setting("monday_api_token") or "",
+        base_url=get_setting("monday_api_base_url") or "https://api.monday.com/v2",
     )
     result = client.pull_item_statuses(refs_by_node_id, dry_run=dry_run)
 
@@ -2022,15 +2022,15 @@ def pull_monday_status_to_workspace(
         }
 
     pulled_at = utc_timestamp()
-    status_updates = monday_status_updates_from_result(
+    status_projections = monday_status_projections_from_result(
         result,
         refs_by_node_id,
         pulled_at,
     )
     if apply:
-        updated_flow_json = apply_monday_status_updates_to_flow_json(
+        updated_flow_json = apply_monday_status_projection_to_flow_json(
             flow.get("flow_json", ""),
-            status_updates,
+            status_projections,
         )
         flow_collection.update_one(
             {"_id": ObjectId(flow_id)},
@@ -2039,8 +2039,10 @@ def pull_monday_status_to_workspace(
 
     return {
         **result,
-        "status_updates": status_updates,
-        "applied": apply and bool(status_updates),
+        "status_projections": status_projections,
+        "status_updates": status_projections,
+        "applied": apply and bool(status_projections),
+        "applied_as": "external_status_projection",
     }
 
 

@@ -8,7 +8,7 @@ The architectural rule is:
 one persistent graph -> many views -> controlled exports
 ```
 
-Miro and monday.com are endpoints. DocMap remains the canonical structure and traceability engine.
+Miro and monday.com are bridge/projection endpoints. DocMap remains the canonical structure and traceability engine; external IDs, push timestamps, and pulled statuses are stored as integration metadata, not as replacement graph state.
 
 ## Current Product Focus
 
@@ -276,12 +276,13 @@ POST /api/workspaces/{id}/export/monday
 POST /api/workspaces/{id}/branches/{node_id}/export/monday
 ```
 
-These endpoints normalize saved React Flow data into the DocMap graph shape before exporting. Prefer dry-run/preview flows before pushing to external tools.
+These endpoints normalize saved React Flow data into the DocMap graph shape before exporting. Prefer dry-run/preview flows before pushing to external tools. Pullbacks from monday.com are stored as `external_status_projections.monday` plus `external_refs.monday` metadata, leaving canonical node status unchanged until a separate user-reviewed graph mutation accepts it.
 
 ## Development Rules
 
 - Keep `ROADMAP.md` current when priorities or acceptance checkpoints change.
 - Treat the graph schema as the source of truth; do not create separate state silos for mind map, task, or export-only data.
+- Treat Miro and monday.com as projections of the graph. Integration pullbacks may annotate nodes with external ref/projection metadata, but they must not overwrite canonical graph fields without an explicit review-and-accept path.
 - Any AI-generated node without a source reference must be marked `needs_review`.
 - Any AI operation that mutates the canonical graph should produce a preview diff and require user acceptance before persistence.
 - Use branch-level previews before Miro or monday.com pushes.

@@ -13,8 +13,9 @@ The product is not "an AI chat with attachments." The product is a persistent wo
 3. Every AI-generated node should retain source traceability when possible.
 4. Prefer strict JSON contracts over freeform text generation.
 5. Keep MVP scope narrow until the document-to-graph loop is reliable.
-6. Miro is the visual collaboration endpoint, not the canonical store.
-7. monday.com is the task execution endpoint, not the canonical store.
+6. Miro is the visual collaboration bridge/projection, not the canonical store.
+7. monday.com is the task execution bridge/projection, not the canonical store.
+8. External pullbacks may persist refs and projection metadata, but must not overwrite canonical graph fields without an explicit review-and-accept flow.
 
 ## Current Build Focus
 ### In scope

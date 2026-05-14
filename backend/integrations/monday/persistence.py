@@ -66,12 +66,12 @@ def monday_item_refs_from_result(
     return refs
 
 
-def monday_status_updates_from_result(
+def monday_status_projections_from_result(
     execution_result: dict,
     refs_by_node_id: dict[str, dict],
     pulled_at: str,
 ) -> dict[str, dict]:
-    updates = {}
+    projections = {}
     node_by_item_id = {
         str(ref.get("item_id", "")): node_id
         for node_id, ref in refs_by_node_id.items()
@@ -86,20 +86,21 @@ def monday_status_updates_from_result(
             status_text = _status_text_from_item(item)
             if not node_id or not status_text:
                 continue
-            updates[node_id] = {
-                "status": _review_state_from_monday_status(status_text),
+            projections[node_id] = {
+                "projected_status": _review_state_from_monday_status(status_text),
                 "monday_status": status_text,
                 "monday_item_id": item_id,
                 "last_pulled_at": pulled_at,
             }
-    return updates
+    return projections
 
 
-def apply_monday_status_updates_to_flow_json(
+def apply_monday_status_projection_to_flow_json(
     flow_json: str,
-    status_updates_by_node_id: dict[str, dict],
+    status_projections_by_node_id: dict[str, dict],
 ) -> str:
-    if not status_updates_by_node_id:
+    """Persist monday status as bridge metadata without changing canonical status."""
+    if not status_projections_by_node_id:
         return flow_json
 
     try:
@@ -113,8 +114,8 @@ def apply_monday_status_updates_to_flow_json(
 
     for node in nodes:
         node_id = node.get("id", "")
-        update = status_updates_by_node_id.get(node_id)
-        if not update:
+        projection = status_projections_by_node_id.get(node_id)
+        if not projection:
             continue
 
         data = node.setdefault("data", {})
@@ -122,10 +123,19 @@ def apply_monday_status_updates_to_flow_json(
             data = {}
             node["data"] = data
 
-        data["status"] = update["status"]
-        nested_data = data.get("data")
-        if isinstance(nested_data, dict):
-            nested_data["status"] = update["status"]
+        external_status_projections = data.setdefault(
+            "external_status_projections",
+            {},
+        )
+        if not isinstance(external_status_projections, dict):
+            external_status_projections = {}
+            data["external_status_projections"] = external_status_projections
+        external_status_projections["monday"] = {
+            "projected_status": projection.get("projected_status", ""),
+            "status": projection.get("monday_status", ""),
+            "item_id": projection.get("monday_item_id", ""),
+            "last_pulled_at": projection.get("last_pulled_at", ""),
+        }
 
         external_refs = data.setdefault("external_refs", {})
         if not isinstance(external_refs, dict):
@@ -134,12 +144,37 @@ def apply_monday_status_updates_to_flow_json(
 
         external_refs["monday"] = {
             **external_refs.get("monday", {}),
-            "item_id": update.get("monday_item_id", ""),
-            "status": update.get("monday_status", ""),
-            "last_pulled_at": update.get("last_pulled_at", ""),
+            "item_id": projection.get("monday_item_id", ""),
+            "status": projection.get("monday_status", ""),
+            "projected_status": projection.get("projected_status", ""),
+            "last_pulled_at": projection.get("last_pulled_at", ""),
         }
 
     return json.dumps(flow)
+
+
+def monday_status_updates_from_result(
+    execution_result: dict,
+    refs_by_node_id: dict[str, dict],
+    pulled_at: str,
+) -> dict[str, dict]:
+    """Backward-compatible alias for monday status projection payloads."""
+    return monday_status_projections_from_result(
+        execution_result,
+        refs_by_node_id,
+        pulled_at,
+    )
+
+
+def apply_monday_status_updates_to_flow_json(
+    flow_json: str,
+    status_updates_by_node_id: dict[str, dict],
+) -> str:
+    """Backward-compatible alias that no longer mutates canonical node status."""
+    return apply_monday_status_projection_to_flow_json(
+        flow_json,
+        status_updates_by_node_id,
+    )
 
 
 def apply_monday_external_refs_to_flow_json(

@@ -573,31 +573,42 @@ const Header = ({
         }
     };
 
-    const applyMondayStatusUpdates = (updatesByNodeId) => {
-        if (!updatesByNodeId || Object.keys(updatesByNodeId).length === 0) {
+    const applyMondayStatusProjections = (projectionsByNodeId) => {
+        if (!projectionsByNodeId || Object.keys(projectionsByNodeId).length === 0) {
             return;
         }
 
         setNodes(
             nodes.map((node) => {
-                const update = updatesByNodeId[node.id];
-                if (!update) {
+                const projection = projectionsByNodeId[node.id];
+                if (!projection) {
                     return node;
                 }
 
                 const externalRefs = node.data?.external_refs || {};
+                const externalStatusProjections =
+                    node.data?.external_status_projections || {};
                 return {
                     ...node,
                     data: {
                         ...node.data,
-                        status: update.status,
+                        external_status_projections: {
+                            ...externalStatusProjections,
+                            monday: {
+                                projected_status: projection.projected_status,
+                                status: projection.monday_status,
+                                item_id: projection.monday_item_id,
+                                last_pulled_at: projection.last_pulled_at
+                            }
+                        },
                         external_refs: {
                             ...externalRefs,
                             monday: {
                                 ...(externalRefs.monday || {}),
-                                item_id: update.monday_item_id,
-                                status: update.monday_status,
-                                last_pulled_at: update.last_pulled_at
+                                item_id: projection.monday_item_id,
+                                status: projection.monday_status,
+                                projected_status: projection.projected_status,
+                                last_pulled_at: projection.last_pulled_at
                             }
                         }
                     }
@@ -638,7 +649,9 @@ const Header = ({
                     }
                 }
             );
-            applyMondayStatusUpdates(response.data.status_updates);
+            applyMondayStatusProjections(
+                response.data.status_projections || response.data.status_updates
+            );
             const blob = new Blob([JSON.stringify(response.data, null, 2)], {
                 type: 'application/json'
             });

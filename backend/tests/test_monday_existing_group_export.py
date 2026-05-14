@@ -85,6 +85,9 @@ def test_monday_existing_group_payload_and_dry_run_operations_snapshot():
     assert result["operations"][0]["variables"]["group_id"] == "group-1"
     column_values = json.loads(result["operations"][0]["variables"]["column_values"])
     assert column_values["node_id"] == "task-1"
+    assert column_values["status"] == {"label": "needs_review"}
+    assert column_values["review_state"] == {"label": "needs_review"}
+    assert column_values["due_date"] == {"date": "2026-06-01"}
     assert column_values["source_quote"] == "Checklist needs SME review."
     assert column_values["export_batch_id"] == "batch-1"
     validate_monday_export_payload(payload)
@@ -192,6 +195,9 @@ def test_autodesk_template_payload_contract_snapshot():
     assert payload["template"] == resolve_monday_template(
         AUTODESK_BUILDING_BLOCK_REVIEW_TEMPLATE_ID
     )
+    assert column_values["review_status"] == {"label": "needs_review"}
+    assert column_values["docmap_review_state"] == {"label": "needs_review"}
+    assert column_values["target_date"] == {"date": "2026-06-01"}
     assert column_values["docmap_node_id"] == "task-1"
     assert column_values["source_evidence"] == "Checklist needs SME review."
     assert column_values["export_batch_id"] == "batch-1"
