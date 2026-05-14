@@ -1518,7 +1518,28 @@ def update_flow(update_data: Flow):
 
 def get_workspace_graph_or_404(flow_id: str) -> dict:
     flow = get_workspace_flow_or_404(flow_id)
-    return build_workspace_graph(flow)
+    return build_workspace_graph(flow, source_components=get_source_components(flow_id))
+
+
+def get_source_components(flow_id: str) -> list[dict]:
+    if not ObjectId.is_valid(flow_id):
+        return []
+
+    try:
+        return list(
+            component_collection.find(
+                {
+                    "flow_id": ObjectId(flow_id),
+                    "$or": [
+                        {"source_document": {"$exists": True}},
+                        {"source_document_id": {"$exists": True}},
+                        {"document_chunks": {"$exists": True}},
+                    ],
+                }
+            )
+        )
+    except PyMongoError:
+        return []
 
 
 def get_workspace_flow_or_404(flow_id: str) -> dict:
@@ -1587,6 +1608,11 @@ def utc_timestamp() -> str:
 @app.get("/api/workspaces/{flow_id}/exports/json")
 def export_workspace_json(flow_id: str):
     return get_workspace_graph_or_404(flow_id)
+
+
+@app.get("/api/workspaces/{flow_id}/sources")
+def get_workspace_sources(flow_id: str):
+    return get_workspace_graph_or_404(flow_id)["source_library"]
 
 
 @app.get("/api/workspaces/{flow_id}/exports/markdown")

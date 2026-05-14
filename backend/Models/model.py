@@ -229,7 +229,7 @@ class SourceDocumentModel(BaseModel):
     id: str
     filename: str
     original_filename: str
-    type: Literal["pdf", "docx", "md", "txt"]
+    type: str
     file_hash: str
     size: int
     version: int

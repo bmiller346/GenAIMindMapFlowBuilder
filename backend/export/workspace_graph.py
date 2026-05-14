@@ -3,13 +3,14 @@ from collections import defaultdict
 from html import escape as html_escape
 from xml.sax.saxutils import escape as xml_escape
 
+from export.source_library import build_source_library
 from graph.validation import validate_and_repair_graph
 
 
 TASK_CAPABLE_TYPES = {"task", "procedure", "workflow", "needs_review"}
 
 
-def build_workspace_graph(flow: dict) -> dict:
+def build_workspace_graph(flow: dict, source_components: list[dict] | None = None) -> dict:
     flow_object = _parse_flow_json(flow.get("flow_json", ""))
     raw_nodes = flow_object.get("nodes", [])
     raw_edges = flow_object.get("edges", [])
@@ -31,6 +32,7 @@ def build_workspace_graph(flow: dict) -> dict:
         "nodes": nodes,
         "edges": [_normalize_edge(edge) for edge in raw_edges],
         "tasks": [],
+        "source_library": {},
         "views": {
             "react_flow": {
                 "viewport": flow_object.get("viewport", {}),
@@ -38,6 +40,11 @@ def build_workspace_graph(flow: dict) -> dict:
         },
     }
     graph = validate_and_repair_graph(graph)
+    graph["source_library"] = build_source_library(
+        flow_object,
+        nodes=graph["nodes"],
+        source_components=source_components or [],
+    )
     graph["tasks"] = [
         _node_to_task(node)
         for node in graph["nodes"]
