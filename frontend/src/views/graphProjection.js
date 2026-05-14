@@ -25,12 +25,18 @@ const firstValue = (node, keys, fallback = '') => {
     return fallback;
 };
 
-const firstSourceRef = (node) => {
+const sourceRefs = (node) => {
     const data = node?.data || {};
     const nestedData = getNestedData(node);
     const refs = data.source_refs || nestedData.source_refs;
 
-    return Array.isArray(refs) && refs[0] ? refs[0] : {};
+    return Array.isArray(refs) ? refs.filter(Boolean) : [];
+};
+
+const firstSourceRef = (node) => {
+    const refs = sourceRefs(node);
+
+    return refs[0] || {};
 };
 
 const hasSourceDocument = (sourceRef) => Boolean(sourceRef?.document_id);
@@ -84,9 +90,279 @@ export const normalizeGraphNode = (node) => {
         due_date: firstValue(node, ['due_date']),
         confidence: firstValue(node, ['confidence'], sourceRef.confidence || ''),
         source_ref: sourceRef,
+        source_refs: sourceRefs(node),
         react_flow_type: node?.type || ''
     };
 };
+
+const SOURCE_TYPE_LABELS = {
+    pdf: 'PDF',
+    docx: 'DOCX',
+    md: 'Markdown',
+    txt: 'Text',
+    web: 'Web',
+    html: 'HTML',
+    img: 'Image',
+    image: 'Image',
+    audio: 'Audio',
+    video: 'Video',
+    youtube: 'YouTube',
+    pptx: 'PowerPoint',
+    csv: 'CSV',
+    sql: 'SQL',
+    brief: 'Brief'
+};
+
+const sourceTypeLabel = (type = '') => SOURCE_TYPE_LABELS[type] || type || 'Source';
+
+const sourceTitle = (data = {}) =>
+    data.source_document?.original_filename ||
+    data.source_document?.filename ||
+    data.original_name ||
+    data.file?.name ||
+    data.filename ||
+    data.title ||
+    data.content ||
+    data.data?.title ||
+    data.data?.content ||
+    'Untitled source';
+
+const sourceIdFromData = (node) => {
+    const data = node?.data || {};
+
+    return (
+        data.source_document_id ||
+        data.source_document?.id ||
+        data.document_id ||
+        data.component_id ||
+        node?.id
+    );
+};
+
+const normalizePersistedSource = (source = {}) => ({
+    id: source.id || source.source_document_id || source.document_id || '',
+    title: source.title || source.name || source.filename || 'Untitled source',
+    type: source.type || '',
+    type_label: source.type_label || sourceTypeLabel(source.type),
+    status: source.status || 'uploaded',
+    node_id: source.node_id || '',
+    component_id: source.component_id || '',
+    flow_id: source.flow_id || '',
+    file_hash: source.file_hash || source.metadata?.file_hash || '',
+    size: source.size || source.metadata?.size || 0,
+    version: source.version || source.metadata?.version || '',
+    metadata: source.metadata || {},
+    chunks: Array.isArray(source.chunks) ? source.chunks : [],
+    segments: Array.isArray(source.segments) ? source.segments : [],
+    normalized_document_id: source.normalized_document_id || ''
+});
+
+const sourceRecordFromNode = (node) => {
+    const data = node?.data || {};
+    const type = data.source_document?.type || data.name || node?.type || '';
+
+    return normalizePersistedSource({
+        id: sourceIdFromData(node),
+        title: sourceTitle(data),
+        type,
+        type_label: sourceTypeLabel(type),
+        status: data.status || (data.source_document ? 'parsed' : 'uploaded'),
+        node_id: node?.id || '',
+        component_id: data.component_id || node?.id || '',
+        flow_id: data.flow_id || '',
+        file_hash: data.file_hash || data.source_document?.file_hash || '',
+        size: data.size || data.source_document?.size || data.file?.size || 0,
+        version: data.source_document?.version || '',
+        metadata: data.source_document || {},
+        chunks: Array.isArray(data.document_chunks) ? data.document_chunks : [],
+        segments: Array.isArray(data.source_segments) ? data.source_segments : []
+    });
+};
+
+const mergeSourceRecord = (current = {}, next = {}) => ({
+    ...current,
+    ...next,
+    id: current.id || next.id,
+    title: current.title && current.title !== 'Untitled source' ? current.title : next.title,
+    type: current.type || next.type,
+    type_label: current.type_label || next.type_label,
+    status: next.status || current.status,
+    chunks: current.chunks?.length ? current.chunks : next.chunks || [],
+    segments: current.segments?.length ? current.segments : next.segments || []
+});
+
+const sourceRecordFromRef = (ref) => ({
+    id: ref.document_id,
+    title: ref.document_id,
+    type: ref.type || '',
+    type_label: sourceTypeLabel(ref.type),
+    status: 'used in graph',
+    node_id: '',
+    component_id: '',
+    metadata: {},
+    chunks: [],
+    segments: []
+});
+
+const sourceLocationLabel = (ref = {}) =>
+    [ref.page ? `p. ${ref.page}` : '', ref.section].filter(Boolean).join(' | ');
+
+export const buildSourceLibraryProjection = (
+    nodes,
+    edges,
+    workspaceBrief = {},
+    persistedSources = []
+) => {
+    const projection = buildGraphProjection(nodes, edges);
+    const sourceMap = new Map();
+    const uploadedSources = nodes.filter((node) => node.type === 'dataSource').map(sourceRecordFromNode);
+    const citingNodesBySource = new Map();
+    const snippetsBySource = new Map();
+    const incompleteRefs = [];
+    const uncitedNodes = [];
+
+    persistedSources.map(normalizePersistedSource).forEach((source) => {
+        if (source.id) {
+            sourceMap.set(source.id, mergeSourceRecord(sourceMap.get(source.id), source));
+        }
+    });
+
+    uploadedSources.forEach((source) => {
+        sourceMap.set(source.id, mergeSourceRecord(sourceMap.get(source.id), source));
+    });
+
+    const sourceIdForRef = (ref) => {
+        if (!ref?.document_id) {
+            return '';
+        }
+        if (sourceMap.has(ref.document_id) || uploadedSources.length !== 1) {
+            return ref.document_id;
+        }
+
+        const uploadedSource = uploadedSources[0];
+        sourceMap.set(
+            uploadedSource.id,
+            mergeSourceRecord(sourceMap.get(uploadedSource.id), {
+                ...sourceRecordFromRef(ref),
+                id: uploadedSource.id,
+                normalized_document_id: ref.document_id
+            })
+        );
+        return uploadedSource.id;
+    };
+
+    projection.nodes.forEach((node) => {
+        if (node.react_flow_type === 'dataSource') {
+            return;
+        }
+
+        const refs = node.source_refs || [];
+        if (refs.length === 0) {
+            uncitedNodes.push(node);
+            return;
+        }
+
+        refs.forEach((ref) => {
+            if (!ref?.document_id) {
+                incompleteRefs.push({ node, ref, issues: sourceRefIssues(ref) });
+                return;
+            }
+
+            const sourceId = sourceIdForRef(ref);
+
+            sourceMap.set(
+                sourceId,
+                mergeSourceRecord(sourceMap.get(sourceId), sourceRecordFromRef(ref))
+            );
+
+            const citingNodes = citingNodesBySource.get(sourceId) || [];
+            citingNodes.push({
+                ...node,
+                source_ref: ref,
+                source_location: sourceLocationLabel(ref)
+            });
+            citingNodesBySource.set(sourceId, citingNodes);
+
+            if (ref.quote_snippet) {
+                const snippets = snippetsBySource.get(sourceId) || [];
+                snippets.push({
+                    node_id: node.id,
+                    node_title: node.title,
+                    location: sourceLocationLabel(ref),
+                    text: ref.quote_snippet
+                });
+                snippetsBySource.set(sourceId, snippets);
+            }
+
+            const issues = sourceRefIssues(ref);
+            if (issues.length > 0) {
+                incompleteRefs.push({ node, ref, issues });
+            }
+        });
+    });
+
+    if (sourceMap.size === 0 && workspaceBrief?.configured) {
+        sourceMap.set('brief-only', {
+            id: 'brief-only',
+            title: workspaceBrief.goal || 'Workspace brief',
+            type: 'brief',
+            type_label: 'Brief',
+            status: 'brief only',
+            metadata: workspaceBrief,
+            chunks: [],
+            segments: []
+        });
+    }
+
+    const sources = Array.from(sourceMap.values())
+        .map((source) => {
+            const citingNodes = citingNodesBySource.get(source.id) || [];
+            const snippets = snippetsBySource.get(source.id) || [];
+            const status = citingNodes.length > 0 ? 'used in graph' : source.status;
+
+            return {
+                ...source,
+                status,
+                coverage_count: citingNodes.length,
+                citing_nodes: citingNodes,
+                snippets,
+                chunk_count: source.chunks?.length || 0,
+                segment_count: source.segments?.length || 0
+            };
+        })
+        .sort((a, b) => b.coverage_count - a.coverage_count || a.title.localeCompare(b.title));
+
+    return {
+        sources,
+        uncited_nodes: uncitedNodes,
+        incomplete_refs: incompleteRefs,
+        total_graph_nodes: projection.nodes.filter((node) => node.react_flow_type !== 'dataSource').length,
+        cited_node_count: projection.nodes.filter(
+            (node) => node.react_flow_type !== 'dataSource' && node.source_refs?.some((ref) => ref?.document_id)
+        ).length
+    };
+};
+
+export const createSourceLibrarySnapshot = ({
+    nodes = [],
+    edges = [],
+    workspaceBrief = {},
+    sourceLibrary = []
+}) =>
+    buildSourceLibraryProjection(nodes, edges, workspaceBrief, sourceLibrary).sources.map(
+        ({
+            citing_nodes,
+            snippets,
+            coverage_count,
+            chunk_count,
+            segment_count,
+            ...source
+        }) =>
+            normalizePersistedSource({
+                ...source,
+                status: source.status === 'used in graph' ? 'parsed' : source.status
+            })
+    );
 
 export const collectBranchIds = (rootId, childrenByParent) => {
     const branchIds = new Set([rootId]);
