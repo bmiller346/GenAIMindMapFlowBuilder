@@ -3,6 +3,8 @@ from collections import defaultdict
 from html import escape as html_escape
 from xml.sax.saxutils import escape as xml_escape
 
+from graph.validation import validate_and_repair_graph
+
 
 TASK_CAPABLE_TYPES = {"task", "procedure", "workflow", "needs_review"}
 
@@ -18,43 +20,57 @@ def build_workspace_graph(flow: dict) -> dict:
         for raw_node in raw_nodes
     ]
 
-    return {
+    graph = {
         "workspace": {
             "id": str(flow.get("_id", "")),
             "title": flow.get("flow_name", "Untitled Workspace"),
             "summary": flow.get("summary", ""),
             "flow_type": flow.get("flow_type", ""),
+            "brief": flow_object.get("workspace_brief", {}),
         },
         "nodes": nodes,
         "edges": [_normalize_edge(edge) for edge in raw_edges],
-        "tasks": [_node_to_task(node) for node in nodes if _is_task_capable(node)],
+        "tasks": [],
         "views": {
             "react_flow": {
                 "viewport": flow_object.get("viewport", {}),
             }
         },
     }
+    graph = validate_and_repair_graph(graph)
+    graph["tasks"] = [
+        _node_to_task(node)
+        for node in graph["nodes"]
+        if _is_task_capable(node)
+    ]
+    return graph
 
 
 def select_branch(graph: dict, node_id: str) -> dict:
     descendants = _descendant_ids(graph.get("edges", []), node_id)
     selected_ids = {node_id, *descendants}
-
-    return {
+    branch = {
         **graph,
-        "nodes": [node for node in graph["nodes"] if node["id"] in selected_ids],
+        "nodes": [
+            {**node, "parent_id": None if node["id"] == node_id else node.get("parent_id")}
+            for node in graph["nodes"]
+            if node["id"] in selected_ids
+        ],
         "edges": [
             edge
             for edge in graph["edges"]
             if edge["source_node_id"] in selected_ids
             and edge["target_node_id"] in selected_ids
         ],
-        "tasks": [
-            task
-            for task in graph["tasks"]
-            if task["node_id"] in selected_ids
-        ],
+        "tasks": [],
     }
+    branch = validate_and_repair_graph(branch)
+    branch["tasks"] = [
+        _node_to_task(node)
+        for node in branch["nodes"]
+        if _is_task_capable(node)
+    ]
+    return branch
 
 
 def graph_to_markdown(graph: dict) -> str:
@@ -82,9 +98,14 @@ def graph_to_task_rows(graph: dict) -> list[dict]:
                 "Node ID": task["node_id"],
                 "Status": task["status"],
                 "Priority": task["priority"],
+                "Owner": task["assignee"],
+                "Due Date": task["due_date"],
+                "Confidence": node.get("confidence", ""),
                 "Node Type": node.get("node_type", ""),
                 "Source Document": source_ref.get("document_id", ""),
                 "Source Page": source_ref.get("page", ""),
+                "Source Section": source_ref.get("section", ""),
+                "Source Quote": source_ref.get("quote_snippet", ""),
                 "App Link": "",
             }
         )
@@ -169,27 +190,38 @@ def _normalize_node(raw_node: dict, parent_id: str | None) -> dict:
     data = raw_node.get("data", {})
     nested_data = data.get("data", {}) if isinstance(data.get("data"), dict) else {}
     node_type = _semantic_node_type(raw_node, data, nested_data)
+    source_refs = _source_refs(data, nested_data)
+    monday_selection_input = _monday_selection_input(data, nested_data)
 
-    return {
+    node = {
         "id": raw_node.get("id", ""),
         "parent_id": parent_id,
         "title": _node_title(raw_node, data, nested_data),
-        "summary": nested_data.get("summ") or data.get("summ") or "",
+        "summary": nested_data.get("summ") or data.get("summ") or data.get("summary", ""),
         "node_type": node_type,
-        "status": data.get("status") or _default_status(node_type),
-        "priority": data.get("priority", ""),
-        "owner_id": data.get("owner_id", ""),
-        "due_date": data.get("due_date", ""),
-        "confidence": data.get("confidence", ""),
-        "source_refs": _source_refs(data, nested_data),
-        "external_refs": data.get("external_refs", {}),
+        "status": _first_value(data, nested_data, "status") or _default_status(node_type),
+        "priority": _first_value(data, nested_data, "priority"),
+        "owner_id": _first_value(data, nested_data, "owner_id", "assignee", "owner"),
+        "due_date": _first_value(data, nested_data, "due_date"),
+        "confidence": _first_value(data, nested_data, "confidence") or _first_source_confidence(source_refs),
+        "source_refs": source_refs,
+        "external_refs": _external_refs(data, nested_data),
         "metadata": {
             "react_flow_type": raw_node.get("type", ""),
             "position": raw_node.get("position", {}),
             "component_id": data.get("component_id") or nested_data.get("component_id", ""),
             "component_type": data.get("name") or nested_data.get("component_type", ""),
+            "task_fields": {
+                "priority": _first_value(data, nested_data, "priority"),
+                "owner_id": _first_value(data, nested_data, "owner_id", "assignee", "owner"),
+                "due_date": _first_value(data, nested_data, "due_date"),
+            },
         },
     }
+    if monday_selection_input:
+        node["monday_selection_input"] = monday_selection_input
+
+    return node
 
 
 def _normalize_edge(edge: dict) -> dict:
@@ -262,6 +294,38 @@ def _source_refs(data: dict, nested_data: dict) -> list[dict]:
     ]
 
 
+def _external_refs(data: dict, nested_data: dict) -> dict:
+    refs = data.get("external_refs") or nested_data.get("external_refs")
+    return refs if isinstance(refs, dict) else {}
+
+
+def _monday_selection_input(data: dict, nested_data: dict) -> dict:
+    selection_input = data.get("monday_selection_input") or nested_data.get(
+        "monday_selection_input"
+    )
+    return selection_input if isinstance(selection_input, dict) else {}
+
+
+def _first_value(*sources_and_keys) -> str:
+    sources = [source for source in sources_and_keys[:2] if isinstance(source, dict)]
+    keys = sources_and_keys[2:]
+
+    for source in sources:
+        for key in keys:
+            value = source.get(key)
+            if value not in (None, ""):
+                return value
+
+    return ""
+
+
+def _first_source_confidence(source_refs: list[dict]) -> str:
+    source_ref = source_refs[0] if source_refs else {}
+    if isinstance(source_ref, dict):
+        return source_ref.get("confidence", "")
+    return ""
+
+
 def _is_task_capable(node: dict) -> bool:
     return node.get("node_type") in TASK_CAPABLE_TYPES
 
@@ -276,6 +340,9 @@ def _node_to_task(node: dict) -> dict:
         "priority": node.get("priority", ""),
         "due_date": node.get("due_date", ""),
         "assignee": node.get("owner_id", ""),
+        "confidence": node.get("confidence", ""),
+        "source_refs": node.get("source_refs", []),
+        "external_refs": node.get("external_refs", {}),
     }
 
 
@@ -320,7 +387,19 @@ def _node_to_opml(node: dict, children: dict[str, list[dict]]) -> str:
         "node_id": node["id"],
         "node_type": node.get("node_type", ""),
         "review_state": node.get("status", ""),
+        "priority": node.get("priority", ""),
+        "owner_id": node.get("owner_id", ""),
+        "due_date": node.get("due_date", ""),
+        "confidence": node.get("confidence", ""),
     }
+    external_refs = node.get("external_refs", {})
+    if external_refs.get("miro"):
+        attrs["miro_board_id"] = external_refs["miro"].get("board_id", "")
+        attrs["miro_item_id"] = external_refs["miro"].get("item_id", "")
+    if external_refs.get("monday"):
+        attrs["monday_board_id"] = external_refs["monday"].get("board_id", "")
+        attrs["monday_item_id"] = external_refs["monday"].get("item_id", "")
+
     source_ref = _first_source_ref(node)
     if source_ref:
         attrs["source_doc"] = str(source_ref.get("document_id", ""))

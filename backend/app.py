@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException, UploadFile, status, File, Depends, Form, Response
+from fastapi import FastAPI, HTTPException, UploadFile, status, File, Depends, Form, Query, Response
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 from bson import ObjectId
 import boto3
 from typing import List
@@ -88,12 +89,20 @@ import io
 import markdown
 from bs4 import BeautifulSoup
 from docx import Document
+from pathlib import Path
 from pptx import Presentation
 import tiktoken
 import traceback
 from dotenv import load_dotenv
+from config import (
+    MissingConfigurationError,
+    configuration_http_error,
+    get_setting,
+    require_settings,
+    reset_request_settings,
+    set_request_settings,
+)
 from export.csv_tasks import export_task_rows
-from export.internal_graph_json import export_internal_graph
 from export.workspace_graph import (
     build_workspace_graph,
     graph_to_markdown,
@@ -103,10 +112,38 @@ from export.workspace_graph import (
     graph_to_task_rows,
     select_branch,
 )
-from integrations.miro.exporter import export_branch_to_miro_payload
-from integrations.monday.exporter import export_tasks_to_monday_payload
+from integrations.miro.client import MiroClient
+from integrations.miro.exporter import (
+    export_branch_to_miro_payload,
+    export_sme_review_board_payload,
+)
+from integrations.miro.native_mindmap import export_native_mindmap_payload
+from integrations.miro.persistence import (
+    apply_miro_external_refs_to_flow_json,
+    miro_item_refs_from_result,
+)
+from integrations.monday.client import MondayClient
+from integrations.monday.exporter import (
+    export_tasks_to_monday_payload,
+    select_monday_task_nodes,
+)
+from integrations.monday.persistence import (
+    apply_monday_external_refs_to_flow_json,
+    apply_monday_status_updates_to_flow_json,
+    monday_item_refs_from_result,
+    monday_refs_from_flow_json,
+    monday_status_updates_from_result,
+)
+from documents.ingestion import (
+    chunk_source_segments,
+    DocumentIngestionError,
+    ingest_supported_document,
+    validate_upload_bytes,
+)
+from documents.source_refs import attach_source_refs_to_mindmap
 
 load_dotenv()
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
 mongo_db_url = os.getenv("mongo_db_url")
 openai_api_key_str = os.getenv("openai_api_key")
@@ -115,21 +152,25 @@ gcp_project_id_str = os.getenv("gcp_project_id")
 aws_access_key_id_str = os.getenv("aws_access_key_id")
 aws_secret_access_key_str = os.getenv("aws_secret_access_key")
 bucket_name = os.getenv("bucket_name")
+gcp_service_account_file = os.getenv(
+    "gcp_service_account_file", "./ai-interview-poc-2b5cf8540f16.json"
+)
 OPENAI_DEFAULT_MODEL = os.getenv("openai_default_model", "gpt-5.5")
 OPENAI_REASONING_MODEL = os.getenv("openai_reasoning_model", "gpt-5.4")
 OPENAI_EMBEDDING_MODEL = os.getenv(
     "openai_embedding_model", "text-embedding-3-large"
 )
 
-credentials = service_account.Credentials.from_service_account_file(
-    "./ai-interview-poc-2b5cf8540f16.json"
-)
-
-vertexai.init(
-    project=gcp_project_id_str, credentials=credentials, location="us-central1"
-)
-
-model_vertexai = GenerativeModel("gemini-2.0-flash")
+credentials = None
+model_vertexai = None
+if gcp_project_id_str and Path(gcp_service_account_file).exists():
+    credentials = service_account.Credentials.from_service_account_file(
+        gcp_service_account_file
+    )
+    vertexai.init(
+        project=gcp_project_id_str, credentials=credentials, location="us-central1"
+    )
+    model_vertexai = GenerativeModel("gemini-2.0-flash")
 
 genai.configure(api_key=gemini_api_key_str)
 
@@ -155,41 +196,52 @@ class CSVBot(ChromaDB_VectorStore, OpenAI_Chat):
         OpenAI_Chat.__init__(self, config=config)
 
 
-sqlBot = SQLBot(
-    config={
-        "api_key": openai_api_key_str,
-        "model": OPENAI_DEFAULT_MODEL,
-        "temperature": 0,
-        "path": "./SQLVectorStore",
-        "client": "persistent",
-        "n_results": 1,
-    }
-)
+class LazyVannaBot:
+    def __init__(self, bot_class, path: str, sqlite_path: str, train_sql_schema: bool = False):
+        self.bot_class = bot_class
+        self.path = path
+        self.sqlite_path = sqlite_path
+        self.train_sql_schema = train_sql_schema
+        self._bot = None
+        self._api_key = None
 
-csvBot = CSVBot(
-    config={
-        "api_key": openai_api_key_str,
-        "model": OPENAI_DEFAULT_MODEL,
-        "temperature": 0,
-        "path": "./CSVVectorStore",
-        "client": "persistent",
-        "n_results": 1,
-    }
-)
+    def _get_bot(self):
+        api_key = get_setting("openai_api_key")
+        if not api_key:
+            raise MissingConfigurationError(
+                "Missing required environment variable(s): openai_api_key."
+            )
 
-sqlBot.connect_to_sqlite("sqlite_data.db")
+        if self._bot is not None and self._api_key == api_key:
+            return self._bot
 
-csvBot.connect_to_sqlite("csv_data.db")
+        bot = self.bot_class(
+            config={
+                "api_key": api_key,
+                "model": OPENAI_DEFAULT_MODEL,
+                "temperature": 0,
+                "path": self.path,
+                "client": "persistent",
+                "n_results": 1,
+            }
+        )
+        bot.connect_to_sqlite(self.sqlite_path)
+
+        if self.train_sql_schema:
+            df_ddl = bot.run_sql("SELECT type, sql FROM sqlite_master WHERE sql IS NOT NULL")
+            for ddl in df_ddl["sql"].to_list():
+                bot.train(ddl=ddl)
+
+        self._bot = bot
+        self._api_key = api_key
+        return bot
+
+    def __getattr__(self, name):
+        return getattr(self._get_bot(), name)
 
 
-df_ddl = sqlBot.run_sql("SELECT type, sql FROM sqlite_master WHERE sql IS NOT NULL")
-# print(df_ddl)
-
-for ddl in df_ddl['sql'].to_list():
-    sqlBot.train(ddl=ddl)
-
-# training_data = sqlBot.get_training_data()
-# print(training_data)
+sqlBot = LazyVannaBot(SQLBot, "./SQLVectorStore", "sqlite_data.db", train_sql_schema=True)
+csvBot = LazyVannaBot(CSVBot, "./CSVVectorStore", "csv_data.db")
 
 app = FastAPI()
 
@@ -204,7 +256,27 @@ app.add_middleware(
 )
 
 
-client = MongoClient(mongo_db_url)
+@app.middleware("http")
+async def apply_local_user_settings(request, call_next):
+    request_settings = {
+        "openai_api_key": request.headers.get("x-docmap-openai-api-key") or "",
+        "miro_api_token": request.headers.get("x-docmap-miro-api-token") or "",
+        "monday_api_token": request.headers.get("x-docmap-monday-api-token") or "",
+    }
+    token = set_request_settings(
+        {key: value for key, value in request_settings.items() if value}
+    )
+    previous_openai_key = openai.api_key
+    if request_settings["openai_api_key"]:
+        openai.api_key = request_settings["openai_api_key"]
+    try:
+        return await call_next(request)
+    finally:
+        openai.api_key = previous_openai_key
+        reset_request_settings(token)
+
+
+client = MongoClient(mongo_db_url, serverSelectionTimeoutMS=2000)
 
 try:
     client.admin.command("ping")
@@ -216,6 +288,81 @@ db = client["MindMap"]
 flow_collection = db["flows"]
 component_collection = db["components"]
 node_collection = db["nodes"]
+LOCAL_FLOW_STORE_PATH = Path(
+    os.getenv("DOCMAP_LOCAL_FLOW_STORE", "docmap_flows.json")
+)
+
+
+def local_flow_store_path() -> Path:
+    return Path(__file__).resolve().parent / LOCAL_FLOW_STORE_PATH
+
+
+def load_local_flows() -> list[dict]:
+    path = local_flow_store_path()
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def save_local_flows(flows: list[dict]) -> None:
+    path = local_flow_store_path()
+    path.write_text(json.dumps(flows, indent=2, default=str), encoding="utf-8")
+
+
+def normalize_flow_record(flow: dict) -> dict:
+    return {
+        "flow_id": str(flow.get("_id") or flow.get("flow_id")),
+        "flow_name": flow.get("flow_name") or "Untitled workspace",
+        "flow_json": flow.get("flow_json") or "",
+        "summary": flow.get("summary") or "",
+        "flow_type": flow.get("flow_type") or "manual",
+    }
+
+
+def local_create_flow(flow_data: dict) -> dict:
+    flows = load_local_flows()
+    flow = {
+        "_id": str(ObjectId()),
+        **flow_data,
+    }
+    flows.append(flow)
+    save_local_flows(flows)
+    return flow
+
+
+def local_find_flow(flow_id: str) -> dict | None:
+    for flow in load_local_flows():
+        if str(flow.get("_id") or flow.get("flow_id")) == flow_id:
+            return flow
+    return None
+
+
+def local_update_flow(flow_id: str, updates: dict) -> bool:
+    flows = load_local_flows()
+    updated = False
+    for flow in flows:
+        if str(flow.get("_id") or flow.get("flow_id")) == flow_id:
+            flow.update(updates)
+            updated = True
+            break
+    if updated:
+        save_local_flows(flows)
+    return updated
+
+
+def local_delete_flow(flow_id: str) -> bool:
+    flows = load_local_flows()
+    next_flows = [
+        flow for flow in flows
+        if str(flow.get("_id") or flow.get("flow_id")) != flow_id
+    ]
+    if len(next_flows) == len(flows):
+        return False
+    save_local_flows(next_flows)
+    return True
 
 # AWS S3 setup
 s3_client = boto3.client(
@@ -226,25 +373,241 @@ s3_client = boto3.client(
 )
 
 
-embedding_function = OpenAIEmbeddings(
-    model=OPENAI_EMBEDDING_MODEL, api_key=openai_api_key_str
-)
-
 persistent_client = chromadb.PersistentClient()
 
-vector_store_from_client = Chroma(
-    client=persistent_client,
-    collection_name="pdfs",
-    embedding_function=embedding_function,
-)
 
-PDFCollection = persistent_client.get_collection("pdfs")
+class LazyOpenAIEmbeddings:
+    def __init__(self):
+        self._client = None
+        self._api_key = None
 
-text_splitter = SemanticChunker(
-    OpenAIEmbeddings(model=OPENAI_EMBEDDING_MODEL, api_key=openai_api_key_str)
-)
+    def _get_client(self):
+        api_key = get_setting("openai_api_key")
+        if not api_key:
+            raise MissingConfigurationError(
+                "Missing required environment variable(s): openai_api_key."
+            )
+        if self._client is None or self._api_key != api_key:
+            self._client = OpenAIEmbeddings(
+                model=OPENAI_EMBEDDING_MODEL, api_key=api_key
+            )
+            self._api_key = api_key
+        return self._client
 
-llm = ChatOpenAI(model=OPENAI_REASONING_MODEL, api_key=openai_api_key_str)
+    def __getattr__(self, name):
+        return getattr(self._get_client(), name)
+
+
+class LazyChromaStore:
+    def __init__(self):
+        self._store = None
+        self._api_key = None
+
+    def _get_store(self):
+        api_key = get_setting("openai_api_key")
+        if not api_key:
+            raise MissingConfigurationError(
+                "Missing required environment variable(s): openai_api_key."
+            )
+        if self._store is None or self._api_key != api_key:
+            self._store = Chroma(
+                client=persistent_client,
+                collection_name="pdfs",
+                embedding_function=OpenAIEmbeddings(
+                    model=OPENAI_EMBEDDING_MODEL, api_key=api_key
+                ),
+            )
+            self._api_key = api_key
+        return self._store
+
+    def __getattr__(self, name):
+        return getattr(self._get_store(), name)
+
+
+class LazySemanticChunker:
+    def __init__(self):
+        self._chunker = None
+        self._api_key = None
+
+    def _get_chunker(self):
+        api_key = get_setting("openai_api_key")
+        if not api_key:
+            raise MissingConfigurationError(
+                "Missing required environment variable(s): openai_api_key."
+            )
+        if self._chunker is None or self._api_key != api_key:
+            self._chunker = SemanticChunker(
+                OpenAIEmbeddings(model=OPENAI_EMBEDDING_MODEL, api_key=api_key)
+            )
+            self._api_key = api_key
+        return self._chunker
+
+    def __getattr__(self, name):
+        return getattr(self._get_chunker(), name)
+
+
+class LazyChatOpenAI:
+    def __init__(self):
+        self._llm = None
+        self._api_key = None
+
+    def _get_llm(self):
+        api_key = get_setting("openai_api_key")
+        if not api_key:
+            raise MissingConfigurationError(
+                "Missing required environment variable(s): openai_api_key."
+            )
+        if self._llm is None or self._api_key != api_key:
+            self._llm = ChatOpenAI(model=OPENAI_REASONING_MODEL, api_key=api_key)
+            self._api_key = api_key
+        return self._llm
+
+    def __getattr__(self, name):
+        return getattr(self._get_llm(), name)
+
+    def __ror__(self, other):
+        return other | self._get_llm()
+
+
+embedding_function = LazyOpenAIEmbeddings()
+vector_store_from_client = LazyChromaStore()
+PDFCollection = persistent_client.get_or_create_collection("pdfs")
+text_splitter = LazySemanticChunker()
+llm = LazyChatOpenAI()
+
+
+def read_upload_bytes(file: UploadFile) -> bytes:
+    file.file.seek(0)
+    file_bytes = file.file.read()
+    file.file.seek(0)
+    return file_bytes
+
+
+def prepare_source_upload(file: UploadFile, flow_id: str, expected_extension: str | None = None) -> dict:
+    file_bytes = read_upload_bytes(file)
+    upload = validate_upload_bytes(file.filename, file_bytes)
+
+    if expected_extension and upload["extension"] != expected_extension:
+        raise DocumentIngestionError(f"Only {expected_extension.upper()} files are allowed.")
+
+    existing_component = component_collection.find_one(
+        {"file_hash": upload["file_hash"], "flow_id": ObjectId(flow_id)}
+    )
+    if existing_component:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="File already exists in the workspace.",
+        )
+
+    existing_versions = component_collection.count_documents(
+        {
+            "flow_id": ObjectId(flow_id),
+            "source_document.filename": upload["filename"],
+        }
+    )
+    return ingest_supported_document(
+        upload["filename"],
+        file_bytes,
+        version=existing_versions + 1,
+    )
+
+
+def source_metadata_fields(source_context: dict) -> dict:
+    source_document = source_context["source_document"]
+    return {
+        "name": source_document["filename"],
+        "original_name": source_document["original_filename"],
+        "file_hash": source_document["file_hash"],
+        "source_document_id": source_document["id"],
+        "source_document": source_document,
+        "source_segments": source_context.get("source_segments", []),
+        "document_chunks": source_context["document_chunks"],
+    }
+
+
+def ingestion_http_error(error: DocumentIngestionError) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
+
+
+def source_segments_from_page_records(records: list[dict]) -> list[dict]:
+    segments = []
+    cursor_by_page: dict[int, int] = {}
+
+    for record in records:
+        text = record.get("content") or record.get("data") or ""
+        if not text:
+            continue
+
+        page = record.get("page_number")
+        cursor = cursor_by_page.get(page, 0)
+        segments.append(
+            {
+                "text": text,
+                "page": page,
+                "heading": None,
+                "start_char": cursor,
+                "end_char": cursor + len(text),
+            }
+        )
+        cursor_by_page[page] = cursor + len(text) + 2
+
+    return segments
+
+
+def ground_mindmap_with_source_refs(response_json: dict, source_context: dict) -> dict:
+    return attach_source_refs_to_mindmap(
+        response_json,
+        source_context["source_document"],
+        source_context["document_chunks"],
+    )
+
+
+def workspace_brief_has_context(workspace_brief: dict | None) -> bool:
+    if not workspace_brief:
+        return False
+
+    if workspace_brief.get("configured") is True:
+        return True
+
+    desired_outputs = workspace_brief.get("desired_outputs") or []
+    non_default_outputs = [output for output in desired_outputs if output != "mind_map"]
+
+    return any(
+        [
+            str(workspace_brief.get("goal") or "").strip(),
+            str(workspace_brief.get("audience") or "").strip(),
+            str(workspace_brief.get("domain_context") or "").strip(),
+            str(workspace_brief.get("review_rules") or "").strip(),
+            non_default_outputs,
+        ]
+    )
+
+
+def query_with_workspace_brief(query: str, workspace_brief: dict | None) -> str:
+    if not workspace_brief_has_context(workspace_brief):
+        return query
+
+    brief_lines = [
+        "Use this structured workspace brief while answering.",
+        f"Goal: {workspace_brief.get('goal') or 'Not specified'}",
+        f"Audience: {workspace_brief.get('audience') or 'Not specified'}",
+        f"Domain context: {workspace_brief.get('domain_context') or 'Not specified'}",
+        f"Desired outputs: {', '.join(workspace_brief.get('desired_outputs') or []) or 'Not specified'}",
+        f"Source mode: {workspace_brief.get('source_mode') or 'source_plus_context'}",
+        f"Assumptions allowed: {bool(workspace_brief.get('assumptions_allowed'))}",
+        f"Preset: {workspace_brief.get('preset') or 'custom'}",
+        f"Output style: {workspace_brief.get('output_style') or 'technical_reference_map'}",
+        f"Preferred node types: {', '.join(workspace_brief.get('node_types') or []) or 'Not specified'}",
+        f"Review policy: {', '.join(workspace_brief.get('review_policy') or []) or 'Not specified'}",
+        f"Review rules: {workspace_brief.get('review_rules') or 'Not specified'}",
+        "",
+        "When the brief adds context beyond the source, keep the answer explicit about what is source-backed versus assumption-based.",
+        "Respect review policy by marking uncited, low-confidence, or assumption-based nodes as reviewable when requested.",
+        "",
+        f"User question: {query}",
+    ]
+    return "\n".join(brief_lines)
+
 
 def calculate_file_hash(file):
     hasher = sha256()
@@ -272,12 +635,22 @@ def validate_dataframe(df):
 
 def upload_to_s3(file_bytes, bucket, key):
     try:
+        require_settings("aws_access_key_id", "aws_secret_access_key", "bucket_name")
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+
+    try:
         s3_client.put_object(Bucket=bucket, Key=key, Body=file_bytes)
     except ClientError as e:
         raise HTTPException(status_code=500, detail=f"S3 Upload Error: {str(e)}")
 
 
 def extract_text_and_tables(key):
+    try:
+        require_settings("aws_access_key_id", "aws_secret_access_key", "bucket_name")
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+
     client = boto3.client(
         "textract",
         aws_access_key_id=aws_access_key_id_str,
@@ -345,8 +718,11 @@ def sanitize_path(path):
 
 def camelot_pdf_processing(flow_id, file, flow_type):
     try:
+        source_context = prepare_source_upload(file, flow_id, expected_extension="pdf")
+        source_document = source_context["source_document"]
+        file_bytes = source_context["file_bytes"]
         sanitized_flow_id = sanitize_path(flow_id)
-        sanitized_filename = file.filename
+        sanitized_filename = source_document["filename"]
 
         flow_dir = os.path.join(UPLOAD_DIR, sanitized_flow_id)
 
@@ -360,27 +736,14 @@ def camelot_pdf_processing(flow_id, file, flow_type):
 
         # Save the uploaded file
         with open(file_path, "wb") as f:
-            # Read the file content and write it to disk
-            f.write(file.file.read())
-
-        file.file.seek(0)
-        file_bytes = file.file.read()
+            f.write(file_bytes)
 
         print(f"File saved at: {file_path}")
 
         print(file_bytes)
 
-        file_hash = calculate_file_hash(file_bytes)
+        file_hash = source_document["file_hash"]
         print(file_hash)
-
-        existing_component = component_collection.find_one(
-            {"file_hash": file_hash, "flow_id": ObjectId(flow_id)}
-        )
-        if existing_component:
-            print("File already exists in the system")
-            raise HTTPException(
-                status_code=400, detail="File already exists in the system."
-            )
 
         # Now, upload the file to S3
         folder = f"uploads/{flow_id}/"
@@ -463,6 +826,10 @@ def camelot_pdf_processing(flow_id, file, flow_type):
         print(combined_data)
 
         combined_data_str = json.dumps(combined_data, indent=4)
+        source_context["source_segments"] = source_segments_from_page_records(combined_data)
+        source_context["document_chunks"] = chunk_source_segments(
+            source_context["source_segments"], source_document["id"]
+        )
 
         chunks = do_semantic_chunking(combined_data_str)
         print(chunks)
@@ -473,13 +840,12 @@ def camelot_pdf_processing(flow_id, file, flow_type):
 
             component_metadata = {
                 "flow_id": ObjectId(flow_id),
-                "name": file.filename,
-                "file_hash": file_hash,
                 "size": len(file_bytes),
                 "s3_path": s3_key,
                 "type": "pdf",
                 "processing_type": "custom",
                 "summary": summary,
+                **source_metadata_fields(source_context),
             }
 
             component_id = component_collection.insert_one(component_metadata).inserted_id
@@ -487,8 +853,9 @@ def camelot_pdf_processing(flow_id, file, flow_type):
             for i in range(len(chunks)):
                 metadata = {
                     "component_id": str(component_id),
-                    "file_name": file.filename,
+                    "file_name": source_document["filename"],
                     "flow_id": flow_id,
+                    "source_document_id": source_document["id"],
                 }
                 EmbeddingsDocuments.append(
                     LangDocument(page_content=chunks[i].page_content, metadata=metadata)
@@ -585,23 +952,26 @@ def camelot_pdf_processing(flow_id, file, flow_type):
             lm_chain = prompt | llm
             
             answer = lm_chain.invoke(
-                    {"summary_pdf": summary, "flow_id": flow_id, "filename": file.filename}
+                    {"summary_pdf": summary, "flow_id": flow_id, "filename": source_document["filename"]}
             )
 
             responseList = answer.content
 
             print(responseList)
 
-            response_json =  response_json.replace("```json", "").replace("```", "").replace("\n", "").strip()
+            response_json = responseList.replace("```json", "").replace("```", "").replace("\n", "").strip()
+            response_json = json.loads(response_json)
             
             print(response_json)
+
+            response_json = ground_mindmap_with_source_refs(response_json, source_context)
             
             component_metadata = {
                 "flow_id": ObjectId(flow_id),
-                "name": file.filename,
                 "type": "pdf",
                 "processing_type": "gpt",
                 "mindmap_json": response_json,
+                **source_metadata_fields(source_context),
             }
 
             component_id = component_collection.insert_one(component_metadata).inserted_id
@@ -659,7 +1029,10 @@ def is_within_gpt4o_token_limit(file: UploadFile) -> bool:
         return token_count <= GPT_4O_MAX_TOKENS
     except Exception as e:
         print(f"Error checking token count: {e}")
-        return False
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Malformed or unreadable document: {str(e)}",
+        ) from e
 
 
 def process_pdf_summary(chunks):
@@ -699,19 +1072,12 @@ def process_pdf_summary(chunks):
 
 
 def use_aws_textract(file, flow_id, flow_type):
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
-    file_bytes = file.file.read()
-    file_hash = calculate_file_hash(file_bytes)
+    source_context = prepare_source_upload(file, flow_id, expected_extension="pdf")
+    source_document = source_context["source_document"]
+    file_bytes = source_context["file_bytes"]
+    file_hash = source_document["file_hash"]
     print(file_hash)
-    existing_component = component_collection.find_one(
-        {"file_hash": file_hash, "flow_id": ObjectId(flow_id)}
-    )
-    if existing_component:
-        raise HTTPException(
-            status_code=400, detail="File already exists in the system."
-        )
-    file_name = file.filename
+    file_name = source_document["filename"]
     folder = f"uploads/{flow_id}/"
     s3_key = folder + file_name
     upload_to_s3(file_bytes, bucket_name, s3_key)
@@ -734,6 +1100,18 @@ def use_aws_textract(file, flow_id, flow_type):
     except Exception as e:
         print(e)
         raise HTTPException(status_code=500, detail=f"Text extraction error: {str(e)}")
+    source_context["source_segments"] = [
+        {
+            "text": data_for_chunking,
+            "page": None,
+            "heading": "Textract output",
+            "start_char": 0,
+            "end_char": len(data_for_chunking),
+        }
+    ]
+    source_context["document_chunks"] = chunk_source_segments(
+        source_context["source_segments"], source_document["id"]
+    )
     chunks = do_semantic_chunking(data_for_chunking)
     print(chunks)
 
@@ -743,13 +1121,12 @@ def use_aws_textract(file, flow_id, flow_type):
         
         component_metadata = {
             "flow_id": ObjectId(flow_id),
-            "name": file.filename,
-            "file_hash": file_hash,
             "size": len(file_bytes),
             "s3_path": s3_key,
             "type": "pdf",
             "processing_type": "aws",
             "summary": summary,
+            **source_metadata_fields(source_context),
         }
 
         component_id = component_collection.insert_one(component_metadata).inserted_id
@@ -757,8 +1134,9 @@ def use_aws_textract(file, flow_id, flow_type):
         for i in range(len(chunks)):
             metadata = {
                 "component_id": str(component_id),
-                "file_name": file.filename,
+                "file_name": source_document["filename"],
                 "flow_id": flow_id,
+                "source_document_id": source_document["id"],
             }
             EmbeddingsDocuments.append(
                 LangDocument(page_content=chunks[i].page_content, metadata=metadata)
@@ -855,23 +1233,26 @@ def use_aws_textract(file, flow_id, flow_type):
         lm_chain = prompt | llm
         
         answer = lm_chain.invoke(
-                {"summary_pdf": summary, "flow_id": flow_id, "filename": file.filename}
+            {"summary_pdf": summary, "flow_id": flow_id, "filename": source_document["filename"]}
         )
 
         responseList = answer.content
 
         print(responseList)
 
-        response_json =  response_json.replace("```json", "").replace("```", "").replace("\n", "").strip()
+        response_json = responseList.replace("```json", "").replace("```", "").replace("\n", "").strip()
+        response_json = json.loads(response_json)
         
         print(response_json)
+
+        response_json = ground_mindmap_with_source_refs(response_json, source_context)
         
         component_metadata = {
             "flow_id": ObjectId(flow_id),
-            "name": file.filename,
             "type": "pdf",
             "processing_type": "gpt",
             "mindmap_json": response_json,
+            **source_metadata_fields(source_context),
         }
 
         component_id = component_collection.insert_one(component_metadata).inserted_id
@@ -1034,10 +1415,18 @@ def fetch_question_answer_from_node_collection(parent_id: str, flow_id: str):
 @app.post("/create-flow/")
 def create_flow(flow: dict):
     try:
-        flow_data = {"flow_name": flow.get("flow_name"), "flow_json": "", "summary": "", "flow_type": flow.get("flow_type")}
-        flow_id = flow_collection.insert_one(flow_data).inserted_id
-        flow_type = flow.get("flow_type")
-        return {"flow_id": str(flow_id), "flow_type": str(flow_type)}
+        flow_type = flow.get("flow_type") or "manual"
+        flow_data = {
+            "flow_name": flow.get("flow_name") or "New Flow",
+            "flow_json": flow.get("flow_json") or "",
+            "summary": flow.get("summary") or "",
+            "flow_type": flow_type,
+        }
+        try:
+            flow_id = flow_collection.insert_one(flow_data).inserted_id
+        except PyMongoError:
+            flow_id = local_create_flow(flow_data)["_id"]
+        return {"flow_id": str(flow_id), "flow_type": flow_type}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating flow: {str(e)}")
 
@@ -1045,15 +1434,25 @@ def create_flow(flow: dict):
 @app.delete("/delete-flow/{flow_id}")
 def delete_flow(flow_id: str):
     try:
+        if not ObjectId.is_valid(flow_id):
+            if local_delete_flow(flow_id):
+                return {"status": "success"}
+            raise HTTPException(status_code=404, detail="Flow not found")
+
         flow_object_id = ObjectId(flow_id)
 
-        components = component_collection.find({"flow_id": flow_object_id})
-        for component in components:
-            component_id = component["_id"]
-            node_collection.delete_many({"component_id": component_id})
-        component_collection.delete_many({"flow_id": flow_object_id})
+        try:
+            components = component_collection.find({"flow_id": flow_object_id})
+            for component in components:
+                component_id = component["_id"]
+                node_collection.delete_many({"component_id": component_id})
+            component_collection.delete_many({"flow_id": flow_object_id})
 
-        flow_collection.delete_one({"_id": flow_object_id})
+            result = flow_collection.delete_one({"_id": flow_object_id})
+            if result.deleted_count == 0:
+                local_delete_flow(flow_id)
+        except PyMongoError:
+            local_delete_flow(flow_id)
 
         return {"status": "success"}
     except Exception as e:
@@ -1062,37 +1461,45 @@ def delete_flow(flow_id: str):
 
 @app.get("/flows/", response_model=List[Flow])
 def list_flows():
-    flows = flow_collection.find()
-    return [
-        {
-            "flow_id": str(flow["_id"]),
-            "flow_name": flow["flow_name"],
-            "flow_json": flow["flow_json"],
-            "summary": flow["summary"],
-            "flow_type": flow["flow_type"]
-        }
-        for flow in flows
-    ]
+    try:
+        flows = flow_collection.find()
+        mongo_flows = [normalize_flow_record(flow) for flow in flows]
+        local_flows = [normalize_flow_record(flow) for flow in load_local_flows()]
+        mongo_ids = {flow["flow_id"] for flow in mongo_flows}
+        return mongo_flows + [
+            flow for flow in local_flows if flow["flow_id"] not in mongo_ids
+        ]
+    except PyMongoError:
+        return [normalize_flow_record(flow) for flow in load_local_flows()]
 
 
 @app.put("/flow-update/")
 def update_flow(update_data: Flow):
     try:
         print(update_data)
-        result = flow_collection.update_one(
-            {"_id": ObjectId(update_data.flow_id)},
-            {
-                "$set": {
-                    "flow_name": update_data.flow_name,
-                    "flow_json": update_data.flow_json,
-                    "flow_type": update_data.flow_type,
-                    "summary": update_data.summary,
-                }
-            },
-        )
+        updates = {
+            "flow_name": update_data.flow_name,
+            "flow_json": update_data.flow_json,
+            "flow_type": update_data.flow_type,
+            "summary": update_data.summary,
+        }
+        result = None
+        if ObjectId.is_valid(update_data.flow_id):
+            try:
+                result = flow_collection.update_one(
+                    {"_id": ObjectId(update_data.flow_id)},
+                    {"$set": updates},
+                )
+            except PyMongoError:
+                result = None
         print(result)
 
-        if result.matched_count == 0:
+        if result is None or result.matched_count == 0:
+            if local_update_flow(update_data.flow_id, updates):
+                return {
+                    "flow_id": str(update_data.flow_id),
+                    "message": "Flow updated successfully",
+                }
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Flow not found"
             )
@@ -1110,14 +1517,54 @@ def update_flow(update_data: Flow):
 
 
 def get_workspace_graph_or_404(flow_id: str) -> dict:
-    if not ObjectId.is_valid(flow_id):
-        raise HTTPException(status_code=400, detail="Invalid workspace id format.")
+    flow = get_workspace_flow_or_404(flow_id)
+    return build_workspace_graph(flow)
 
-    flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
+
+def get_workspace_flow_or_404(flow_id: str) -> dict:
+    flow = None
+    if ObjectId.is_valid(flow_id):
+        try:
+            flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
+        except PyMongoError:
+            flow = None
+
+    if not flow:
+        flow = local_find_flow(flow_id)
+
     if not flow:
         raise HTTPException(status_code=404, detail="Workspace not found.")
 
-    return build_workspace_graph(flow)
+    return flow
+
+
+def get_upload_flow_or_400(flow_id: str) -> dict:
+    if not flow_id or flow_id == "undefined" or not ObjectId.is_valid(flow_id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Create or open a workspace before uploading a source document.",
+        )
+
+    try:
+        flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
+    except PyMongoError as exc:
+        if local_find_flow(flow_id):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "Source uploads need MongoDB so document metadata and source references can be saved. "
+                    "Start MongoDB, then reopen or create a workspace and try the DOCX upload again."
+                ),
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="MongoDB is unavailable. Start MongoDB, then try the source upload again.",
+        ) from exc
+
+    if not flow:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
+
+    return flow
 
 
 def get_workspace_branch_or_404(flow_id: str, node_id: str) -> dict:
@@ -1127,6 +1574,14 @@ def get_workspace_branch_or_404(flow_id: str, node_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Branch root node not found.")
 
     return select_branch(graph, node_id)
+
+
+def monday_task_nodes_from_graph(graph: dict) -> list[dict]:
+    return select_monday_task_nodes(graph)
+
+
+def utc_timestamp() -> str:
+    return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
 @app.get("/api/workspaces/{flow_id}/exports/json")
@@ -1188,35 +1643,417 @@ def export_branch_json(flow_id: str, node_id: str):
 @app.post("/api/workspaces/{flow_id}/export/miro")
 def preview_workspace_miro_export(flow_id: str):
     graph = get_workspace_graph_or_404(flow_id)
-    return export_branch_to_miro_payload(graph["nodes"])
+    return export_branch_to_miro_payload(
+        graph["nodes"],
+        graph["edges"],
+        graph["workspace"],
+        target="workspace_board_preview",
+    )
+
+
+@app.post("/api/workspaces/{flow_id}/export/miro/board")
+def export_workspace_to_miro_board(
+    flow_id: str,
+    board_id: str = Query(...),
+    dry_run: bool = Query(True),
+):
+    if not dry_run:
+        try:
+            require_settings("miro_api_token")
+        except MissingConfigurationError as exc:
+            raise configuration_http_error(exc)
+
+    flow = get_workspace_flow_or_404(flow_id)
+    graph = build_workspace_graph(flow)
+    payload = export_branch_to_miro_payload(
+        graph["nodes"],
+        graph["edges"],
+        graph["workspace"],
+        target="workspace_board",
+    )
+    client = MiroClient(
+        token=get_setting("miro_api_token") or "",
+        base_url=get_setting("miro_api_base_url") or "https://api.miro.com/v2",
+    )
+    result = client.export_frame_payload(board_id, payload, dry_run=dry_run)
+
+    if dry_run:
+        return result
+
+    pushed_at = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    refs_by_node_id = miro_item_refs_from_result(board_id, result, pushed_at)
+    updated_flow_json = apply_miro_external_refs_to_flow_json(
+        flow.get("flow_json", ""),
+        refs_by_node_id,
+    )
+    flow_collection.update_one(
+        {"_id": ObjectId(flow_id)},
+        {"$set": {"flow_json": updated_flow_json}},
+    )
+
+    return {
+        **result,
+        "external_refs": refs_by_node_id,
+        "persisted": bool(refs_by_node_id),
+    }
+
+
+@app.post("/api/workspaces/{flow_id}/export/miro/sme-review")
+def export_workspace_to_miro_sme_review_board(
+    flow_id: str,
+    board_id: str = Query(...),
+    dry_run: bool = Query(True),
+):
+    if not dry_run:
+        try:
+            require_settings("miro_api_token")
+        except MissingConfigurationError as exc:
+            raise configuration_http_error(exc)
+
+    flow = get_workspace_flow_or_404(flow_id)
+    graph = build_workspace_graph(flow)
+    payload = export_sme_review_board_payload(graph)
+    client = MiroClient(
+        token=get_setting("miro_api_token") or "",
+        base_url=get_setting("miro_api_base_url") or "https://api.miro.com/v2",
+    )
+    result = client.export_frame_payload(board_id, payload, dry_run=dry_run)
+
+    if dry_run:
+        return result
+
+    pushed_at = utc_timestamp()
+    refs_by_node_id = miro_item_refs_from_result(board_id, result, pushed_at)
+    updated_flow_json = apply_miro_external_refs_to_flow_json(
+        flow.get("flow_json", ""),
+        refs_by_node_id,
+    )
+    flow_collection.update_one(
+        {"_id": ObjectId(flow_id)},
+        {"$set": {"flow_json": updated_flow_json}},
+    )
+
+    return {
+        **result,
+        "external_refs": refs_by_node_id,
+        "persisted": bool(refs_by_node_id),
+    }
+
+
+@app.post("/api/workspaces/{flow_id}/export/miro/native-mindmap")
+def preview_workspace_miro_native_mindmap_export(
+    flow_id: str,
+    board_id: str = Query(...),
+):
+    graph = get_workspace_graph_or_404(flow_id)
+    payload = export_native_mindmap_payload(graph)
+    client = MiroClient(
+        token=os.getenv("miro_api_token", ""),
+        base_url=os.getenv("miro_api_base_url", "https://api.miro.com/v2"),
+    )
+    return client.export_native_mindmap_payload(board_id, payload, dry_run=True)
 
 
 @app.post("/api/workspaces/{flow_id}/branches/{node_id}/export/miro")
 def preview_branch_miro_export(flow_id: str, node_id: str):
     branch = get_workspace_branch_or_404(flow_id, node_id)
-    return export_branch_to_miro_payload(branch["nodes"])
+    return export_branch_to_miro_payload(
+        branch["nodes"],
+        branch["edges"],
+        branch["workspace"],
+        target="selected_branch_frame",
+    )
+
+
+@app.post("/api/workspaces/{flow_id}/branches/{node_id}/export/miro/frame")
+def export_branch_to_miro_frame(
+    flow_id: str,
+    node_id: str,
+    board_id: str = Query(...),
+    dry_run: bool = Query(True),
+):
+    if not dry_run:
+        try:
+            require_settings("miro_api_token")
+        except MissingConfigurationError as exc:
+            raise configuration_http_error(exc)
+
+    flow = get_workspace_flow_or_404(flow_id)
+    graph = build_workspace_graph(flow)
+    if not any(node["id"] == node_id for node in graph["nodes"]):
+        raise HTTPException(status_code=404, detail="Branch root node not found.")
+
+    branch = select_branch(graph, node_id)
+    payload = export_branch_to_miro_payload(
+        branch["nodes"],
+        branch["edges"],
+        branch["workspace"],
+        target="selected_branch_frame",
+    )
+    client = MiroClient(
+        token=get_setting("miro_api_token") or "",
+        base_url=get_setting("miro_api_base_url") or "https://api.miro.com/v2",
+    )
+    result = client.export_frame_payload(board_id, payload, dry_run=dry_run)
+
+    if dry_run:
+        return result
+
+    pushed_at = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    refs_by_node_id = miro_item_refs_from_result(board_id, result, pushed_at)
+    updated_flow_json = apply_miro_external_refs_to_flow_json(
+        flow.get("flow_json", ""),
+        refs_by_node_id,
+    )
+    flow_collection.update_one(
+        {"_id": ObjectId(flow_id)},
+        {"$set": {"flow_json": updated_flow_json}},
+    )
+
+    return {
+        **result,
+        "external_refs": refs_by_node_id,
+        "persisted": bool(refs_by_node_id),
+    }
 
 
 @app.post("/api/workspaces/{flow_id}/export/monday")
-def preview_workspace_monday_export(flow_id: str):
+def preview_workspace_monday_export(
+    flow_id: str,
+    confirmed: bool = Query(False),
+    board_id: str = Query(""),
+    group_id: str = Query(""),
+    template_id: str = Query(""),
+):
     graph = get_workspace_graph_or_404(flow_id)
-    task_node_ids = {task["node_id"] for task in graph["tasks"]}
-    task_nodes = [node for node in graph["nodes"] if node["id"] in task_node_ids]
-    return export_tasks_to_monday_payload(task_nodes)
+    return export_tasks_to_monday_payload(
+        monday_task_nodes_from_graph(graph),
+        graph["workspace"],
+        confirmed=confirmed,
+        board_id=board_id,
+        group_id=group_id,
+        scope="workspace",
+        created_at=utc_timestamp(),
+        template_id=template_id,
+    )
+
+
+@app.post("/api/workspaces/{flow_id}/export/monday/existing-group")
+def export_workspace_to_monday_existing_group(
+    flow_id: str,
+    board_id: str = Query(...),
+    group_id: str = Query(...),
+    dry_run: bool = Query(True),
+    confirmed: bool = Query(False),
+    template_id: str = Query(""),
+):
+    if not dry_run and not confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirm the monday export before creating items.",
+        )
+    if not dry_run:
+        try:
+            require_settings("monday_api_token")
+        except MissingConfigurationError as exc:
+            raise configuration_http_error(exc)
+
+    flow = get_workspace_flow_or_404(flow_id)
+    graph = build_workspace_graph(flow)
+    payload = export_tasks_to_monday_payload(
+        monday_task_nodes_from_graph(graph),
+        graph["workspace"],
+        confirmed=confirmed,
+        board_id=board_id,
+        group_id=group_id,
+        scope="workspace",
+        created_at=utc_timestamp(),
+        template_id=template_id,
+    )
+    client = MondayClient(
+        token=get_setting("monday_api_token") or "",
+        base_url=get_setting("monday_api_base_url") or "https://api.monday.com/v2",
+    )
+    result = client.export_existing_group_items(payload, dry_run=dry_run)
+
+    if dry_run:
+        return result
+
+    pushed_at = utc_timestamp()
+    refs_by_node_id = monday_item_refs_from_result(
+        board_id,
+        group_id,
+        result,
+        pushed_at,
+    )
+    updated_flow_json = apply_monday_external_refs_to_flow_json(
+        flow.get("flow_json", ""),
+        refs_by_node_id,
+    )
+    flow_collection.update_one(
+        {"_id": ObjectId(flow_id)},
+        {"$set": {"flow_json": updated_flow_json}},
+    )
+
+    return {
+        **result,
+        "external_refs": refs_by_node_id,
+        "persisted": bool(refs_by_node_id),
+    }
 
 
 @app.post("/api/workspaces/{flow_id}/branches/{node_id}/export/monday")
-def preview_branch_monday_export(flow_id: str, node_id: str):
+def preview_branch_monday_export(
+    flow_id: str,
+    node_id: str,
+    confirmed: bool = Query(False),
+    board_id: str = Query(""),
+    group_id: str = Query(""),
+    template_id: str = Query(""),
+):
     branch = get_workspace_branch_or_404(flow_id, node_id)
-    task_node_ids = {task["node_id"] for task in branch["tasks"]}
-    task_nodes = [node for node in branch["nodes"] if node["id"] in task_node_ids]
-    return export_tasks_to_monday_payload(task_nodes)
+    return export_tasks_to_monday_payload(
+        monday_task_nodes_from_graph(branch),
+        branch["workspace"],
+        confirmed=confirmed,
+        board_id=board_id,
+        group_id=group_id,
+        scope="branch",
+        root_node_id=node_id,
+        created_at=utc_timestamp(),
+        template_id=template_id,
+    )
+
+
+@app.post("/api/workspaces/{flow_id}/branches/{node_id}/export/monday/existing-group")
+def export_branch_to_monday_existing_group(
+    flow_id: str,
+    node_id: str,
+    board_id: str = Query(...),
+    group_id: str = Query(...),
+    dry_run: bool = Query(True),
+    confirmed: bool = Query(False),
+    template_id: str = Query(""),
+):
+    if not dry_run and not confirmed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirm the monday export before creating items.",
+        )
+    if not dry_run:
+        try:
+            require_settings("monday_api_token")
+        except MissingConfigurationError as exc:
+            raise configuration_http_error(exc)
+
+    flow = get_workspace_flow_or_404(flow_id)
+    graph = build_workspace_graph(flow)
+    if not any(node["id"] == node_id for node in graph["nodes"]):
+        raise HTTPException(status_code=404, detail="Branch root node not found.")
+
+    branch = select_branch(graph, node_id)
+    payload = export_tasks_to_monday_payload(
+        monday_task_nodes_from_graph(branch),
+        branch["workspace"],
+        confirmed=confirmed,
+        board_id=board_id,
+        group_id=group_id,
+        scope="branch",
+        root_node_id=node_id,
+        created_at=utc_timestamp(),
+        template_id=template_id,
+    )
+    client = MondayClient(
+        token=get_setting("monday_api_token") or "",
+        base_url=get_setting("monday_api_base_url") or "https://api.monday.com/v2",
+    )
+    result = client.export_existing_group_items(payload, dry_run=dry_run)
+
+    if dry_run:
+        return result
+
+    pushed_at = utc_timestamp()
+    refs_by_node_id = monday_item_refs_from_result(
+        board_id,
+        group_id,
+        result,
+        pushed_at,
+    )
+    updated_flow_json = apply_monday_external_refs_to_flow_json(
+        flow.get("flow_json", ""),
+        refs_by_node_id,
+    )
+    flow_collection.update_one(
+        {"_id": ObjectId(flow_id)},
+        {"$set": {"flow_json": updated_flow_json}},
+    )
+
+    return {
+        **result,
+        "external_refs": refs_by_node_id,
+        "persisted": bool(refs_by_node_id),
+    }
+
+
+@app.post("/api/workspaces/{flow_id}/sync/monday/status")
+def pull_monday_status_to_workspace(
+    flow_id: str,
+    dry_run: bool = Query(True),
+    apply: bool = Query(False),
+):
+    if not dry_run:
+        try:
+            require_settings("monday_api_token")
+        except MissingConfigurationError as exc:
+            raise configuration_http_error(exc)
+
+    flow = get_workspace_flow_or_404(flow_id)
+    refs_by_node_id = monday_refs_from_flow_json(flow.get("flow_json", ""))
+    client = MondayClient(
+        token=os.getenv("monday_api_token", ""),
+        base_url=os.getenv("monday_api_base_url", "https://api.monday.com/v2"),
+    )
+    result = client.pull_item_statuses(refs_by_node_id, dry_run=dry_run)
+
+    if dry_run:
+        return {
+            **result,
+            "tracked_node_count": len(refs_by_node_id),
+        }
+
+    pulled_at = utc_timestamp()
+    status_updates = monday_status_updates_from_result(
+        result,
+        refs_by_node_id,
+        pulled_at,
+    )
+    if apply:
+        updated_flow_json = apply_monday_status_updates_to_flow_json(
+            flow.get("flow_json", ""),
+            status_updates,
+        )
+        flow_collection.update_one(
+            {"_id": ObjectId(flow_id)},
+            {"$set": {"flow_json": updated_flow_json}},
+        )
+
+    return {
+        **result,
+        "status_updates": status_updates,
+        "applied": apply and bool(status_updates),
+    }
 
 
 def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
-    file.file.seek(0)
-    file_bytes = file.file.read()
-    file_extension = file.filename.split(".")[-1].lower()
+    try:
+        require_settings("openai_api_key")
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+
+    source_context = prepare_source_upload(file, flow_id)
+    source_document = source_context["source_document"]
+    file_bytes = source_context["file_bytes"]
+    file_extension = source_document["type"]
 
     if len(file_bytes) == 0:
         raise ValueError("The uploaded file is actually empty!")
@@ -1237,7 +2074,7 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
     if file_extension == "pdf":
         mime_type = "application/pdf"
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     elif file_extension == "csv":
         mime_type = "application/json"
@@ -1250,14 +2087,14 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
     elif file_extension == "txt":
         mime_type = "text/plain"
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     elif file_extension == "docx":
         mime_type = (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     elif file_extension == "html":
         mime_type = "text/html"
@@ -1267,7 +2104,7 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
     elif file_extension == "md":
         mime_type = "text/markdown"
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     elif file_extension == "pptx":
         mime_type = (
@@ -1316,7 +2153,6 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
     # Insert metadata into the database
     component_metadata = {
         "flow_id": ObjectId(flow_id),
-        "name": file.filename,
         "file_id": messages_file.id,
         "assistant_id": assistant.id,
         "vector_store_id": vector_store.id,
@@ -1324,6 +2160,7 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
         "type": file_extension,
         "processing_type": "gpt",
         "summary": message_content.value,
+        **source_metadata_fields(source_context),
     }
 
     # Store the document in MongoDB
@@ -1333,9 +2170,15 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
     return {"component_id": str(component_id), "type": file_extension, flow_type: flow_type}
 
 def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
-    file.file.seek(0)
-    file_bytes = file.file.read()
-    file_extension = file.filename.split(".")[-1].lower()
+    try:
+        require_settings("openai_api_key")
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+
+    source_context = prepare_source_upload(file, flow_id)
+    source_document = source_context["source_document"]
+    file_bytes = source_context["file_bytes"]
+    file_extension = source_document["type"]
 
     if len(file_bytes) == 0:
         raise ValueError("The uploaded file is actually empty!")
@@ -1356,7 +2199,7 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
     if file_extension == "pdf":
         mime_type = "application/pdf"
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     elif file_extension == "csv":
         mime_type = "application/json"
@@ -1369,14 +2212,14 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
     elif file_extension == "txt":
         mime_type = "text/plain"
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     elif file_extension == "docx":
         mime_type = (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     elif file_extension == "html":
         mime_type = "text/html"
@@ -1386,7 +2229,7 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
     elif file_extension == "md":
         mime_type = "text/markdown"
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     elif file_extension == "pptx":
         mime_type = (
@@ -1439,7 +2282,7 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
                             "name": "{file_extension}", !!!DOESN"T CHANGES 
                             "content": "<file name or content>",
                             "flow_id": "{flow_id}",
-                            "file": "{file.filename}"  // Empty object or file metadata
+                            "file": "{source_document["filename"]}"  // Empty object or file metadata
                         }}
                 5. **Question Data Format:**
                 - `question` Node:
@@ -1524,10 +2367,10 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
         )
 
     response_json = json.loads(response_json)
+    response_json = ground_mindmap_with_source_refs(response_json, source_context)
 
     component_metadata = {
         "flow_id": ObjectId(flow_id),
-        "name": file.filename,
         "file_id": messages_file.id,
         "assistant_id": assistant.id,
         "vector_store_id": vector_store.id,
@@ -1535,6 +2378,7 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
         "type": file_extension,
         "processing_type": "gpt",
         "mindmap_json": response_json,
+        **source_metadata_fields(source_context),
     }
 
     component_id = component_collection.insert_one(component_metadata).inserted_id
@@ -1636,15 +2480,15 @@ def one_shot_openai(query, vector_store_id, file_id, assistant_id):
 
 
 def get_page_len(file: UploadFile):
-    f_bytes = file.file.read()
-    stream = BytesIO(f_bytes)
-    reader = pdfium.PdfDocument(f_bytes)
-    stream.seek(0)
-    file.file.seek(0)
-    if len(reader) > 100:
-        return True
-    else:
-        return False
+    try:
+        f_bytes = read_upload_bytes(file)
+        reader = pdfium.PdfDocument(f_bytes)
+        return len(reader) > 100
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Malformed PDF file: {str(exc)}",
+        ) from exc
 
 
 @app.post("/component-create-pdf")
@@ -1652,7 +2496,12 @@ def create_pdf_component(
     file: UploadFile, flow_id: str = Form(...), processing_type: str = Form(...)
 ):
     flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
-    if file.filename.endswith(".pdf"):
+    try:
+        upload = validate_upload_bytes(file.filename, read_upload_bytes(file))
+    except DocumentIngestionError as exc:
+        raise ingestion_http_error(exc) from exc
+
+    if upload["extension"] == "pdf":
         print(get_page_len(file))
         check_page_length = get_page_len(file)
         if processing_type == "gpt" and not check_page_length and flow["flow_type"] == 'manual':
@@ -2353,7 +3202,12 @@ async def create_video_component(
 @app.post("/component-create-txt")
 def create_txt_component(file: UploadFile, flow_id: str = Form(...)):
     flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
-    if file.filename.endswith(".txt"):
+    try:
+        upload = validate_upload_bytes(file.filename, read_upload_bytes(file))
+    except DocumentIngestionError as exc:
+        raise ingestion_http_error(exc) from exc
+
+    if upload["extension"] == "txt":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
             return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"])
@@ -2370,7 +3224,12 @@ def create_txt_component(file: UploadFile, flow_id: str = Form(...)):
 @app.post("/component-create-md")
 def create_md_component(file: UploadFile, flow_id: str = Form(...)):
     flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
-    if file.filename.endswith(".md"):
+    try:
+        upload = validate_upload_bytes(file.filename, read_upload_bytes(file))
+    except DocumentIngestionError as exc:
+        raise ingestion_http_error(exc) from exc
+
+    if upload["extension"] == "md":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
             return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"])
@@ -2420,8 +3279,13 @@ def create_html_component(file: UploadFile, flow_id: str = Form(...)):
 
 @app.post("/component-create-docx")
 def create_docx_component(file: UploadFile, flow_id: str = Form(...)):
-    flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
-    if file.filename.endswith(".docx"):
+    flow = get_upload_flow_or_400(flow_id)
+    try:
+        upload = validate_upload_bytes(file.filename, read_upload_bytes(file))
+    except DocumentIngestionError as exc:
+        raise ingestion_http_error(exc) from exc
+
+    if upload["extension"] == "docx":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
             return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"])
@@ -2429,7 +3293,7 @@ def create_docx_component(file: UploadFile, flow_id: str = Form(...)):
             return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"])
         else:
             traceback.print_exc()
-            return HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
+            raise HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
     else:
         traceback.print_exc()
         raise HTTPException(status_code=400, detail="Only DOCX files are allowed.")
@@ -2784,7 +3648,10 @@ def PDF_QA(request: PDFNodeQueryRequest):
             file_id = record["file_id"]
             assistant_id = record["assistant_id"]
             response = one_shot_openai(
-                request.query, vector_store_id, file_id, assistant_id
+                query_with_workspace_brief(request.query, request.workspace_brief),
+                vector_store_id,
+                file_id,
+                assistant_id,
             )
             response_json = json.loads(response)
             print(response_json)
@@ -2906,10 +3773,13 @@ def PDF_QA(request: PDFNodeQueryRequest):
             print(prompt)
 
             llm_chain = prompt | llm
+            augmented_query = query_with_workspace_brief(
+                request.query, request.workspace_brief
+            )
             answer = llm_chain.invoke(
                 {
                     "instructions": instructions,
-                    "query": request.query,
+                    "query": augmented_query,
                     "escaped_passage": relevant_passage,
                 }
             )
@@ -2987,7 +3857,10 @@ def TXT_QA(request: TXTNodeQueryRequest):
         file_id = record["file_id"]
         assistant_id = record["assistant_id"]
         response = one_shot_openai(
-            request.query, vector_store_id, file_id, assistant_id
+            query_with_workspace_brief(request.query, request.workspace_brief),
+            vector_store_id,
+            file_id,
+            assistant_id,
         )
         response_json = json.loads(response)
         print(response_json)
@@ -3060,7 +3933,10 @@ def MD_QA(request: MDNodeQueryRequest):
         file_id = record["file_id"]
         assistant_id = record["assistant_id"]
         response = one_shot_openai(
-            request.query, vector_store_id, file_id, assistant_id
+            query_with_workspace_brief(request.query, request.workspace_brief),
+            vector_store_id,
+            file_id,
+            assistant_id,
         )
         response_json = json.loads(response)
         print(response_json)
@@ -3135,7 +4011,10 @@ def HTML_QA(request: HTMLNodeQueryRequest):
         file_id = record["file_id"]
         assistant_id = record["assistant_id"]
         response = one_shot_openai(
-            request.query, vector_store_id, file_id, assistant_id
+            query_with_workspace_brief(request.query, request.workspace_brief),
+            vector_store_id,
+            file_id,
+            assistant_id,
         )
         response_json = json.loads(response)
         print(response_json)
@@ -3210,7 +4089,10 @@ def DOCX_QA(request: DOCXNodeQueryRequest):
         file_id = record["file_id"]
         assistant_id = record["assistant_id"]
         response = one_shot_openai(
-            request.query, vector_store_id, file_id, assistant_id
+            query_with_workspace_brief(request.query, request.workspace_brief),
+            vector_store_id,
+            file_id,
+            assistant_id,
         )
         response_json = json.loads(response)
         print(response_json)
@@ -3285,7 +4167,10 @@ def PPTX_QA(request: PPTXNodeQueryRequest):
         file_id = record["file_id"]
         assistant_id = record["assistant_id"]
         response = one_shot_openai(
-            request.query, vector_store_id, file_id, assistant_id
+            query_with_workspace_brief(request.query, request.workspace_brief),
+            vector_store_id,
+            file_id,
+            assistant_id,
         )
         response_json = json.loads(response)
         print(response_json)
@@ -3492,7 +4377,10 @@ def WEB_QA(request: WebNodeQueryRequest):
         file_id = record["file_id"]
         assistant_id = record["assistant_id"]
         response = one_shot_openai(
-            request.query, vector_store_id, file_id, assistant_id
+            query_with_workspace_brief(request.query, request.workspace_brief),
+            vector_store_id,
+            file_id,
+            assistant_id,
         )
         response_json = json.loads(response)
         print(response_json)

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, List, Dict, Literal
 
 class Flow(BaseModel):
@@ -14,6 +14,7 @@ class PDFNodeQueryRequest(BaseModel):
     component_id: str
     node_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class PDFNodeQueryResponse(BaseModel):
     id: str
@@ -26,6 +27,7 @@ class TXTNodeQueryRequest(BaseModel):
     component_id: str
     node_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class TXTNodeQueryResponse(BaseModel):
     id: str
@@ -38,6 +40,7 @@ class MDNodeQueryRequest(BaseModel):
     component_id: str
     node_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class MDNodeQueryResponse(BaseModel):
     id: str
@@ -50,6 +53,7 @@ class HTMLNodeQueryRequest(BaseModel):
     component_id: str
     node_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class HTMLNodeQueryResponse(BaseModel):
     id: str
@@ -62,6 +66,7 @@ class DOCXNodeQueryRequest(BaseModel):
     component_id: str
     node_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class DOCXNodeQueryResponse(BaseModel):
     id: str
@@ -74,6 +79,7 @@ class PPTXNodeQueryRequest(BaseModel):
     component_id: str
     node_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class PPTXNodeQueryResponse(BaseModel):
     id: str
@@ -95,6 +101,7 @@ class SQLNodeQueryRequest(BaseModel):
     flow_id: str
     component_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class SQLNodeQueryResponse(BaseModel):
     id: str  
@@ -107,6 +114,7 @@ class CSVNodeQueryRequest(BaseModel):
     flow_id: str
     component_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class CSVNodeQueryResponse(BaseModel):
     id: str  
@@ -119,6 +127,7 @@ class WebNodeQueryRequest(BaseModel):
     flow_id: str
     component_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class WebNodeQueryResponse(BaseModel):
     id: str  
@@ -131,6 +140,7 @@ class ImgNodeQueryRequest(BaseModel):
     flow_id: str
     component_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class ImgNodeQueryResponse(BaseModel):
     id: str  
@@ -143,6 +153,7 @@ class AudioNodeQueryRequest(BaseModel):
     flow_id: str
     component_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class AudioNodeQueryResponse(BaseModel):
     id: str  
@@ -155,6 +166,7 @@ class YoutubeNodeQueryRequest(BaseModel):
     flow_id: str
     component_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class YoutubeNodeQueryResponse(BaseModel):
     id: str  
@@ -167,6 +179,7 @@ class VideoNodeQueryRequest(BaseModel):
     flow_id: str
     component_id: str
     request_type: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class VideoNodeQueryResponse(BaseModel):
     id: str  
@@ -174,6 +187,8 @@ class VideoNodeQueryResponse(BaseModel):
     data: dict   
 
 class ComponentFollowUpQueryRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     flow_id: str 
     component_id : str 
     component_type: str 
@@ -195,6 +210,7 @@ class MultipleQuestionAnswerQueryRequest(BaseModel):
     question: str
     parent_node_ids: List[str]
     flow_id: str
+    workspace_brief: Dict[str, Any] = Field(default_factory=dict)
 
 class MultipleQuestionAnswerQueryResponse(BaseModel):
     id: str
@@ -208,3 +224,23 @@ class FlowSummarizeRequest(BaseModel):
 class FlowSummarizeResponse(BaseModel):
     flow_id: str      
     response: str
+
+class SourceDocumentModel(BaseModel):
+    id: str
+    filename: str
+    original_filename: str
+    type: Literal["pdf", "docx", "md", "txt"]
+    file_hash: str
+    size: int
+    version: int
+    status: str = "uploaded"
+
+class DocumentChunkModel(BaseModel):
+    id: str
+    document_id: str
+    index: int
+    text: str
+    page: int | None = None
+    heading: str | None = None
+    start_char: int = 0
+    end_char: int = 0
