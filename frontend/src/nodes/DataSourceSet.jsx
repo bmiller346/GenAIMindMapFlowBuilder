@@ -114,23 +114,26 @@ const DataSourceSet = ({ data }) => {
     //         </div>
     //     );
     // } else {
+    const openSourceModal = () => setDataSourceModal(data.name, pushNode);
+
     return (
-        <div
+        <button
+            type="button"
             className="data-source-set"
-            onClick={(e) => setDataSourceModal(data.name, pushNode)}
+            onClick={openSourceModal}
         >
             <div>
                 <img
                     src={data.img}
-                    alt={'image will be here'}
+                    alt=""
                 />
                 <p>{data.content}</p>
             </div>
             <img
                 src={RIGHTArrow}
-                alt={'RIght arrow'}
+                alt=""
             />
-        </div>
+        </button>
     );
     // }
 };

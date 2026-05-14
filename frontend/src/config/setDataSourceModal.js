@@ -11,10 +11,25 @@ import PPTXModal from '../modals/PPTXModal.jsx';
 import HTMLModal from '../modals/HTMLModal.jsx';
 import TextModal from '../modals/TextModal.jsx';
 import VideoModal from '../modals/VideoModal.jsx';
-import FlowModal from '../modals/FlowModal.jsx';
+import WorkspaceBriefModal from '../modals/WorkspaceBriefModal.jsx';
 
 const setDataSourceModal = (name, pushNode) => {
     switch (name) {
+        case 'pdf':
+            pushNode(PDFModal);
+            break;
+        case 'md':
+            pushNode(MDModal);
+            break;
+        case 'docx':
+            pushNode(DocxModal);
+            break;
+        case 'txt':
+            pushNode(TextModal);
+            break;
+        case 'brief':
+            pushNode(WorkspaceBriefModal);
+            break;
         case 'sql':
             pushNode(SQLModal);
             break;
@@ -24,14 +39,8 @@ const setDataSourceModal = (name, pushNode) => {
         case 'web':
             pushNode(WEBModal);
             break;
-        case 'pdf':
-            pushNode(PDFModal);
-            break;
         case 'audio':
             pushNode(AudioModal);
-            break;
-        case 'md':
-            pushNode(MDModal);
             break;
         case 'youtube':
             pushNode(YTModal);
@@ -39,23 +48,17 @@ const setDataSourceModal = (name, pushNode) => {
         case 'img':
             pushNode(ImgModal);
             break;
-        case 'docx':
-            pushNode(DocxModal);
-            break;
         case 'pptx':
             pushNode(PPTXModal);
             break;
         case 'html':
             pushNode(HTMLModal);
             break;
-        case 'txt':
-            pushNode(TextModal);
-            break;
         case 'video':
             pushNode(VideoModal);
             break;
         default:
-            console.log('In-progress');
+            console.warn(`Unsupported DocMap source type: ${name}`);
     }
 };
 

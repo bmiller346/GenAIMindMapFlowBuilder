@@ -2,32 +2,17 @@ import STARSvg from '../assets/star.svg';
 import CROSSSvg from '../assets/cross.svg';
 import flowStore from '../stores/flowStore';
 import modalStore from '../stores/modalStore';
-import TableComponent from '../global-components/TableComponent';
-import Graph from '../global-components/Graph';
 import { AgGridReact } from 'ag-grid-react'; // React Data Grid Component
 import 'ag-grid-community/styles/ag-grid.css';
-import {
-    AllCommunityModule,
-    ModuleRegistry,
-    PopupComponent
-} from 'ag-grid-community';
-import { alignProperty } from '@mui/material/styles/cssUtils';
-import Plot from 'react-plotly.js';
-import 'ag-grid-community/styles/ag-grid.css';
 import 'ag-grid-community/styles/ag-theme-alpine.css';
-import { colorSchemeLightWarm } from 'ag-grid-community';
-import { themeAlpine } from 'ag-grid-community';
 import ReactJsxParser from 'react-jsx-parser';
 import DOWNLOADSvg from '../assets/download_img.svg';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
-import { useRef } from 'react';
+import Plot from '../global-components/PlotlyBasic.jsx';
 const FlowSummary = () => {
     const flowSummary = flowStore((s) => s.flow_summary);
     const popNode = modalStore((s) => s.popNode);
     // const data = JSON.parse(flowSummary);
     console.log('LOOKING FOR THIS', flowSummary);
-    const myTheme = themeAlpine.withPart(colorSchemeLightWarm);
     const flow_name = flowStore((s) => s.flow_name);
     {
         /* <div className="flow-summary">
@@ -76,7 +61,11 @@ const FlowSummary = () => {
 
     const downloadPdf = (e) => {
         const input = document.querySelector('.jsx-parser'); // Select div by class name
-        html2canvas(input, { scale: 2 }).then((canvas) => {
+        Promise.all([import('html2canvas'), import('jspdf')]).then(([html2canvasModule, jsPdfModule]) => {
+            const html2canvas = html2canvasModule.default;
+            const jsPDF = jsPdfModule.default;
+
+            return html2canvas(input, { scale: 2 }).then((canvas) => {
             const imgData = canvas.toDataURL('image/png');
             const pdf = new jsPDF('p', 'mm', 'a4');
             const imgWidth = 190; // Adjust width to fit A4 page
@@ -84,6 +73,7 @@ const FlowSummary = () => {
 
             pdf.addImage(imgData, 'PNG', 10, 10, imgWidth, imgHeight);
             pdf.save(`${flow_name} + Report.pdf`);
+            });
         });
     };
 

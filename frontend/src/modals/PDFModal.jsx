@@ -17,6 +17,7 @@ import ErrorModal from './ErrorModal';
 import errorStore from '../stores/errorStore';
 import DELETESvg from '../assets/delete.svg';
 import { useReactFlow } from '@xyflow/react';
+import { sourceUploadLoading } from '../config/loadingStates';
 
 const PDFModal = () => {
     const flowId = flowStore((s) => s.flow_id);
@@ -55,7 +56,7 @@ const PDFModal = () => {
             file: file,
             processing_type: processingType
         };
-        pushNode(LoadingModal);
+        pushNode(LoadingModal, sourceUploadLoading('PDF', file?.name));
         const [url, body, headerConfig] = setRequestData('pdf', flowId, data);
         axios
             .post(`http://localhost:8000/${url}`, body, {

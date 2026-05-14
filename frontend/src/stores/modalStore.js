@@ -2,14 +2,17 @@ import { create } from 'zustand';
 import DataSourceSelect from '../global-components/DataSourceSelect';
 const modalStore = create((set) => ({
     node: undefined,
-    pushNode: (nd) => {
+    nodeProps: {},
+    pushNode: (nd, props = {}) => {
         set({
-            node: nd
+            node: nd,
+            nodeProps: props
         });
     },
     popNode: () =>
         set({
-            node: undefined
+            node: undefined,
+            nodeProps: {}
         }),
     sourceId: undefined,
     setSourceId: (id) => {

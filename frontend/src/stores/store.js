@@ -196,9 +196,34 @@ const useStore = create((set, get) => ({
         //     type: 'question',
         //     position: { x: 700, y: 100 },
         // }
-
     ],
     edges: [],
+    activeView: 'mindmap',
+    selectedBranchId: undefined,
+    workspaceBrief: {
+        configured: false,
+        preset: 'custom',
+        goal: '',
+        audience: '',
+        domain_context: '',
+        desired_outputs: ['mind_map'],
+        source_mode: 'source_plus_context',
+        assumptions_allowed: false,
+        output_style: 'technical_reference_map',
+        node_types: [
+            'category',
+            'standard',
+            'workflow',
+            'requirement',
+            'task',
+            'reference',
+            'definition',
+            'question',
+            'needs_review'
+        ],
+        review_policy: ['mark_uncited_needs_review'],
+        review_rules: ''
+    },
     viewport: {},
     onNodesChange: (change) => {
         console.log("Test");
@@ -216,6 +241,15 @@ const useStore = create((set, get) => ({
     },
     setEdges: (edges) => {
         set({ edges });
+    },
+    setActiveView: (activeView) => {
+        set({ activeView });
+    },
+    setSelectedBranchId: (selectedBranchId) => {
+        set({ selectedBranchId });
+    },
+    setWorkspaceBrief: (workspaceBrief) => {
+        set({ workspaceBrief });
     },
     uploadFile: (id, file) => {
         set({

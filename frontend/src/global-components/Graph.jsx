@@ -1,4 +1,4 @@
-import Plot from 'react-plotly.js';
+import Plot from './PlotlyBasic.jsx';
 
 const Graph = ({ data }) => {
     const graph = data;

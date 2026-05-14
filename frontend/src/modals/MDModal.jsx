@@ -17,6 +17,7 @@ import ErrorModal from './ErrorModal';
 import errorStore from '../stores/errorStore';
 import DELETESvg from '../assets/delete.svg';
 import { useReactFlow } from '@xyflow/react';
+import { sourceUploadLoading } from '../config/loadingStates';
 
 const MDModal = () => {
     const flowId = flowStore((s) => s.flow_id);
@@ -56,7 +57,7 @@ const MDModal = () => {
         const data = {
             file: file,
         };
-        pushNode(LoadingModal);
+        pushNode(LoadingModal, sourceUploadLoading('Markdown', file?.name));
         const [url, body, headerConfig] = setRequestData('md', flowId, data);
         axios
             .post(`http://localhost:8000/${url}`, body, {

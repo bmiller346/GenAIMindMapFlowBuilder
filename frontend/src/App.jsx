@@ -19,6 +19,11 @@ import AskMultiple from './global-components/AskMultiple.jsx';
 import Header from './global-components/Header.jsx';
 import Drawer from './global-components/Drawer.jsx';
 import flowStore from './stores/flowStore.js';
+import NodeInspector from './global-components/NodeInspector.jsx';
+import GraphValidationPanel from './global-components/GraphValidationPanel.jsx';
+import LocalViewsPanel from './views/LocalViewsPanel.jsx';
+import WorkspaceBriefPanel from './global-components/WorkspaceBriefPanel.jsx';
+import { getLocalSetting, setLocalSetting, SETTINGS_KEYS } from './config/localSettings';
 const App = () => {
     const nodeType = useMemo(() => nodeTypes, []);
     const selector = (state) => ({
@@ -28,7 +33,9 @@ const App = () => {
         onNodesChange: state.onNodesChange,
         onEdgesChange: state.onEdgesChange,
         setNodes: state.setNodes,
-        setEdges: state.setEdges
+        setEdges: state.setEdges,
+        activeView: state.activeView,
+        setSelectedBranchId: state.setSelectedBranchId
     });
     const {
         trigger,
@@ -37,22 +44,49 @@ const App = () => {
         onNodesChange,
         onEdgesChange,
         setNodes,
-        setEdges
+        setEdges,
+        activeView,
+        setSelectedBranchId
     } = useStore(useShallow(selector));
     const areNodesIntialised = useNodesInitialized();
     const [askMultipleClass, setAskMultipleClass] = useState();
     const [isDrawer, setIsDrawer] = useState(false);
     const setRfInstance = flowStore((s) => s.setRfInstance);
     const [selectedNodes, setSelectedNodes] = useState();
+    const [selectedNodeId, setSelectedNodeId] = useState();
+    const [validationReport, setValidationReport] = useState();
     const reactFlow = useReactFlow();
     const { fitView } = useReactFlow();
     const popNode = modalStore((s) => s.popNode);
     const [flowList, setFlowList] = useState([]);
-    const [lightMode, setLightMode] = useState(false);
+    const [lightMode, setLightMode] = useState(
+        () => getLocalSetting(SETTINGS_KEYS.theme) === 'light'
+    );
+    const flow_id = flowStore((s) => s.flow_id);
     const flow_type = flowStore((s) => s.flow_type);
+    const selectedNodeIssues = useMemo(() => {
+        if (!selectedNodeId || !validationReport?.issues) {
+            return [];
+        }
+
+        return validationReport.issues.filter(
+            (issue) => issue.nodeId === selectedNodeId
+        );
+    }, [selectedNodeId, validationReport]);
+    const closeNodeInspector = useCallback(() => {
+        setSelectedNodeId(undefined);
+        setSelectedBranchId(undefined);
+        setNodes(
+            nodes.map((node) =>
+                node.selected ? { ...node, selected: false } : node
+            )
+        );
+    }, [nodes, setNodes, setSelectedBranchId]);
 
     const onChange = useCallback(
         ({ nodes }) => {
+            setSelectedNodeId(nodes.length === 1 ? nodes[0].id : undefined);
+            setSelectedBranchId(nodes.length === 1 ? nodes[0].id : undefined);
             const responseNodes = nodes.filter(
                 (ele) => ele.type === 'response'
             );
@@ -76,7 +110,7 @@ const App = () => {
                 setAskMultipleClass('deanimate');
             }
         },
-        [askMultipleClass]
+        [askMultipleClass, setSelectedBranchId]
     );
 
     useOnSelectionChange({
@@ -145,6 +179,10 @@ const App = () => {
         fitView();
     }, [trigger]);
 
+    useEffect(() => {
+        setLocalSetting(SETTINGS_KEYS.theme, lightMode ? 'light' : 'dark');
+    }, [lightMode]);
+
     return (
         <div className={lightMode ? 'app light' : 'app dark'}>
             <Modal ChildProp={Prompts} />
@@ -175,18 +213,47 @@ const App = () => {
                 minZoom={-1}
                 maxZoom={100}
             >
-                {showDataSource() ? 
                 <Panel
                     position="bottom-left"
                     style={isDrawer ? { display: 'none' } : { display: 'flex' }}
                 >
-                    <AddDataSource />
+                    <div className="workspace-flow-controls">
+                        <WorkspaceBriefPanel />
+                        {showDataSource() ? <AddDataSource /> : null}
+                    </div>
                 </Panel>
-                : null }
                 <Panel position="bottom">
                     <AskMultiple
                         data={askMultipleClass}
                         selectedNodes={selectedNodes}
+                    />
+                </Panel>
+                <Panel
+                    position="top-left"
+                    style={isDrawer ? { display: 'none' } : { display: 'block' }}
+                >
+                    <GraphValidationPanel
+                        flowId={flow_id}
+                        nodes={nodes}
+                        edges={edges}
+                        onSelectNode={setSelectedNodeId}
+                        onReportChange={setValidationReport}
+                    />
+                </Panel>
+                <Panel
+                    position="top-center"
+                    style={isDrawer ? { display: 'none' } : { display: 'block' }}
+                >
+                    <LocalViewsPanel hidden={false} />
+                </Panel>
+                <Panel
+                    position="top-right"
+                    style={isDrawer ? { display: 'none' } : { display: 'block' }}
+                >
+                    <NodeInspector
+                        selectedNodeId={selectedNodeId}
+                        validationIssues={selectedNodeIssues}
+                        onClose={closeNodeInspector}
                     />
                 </Panel>
             </ReactFlow>

@@ -12,34 +12,65 @@ import PPTXSvg from "../assets/pptx.svg"
 import TXTSvg from "../assets/text.svg"
 import VIDEOSvg from "../assets/video.svg"
 import YOUTUBESvg from "../assets/youtube.svg"
-import flowStore from "../stores/flowStore";
+import PROMPTSvg from "../assets/prompt.svg"
+import CROSSSvg from "../assets/cross.svg";
+import modalStore from "../stores/modalStore";
+
+const DOCMAP_PRIMARY_SOURCES = [
+	{ img: PROMPTSvg, content: "Start from workspace brief", name: "brief" },
+	{ img: PDFSvg, content: "Upload PDF", name: "pdf" },
+	{ img: DOCXSvg, content: "Upload DOCX", name: "docx" },
+	{ img: MDSvg, content: "Upload Markdown", name: "md" },
+	{ img: TXTSvg, content: "Upload TXT", name: "txt" },
+];
+
+const LEGACY_DEMO_SOURCES = [
+	{ img: CSVSvg, content: "CSV", name: "csv" },
+	{ img: SQLSvg, content: "Connect SQL", name: "sql" },
+	{ img: WEBSvg, content: "Enter URL", name: "web" },
+	{ img: AudioSvg, content: "Select Audio File", name: "audio" },
+	{ img: YOUTUBESvg, content: "Connect YouTube", name: "youtube" },
+	{ img: IMGSvg, content: "Select Image File", name: "img" },
+	{ img: PPTXSvg, content: "Select PPTX File", name: "pptx" },
+	{ img: HTMLSvg, content: "Select HTML File", name: "html" },
+	{ img: VIDEOSvg, content: "Select Video File", name: "video" },
+];
+
+const showLegacySources =
+	typeof window !== "undefined" &&
+	window.localStorage?.getItem("docmap:showLegacySources") === "true";
+
 const DataSourceSelect = () => {
-	const flow_type = flowStore((s) => s.flow_type)
+	const popNode = modalStore((s) => s.popNode);
+
 	return (
 		< div className="data-source-selector" >
-			<h5>CHOOSE YOUR STARTING POINT</h5>
-			<div className="data-source-select-container">
-				{flow_type === 'manual' 
-				? (
-				<>
-					<DataSourceSet data={{ img: CSVSvg, content: "CSV", name: "csv" }} />
-					<DataSourceSet data={{ img: SQLSvg, content: "Connect SQL", name: "sql" }} />
-				</>
-				) 
-				: null
-				}
-				<DataSourceSet data={{ img: PDFSvg, content: "PDF", name: "pdf" }} />
-				<DataSourceSet data={{ img: WEBSvg, content: "Enter Url", name: "web" }} />
-				<DataSourceSet data={{ img: AudioSvg, content: "Select Audio File", name: "audio" }} />
-				<DataSourceSet data={{ img: MDSvg, content: "Select MD File", name: "md" }} />
-				<DataSourceSet data={{ img: YOUTUBESvg, content: "Connect Youtube", name: 'youtube' }} />
-				<DataSourceSet data={{ img: IMGSvg, content: "Select Image file ", name: 'img' }} />
-				<DataSourceSet data={{ img: DOCXSvg, content: "Select Docx file ", name: 'docx' }} />
-				<DataSourceSet data={{ img: PPTXSvg, content: "Select PPTX file ", name: 'pptx' }} />
-				<DataSourceSet data={{ img: HTMLSvg, content: "Select HTML file ", name: 'html' }} />
-				<DataSourceSet data={{ img: TXTSvg, content: "Select TEXT file ", name: 'txt' }} />
-				<DataSourceSet data={{ img: VIDEOSvg, content: "Select VIDEO file ", name: 'video' }} />
+			<div className="data-source-selector-header">
+				<h5>CHOOSE A STARTING POINT</h5>
+				<button
+					type="button"
+					className="icon-button"
+					aria-label="Close source picker"
+					onClick={() => popNode()}
+				>
+					<img src={CROSSSvg} alt="" />
+				</button>
 			</div>
+			<div className="data-source-select-container">
+				{DOCMAP_PRIMARY_SOURCES.map((source) => (
+					<DataSourceSet key={source.name} data={source} />
+				))}
+			</div>
+			{showLegacySources ? (
+				<>
+					<h5>LEGACY DEMO SOURCES</h5>
+					<div className="data-source-select-container">
+						{LEGACY_DEMO_SOURCES.map((source) => (
+							<DataSourceSet key={source.name} data={source} />
+						))}
+					</div>
+				</>
+			) : null}
 		</div >
 	)
 

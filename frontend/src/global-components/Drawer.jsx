@@ -19,6 +19,7 @@ const Drawer = ({ isDrawer, setIsDrawer, flowList, setFlowList }) => {
         setNodes: state.setNodes,
         edges: state.edges,
         setEdges: state.setEdges,
+        setWorkspaceBrief: state.setWorkspaceBrief,
         viewport: state.viewport,
         setViewPort: state.setViewPort
     });
@@ -30,6 +31,7 @@ const Drawer = ({ isDrawer, setIsDrawer, flowList, setFlowList }) => {
         setNodes,
         edges,
         setEdges,
+        setWorkspaceBrief,
         viewport,
         setViewPort
     } = useStore(useShallow(selector));
@@ -45,7 +47,8 @@ const Drawer = ({ isDrawer, setIsDrawer, flowList, setFlowList }) => {
         const data = {
             flow_name: 'This flow will have edges and nodes again',
             summary: 'Flow is empty',
-            flow_json: ''
+            flow_json: '',
+            flow_type: 'manual'
         };
         axios
             .post(`http://localhost:8000/create-flow`, data, {
@@ -61,13 +64,21 @@ const Drawer = ({ isDrawer, setIsDrawer, flowList, setFlowList }) => {
         setIsViewFlowModal(true)
     }
 
+    const closeDrawer = () => {
+        setIsDrawer(false);
+        setIsViewFlowModal(false);
+    }
+
     const setupNewFlow = (res) => {
         setFlow(res.data.flow_id);
-        setIsDrawer(!isDrawer);
+        setIsDrawer(false);
+        setIsViewFlowModal(false);
         setNodes([]);
         setEdges([]);
+        setWorkspaceBrief({});
         setViewPort({});
         setFlowName('This flow will have edges and nodes again');
+        flowStore.getState().setFlowType(res.data.flow_type || 'manual');
         setTrigger(!trigger);
     };
 
@@ -84,9 +95,9 @@ const Drawer = ({ isDrawer, setIsDrawer, flowList, setFlowList }) => {
     const manageErrors = (err) => {
         console.log(err);
         console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
-        setStatus(err.status);
-        setMsg(err.response.statusText);
+        console.log('Errroross', err.response?.statusText);
+        setStatus(err.response?.status || err.status || 500);
+        setMsg(err.response?.data?.detail || err.response?.statusText || err.message || 'Request failed');
         popNode();
         pushNode(ErrorModal);
     };
@@ -106,15 +117,19 @@ const Drawer = ({ isDrawer, setIsDrawer, flowList, setFlowList }) => {
         <div
             className="drawer-container"
             style={isDrawer ? { display: 'block' } : { display: 'none' }}
+            onClick={closeDrawer}
         >
-            <div className="drawer">
+            <div
+                className="drawer"
+                onClick={(event) => event.stopPropagation()}
+            >
                 <div className="drawer-header">
                     <div className="drawer-holder">
                         <img
                             src={SMALLLsvg}
                             alt="Loader"
                         />
-                        <h4>Your Thinkplace</h4>
+                        <h4>Your Thinkspaces</h4>
                     </div>
                     <div
                         id="new-flow"
@@ -141,7 +156,11 @@ const Drawer = ({ isDrawer, setIsDrawer, flowList, setFlowList }) => {
                     ))}
                 </div>
             </div>
-            {isViewModal ? <FlowModal isDrawer={isDrawer} setIsDrawer={setIsDrawer} isViewModal={isViewModal} setIsViewFlowModal={setIsViewFlowModal}/> : null}
+            {isViewModal ? (
+                <div onClick={(event) => event.stopPropagation()}>
+                    <FlowModal isDrawer={isDrawer} setIsDrawer={setIsDrawer} isViewModal={isViewModal} setIsViewFlowModal={setIsViewFlowModal}/>
+                </div>
+            ) : null}
         </div>
     );
 };

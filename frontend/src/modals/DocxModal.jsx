@@ -17,6 +17,7 @@ import ErrorModal from './ErrorModal';
 import errorStore from '../stores/errorStore';
 import DELETESvg from '../assets/delete.svg';
 import { useReactFlow } from '@xyflow/react';
+import { sourceUploadLoading } from '../config/loadingStates';
 
 const DocxModal = () => {
     const selector = (state) => ({
@@ -49,12 +50,28 @@ const DocxModal = () => {
         setViewPort
     } = useStore(useShallow(selector));
 
+    const showError = (statusCode, message) => {
+        setStatus(statusCode);
+        setMsg(message);
+        pushNode(ErrorModal);
+    };
+
     const addDataSource = (e) => {
+        const currentFlowId = flowStore.getState().flow_id || flowId;
+        if (!file) {
+            showError(400, 'Choose a DOCX file before uploading.');
+            return;
+        }
+        if (!currentFlowId || currentFlowId === 'undefined') {
+            showError(400, 'Create or open a workspace before uploading a DOCX source.');
+            return;
+        }
+
         const data = {
             file: file,
         };
-        pushNode(LoadingModal);
-        const [url, body, headerConfig] = setRequestData('docx', flowId, data);
+        pushNode(LoadingModal, sourceUploadLoading('DOCX', file?.name));
+        const [url, body, headerConfig] = setRequestData('docx', currentFlowId, data);
         axios
             .post(`http://localhost:8000/${url}`, body, {
                 headers: {
@@ -132,10 +149,13 @@ const DocxModal = () => {
 
     const manageErrors = (err) => {
         console.log(err);
-        console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
-        setStatus(err.status);
-        setMsg(err.response.statusText);
+        const statusCode = err.response?.status || err.status || 500;
+        const message = err.response?.data?.detail
+            || err.response?.statusText
+            || (err.request ? 'The backend did not return a response. Check that the API server is running and try again.' : err.message)
+            || 'Unable to upload DOCX source.';
+        setStatus(statusCode);
+        setMsg(message);
         popNode();
         pushNode(ErrorModal);
     };
@@ -148,7 +168,7 @@ const DocxModal = () => {
             data: {
                 name: data.type,
                 content: file.name,
-                flow_id: flowId,
+                flow_id: flowStore.getState().flow_id || flowId,
                 prompt: 'Research Assistant',
                 file: file
             }

@@ -1,14 +1,14 @@
-import { Handle, Position } from '@xyflow/react';
-import { CopyBlock, dracula, a11yDark, a11yLight } from 'react-code-blocks';
+import { Handle } from '@xyflow/react';
+import { lazy, Suspense } from 'react';
 import SQLSvg from '../assets/sql.svg';
 import STARSvg from '../assets/star.svg';
-import TableComponent from '../global-components/TableComponent';
-import { BsDisplay } from 'react-icons/bs';
-import Graph from '../global-components/Graph';
-import flowStore from '../stores/flowStore';
+import NodeMetadataBadges from './NodeMetadataBadges';
+
+const Graph = lazy(() => import('../global-components/Graph'));
+const TableComponent = lazy(() => import('../global-components/TableComponent'));
+
 const ResponseNode = ({ data }) => {
-    const theme = flowStore((s) => s.theme);
-    console.log('EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', data, theme);
+    console.log('EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', data);
     const summaryBlock = () => {
         return (
             <div className="summary-block">
@@ -30,6 +30,7 @@ const ResponseNode = ({ data }) => {
 
     return (
         <div className="node-response">
+            <NodeMetadataBadges data={data} />
             {data.data.summ.length > 0 && summaryBlock()}
             {data.data.query && data.data.query.length > 0 && (
                 <div className="query-block">
@@ -40,24 +41,22 @@ const ResponseNode = ({ data }) => {
                     <div>
                         <h3 id="response-title">SQL QUERY</h3>
                         <div className="code-block">
-                            <CopyBlock
-                                language="sql"
-                                text={data.data.query}
-                                showLineNumbers={false}
-                                theme={theme ? a11yLight : a11yDark}
-                                codeBlock
-                            />
+                            <pre>
+                                <code>{data.data.query}</code>
+                            </pre>
                         </div>
                     </div>
                 </div>
             )}
             {data.data.df.length > 0 && (
-                <div>
+                <Suspense fallback={<div className="lazy-block">Loading table...</div>}>
                     <TableComponent df={data.data.df} />
-                </div>
+                </Suspense>
             )}
             {Object.keys(data.data.graph).length !== 0 && (
-                <Graph data={data.data.graph} />
+                <Suspense fallback={<div className="lazy-block">Loading chart...</div>}>
+                    <Graph data={data.data.graph} />
+                </Suspense>
             )}
             {/* <Handle type="target" position={Position.Left} />
 			<Handle type="source" position={Position.Right} /> */}

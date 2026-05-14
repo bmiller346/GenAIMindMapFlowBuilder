@@ -1,9 +1,11 @@
 import STARSvg from "../assets/star.svg"
 import { Handle } from "@xyflow/react"
 import { Position } from "@xyflow/react"
+import NodeMetadataBadges from "./NodeMetadataBadges"
 const ResponsePdf = ({ data }) => {
 	return (
 		<div className="node-response">
+			<NodeMetadataBadges data={data} />
 			<div className="summary-block">
 				<img src={STARSvg} alt="prompt svg" />
 				<div>

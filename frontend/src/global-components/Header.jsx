@@ -5,27 +5,28 @@ import LoadingModal from '../modals/LoadingModal';
 import flowStore from '../stores/flowStore';
 import modalStore from '../stores/modalStore';
 import axios from 'axios';
-import DOWNLOADSvg from '../assets/download_img.svg';
-import SHARESvg from '../assets/share.svg';
 import {
     getNodesBounds,
     getViewportForBounds,
     useReactFlow
 } from '@xyflow/react';
-import { toPng } from 'html-to-image';
-import FlowSummary from '../modals/FlowSummary';
 import errorStore from '../stores/errorStore';
 import ErrorModal from '../modals/ErrorModal';
+import SettingsModal from '../modals/SettingsModal';
+import WorkspaceBriefModal from '../modals/WorkspaceBriefModal';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
+import { useState } from 'react';
 const Header = ({
     isDrawer,
     setIsDrawer,
-    flowList,
     setFlowList,
     lightMode,
     setLightMode
 }) => {
+    const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+    const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
+    const [saveState, setSaveState] = useState('idle');
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const flow_id = flowStore((s) => s.flow_id);
@@ -36,36 +37,186 @@ const Header = ({
     const setFlowSummary = flowStore((s) => s.setFlowSummary);
     const selector = (s) => ({
         trigger: s.trigger,
-        setTrigger: s.setTrigger
+        setTrigger: s.setTrigger,
+        nodes: s.nodes,
+        edges: s.edges,
+        selectedBranchId: s.selectedBranchId,
+        setNodes: s.setNodes,
+        workspaceBrief: s.workspaceBrief
     });
     const setTheme = flowStore((s) => s.setTheme);
-    const { trigger, setTrigger } = useStore(useShallow(selector));
+    const {
+        trigger,
+        setTrigger,
+        nodes,
+        edges,
+        selectedBranchId,
+        setNodes,
+        workspaceBrief
+    } = useStore(useShallow(selector));
     const { getNodes } = useReactFlow();
-    const saveFlow = (e) => {
+    const exportFormats = [
+        { id: 'json', label: 'JSON', extension: 'json' },
+        { id: 'markdown', label: 'Markdown', extension: 'md' },
+        { id: 'csv', label: 'CSV', extension: 'csv' },
+        { id: 'opml', label: 'OPML', extension: 'opml' },
+        { id: 'mmd-json', label: 'MMD JSON', extension: 'json' },
+        { id: 'mermaid', label: 'Mermaid', extension: 'mmd' }
+    ];
+    const imageExportFormats = [
+        { id: 'png', label: 'PNG', extension: 'png' },
+        { id: 'svg', label: 'SVG', extension: 'svg' }
+    ];
+    const bridgeExportFormats = [
+        {
+            id: 'miro',
+            label: 'Miro dry-run preview',
+            extension: 'miro-preview.json'
+        },
+        {
+            id: 'monday',
+            label: 'monday confirmed payload',
+            extension: 'monday-batch.json'
+        }
+    ];
+    const workspaceMiroFormats = [
+        {
+            id: 'miro-board-plan',
+            label: 'Workspace Miro board plan',
+            extension: 'miro-board-plan.json',
+            dryRun: true,
+            endpoint: 'board'
+        },
+        {
+            id: 'miro-board-push',
+            label: 'Push workspace to Miro',
+            extension: 'miro-board-result.json',
+            dryRun: false,
+            endpoint: 'board'
+        },
+        {
+            id: 'miro-sme-review-plan',
+            label: 'SME review Miro board plan',
+            extension: 'miro-sme-review-plan.json',
+            dryRun: true,
+            endpoint: 'sme-review'
+        },
+        {
+            id: 'miro-sme-review-push',
+            label: 'Push SME review board to Miro',
+            extension: 'miro-sme-review-result.json',
+            dryRun: false,
+            endpoint: 'sme-review'
+        },
+        {
+            id: 'miro-native-mindmap-plan',
+            label: 'Native Miro mind map plan',
+            extension: 'miro-native-mindmap-plan.json',
+            dryRun: true,
+            endpoint: 'native-mindmap'
+        }
+    ];
+    const mondayExistingGroupFormats = [
+        {
+            id: 'monday-existing-plan',
+            label: 'monday existing group plan',
+            extension: 'monday-existing-plan.json',
+            dryRun: true,
+            scope: 'workspace',
+            templateId: 'autodesk_building_block_review'
+        },
+        {
+            id: 'monday-existing-push',
+            label: 'Push workspace tasks to monday',
+            extension: 'monday-existing-result.json',
+            dryRun: false,
+            scope: 'workspace',
+            templateId: 'autodesk_building_block_review'
+        },
+        {
+            id: 'monday-branch-existing-plan',
+            label: 'Selected branch monday plan',
+            extension: 'monday-branch-existing-plan.json',
+            dryRun: true,
+            scope: 'branch',
+            templateId: 'autodesk_building_block_review'
+        },
+        {
+            id: 'monday-branch-existing-push',
+            label: 'Push selected branch tasks to monday',
+            extension: 'monday-branch-existing-result.json',
+            dryRun: false,
+            scope: 'branch',
+            templateId: 'autodesk_building_block_review'
+        }
+    ];
+    const mondayStatusPullFormats = [
+        {
+            id: 'monday-status-plan',
+            label: 'monday status pull plan',
+            extension: 'monday-status-plan.json',
+            dryRun: true,
+            apply: false
+        },
+        {
+            id: 'monday-status-apply',
+            label: 'Pull monday status into nodes',
+            extension: 'monday-status-result.json',
+            dryRun: false,
+            apply: true
+        }
+    ];
+    const selectedBranchMiroFormats = [
+        {
+            id: 'miro-frame-plan',
+            label: 'Selected branch Miro frame plan',
+            extension: 'miro-frame-plan.json',
+            dryRun: true
+        },
+        {
+            id: 'miro-frame-push',
+            label: 'Push selected branch to Miro',
+            extension: 'miro-frame-result.json',
+            dryRun: false
+        }
+    ];
+
+    const saveFlow = async () => {
+        setSaveState('saving');
         pushNode(LoadingModal);
-        saveFlowCall(e);
+        try {
+            await saveFlowCall();
+            popNode();
+            setSaveState('saved');
+        } catch (err) {
+            setSaveState('error');
+            manageErrors(err);
+        }
     };
-    const saveFlowCall = (e) => {
-        pushNode(LoadingModal);
-        const flow_json = JSON.stringify(rfInstance.toObject());
+
+    const saveFlowCall = (nameOverride) => {
+        const flowObject = rfInstance?.toObject
+            ? rfInstance.toObject()
+            : { nodes: [], edges: [], viewport: {} };
+        const flow_json = JSON.stringify({
+            ...flowObject,
+            nodes,
+            edges,
+            workspace_brief: workspaceBrief
+        });
         const data = {
             flow_id: flow_id,
-            flow_name: flow_name,
+            flow_name: nameOverride ?? flow_name,
             flow_json: flow_json,
             flow_type: flow_type,
             summary: 'Please work'
         };
         console.log('JSON DATA', data);
-        axios
-            .put(`http://localhost:8000/flow-update`, data, {
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then((res) => console.log(res))
-            .catch((err) => manageErrors(err));
-
-        popNode();
+        return axios.put(`http://localhost:8000/flow-update`, data, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
     };
 
     const selector2 = (state) => ({
@@ -74,48 +225,513 @@ const Header = ({
         setStatus: state.setStatus,
         setMsg: state.setMsg
     });
-    const { status, message, setStatus, setMsg } = errorStore(
+    const { setStatus, setMsg } = errorStore(
         useShallow(selector2)
     );
 
     const manageErrors = (err) => {
         console.log(err);
         console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
-        setStatus(err.status);
-        setMsg(err.response.statusText);
+        console.log('Errroross', err.response?.statusText);
+        const isNetworkError = !err.response;
+        setStatus(err.response?.status || err.status || (isNetworkError ? 503 : 500));
+        setMsg(
+            err.response?.data?.detail ||
+            err.response?.statusText ||
+            (isNetworkError
+                ? 'Local backend is not running yet. Start the DocMap backend or launch the Electron app so it can start it for you.'
+                : err.message || 'Request failed')
+        );
         popNode();
         pushNode(ErrorModal);
     };
 
-    const initiateDownload = (imgUrl) => {
-        const a = document.createElement('a');
-        a.setAttribute('download', 'flow_name.png');
-        a.setAttribute('href', imgUrl);
-        a.click();
+    const sanitizeFileName = (value) => {
+        const nextValue = value?.trim() || 'workspace';
+        return nextValue.replace(/[<>:"/\\|?*]/g, '_');
     };
 
-    const downloadImage = (e) => {
+    const triggerFileDownload = (blob, fileName) => {
+        const url = window.URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = fileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.URL.revokeObjectURL(url);
+    };
+
+    const triggerUrlDownload = (url, fileName) => {
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = fileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+    };
+
+    const exportWorkspace = async (format) => {
+        if (!flow_id) {
+            setStatus(400);
+            setMsg('Create or open a workspace before exporting.');
+            pushNode(ErrorModal);
+            return;
+        }
+
+        pushNode(LoadingModal);
+        try {
+            await saveFlowCall();
+            const response = await axios.get(
+                `http://localhost:8000/api/workspaces/${flow_id}/exports/${format.id}`,
+                {
+                    responseType: 'blob'
+                }
+            );
+            const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
+            triggerFileDownload(response.data, fileName);
+            setIsExportMenuOpen(false);
+            popNode();
+        } catch (err) {
+            manageErrors(err);
+        }
+    };
+
+    const exportBridgePayload = async (format) => {
+        if (!flow_id) {
+            setStatus(400);
+            setMsg('Create or open a workspace before exporting.');
+            pushNode(ErrorModal);
+            return;
+        }
+
+        const confirmed =
+            format.id !== 'monday' ||
+            window.confirm(
+                'Create a confirmed monday export payload for boards, groups, and items?'
+            );
+
+        if (!confirmed) {
+            return;
+        }
+
+        pushNode(LoadingModal);
+        try {
+            await saveFlowCall();
+            const response = await axios.post(
+                `http://localhost:8000/api/workspaces/${flow_id}/export/${format.id}`,
+                {},
+                {
+                    params: format.id === 'monday' ? { confirmed: true } : {},
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+            const blob = new Blob([JSON.stringify(response.data, null, 2)], {
+                type: 'application/json'
+            });
+            const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
+            triggerFileDownload(blob, fileName);
+            setIsExportMenuOpen(false);
+            popNode();
+        } catch (err) {
+            manageErrors(err);
+        }
+    };
+
+    const mergeExternalRefs = (integration, refsByNodeId) => {
+        if (!refsByNodeId || Object.keys(refsByNodeId).length === 0) {
+            return;
+        }
+
+        setNodes(
+            nodes.map((node) => {
+                const ref = refsByNodeId[node.id];
+                if (!ref) {
+                    return node;
+                }
+
+                const externalRefs = node.data?.external_refs || {};
+                return {
+                    ...node,
+                    data: {
+                        ...node.data,
+                        external_refs: {
+                            ...externalRefs,
+                            [integration]: {
+                                ...(externalRefs[integration] || {}),
+                                ...ref
+                            }
+                        }
+                    }
+                };
+            })
+        );
+    };
+
+    const mergeMiroExternalRefs = (refsByNodeId) => {
+        mergeExternalRefs('miro', refsByNodeId);
+    };
+
+    const mergeMondayExternalRefs = (refsByNodeId) => {
+        mergeExternalRefs('monday', refsByNodeId);
+    };
+
+    const promptExistingMondayTarget = () => {
+        const boardId = window.prompt('monday board ID for this export');
+        if (!boardId?.trim()) {
+            return null;
+        }
+
+        const groupId = window.prompt('monday group ID for this export');
+        if (!groupId?.trim()) {
+            return null;
+        }
+
+        return {
+            boardId: boardId.trim(),
+            groupId: groupId.trim()
+        };
+    };
+
+    const exportWorkspaceMiroBoard = async (format) => {
+        if (!flow_id) {
+            setStatus(400);
+            setMsg('Create or open a workspace before exporting.');
+            pushNode(ErrorModal);
+            return;
+        }
+
+        const boardId = window.prompt('Miro board ID for this workspace export');
+        if (!boardId?.trim()) {
+            return;
+        }
+
+        const confirmed =
+            format.dryRun ||
+            window.confirm(
+                'Push this Miro export and persist returned item IDs?'
+            );
+
+        if (!confirmed) {
+            return;
+        }
+
+        pushNode(LoadingModal);
+        try {
+            await saveFlowCall();
+            const response = await axios.post(
+                `http://localhost:8000/api/workspaces/${flow_id}/export/miro/${format.endpoint}`,
+                {},
+                {
+                    params: {
+                        board_id: boardId.trim(),
+                        dry_run: format.dryRun
+                    },
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+            mergeMiroExternalRefs(response.data.external_refs);
+            const blob = new Blob([JSON.stringify(response.data, null, 2)], {
+                type: 'application/json'
+            });
+            const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
+            triggerFileDownload(blob, fileName);
+            setIsExportMenuOpen(false);
+            popNode();
+        } catch (err) {
+            manageErrors(err);
+        }
+    };
+
+    const exportSelectedBranchMiroFrame = async (format) => {
+        if (!flow_id) {
+            setStatus(400);
+            setMsg('Create or open a workspace before exporting.');
+            pushNode(ErrorModal);
+            return;
+        }
+
+        if (!selectedBranchId) {
+            setStatus(400);
+            setMsg('Select one node before exporting a Miro branch frame.');
+            pushNode(ErrorModal);
+            return;
+        }
+
+        const boardId = window.prompt('Miro board ID for this branch frame');
+        if (!boardId?.trim()) {
+            return;
+        }
+
+        const confirmed =
+            format.dryRun ||
+            window.confirm(
+                'Push this selected branch to Miro and persist returned item IDs?'
+            );
+
+        if (!confirmed) {
+            return;
+        }
+
+        pushNode(LoadingModal);
+        try {
+            await saveFlowCall();
+            const response = await axios.post(
+                `http://localhost:8000/api/workspaces/${flow_id}/branches/${selectedBranchId}/export/miro/frame`,
+                {},
+                {
+                    params: {
+                        board_id: boardId.trim(),
+                        dry_run: format.dryRun
+                    },
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+            mergeMiroExternalRefs(response.data.external_refs);
+            const blob = new Blob([JSON.stringify(response.data, null, 2)], {
+                type: 'application/json'
+            });
+            const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
+            triggerFileDownload(blob, fileName);
+            setIsExportMenuOpen(false);
+            popNode();
+        } catch (err) {
+            manageErrors(err);
+        }
+    };
+
+    const exportMondayExistingGroup = async (format) => {
+        if (!flow_id) {
+            setStatus(400);
+            setMsg('Create or open a workspace before exporting.');
+            pushNode(ErrorModal);
+            return;
+        }
+
+        if (format.scope === 'branch' && !selectedBranchId) {
+            setStatus(400);
+            setMsg('Select one node before exporting branch tasks to monday.');
+            pushNode(ErrorModal);
+            return;
+        }
+
+        const target = promptExistingMondayTarget();
+        if (!target) {
+            return;
+        }
+
+        const confirmed =
+            format.dryRun ||
+            window.confirm(
+                'Create monday items in this existing board/group and persist returned item IDs?'
+            );
+
+        if (!confirmed) {
+            return;
+        }
+
+        const endpoint =
+            format.scope === 'branch'
+                ? `http://localhost:8000/api/workspaces/${flow_id}/branches/${selectedBranchId}/export/monday/existing-group`
+                : `http://localhost:8000/api/workspaces/${flow_id}/export/monday/existing-group`;
+
+        pushNode(LoadingModal);
+        try {
+            await saveFlowCall();
+            const response = await axios.post(
+                endpoint,
+                {},
+                {
+                    params: {
+                        board_id: target.boardId,
+                        group_id: target.groupId,
+                        dry_run: format.dryRun,
+                        confirmed: !format.dryRun,
+                        template_id: format.templateId
+                    },
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+            mergeMondayExternalRefs(response.data.external_refs);
+            const blob = new Blob([JSON.stringify(response.data, null, 2)], {
+                type: 'application/json'
+            });
+            const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
+            triggerFileDownload(blob, fileName);
+            setIsExportMenuOpen(false);
+            popNode();
+        } catch (err) {
+            manageErrors(err);
+        }
+    };
+
+    const applyMondayStatusUpdates = (updatesByNodeId) => {
+        if (!updatesByNodeId || Object.keys(updatesByNodeId).length === 0) {
+            return;
+        }
+
+        setNodes(
+            nodes.map((node) => {
+                const update = updatesByNodeId[node.id];
+                if (!update) {
+                    return node;
+                }
+
+                const externalRefs = node.data?.external_refs || {};
+                return {
+                    ...node,
+                    data: {
+                        ...node.data,
+                        status: update.status,
+                        external_refs: {
+                            ...externalRefs,
+                            monday: {
+                                ...(externalRefs.monday || {}),
+                                item_id: update.monday_item_id,
+                                status: update.monday_status,
+                                last_pulled_at: update.last_pulled_at
+                            }
+                        }
+                    }
+                };
+            })
+        );
+    };
+
+    const pullMondayStatuses = async (format) => {
+        if (!flow_id) {
+            setStatus(400);
+            setMsg('Create or open a workspace before pulling monday statuses.');
+            pushNode(ErrorModal);
+            return;
+        }
+
+        const confirmed =
+            format.dryRun ||
+            window.confirm('Pull monday statuses and apply them to matching nodes?');
+
+        if (!confirmed) {
+            return;
+        }
+
+        pushNode(LoadingModal);
+        try {
+            await saveFlowCall();
+            const response = await axios.post(
+                `http://localhost:8000/api/workspaces/${flow_id}/sync/monday/status`,
+                {},
+                {
+                    params: {
+                        dry_run: format.dryRun,
+                        apply: format.apply
+                    },
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+            applyMondayStatusUpdates(response.data.status_updates);
+            const blob = new Blob([JSON.stringify(response.data, null, 2)], {
+                type: 'application/json'
+            });
+            const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
+            triggerFileDownload(blob, fileName);
+            setIsExportMenuOpen(false);
+            popNode();
+        } catch (err) {
+            manageErrors(err);
+        }
+    };
+
+    const buildMindMapExportOptions = () => {
         const nodeBounds = getNodesBounds(getNodes());
         const viewPort = getViewportForBounds(nodeBounds, 1920, 1080, 0, 2);
-        toPng(document.querySelector('.react-flow__viewport'), {
-            // width: 1920,
-            // height: 1080,
+        return {
             backgroundColor: '#1e1e1e',
             style: {
-                // width: 1920,
-                // height: 1080,
                 transform: `translate(${viewPort.x}px, ${viewPort.y}px, scale(${viewPort.zoom}))`
             }
-        }).then(initiateDownload);
+        };
     };
 
-    const setupFlowName = (e) => {
-        console.log(e.target.value);
-        setFlowName(e.target.value);
+    const downloadMindMap = async (format) => {
+        const viewport = document.querySelector('.react-flow__viewport');
+        if (!viewport) {
+            setStatus(400);
+            setMsg('Could not find the current mind map to export.');
+            pushNode(ErrorModal);
+            return;
+        }
+
+        const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
+        const exportOptions = buildMindMapExportOptions();
+
+        try {
+            if (format.id === 'svg') {
+                const { toSvg } = await import('html-to-image');
+                const svgUrl = await toSvg(viewport, exportOptions);
+                triggerUrlDownload(svgUrl, fileName);
+            } else {
+                const { toPng } = await import('html-to-image');
+                const pngUrl = await toPng(viewport, exportOptions);
+                triggerUrlDownload(pngUrl, fileName);
+            }
+            setIsExportMenuOpen(false);
+        } catch (err) {
+            manageErrors(err);
+        }
     };
 
-    const flowSummary = (e) => {
+    const syncActiveFlowName = (nextName) => {
+        setFlowList((currentList) =>
+            currentList.map((flow) =>
+                flow.flow_id === flow_id
+                    ? { ...flow, flow_name: nextName }
+                    : flow
+            )
+        );
+    };
+
+    const setupFlowName = (event) => {
+        const nextName = event.target.value;
+        console.log(nextName);
+        setFlowName(nextName);
+        syncActiveFlowName(nextName);
+        setSaveState('idle');
+    };
+
+    const commitFlowName = async (nextName = flow_name) => {
+        if (!flow_id) {
+            return;
+        }
+
+        setSaveState('saving');
+        try {
+            await saveFlowCall(nextName);
+            setSaveState('saved');
+        } catch (err) {
+            setSaveState('error');
+            manageErrors(err);
+        }
+    };
+
+    const handleFlowNameKeyDown = (event) => {
+        if (event.key !== 'Enter') {
+            return;
+        }
+
+        event.currentTarget.blur();
+    };
+
+    const flowSummary = () => {
         pushNode(LoadingModal);
         console.log('THIS IS FLOW ID', flow_id);
         const data = {
@@ -130,7 +746,9 @@ const Header = ({
             .then((res) => {
                 setFlowSummary(res.data.response);
                 popNode();
-                pushNode(FlowSummary);
+                import('../modals/FlowSummary').then(({ default: FlowSummary }) => {
+                    pushNode(FlowSummary);
+                });
             })
             .catch((err) => manageErrors(err));
     };
@@ -148,11 +766,44 @@ const Header = ({
             .catch((err) => manageErrors(err));
     };
 
-    const manageTheme = (e) => {
+    const manageTheme = () => {
         setTheme(!lightMode);
         setLightMode(!lightMode);
         setTrigger(!trigger);
     };
+
+    const openSettings = () => {
+        setIsAiMenuOpen(false);
+        setIsExportMenuOpen(false);
+        pushNode(SettingsModal);
+    };
+
+    const openWorkspaceBrief = () => {
+        setIsAiMenuOpen(false);
+        setIsExportMenuOpen(false);
+        pushNode(WorkspaceBriefModal);
+    };
+
+    const toggleExportMenu = () => {
+        setIsAiMenuOpen(false);
+        setIsExportMenuOpen((prev) => !prev);
+    };
+
+    const toggleAiMenu = () => {
+        setIsExportMenuOpen(false);
+        setIsAiMenuOpen((prev) => !prev);
+    };
+
+    const hasWorkspace = Boolean(flow_id);
+    const canSave = hasWorkspace && (nodes.length > 0 || edges.length > 0);
+    const saveLabel =
+        saveState === 'saving'
+            ? 'Saving...'
+            : saveState === 'saved'
+                ? 'Saved'
+                : saveState === 'error'
+                    ? 'Retry save'
+                    : 'Save now';
 
     // useEffect(() => {
     // 	getFlowList();
@@ -163,43 +814,171 @@ const Header = ({
             className="header"
             style={isDrawer ? { display: 'none' } : { display: 'flex' }}
         >
-            <img
-                src={DRAWERSvg}
-                alt="Drawer Svg"
-                onClick={(e) => getFlowList(true)}
-            />
-            <input
-                type="text"
-                defaultValue={flow_name}
-                onChange={(e) => setupFlowName(e)}
-            />
-            <div className="button">
+            <div className="header-left">
                 <img
-                    src={lightMode ? LIGHT : DARK}
-                    alt="Save button"
-                    onClick={(e) => manageTheme(!lightMode)}
+                    className="drawer-trigger"
+                    src={DRAWERSvg}
+                    alt="Open workspaces"
+                    onClick={() => getFlowList(true)}
                 />
-                <img
-                    src={DOWNLOADSvg}
-                    alt="download_svg"
-                    onClick={(e) => downloadImage(e)}
+                <input
+                    type="text"
+                    value={flow_name || ''}
+                    placeholder="Untitled workspace"
+                    onChange={setupFlowName}
+                    onBlur={(event) => commitFlowName(event.target.value)}
+                    onKeyDown={handleFlowNameKeyDown}
+                    aria-label="Workspace name"
                 />
-                <img
-                    src={SHARESvg}
-                    alt="share_svg"
-                />
+            </div>
+            <div className="button header-actions">
                 <button
-                    id="save-button"
-                    style={flow_type === 'automatic' ?  { display: 'none' } : { display: 'flex' }}
-                    onClick={(e) => flowSummary(e)}
+                    type="button"
+                    className="header-action header-action-secondary"
+                    onClick={openWorkspaceBrief}
                 >
-                    <span>Summarize</span>
+                    Brief
+                </button>
+                <div className="export-actions">
+                    <button
+                        type="button"
+                        className="header-action header-action-primary"
+                        onClick={toggleExportMenu}
+                    >
+                        Export
+                    </button>
+                    {isExportMenuOpen ? (
+                        <div className="export-menu">
+                            <p className="export-menu-label">Mind map image</p>
+                            {imageExportFormats.map((format) => (
+                                <button
+                                    key={format.id}
+                                    type="button"
+                                    onClick={() => downloadMindMap(format)}
+                                >
+                                    Download {format.label}
+                                </button>
+                            ))}
+                            <div className="export-menu-divider" />
+                            <p className="export-menu-label">Neutral files</p>
+                            {exportFormats.map((format) => (
+                                <button
+                                    key={format.id}
+                                    type="button"
+                                    onClick={() => exportWorkspace(format)}
+                                >
+                                    {format.label}
+                                </button>
+                            ))}
+                            <div className="export-menu-divider" />
+                            <p className="export-menu-label">Preview payloads</p>
+                            {bridgeExportFormats.map((format) => (
+                                <button
+                                    key={format.id}
+                                    type="button"
+                                    onClick={() => exportBridgePayload(format)}
+                                >
+                                    {format.label}
+                                </button>
+                            ))}
+                            <div className="export-menu-divider" />
+                            <p className="export-menu-label">Miro</p>
+                            {workspaceMiroFormats.map((format) => (
+                                <button
+                                    key={format.id}
+                                    type="button"
+                                    onClick={() => exportWorkspaceMiroBoard(format)}
+                                >
+                                    {format.label}
+                                </button>
+                            ))}
+                            {selectedBranchMiroFormats.map((format) => (
+                                <button
+                                    key={format.id}
+                                    type="button"
+                                    onClick={() => exportSelectedBranchMiroFrame(format)}
+                                >
+                                    {format.label}
+                                </button>
+                            ))}
+                            <div className="export-menu-divider" />
+                            <p className="export-menu-label">monday.com</p>
+                            {mondayExistingGroupFormats.map((format) => (
+                                <button
+                                    key={format.id}
+                                    type="button"
+                                    onClick={() => exportMondayExistingGroup(format)}
+                                >
+                                    {format.label}
+                                </button>
+                            ))}
+                            {mondayStatusPullFormats.map((format) => (
+                                <button
+                                    key={format.id}
+                                    type="button"
+                                    onClick={() => pullMondayStatuses(format)}
+                                >
+                                    {format.label}
+                                </button>
+                            ))}
+                        </div>
+                    ) : null}
+                </div>
+                {flow_type !== 'automatic' ? (
+                    <div className="export-actions">
+                        <button
+                            type="button"
+                            className="header-action header-action-secondary"
+                            onClick={toggleAiMenu}
+                        >
+                            AI actions
+                        </button>
+                        {isAiMenuOpen ? (
+                            <div className="export-menu ai-actions-menu">
+                                <p className="export-menu-label">Workspace</p>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsAiMenuOpen(false);
+                                        flowSummary();
+                                    }}
+                                >
+                                    Summarize workspace
+                                </button>
+                            </div>
+                        ) : null}
+                    </div>
+                ) : null}
+                {canSave ? (
+                    <button
+                        type="button"
+                        className={`header-action save-now ${saveState}`}
+                        onClick={() => saveFlow()}
+                        disabled={saveState === 'saving'}
+                    >
+                        {saveLabel}
+                    </button>
+                ) : (
+                    <span className="save-status">Autosave ready</span>
+                )}
+                <button
+                    type="button"
+                    className="theme-toggle-button"
+                    onClick={manageTheme}
+                    aria-label={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
+                >
+                    <img
+                        className="theme-toggle"
+                        src={lightMode ? LIGHT : DARK}
+                        alt=""
+                    />
                 </button>
                 <button
-                    id="save-button"
-                    onClick={(e) => saveFlow()}
+                    type="button"
+                    className="header-action iconless-settings"
+                    onClick={openSettings}
                 >
-                    Save
+                    Settings
                 </button>
             </div>
         </div>

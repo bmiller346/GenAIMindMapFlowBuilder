@@ -1,0 +1,103 @@
+import modalStore from '../stores/modalStore';
+import useStore from '../stores/store';
+import WorkspaceBriefModal from '../modals/WorkspaceBriefModal';
+
+const SOURCE_MODE_LABELS = {
+    source_only: 'Source-backed only',
+    source_plus_context: 'Source + context',
+    context_only: 'Exploratory'
+};
+
+const OUTPUT_LABELS = {
+    mind_map: 'Mind map',
+    outline: 'Outline',
+    table: 'Table',
+    tasks: 'Tasks',
+    checklist: 'Checklist',
+    sme_questions: 'SME questions',
+    missing_info_report: 'Missing info',
+    source_coverage_report: 'Coverage report',
+    miro_handoff: 'Miro',
+    monday_handoff: 'monday',
+    handoff: 'Handoff'
+};
+
+const PRESET_LABELS = {
+    autodesk_standards: 'Autodesk Standards',
+    revit_building_blocks: 'Revit Building Blocks',
+    software_inventory: 'Software Inventory',
+    training_guide: 'Training Guide',
+    sop_workflow: 'SOP / Workflow',
+    custom: 'Custom'
+};
+
+const hasBriefContent = (brief = {}) =>
+    Boolean(
+        brief.configured ||
+        brief.goal?.trim() ||
+            brief.audience?.trim() ||
+            brief.domain_context?.trim() ||
+            brief.review_rules?.trim() ||
+            brief.desired_outputs?.some((output) => output !== 'mind_map')
+    );
+
+const WorkspaceBriefPanel = () => {
+    const pushNode = modalStore((s) => s.pushNode);
+    const workspaceBrief = useStore((s) => s.workspaceBrief) || {};
+    const isBriefSet = hasBriefContent(workspaceBrief);
+    const sourceMode =
+        SOURCE_MODE_LABELS[workspaceBrief.source_mode] || 'Source + context';
+    const outputs = (workspaceBrief.desired_outputs || [])
+        .map((output) => OUTPUT_LABELS[output] || output)
+        .slice(0, 3);
+
+    const openBrief = () => {
+        pushNode(WorkspaceBriefModal);
+    };
+
+    return (
+        <section className="workspace-brief-panel">
+            <div className="workspace-brief-panel-header">
+                <div>
+                    <p>DocMap setup</p>
+                    <span>
+                        {isBriefSet
+                            ? `${PRESET_LABELS[workspaceBrief.preset] || 'Custom'} | ${sourceMode}`
+                            : 'No intent set'}
+                    </span>
+                </div>
+                <button type="button" onClick={openBrief}>
+                    {isBriefSet ? 'Edit' : 'Add'}
+                </button>
+            </div>
+            {isBriefSet ? (
+                <>
+                    <p className="workspace-brief-panel-goal">
+                        {workspaceBrief.goal || workspaceBrief.domain_context || 'Brief saved'}
+                    </p>
+                    <div className="workspace-brief-panel-tags">
+                        {outputs.map((output) => (
+                            <span key={output}>{output}</span>
+                        ))}
+                        {workspaceBrief.assumptions_allowed ? (
+                            <span>Assumptions allowed</span>
+                        ) : (
+                            <span>Needs source backing</span>
+                        )}
+                        {workspaceBrief.review_policy?.includes(
+                            'mark_uncited_needs_review'
+                        ) ? (
+                            <span>Uncited = Needs Review</span>
+                        ) : null}
+                    </div>
+                </>
+            ) : (
+                <p className="workspace-brief-panel-empty">
+                    Pick a preset, outputs, and source strictness before generating.
+                </p>
+            )}
+        </section>
+    );
+};
+
+export default WorkspaceBriefPanel;

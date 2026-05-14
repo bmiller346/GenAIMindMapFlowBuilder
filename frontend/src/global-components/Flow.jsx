@@ -21,6 +21,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
         edges: state.edges,
         setNodes: state.setNodes,
         setEdges: state.setEdges,
+        setWorkspaceBrief: state.setWorkspaceBrief,
         setViewPort: state.setViewPort
     });
 
@@ -31,16 +32,17 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
         edges,
         setNodes,
         setEdges,
+        setWorkspaceBrief,
         setViewPort
     } = useStore(useShallow(selector));
 
 
-    const setupFlow = (e) => {
+    const setupFlow = () => {
         pushNode(LoadingModal);
         setFlowId(data.flow_id);
         console.log('DEDEDE', data);
         setFlowName(data.flow_name);
-        if (data.flow_json.length > 0) {
+        if (data.flow_json?.length > 0) {
             const flow = JSON.parse(data.flow_json);
             console.log('NODEEEEEEEEEE', flow.nodes);
             if (flow.nodes.length === 0 && flow.edges.length === 0) {
@@ -49,11 +51,13 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
                 setTrigger(!trigger);
                 setViewPort(0, 0, 1);
                 popNode();
+                return;
             }
             if (flow) {
                 const { x = 0, y = 0, zoom = 1.25 } = flow.viewport;
                 setNodes(flow.nodes || []);
                 setEdges(flow.edges || []);
+                setWorkspaceBrief(flow.workspace_brief || {});
                 setViewPort(x, y, zoom);
                 // fitView();
                 console.log(
@@ -63,12 +67,15 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
                     nodes
                 );
                 setIsDrawer(false);
+                popNode();
             } else {
                 console.log('Flow error');
+                popNode();
             }
         } else {
             setNodes([]);
             setEdges([]);
+            setWorkspaceBrief({});
             // setViewPort({});
             fitView();
             setIsDrawer(false);
@@ -94,11 +101,14 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
 
     return (
         <div>
-            <p onClick={(e) => setupFlow(data.flow_id)}>{data.flow_name}</p>
+            <p onClick={setupFlow}>{data.flow_name}</p>
             <img
                 src={DELETESvg}
                 alt="delete svg"
-                onClick={deleteFlow}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    deleteFlow(event);
+                }}
             />
         </div>
     );

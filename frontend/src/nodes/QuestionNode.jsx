@@ -14,6 +14,7 @@ import flowStore from '../stores/flowStore';
 import generateHexId from '../utils/setUpHex';
 import errorStore from '../stores/errorStore';
 import ErrorModal from '../modals/ErrorModal';
+import { questionAnswerLoading } from '../config/loadingStates';
 
 const QuestionNode = ({ id, position, data  }) => {
     console.log('HERE QUESTION NODE', data, position, id);
@@ -24,12 +25,13 @@ const QuestionNode = ({ id, position, data  }) => {
         nodes: state.nodes,
         setNodes: state.setNodes,
         edges: state.edges,
-        setEdges: state.setEdges
+        setEdges: state.setEdges,
+        workspaceBrief: state.workspaceBrief
     });
     const connections = useNodeConnections({
         type: 'source'
     });
-    const { nodes, setNodes, edges, setEdges, trigger, setTrigger } = useStore(
+    const { nodes, setNodes, edges, setEdges, trigger, setTrigger, workspaceBrief } = useStore(
         useShallow(selector)
     );
     const currNodeObj = nodes.find((ele) => ele.id === id);
@@ -69,6 +71,42 @@ const QuestionNode = ({ id, position, data  }) => {
         console.log('Deleted followUpNodes', deleteNodes);
     };
 
+    const hasBriefContext = () =>
+        Boolean(
+            workspaceBrief?.configured ||
+                workspaceBrief?.goal?.trim() ||
+                workspaceBrief?.audience?.trim() ||
+                workspaceBrief?.domain_context?.trim() ||
+                workspaceBrief?.review_rules?.trim() ||
+                workspaceBrief?.desired_outputs?.some((output) => output !== 'mind_map')
+        );
+
+    const buildDerivationMetadata = () => {
+        if (!hasBriefContext()) {
+            return {};
+        }
+
+        const sourceMode = workspaceBrief.source_mode || 'source_plus_context';
+        const assumption =
+            sourceMode === 'context_only' || Boolean(workspaceBrief.assumptions_allowed);
+
+        return {
+            derivation_context_id: `brief:${flowId}`,
+            source_mode: sourceMode,
+            assumption,
+            status: assumption ? 'needs_review' : 'ai_generated',
+            workspace_brief: workspaceBrief
+        };
+    };
+
+    const withDerivationMetadata = (responseNode) => ({
+        ...responseNode,
+        data: {
+            ...responseNode.data,
+            ...buildDerivationMetadata()
+        }
+    });
+
     const setResponse = (resData) => {
         console.log('HEre is response', resData);
         const currNode = nodes.filter((node) => node.id === id);
@@ -76,7 +114,7 @@ const QuestionNode = ({ id, position, data  }) => {
         let node;
         node = {
             id: generateHexId(),
-            data: resData[0],
+            data: withDerivationMetadata(resData[0]),
             type: 'response',
             position: {
                 x: currNode[0].position.x + 500,
@@ -128,7 +166,8 @@ const QuestionNode = ({ id, position, data  }) => {
             data,
             question,
             id,
-            'question'
+            'question',
+            workspaceBrief
         );
         axios
             .post(`http://localhost:8000/${url}`, body, config)
@@ -179,7 +218,7 @@ const QuestionNode = ({ id, position, data  }) => {
             const currentNode = nodes.find((ele) => ele.id === id);
             currentNode.data.question = question;
             setNodes(nodes);
-            pushNode(LoadingModal);
+            pushNode(LoadingModal, questionAnswerLoading(workspaceBrief));
             askQuestion();
         }
     };

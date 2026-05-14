@@ -1,48 +1,32 @@
-import PDFSvg from '../assets/pdf.svg';
 import CROSSSvg from '../assets/cross.svg';
-import RIGHTArrow from '../assets/right.svg';
-import { useState } from 'react';
-import InputBar from '../helpful-components/InputBar';
-import { nanoid } from 'nanoid';
 import useStore from '../stores/store';
 import { useShallow } from 'zustand/shallow';
 import modalStore from '../stores/modalStore';
 import axios from 'axios';
-import LoadingModal from './LoadingModal';
-import setRequestData from '../config/setRequestData';
 import flowStore from '../stores/flowStore';
-import DataSourceSet from '../nodes/DataSourceSet';
 import DataSourceSelect from '../global-components/DataSourceSelect';
 import ErrorModal from './ErrorModal';
 import errorStore from '../stores/errorStore';
 
-const FlowModal = ({isDrawer, setIsDrawer, isViewModal, setIsViewFlowModal}) => {
+const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
    const selector = (state) => ({
         trigger: state.trigger,
         setTrigger: state.setTrigger,
-        nodes: state.nodes,
         setNodes: state.setNodes,
-        edges: state.edges,
         setEdges: state.setEdges,
-        viewport: state.viewport,
         setViewPort: state.setViewPort
     });
 
     const {
         trigger,
         setTrigger,
-        nodes,
         setNodes,
-        edges,
         setEdges,
-        viewport,
         setViewPort
     } = useStore(useShallow(selector));
     const setFlow = flowStore((s) => s.setFlow);
-    const flow = flowStore((s) => s.flow);
     const setFlowName = flowStore((s) => s.setFlowName);
-    const flow_name = flowStore((s) => s.flow_name);
-    const setFlowType = flowStore((s) => s.setFlowType)
+    const setFlowType = flowStore((s) => s.setFlowType);
     const popNode = modalStore((s) => s.popNode);
     const pushNode = modalStore((s) => s.pushNode);
 
@@ -61,7 +45,7 @@ const FlowModal = ({isDrawer, setIsDrawer, isViewModal, setIsViewFlowModal}) => 
                     'Content-Type': 'application/json'
                 }
             })
-            .then((res) => setupNewFlow(res))
+            .then((res) => setupNewFlow(res, { openSourcePicker: false }))
             .catch((err) => manageErrors(err));
     };
 
@@ -80,21 +64,24 @@ const FlowModal = ({isDrawer, setIsDrawer, isViewModal, setIsViewFlowModal}) => 
                     'Content-Type': 'application/json'
                 }
             })
-            .then((res) => setupNewFlow(res))
+            .then((res) => setupNewFlow(res, { openSourcePicker: true }))
             .catch((err) => manageErrors(err));
     };
 
 
-    const setupNewFlow = (res) => {
+    const setupNewFlow = (res, { openSourcePicker = false } = {}) => {
         console.log("SERVER RESPONSE", res.data)
         setFlow(res.data.flow_id);
         setFlowType(res.data.flow_type)
-        setIsDrawer(!isDrawer);
+        setIsDrawer(false);
         setNodes([]);
         setEdges([]);
         setViewPort({});
         setFlowName('New Flow');
         setTrigger(!trigger);
+        if (openSourcePicker) {
+            pushNode(DataSourceSelect);
+        }
     };
 
     const selector2 = (state) => ({
@@ -103,16 +90,16 @@ const FlowModal = ({isDrawer, setIsDrawer, isViewModal, setIsViewFlowModal}) => 
         setStatus: state.setStatus,
         setMsg: state.setMsg
     });
-    const { status, message, setStatus, setMsg } = errorStore(
+    const { setStatus, setMsg } = errorStore(
         useShallow(selector2)
     );
 
     const manageErrors = (err) => {
         console.log(err);
         console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
-        setStatus(err.status);
-        setMsg(err.response.statusText);
+        console.log('Errroross', err.response?.statusText);
+        setStatus(err.response?.status || err.status || 500);
+        setMsg(err.response?.data?.detail || err.response?.statusText || err.message || 'Request failed');
         popNode();
         pushNode(ErrorModal);
     };
@@ -121,29 +108,28 @@ const FlowModal = ({isDrawer, setIsDrawer, isViewModal, setIsViewFlowModal}) => 
             <div className="modal-container">
                 <div className="title">
                     <div>
-                        <p>Select Flow Type</p>
+                        <p>Start a workspace</p>
                     </div>
                     <img
                         src={CROSSSvg}
                         alt="Cross Svg"
-                        onClick={(e) => setIsViewFlowModal(false)}
+                        onClick={() => setIsViewFlowModal(false)}
                     />
                 </div>
-                <div className="buttons">
+                <div className="flow-choice-list">
                     <button
-                        id="cancel"
-                        onClick={(e) => createAutomaticFlow(e)}
+                        className="flow-choice-card"
+                        onClick={createAutomaticFlow}
                     >
-                        Automatic
+                        <strong>Auto-generate from document</strong>
+                        <span>Next you will choose a PDF, DOCX, Markdown, TXT, or brief so DocMap can draft the first map.</span>
                     </button>
-                    {/* <button id="add" onClick={(e) => addDataSource(e)}>Add</button> */}
-
                     <button
-                        id="add"
-                        style={{ opacity: '100%' }}
-                        onClick={(e) => createNewFlow(e)}
+                        className="flow-choice-card flow-choice-primary"
+                        onClick={createNewFlow}
                     >
-                        Manual
+                        <strong>Blank workspace</strong>
+                        <span>Start empty and add sources, nodes, and review details yourself.</span>
                     </button>
                 </div>
             </div>
