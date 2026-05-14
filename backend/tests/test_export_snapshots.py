@@ -22,6 +22,7 @@ def test_validated_graph_json_snapshot_includes_report_and_task_projection():
         "title": "Training Rollout",
         "summary": "Plan rollout work.",
         "flow_type": "mind_map",
+        "brief": {},
     }
     assert graph["validation_report"] == {
         "is_valid": True,

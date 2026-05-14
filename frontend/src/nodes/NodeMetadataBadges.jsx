@@ -61,42 +61,84 @@ const NodeMetadataBadges = ({ data }) => {
     const sourceMode = firstValue(data, nestedData, ['source_mode']);
     const assumption = firstValue(data, nestedData, ['assumption']);
     const sourceBacked = hasSourceRefs(data, nestedData);
+    const needsReview = status === 'needs_review' || assumption || !sourceBacked;
+    const indicators = [
+        !sourceBacked
+            ? {
+                  id: 'missing-source',
+                  label: 'No citation',
+                  className: 'node-review-indicator-source'
+              }
+            : undefined,
+        status === 'needs_review'
+            ? {
+                  id: 'needs-review',
+                  label: 'Needs review',
+                  className: 'node-review-indicator-review'
+              }
+            : undefined,
+        assumption
+            ? {
+                  id: 'assumption',
+                  label: 'Assumption',
+                  className: 'node-review-indicator-assumption'
+              }
+            : undefined
+    ].filter(Boolean);
 
     return (
         <div className="node-metadata-badges">
-            {nodeType ? (
-                <span className="node-metadata-badge node-metadata-badge-type">
-                    {nodeType}
+            {indicators.length > 0 ? (
+                <span
+                    className={`node-review-indicators ${
+                        needsReview ? 'node-review-indicators-active' : ''
+                    }`}
+                    aria-label={indicators.map((indicator) => indicator.label).join(', ')}
+                    title={indicators.map((indicator) => indicator.label).join(', ')}
+                >
+                    {indicators.map((indicator) => (
+                        <span
+                            key={indicator.id}
+                            className={`node-review-indicator ${indicator.className}`}
+                        />
+                    ))}
                 </span>
             ) : null}
-            <span
-                className={`node-metadata-badge node-metadata-badge-status node-status-${status}`}
-            >
-                {REVIEW_LABELS[status] || status}
-            </span>
-            {confidence ? (
-                <span className="node-metadata-badge">
-                    Confidence {confidence}
+            <span className="node-metadata-badge-list">
+                {nodeType ? (
+                    <span className="node-metadata-badge node-metadata-badge-type">
+                        {nodeType}
+                    </span>
+                ) : null}
+                <span
+                    className={`node-metadata-badge node-metadata-badge-status node-status-${status}`}
+                >
+                    {REVIEW_LABELS[status] || status}
                 </span>
-            ) : null}
-            {sourceMode ? (
-                <span className="node-metadata-badge">
-                    {SOURCE_MODE_LABELS[sourceMode] || sourceMode}
+                {confidence ? (
+                    <span className="node-metadata-badge">
+                        Confidence {confidence}
+                    </span>
+                ) : null}
+                {sourceMode ? (
+                    <span className="node-metadata-badge">
+                        {SOURCE_MODE_LABELS[sourceMode] || sourceMode}
+                    </span>
+                ) : null}
+                {assumption ? (
+                    <span className="node-metadata-badge node-metadata-badge-missing-source">
+                        Assumption
+                    </span>
+                ) : null}
+                <span
+                    className={`node-metadata-badge ${
+                        sourceBacked
+                            ? 'node-metadata-badge-source'
+                            : 'node-metadata-badge-missing-source'
+                    }`}
+                >
+                    {sourceBacked ? 'Source cited' : 'No citation'}
                 </span>
-            ) : null}
-            {assumption ? (
-                <span className="node-metadata-badge node-metadata-badge-missing-source">
-                    Assumption
-                </span>
-            ) : null}
-            <span
-                className={`node-metadata-badge ${
-                    sourceBacked
-                        ? 'node-metadata-badge-source'
-                        : 'node-metadata-badge-missing-source'
-                }`}
-            >
-                {sourceBacked ? 'Source cited' : 'No citation'}
             </span>
         </div>
     );

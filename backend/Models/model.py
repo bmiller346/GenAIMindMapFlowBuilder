@@ -89,6 +89,7 @@ class PPTXNodeQueryResponse(BaseModel):
 class SQLComponentRequest(BaseModel):
     flow_id: str
     table_name: str
+    operation_id: str | None = None
 
 class SQLComponentResponse(BaseModel):
     component_id: str

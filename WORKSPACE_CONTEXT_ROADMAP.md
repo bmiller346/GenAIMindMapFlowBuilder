@@ -277,6 +277,222 @@ Avoid a vague "AI Agents" bucket. Use narrow helpers:
 - Helper output is previewable and accept/rejectable.
 - Accepted helper work becomes graph data plus timeline memory.
 
+## Phase 6: Backend AI Helper Generation
+
+Goal: make AI helpers produce real, source-aware preview artifacts from the
+canonical workspace graph.
+
+### Scope
+
+- Add backend helper-preview endpoints, starting with Source Librarian:
+  - `POST /api/workspaces/{id}/ai/source-librarian/preview`
+  - future: Project Planner, Reviewer, and Integration Operator previews.
+- Define strict request and response contracts for helper previews.
+- Feed helpers the selected scope: workspace, branch, node, or source.
+- Require helper outputs to include proposed changes, citations or assumptions,
+  confidence, and reviewer-readable rationale.
+- Validate AI output before returning it to the frontend.
+- Record preview generation and preview acceptance in Activity.
+- Keep mutation frontend-mediated: backend proposes; the user accepts.
+
+### Helper Preview Contract
+
+```json
+{
+  "preview_id": "preview_...",
+  "helper_id": "source_librarian",
+  "action": "source_repair",
+  "scope": {
+    "type": "branch",
+    "node_id": "node_1"
+  },
+  "generated_by": "openai",
+  "preview_items": [
+    {
+      "id": "item_...",
+      "preview_type": "source_repair",
+      "node_id": "node_1",
+      "title": "Repair source reference",
+      "rationale": "Nearest cited ancestor supports this claim.",
+      "confidence": "low",
+      "source_refs": [
+        {
+          "document_id": "doc_1",
+          "page": 3,
+          "section": "Requirements",
+          "quote_snippet": "..."
+        }
+      ],
+      "assumptions": [],
+      "proposed_mutation": {}
+    }
+  ],
+  "warnings": []
+}
+```
+
+### Acceptance
+
+- Source Librarian can generate a fresh backend preview from current workspace
+  or branch context.
+- Invalid AI output is rejected before it reaches the frontend.
+- Missing credentials produce a clear configuration warning or deterministic
+  local preview, depending on request options.
+- The frontend can inspect, accept, or reject generated helper preview items.
+  Accepted items become graph metadata plus timeline memory.
+
+### Recommended Phase 6 Agent Split
+
+Phase 6 is large enough for four focused agents. The work separates cleanly
+because the shared boundary is the helper preview contract: backends generate
+validated previews, frontends display and accept them, and Activity records the
+outcome.
+
+#### Agent 1: Helper Contract And Backend Foundation
+
+Owns:
+
+- `backend/ai_helpers.py`
+- helper preview schemas and validators
+- shared OpenAI Responses API call path
+- deterministic fallback behavior for local/dev/test
+- request/response shape for helper preview endpoints
+- focused backend tests for valid and invalid helper output
+
+Primary deliverables:
+
+- Harden `source_librarian` preview generation.
+- Add reusable helpers for `project_planner`, `reviewer`, and
+  `integration_operator` preview contracts.
+- Ensure invalid model output returns clear 422 errors.
+
+Avoid:
+
+- Frontend helper UI.
+- Direct graph mutation.
+- Integration credentials or push/pull behavior.
+
+#### Agent 2: Source Librarian And Reviewer Generation
+
+Owns:
+
+- Source Librarian generation quality.
+- Reviewer generation quality.
+- source coverage, uncited node, contradiction, gap, and SME question previews.
+- prompt contracts that require citations or explicit assumptions.
+
+Primary deliverables:
+
+- `POST /api/workspaces/{id}/ai/source-librarian/preview`
+- `POST /api/workspaces/{id}/ai/reviewer/preview`
+- backend tests covering citation-backed and assumption-backed outputs.
+- frontend wiring from Source Librarian and Reviewer buttons to backend
+  previews.
+
+Avoid:
+
+- Project planning/task ownership generation.
+- monday/Miro credentials and sync logic.
+
+#### Agent 3: Project Planner Generation And Accept Flow
+
+Owns:
+
+- Project Planner backend preview generation.
+- branch-to-task, checklist, owner, due date, and priority suggestions.
+- frontend preview merge behavior for generated planner items.
+- accepted preview metadata on graph nodes.
+
+Primary deliverables:
+
+- `POST /api/workspaces/{id}/ai/project-planner/preview`
+- branch-scoped planning previews.
+- preview accept/reject UI that marks accepted generated work as
+  `needs_review` unless already approved.
+- tests for generated planner item validation and acceptance metadata.
+
+Avoid:
+
+- Source coverage repair logic.
+- Integration credential handling.
+
+#### Agent 4: Integration Operator, Activity, And End-To-End Polish
+
+Owns:
+
+- Integration Operator preview generation.
+- handoff readiness, sync issue explanation, and preflight preview summaries.
+- activity events for helper preview generation, rejection, and acceptance.
+- end-to-end UI polish and regression coverage across helper roles.
+
+Primary deliverables:
+
+- `POST /api/workspaces/{id}/ai/integration-operator/preview`
+- generated helper previews visible in Activity.
+- consistent loading/error states for backend AI helper calls.
+- Playwright coverage for helper invocation, preview display, accept, and
+  Activity entry.
+
+Avoid:
+
+- Implementing provider credential storage.
+- Autonomous mutation or background agent behavior.
+
+### Phase 6 Sequencing
+
+1. Agent 1 finishes and stabilizes the shared helper preview contract.
+2. Agent 2 expands real Source Librarian and Reviewer generation.
+3. Agent 3 adds Project Planner generation and generated task/checklist
+   acceptance.
+4. Agent 4 completes Integration Operator previews, Activity instrumentation,
+   and end-to-end verification.
+
+Agents 2 and 3 can work in parallel after Agent 1 lands the shared contract.
+Agent 4 should start once at least one generated helper preview reaches the
+frontend.
+
+### Implementation Status - 2026-05-14
+
+Agent 1 foundation is in progress with the shared contract now available:
+
+- Added `backend/ai_helpers.py`.
+- Added registered helper/action validation for Source Librarian, Reviewer,
+  Project Planner, and Integration Operator.
+- Added reusable helper preview builders and scope normalization.
+- Added strict helper preview validation for scopes, duplicate preview item IDs,
+  source refs, assumptions, proposed mutations, warnings, and metadata.
+- Added reusable OpenAI Responses API payload plumbing for helper preview
+  generation.
+- Added deterministic fallback generation for Source Librarian source-repair
+  previews.
+- Added `POST /api/workspaces/{id}/ai/source-librarian/preview`.
+- Added `POST /api/workspaces/{id}/ai/helpers/{helper_id}/preview`.
+- Added focused backend tests for helper preview parsing, validation, registered
+  future roles, branch scoping, reusable OpenAI payload building, and
+  deterministic Source Librarian output.
+
+Agent 2 and Agent 3 can build on:
+
+- `build_helper_preview(...)`
+- `build_openai_helper_preview_payload(...)`
+- `generate_helper_preview(...)`
+- `validate_ai_helper_preview(...)`
+- `normalize_helper_scope(...)`
+- `validate_helper_action(...)`
+
+Agent 2 Source Librarian and Reviewer generation is now implemented:
+
+- Added Source Librarian `source_coverage` generation alongside source repair.
+- Added Reviewer `missing_information`, `sme_questions`, and `contradictions`
+  generation with deterministic fallback previews.
+- Added `POST /api/workspaces/{id}/ai/reviewer/preview`.
+- Wired Source Librarian and Reviewer helper buttons to backend preview
+  generation and the shared generated-preview frontend cache.
+- Existing source repair, gap, and SME preview views can inspect and accept
+  generated backend preview items while preserving local projection fallback.
+- Added backend coverage for citation-backed and assumption-backed Source
+  Librarian and Reviewer outputs.
+
 ## Recommended Agent Workstreams
 
 This roadmap can be split cleanly across four implementation agents.
@@ -401,7 +617,8 @@ If one agent implements everything, use this order:
 5. Add automation data model without background scheduling.
 6. Add manual "run automation" actions.
 7. Add AI helper shell with one real helper: Source Librarian.
-8. Expand helpers only after the preview/accept loop is stable.
+8. Add the backend Source Librarian generation endpoint.
+9. Expand helpers only after the preview/accept loop is stable.
 
 ## Non-Goals For This Roadmap
 

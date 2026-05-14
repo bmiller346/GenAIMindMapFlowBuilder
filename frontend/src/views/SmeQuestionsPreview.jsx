@@ -5,10 +5,43 @@ import { withLocalPreviewAcceptance } from './localPreviewMetadata';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
 
-const SmeQuestionsPreview = ({ nodes, projection, setNodes, setActiveView }) => {
+const smeRowsFromGeneratedPreview = (generatedPreview) => {
+    const items = Array.isArray(generatedPreview?.preview_items)
+        ? generatedPreview.preview_items
+        : [];
+
+    return items.map((item, index) => {
+        const mutation = item.proposed_mutation || {};
+        const reviewQuestion = mutation.sme_review_question || {};
+        return {
+            id: item.node_id,
+            title: item.title,
+            question_id: item.id,
+            question_order: index + 1,
+            reason: reviewQuestion.reason || item.rationale,
+            question: reviewQuestion.question || item.title,
+            generated_preview_item: item,
+            included: true
+        };
+    });
+};
+
+const SmeQuestionsPreview = ({
+    nodes,
+    projection,
+    generatedPreview,
+    onRejectGeneratedPreview,
+    setNodes,
+    setActiveView
+}) => {
     const previewRows = useMemo(
-        () => getSmeQuestionPreviewRows(projection),
-        [projection]
+        () => {
+            const generatedRows = smeRowsFromGeneratedPreview(generatedPreview);
+            return generatedRows.length > 0
+                ? generatedRows
+                : getSmeQuestionPreviewRows(projection);
+        },
+        [projection, generatedPreview]
     );
     const defaultIds = useMemo(
         () => new Set(previewRows.map((row) => row.question_id)),
@@ -48,7 +81,9 @@ const SmeQuestionsPreview = ({ nodes, projection, setNodes, setActiveView }) => 
                 id: row.question_id,
                 question: row.question,
                 reason: row.reason,
-                status: 'open'
+                status: 'open',
+                preview_item_id: row.generated_preview_item?.id,
+                generated_preview_item: row.generated_preview_item
             });
             groups.set(row.id, questions);
             return groups;
@@ -62,9 +97,15 @@ const SmeQuestionsPreview = ({ nodes, projection, setNodes, setActiveView }) => 
                 }
 
                 const data = withLocalPreviewAcceptance(node.data, {
-                    flow: 'sme_review_questions',
+                    flow: questions.some((question) => question.generated_preview_item)
+                        ? 'generated_reviewer_sme_questions'
+                        : 'sme_review_questions',
                     accepted_at: acceptedAt,
                     node_id: node.id,
+                    helper_id: questions.some((question) => question.generated_preview_item)
+                        ? 'reviewer'
+                        : undefined,
+                    preview_id: generatedPreview?.preview_id,
                     question_count: questions.length,
                     question_ids: questions.map((question) => question.id)
                 });
@@ -94,7 +135,20 @@ const SmeQuestionsPreview = ({ nodes, projection, setNodes, setActiveView }) => 
             }.`,
             context: 'Helper: Reviewer'
         });
+        onRejectGeneratedPreview?.();
         setActiveView('table');
+    };
+
+    const rejectGeneratedPreview = () => {
+        onRejectGeneratedPreview?.();
+        addActivity({
+            status: 'completed',
+            title: 'Rejected SME questions preview',
+            detail: `Rejected ${previewRows.length} generated SME question${
+                previewRows.length === 1 ? '' : 's'
+            }.`,
+            context: 'Helper: Reviewer'
+        });
     };
 
     return (
@@ -107,6 +161,11 @@ const SmeQuestionsPreview = ({ nodes, projection, setNodes, setActiveView }) => 
                 <button type="button" onClick={acceptQuestions}>
                     Accept selected
                 </button>
+                {generatedPreview ? (
+                    <button type="button" onClick={rejectGeneratedPreview}>
+                        Reject generated
+                    </button>
+                ) : null}
             </div>
             <div className="local-table-wrap">
                 <table className="local-projection-table">

@@ -53,6 +53,15 @@ def test_monday_existing_group_payload_and_dry_run_operations_snapshot():
         "will_create_items": 1,
         "will_use_existing_board": True,
         "will_use_existing_group": True,
+        "group_creation_policy": {
+            "mvp_scope": "existing_board_existing_group_only",
+            "will_create_groups": False,
+            "decision": (
+                "MVP exports require the user to choose an existing monday board and group. "
+                "Automatic group creation from DocMap categories is deferred until conflict "
+                "handling and target-template governance exist."
+            ),
+        },
     }
     assert payload["export_batch"] | {
         "id": payload["export_batch"].get("id", ""),

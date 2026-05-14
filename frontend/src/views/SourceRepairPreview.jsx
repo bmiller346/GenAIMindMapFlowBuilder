@@ -41,10 +41,47 @@ const mergeSourceRef = (currentRef, suggestedRef) => ({
     confidence: currentRef?.confidence || suggestedRef?.confidence || ''
 });
 
-const SourceRepairPreview = ({ nodes, projection, setNodes, setActiveView }) => {
+const sourceRepairRowsFromGeneratedPreview = (generatedPreview) => {
+    const items = Array.isArray(generatedPreview?.preview_items)
+        ? generatedPreview.preview_items
+        : [];
+
+    return items.map((item) => {
+        const mutation = item.proposed_mutation || {};
+        const repair = mutation.source_ref_repair || mutation.source_coverage || {};
+        return {
+            id: item.node_id,
+            title: item.title,
+            repair_id: item.id,
+            issues: repair.issues || [item.rationale].filter(Boolean),
+            repair_type: repair.repair_type || repair.coverage_status || item.preview_type,
+            suggested_source_ref: item.source_refs?.[0],
+            suggested_from_node_id: repair.suggested_from_node_id || '',
+            suggested_from_title: repair.suggested_from_title || '',
+            suggestion_relationship: repair.suggestion_relationship || '',
+            repair_confidence: item.confidence,
+            generated_preview_item: item,
+            included: true
+        };
+    });
+};
+
+const SourceRepairPreview = ({
+    nodes,
+    projection,
+    generatedPreview,
+    onRejectGeneratedPreview,
+    setNodes,
+    setActiveView
+}) => {
     const previewRows = useMemo(
-        () => getSourceRepairPreviewRows(projection),
-        [projection]
+        () => {
+            const generatedRows = sourceRepairRowsFromGeneratedPreview(generatedPreview);
+            return generatedRows.length > 0
+                ? generatedRows
+                : getSourceRepairPreviewRows(projection);
+        },
+        [projection, generatedPreview]
     );
     const defaultIds = useMemo(
         () => new Set(previewRows.map((row) => row.repair_id)),
@@ -91,9 +128,14 @@ const SourceRepairPreview = ({ nodes, projection, setNodes, setActiveView }) => 
                     ? [repairedRef, ...existingRefs.slice(1)]
                     : existingRefs;
                 const data = withLocalPreviewAcceptance(node.data, {
-                    flow: 'source_reference_repair',
+                    flow: row?.generated_preview_item
+                        ? 'generated_source_librarian_preview'
+                        : 'source_reference_repair',
                     accepted_at: acceptedAt,
                     node_id: node.id,
+                    helper_id: row?.generated_preview_item ? 'source_librarian' : undefined,
+                    preview_id: generatedPreview?.preview_id,
+                    preview_item_id: row?.generated_preview_item?.id,
                     repair_type: row.repair_type,
                     issues: row.issues,
                     suggested_from_node_id: row.suggested_from_node_id,
@@ -131,7 +173,20 @@ const SourceRepairPreview = ({ nodes, projection, setNodes, setActiveView }) => 
             }.`,
             context: 'Helper: Source Librarian'
         });
+        onRejectGeneratedPreview?.();
         setActiveView('table');
+    };
+
+    const rejectGeneratedPreview = () => {
+        onRejectGeneratedPreview?.();
+        addActivity({
+            status: 'completed',
+            title: 'Rejected source helper preview',
+            detail: `Rejected ${previewRows.length} generated source preview item${
+                previewRows.length === 1 ? '' : 's'
+            }.`,
+            context: 'Helper: Source Librarian'
+        });
     };
 
     return (
@@ -144,6 +199,11 @@ const SourceRepairPreview = ({ nodes, projection, setNodes, setActiveView }) => 
                 <button type="button" onClick={acceptRepairs}>
                     Accept selected
                 </button>
+                {generatedPreview ? (
+                    <button type="button" onClick={rejectGeneratedPreview}>
+                        Reject generated
+                    </button>
+                ) : null}
             </div>
             <div className="local-table-wrap">
                 <table className="local-projection-table">

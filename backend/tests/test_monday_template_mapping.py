@@ -38,11 +38,11 @@ def test_autodesk_building_block_review_template_maps_neutral_fields():
         },
         template,
     ) == {
-        "review_status": "accepted",
-        "docmap_review_state": "accepted",
+        "review_status": {"label": "accepted"},
+        "docmap_review_state": {"label": "accepted"},
         "priority": "high",
         "owner": "review-team",
-        "target_date": "2026-06-15",
+        "target_date": {"date": "2026-06-15"},
         "ai_confidence": 0.91,
         "docmap_node_id": "task-1",
         "building_block_type": "task",
@@ -76,10 +76,29 @@ def test_monday_payload_and_operations_include_autodesk_template():
     assert result["template"]["id"] == AUTODESK_BUILDING_BLOCK_REVIEW_TEMPLATE_ID
     assert operation["metadata"]["template_id"] == AUTODESK_BUILDING_BLOCK_REVIEW_TEMPLATE_ID
     assert operation["variables"]["item_name"] == "Review checklist"
-    assert column_values["review_status"] == "needs_review"
-    assert column_values["target_date"] == "2026-06-01"
+    assert column_values["review_status"] == {"label": "needs_review"}
+    assert column_values["target_date"] == {"date": "2026-06-01"}
     assert column_values["docmap_node_id"] == "task-1"
     assert column_values["source_evidence"] == "Review checklist with SMEs."
+
+
+def test_monday_template_omits_invalid_date_values():
+    template = resolve_monday_template(AUTODESK_BUILDING_BLOCK_REVIEW_TEMPLATE_ID)
+
+    column_values = map_item_to_template_columns(
+        {
+            "name": "Review checklist",
+            "status": "needs_review",
+            "due_date": "next Friday",
+            "node_id": "task-1",
+            "source_document": "doc-1",
+            "export_batch_id": "batch-1",
+        },
+        template,
+    )
+
+    assert column_values["review_status"] == {"label": "needs_review"}
+    assert "target_date" not in column_values
 
 
 def _task_node(node_id: str, title: str) -> dict:

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    buildGraphProjection,
     buildSourceLibraryProjection,
     createSourceLibrarySnapshot
 } from '../src/views/graphProjection.js';
@@ -121,4 +122,28 @@ test('createSourceLibrarySnapshot strips live relationship fields', () => {
     assert.equal(snapshot[0].chunks.length, 1);
     assert.equal(Object.hasOwn(snapshot[0], 'citing_nodes'), false);
     assert.equal(Object.hasOwn(snapshot[0], 'coverage_count'), false);
+});
+
+test('buildGraphProjection preserves manual table rows for local views', () => {
+    const manualTableNode = {
+        id: 'manual-table-1',
+        type: 'response',
+        data: {
+            title: 'Manual table',
+            node_type: 'reference',
+            status: 'needs_review',
+            manual: true,
+            data: {
+                summ: 'Manual table',
+                df: [{ Name: 'Ada', Role: 'Reviewer' }]
+            }
+        }
+    };
+
+    const projection = buildGraphProjection([manualTableNode], []);
+    const projectedNode = projection.nodes[0];
+
+    assert.equal(projectedNode.is_manual, true);
+    assert.deepEqual(projectedNode.table_columns, ['Name', 'Role']);
+    assert.deepEqual(projectedNode.table_rows, [{ Name: 'Ada', Role: 'Reviewer' }]);
 });

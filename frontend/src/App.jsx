@@ -93,6 +93,36 @@ const App = () => {
             )
         );
     }, [nodes, setInspectorNodeId, setNodes]);
+    const focusNodeForReview = useCallback(
+        (nodeId) => {
+            if (!nodeId) {
+                return;
+            }
+
+            const node = nodes.find((item) => item.id === nodeId);
+            setInspectorNodeId(nodeId);
+
+            if (!node) {
+                return;
+            }
+
+            setNodes(
+                nodes.map((item) => ({
+                    ...item,
+                    selected: item.id === nodeId
+                }))
+            );
+
+            const nodeWidth = node.measured?.width || node.width || 260;
+            const nodeHeight = node.measured?.height || node.height || 140;
+            reactFlow.setCenter(
+                (node.position?.x || 0) + nodeWidth / 2,
+                (node.position?.y || 0) + nodeHeight / 2,
+                { duration: 420, zoom: 1 }
+            );
+        },
+        [nodes, reactFlow, setInspectorNodeId, setNodes]
+    );
 
     const onChange = useCallback(
         ({ nodes }) => {
@@ -251,7 +281,7 @@ const App = () => {
                         flowId={flow_id}
                         nodes={nodes}
                         edges={edges}
-                        onSelectNode={setInspectorNodeId}
+                        onSelectNode={focusNodeForReview}
                         onReportChange={setValidationReport}
                     />
                 </Panel>
@@ -261,7 +291,7 @@ const App = () => {
                 >
                     <LocalViewsPanel
                         hidden={false}
-                        onSelectNode={setInspectorNodeId}
+                        onSelectNode={focusNodeForReview}
                     />
                 </Panel>
                 <Panel

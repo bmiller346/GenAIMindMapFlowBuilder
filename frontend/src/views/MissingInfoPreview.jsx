@@ -14,10 +14,43 @@ const sourceLabel = (node) => {
     return parts || 'No source';
 };
 
-const MissingInfoPreview = ({ nodes, projection, setNodes, setActiveView }) => {
+const missingInfoRowsFromGeneratedPreview = (generatedPreview) => {
+    const items = Array.isArray(generatedPreview?.preview_items)
+        ? generatedPreview.preview_items
+        : [];
+
+    return items.map((item) => {
+        const mutation = item.proposed_mutation || {};
+        const review =
+            mutation.missing_info_review || mutation.contradiction_review || {};
+        return {
+            id: item.node_id,
+            title: item.title,
+            severity: review.severity || item.confidence || 'low',
+            reasons: review.reasons || [item.rationale].filter(Boolean),
+            source_ref: item.source_refs?.[0] || {},
+            generated_preview_item: item,
+            included: true
+        };
+    });
+};
+
+const MissingInfoPreview = ({
+    nodes,
+    projection,
+    generatedPreview,
+    onRejectGeneratedPreview,
+    setNodes,
+    setActiveView
+}) => {
     const previewRows = useMemo(
-        () => getMissingInfoPreviewRows(projection),
-        [projection]
+        () => {
+            const generatedRows = missingInfoRowsFromGeneratedPreview(generatedPreview);
+            return generatedRows.length > 0
+                ? generatedRows
+                : getMissingInfoPreviewRows(projection);
+        },
+        [projection, generatedPreview]
     );
     const defaultIds = useMemo(
         () => new Set(previewRows.filter((row) => row.included).map((row) => row.id)),
@@ -57,9 +90,14 @@ const MissingInfoPreview = ({ nodes, projection, setNodes, setActiveView }) => {
 
                 const row = rowsById.get(node.id);
                 const data = withLocalPreviewAcceptance(node.data, {
-                    flow: 'missing_information_review',
+                    flow: row?.generated_preview_item
+                        ? 'generated_reviewer_gap'
+                        : 'missing_information_review',
                     accepted_at: acceptedAt,
                     node_id: node.id,
+                    helper_id: row?.generated_preview_item ? 'reviewer' : undefined,
+                    preview_id: generatedPreview?.preview_id,
+                    preview_item_id: row?.generated_preview_item?.id,
                     severity: row?.severity || 'low',
                     reasons: row?.reasons || []
                 });
@@ -90,7 +128,20 @@ const MissingInfoPreview = ({ nodes, projection, setNodes, setActiveView }) => {
             }.`,
             context: 'Helper: Reviewer'
         });
+        onRejectGeneratedPreview?.();
         setActiveView('table');
+    };
+
+    const rejectGeneratedPreview = () => {
+        onRejectGeneratedPreview?.();
+        addActivity({
+            status: 'completed',
+            title: 'Rejected reviewer gap preview',
+            detail: `Rejected ${previewRows.length} generated reviewer item${
+                previewRows.length === 1 ? '' : 's'
+            }.`,
+            context: 'Helper: Reviewer'
+        });
     };
 
     return (
@@ -103,6 +154,11 @@ const MissingInfoPreview = ({ nodes, projection, setNodes, setActiveView }) => {
                 <button type="button" onClick={acceptMissingInfoReview}>
                     Accept selected
                 </button>
+                {generatedPreview ? (
+                    <button type="button" onClick={rejectGeneratedPreview}>
+                        Reject generated
+                    </button>
+                ) : null}
             </div>
             <div className="local-table-wrap">
                 <table className="local-projection-table">

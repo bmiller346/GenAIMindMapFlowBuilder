@@ -3,7 +3,7 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from bson import ObjectId
 import boto3
-from typing import List
+from typing import Any, List
 from Models.model import CSVNodeQueryRequest, CSVNodeQueryResponse, Flow
 from Models.model import PDFNodeQueryRequest
 from Models.model import PDFNodeQueryResponse
@@ -135,12 +135,32 @@ from integrations.monday.persistence import (
     monday_status_projections_from_result,
 )
 from documents.ingestion import (
+    ALLOWED_DOCUMENT_EXTENSIONS,
+    build_ai_intake_source_document,
     chunk_source_segments,
     DocumentIngestionError,
+    file_sha256,
     ingest_supported_document,
+    sanitize_filename,
+    source_document_from_upload,
+    validate_ai_intake_bytes,
     validate_upload_bytes,
 )
 from documents.source_refs import attach_source_refs_to_mindmap
+from ai_helpers import generate_helper_preview, generate_source_librarian_preview
+from graph.ai_contract import (
+    append_ai_graph_prompt_contract,
+    parse_ai_mindmap_response,
+    validate_ai_mindmap_contract,
+)
+from graph.schemas import GraphSchemaError
+from openai_sources import (
+    generate_audio_mindmap,
+    generate_image_mindmap,
+    generate_video_mindmap,
+    generate_web_mindmap,
+    transcribe_audio,
+)
 
 load_dotenv()
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
@@ -183,6 +203,31 @@ GPT_4O_MAX_TOKENS = 128000
 UPLOAD_DIR = "uploaded_pdfs"
 
 openai.api_key = openai_api_key_str
+
+operation_progress: dict[str, dict] = {}
+
+
+def update_operation_progress(
+    operation_id: str | None,
+    *,
+    phase: str,
+    message: str,
+    progress: int,
+    detail: str = "",
+    status_value: str = "running",
+) -> None:
+    if not operation_id:
+        return
+
+    operation_progress[operation_id] = {
+        "operation_id": operation_id,
+        "phase": phase,
+        "message": message,
+        "detail": detail,
+        "progress": max(0, min(100, progress)),
+        "status": status_value,
+        "updated_at": utc_timestamp(),
+    }
 
 class SQLBot(ChromaDB_VectorStore, OpenAI_Chat):
     def __init__(self, config=None):
@@ -254,6 +299,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/operations/{operation_id}")
+def get_operation_progress(operation_id: str):
+    progress = operation_progress.get(operation_id)
+    if not progress:
+        return {
+            "operation_id": operation_id,
+            "phase": "queued",
+            "message": "Waiting for backend to begin.",
+            "detail": "",
+            "progress": 5,
+            "status": "queued",
+            "updated_at": utc_timestamp(),
+        }
+    return progress
 
 
 @app.middleware("http")
@@ -512,6 +573,84 @@ def prepare_source_upload(file: UploadFile, flow_id: str, expected_extension: st
     )
 
 
+def prepare_ai_intake_upload(file: UploadFile, flow_id: str) -> dict:
+    file_bytes = read_upload_bytes(file)
+    upload = validate_ai_intake_bytes(file.filename, file_bytes)
+
+    if upload["extension"] in ALLOWED_DOCUMENT_EXTENSIONS:
+        return prepare_source_upload(file, flow_id)
+
+    existing_component = component_collection.find_one(
+        {"file_hash": upload["file_hash"], "flow_id": ObjectId(flow_id)}
+    )
+    if existing_component:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="File already exists in the workspace.",
+        )
+
+    existing_versions = component_collection.count_documents(
+        {
+            "flow_id": ObjectId(flow_id),
+            "source_document.filename": upload["filename"],
+        }
+    )
+    source_document = build_ai_intake_source_document(
+        upload["filename"],
+        file_bytes,
+        version=existing_versions + 1,
+    )
+    return {
+        "upload": upload,
+        "file_bytes": file_bytes,
+        "source_document": source_document,
+        "source_segments": [],
+        "document_chunks": [],
+    }
+
+
+def binary_source_context(
+    *,
+    filename: str,
+    file_bytes: bytes,
+    source_type: str,
+    flow_id: str,
+) -> dict:
+    sanitized_filename = sanitize_filename(filename)
+    file_hash = file_sha256(file_bytes)
+    existing_versions = component_collection.count_documents(
+        {
+            "flow_id": ObjectId(flow_id),
+            "source_document.filename": sanitized_filename,
+        }
+    )
+    upload = {
+        "filename": sanitized_filename,
+        "original_filename": filename or sanitized_filename,
+        "extension": source_type,
+        "size": len(file_bytes),
+        "file_hash": file_hash,
+    }
+    source_document = source_document_from_upload(upload, version=existing_versions + 1)
+    return {
+        "upload": upload,
+        "file_bytes": file_bytes,
+        "source_document": source_document,
+        "source_segments": [],
+        "document_chunks": [],
+    }
+
+
+def virtual_source_context(*, label: str, source_type: str, flow_id: str) -> dict:
+    file_bytes = label.encode("utf-8")
+    return binary_source_context(
+        filename=f"{source_type}-{file_sha256(file_bytes)[:12]}.{source_type}.txt",
+        file_bytes=file_bytes,
+        source_type=source_type,
+        flow_id=flow_id,
+    )
+
+
 def source_metadata_fields(source_context: dict) -> dict:
     source_document = source_context["source_document"]
     return {
@@ -555,11 +694,22 @@ def source_segments_from_page_records(records: list[dict]) -> list[dict]:
 
 
 def ground_mindmap_with_source_refs(response_json: dict, source_context: dict) -> dict:
+    response_json = validate_ai_mindmap_contract(response_json)
     return attach_source_refs_to_mindmap(
         response_json,
         source_context["source_document"],
         source_context["document_chunks"],
     )
+
+
+def parse_ai_mindmap_or_422(raw_response: str | dict) -> dict:
+    try:
+        return parse_ai_mindmap_response(raw_response)
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "AI graph output failed schema validation.", "errors": exc.errors},
+        ) from exc
 
 
 def workspace_brief_has_context(workspace_brief: dict | None) -> bool:
@@ -947,6 +1097,7 @@ def camelot_pdf_processing(flow_id, file, flow_type):
                 - Maintain the format with double curly braces `{{` and `}}` as shown in the format.
                 """
 
+            template = append_ai_graph_prompt_contract(template)
             prompt = PromptTemplate.from_template(template)
 
             lm_chain = prompt | llm
@@ -959,8 +1110,7 @@ def camelot_pdf_processing(flow_id, file, flow_type):
 
             print(responseList)
 
-            response_json = responseList.replace("```json", "").replace("```", "").replace("\n", "").strip()
-            response_json = json.loads(response_json)
+            response_json = parse_ai_mindmap_or_422(responseList)
             
             print(response_json)
 
@@ -983,6 +1133,8 @@ def camelot_pdf_processing(flow_id, file, flow_type):
                 "flow_type": "automatic"
             }
             
+    except HTTPException:
+        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=e)
@@ -1228,6 +1380,7 @@ def use_aws_textract(file, flow_id, flow_type):
                 - Maintain the format with double curly braces `{{` and `}}` as shown in the format.
                 """
 
+        template = append_ai_graph_prompt_contract(template)
         prompt = PromptTemplate.from_template(template)
 
         lm_chain = prompt | llm
@@ -1240,8 +1393,7 @@ def use_aws_textract(file, flow_id, flow_type):
 
         print(responseList)
 
-        response_json = responseList.replace("```json", "").replace("```", "").replace("\n", "").strip()
-        response_json = json.loads(response_json)
+        response_json = parse_ai_mindmap_or_422(responseList)
         
         print(response_json)
 
@@ -1473,6 +1625,12 @@ def list_flows():
         return [normalize_flow_record(flow) for flow in load_local_flows()]
 
 
+@app.get("/flows/{flow_id}", response_model=Flow)
+def get_flow(flow_id: str):
+    flow = get_workspace_flow_or_404(flow_id)
+    return normalize_flow_record(flow)
+
+
 @app.put("/flow-update/")
 def update_flow(update_data: Flow):
     try:
@@ -1664,6 +1822,215 @@ def export_workspace_mermaid(flow_id: str):
 @app.get("/api/workspaces/{flow_id}/branches/{node_id}/exports/json")
 def export_branch_json(flow_id: str, node_id: str):
     return get_workspace_branch_or_404(flow_id, node_id)
+
+
+@app.post("/api/workspaces/{flow_id}/ai/helpers/{helper_id}/preview")
+def preview_ai_helper(
+    flow_id: str,
+    helper_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    helper_id = helper_id.replace("-", "_")
+    action = request.get("action") or ""
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    if request.get("branch_node_id") and not scope:
+        scope = {"type": "branch", "node_id": request["branch_node_id"]}
+    if not scope:
+        scope = {"type": "workspace"}
+
+    if scope.get("type") == "branch" and scope.get("node_id"):
+        graph = get_workspace_branch_or_404(flow_id, scope["node_id"])
+    else:
+        graph = get_workspace_graph_or_404(flow_id)
+
+    try:
+        return generate_helper_preview(
+            helper_id,
+            action,
+            graph,
+            scope=scope,
+            use_ai=bool(request.get("use_ai", True)),
+            allow_deterministic_fallback=bool(
+                request.get("allow_deterministic_fallback", True)
+            ),
+            model=request.get("model"),
+        )
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "AI helper preview failed schema validation.",
+                "errors": exc.errors,
+            },
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/workspaces/{flow_id}/ai/source-librarian/preview")
+def preview_source_librarian(flow_id: str, request: dict[str, Any] | None = None):
+    request = request or {}
+    action = request.get("action") or "source_repair"
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    if request.get("branch_node_id") and not scope:
+        scope = {"type": "branch", "node_id": request["branch_node_id"]}
+    if not scope:
+        scope = {"type": "workspace"}
+
+    if scope.get("type") == "branch" and scope.get("node_id"):
+        graph = get_workspace_branch_or_404(flow_id, scope["node_id"])
+    else:
+        graph = get_workspace_graph_or_404(flow_id)
+
+    try:
+        return generate_source_librarian_preview(
+            graph,
+            action=action,
+            scope=scope,
+            use_ai=bool(request.get("use_ai", True)),
+            allow_deterministic_fallback=bool(
+                request.get("allow_deterministic_fallback", True)
+            ),
+            model=request.get("model"),
+        )
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "AI helper preview failed schema validation.",
+                "errors": exc.errors,
+            },
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/workspaces/{flow_id}/ai/reviewer/preview")
+def preview_reviewer(flow_id: str, request: dict[str, Any] | None = None):
+    request = request or {}
+    action = request.get("action") or "missing_information"
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    if request.get("branch_node_id") and not scope:
+        scope = {"type": "branch", "node_id": request["branch_node_id"]}
+    if not scope:
+        scope = {"type": "workspace"}
+
+    if scope.get("type") == "branch" and scope.get("node_id"):
+        graph = get_workspace_branch_or_404(flow_id, scope["node_id"])
+    else:
+        graph = get_workspace_graph_or_404(flow_id)
+
+    try:
+        return generate_helper_preview(
+            "reviewer",
+            action,
+            graph,
+            scope=scope,
+            use_ai=bool(request.get("use_ai", True)),
+            allow_deterministic_fallback=bool(
+                request.get("allow_deterministic_fallback", True)
+            ),
+            model=request.get("model"),
+        )
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "AI helper preview failed schema validation.",
+                "errors": exc.errors,
+            },
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/workspaces/{flow_id}/ai/project-planner/preview")
+def preview_project_planner(flow_id: str, request: dict[str, Any] | None = None):
+    request = request or {}
+    action = request.get("action") or "task_projection"
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    if request.get("branch_node_id") and not scope:
+        scope = {"type": "branch", "node_id": request["branch_node_id"]}
+    if not scope:
+        scope = {"type": "workspace"}
+
+    if scope.get("type") == "branch" and scope.get("node_id"):
+        graph = get_workspace_branch_or_404(flow_id, scope["node_id"])
+    else:
+        graph = get_workspace_graph_or_404(flow_id)
+
+    try:
+        return generate_helper_preview(
+            "project_planner",
+            action,
+            graph,
+            scope=scope,
+            use_ai=bool(request.get("use_ai", True)),
+            allow_deterministic_fallback=bool(
+                request.get("allow_deterministic_fallback", True)
+            ),
+            model=request.get("model"),
+        )
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "AI helper preview failed schema validation.",
+                "errors": exc.errors,
+            },
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/workspaces/{flow_id}/ai/integration-operator/preview")
+def preview_integration_operator(flow_id: str, request: dict[str, Any] | None = None):
+    request = request or {}
+    action = request.get("action") or "handoff_readiness"
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    if request.get("branch_node_id") and not scope:
+        scope = {"type": "branch", "node_id": request["branch_node_id"]}
+    if not scope:
+        scope = {"type": "workspace"}
+
+    if scope.get("type") == "branch" and scope.get("node_id"):
+        graph = get_workspace_branch_or_404(flow_id, scope["node_id"])
+    else:
+        graph = get_workspace_graph_or_404(flow_id)
+
+    try:
+        return generate_helper_preview(
+            "integration_operator",
+            action,
+            graph,
+            scope=scope,
+            use_ai=bool(request.get("use_ai", True)),
+            allow_deterministic_fallback=bool(
+                request.get("allow_deterministic_fallback", True)
+            ),
+            model=request.get("model"),
+        )
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "AI helper preview failed schema validation.",
+                "errors": exc.errors,
+            },
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/workspaces/{flow_id}/export/miro")
@@ -1864,6 +2231,31 @@ def preview_workspace_monday_export(
     )
 
 
+@app.post("/api/integrations/monday/preflight/existing-group")
+def preflight_monday_existing_group(
+    board_id: str = Query(...),
+    group_id: str = Query(...),
+    dry_run: bool = Query(True),
+    template_id: str = Query(""),
+):
+    if not dry_run:
+        try:
+            require_settings("monday_api_token")
+        except MissingConfigurationError as exc:
+            raise configuration_http_error(exc)
+
+    client = MondayClient(
+        token=get_setting("monday_api_token") or "",
+        base_url=get_setting("monday_api_base_url") or "https://api.monday.com/v2",
+    )
+    return client.preflight_existing_group(
+        board_id,
+        group_id,
+        template_id=template_id,
+        dry_run=dry_run,
+    )
+
+
 @app.post("/api/workspaces/{flow_id}/export/monday/existing-group")
 def export_workspace_to_monday_existing_group(
     flow_id: str,
@@ -1900,6 +2292,22 @@ def export_workspace_to_monday_existing_group(
         token=get_setting("monday_api_token") or "",
         base_url=get_setting("monday_api_base_url") or "https://api.monday.com/v2",
     )
+    preflight_result = None
+    if not dry_run:
+        preflight_result = client.preflight_existing_group(
+            board_id,
+            group_id,
+            template_id=template_id,
+            dry_run=False,
+        )
+        if not preflight_result.get("preflight", {}).get("ok"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "monday target preflight failed.",
+                    "preflight": preflight_result.get("preflight", {}),
+                },
+            )
     result = client.export_existing_group_items(payload, dry_run=dry_run)
 
     if dry_run:
@@ -1923,6 +2331,7 @@ def export_workspace_to_monday_existing_group(
 
     return {
         **result,
+        "preflight": preflight_result.get("preflight", {}) if preflight_result else {},
         "external_refs": refs_by_node_id,
         "persisted": bool(refs_by_node_id),
     }
@@ -1993,6 +2402,22 @@ def export_branch_to_monday_existing_group(
         token=get_setting("monday_api_token") or "",
         base_url=get_setting("monday_api_base_url") or "https://api.monday.com/v2",
     )
+    preflight_result = None
+    if not dry_run:
+        preflight_result = client.preflight_existing_group(
+            board_id,
+            group_id,
+            template_id=template_id,
+            dry_run=False,
+        )
+        if not preflight_result.get("preflight", {}).get("ok"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "monday target preflight failed.",
+                    "preflight": preflight_result.get("preflight", {}),
+                },
+            )
     result = client.export_existing_group_items(payload, dry_run=dry_run)
 
     if dry_run:
@@ -2016,6 +2441,7 @@ def export_branch_to_monday_existing_group(
 
     return {
         **result,
+        "preflight": preflight_result.get("preflight", {}) if preflight_result else {},
         "external_refs": refs_by_node_id,
         "persisted": bool(refs_by_node_id),
     }
@@ -2072,13 +2498,40 @@ def pull_monday_status_to_workspace(
     }
 
 
-def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
+def get_summary_from_openai(
+    file: UploadFile,
+    flow_id: str,
+    flow_type: str,
+    operation_id: str | None = None,
+):
     try:
+        update_operation_progress(
+            operation_id,
+            phase="checking_settings",
+            message="Checking AI settings",
+            detail="Verifying OpenAI configuration before upload.",
+            progress=18,
+        )
         require_settings("openai_api_key")
     except MissingConfigurationError as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Missing AI settings",
+            detail=str(exc),
+            progress=100,
+            status_value="failed",
+        )
         raise configuration_http_error(exc) from exc
 
-    source_context = prepare_source_upload(file, flow_id)
+    update_operation_progress(
+        operation_id,
+        phase="extracting",
+        message="Reading source document",
+        detail="Validating the source and preparing document metadata.",
+        progress=28,
+    )
+    source_context = prepare_ai_intake_upload(file, flow_id)
     source_document = source_context["source_document"]
     file_bytes = source_context["file_bytes"]
     file_extension = source_document["type"]
@@ -2086,6 +2539,13 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
     if len(file_bytes) == 0:
         raise ValueError("The uploaded file is actually empty!")
 
+    update_operation_progress(
+        operation_id,
+        phase="uploading_to_ai",
+        message="Uploading source to AI workspace",
+        detail="Creating an AI file-search workspace for the source.",
+        progress=42,
+    )
     assistant = openai.beta.assistants.create(
         name="Summarize agent",
         instructions="Your task is to only summarize the document",
@@ -2127,7 +2587,7 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
     elif file_extension == "html":
         mime_type = "text/html"
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     elif file_extension == "md":
         mime_type = "text/markdown"
@@ -2139,11 +2599,18 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
             "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         )
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     else:
         raise ValueError("Unsupported file type")
 
+    update_operation_progress(
+        operation_id,
+        phase="ai_reading",
+        message="AI is reading the source",
+        detail="The model is summarizing the uploaded document.",
+        progress=62,
+    )
     # Create thread for summarization task
     thread = openai.beta.threads.create(
         messages=[
@@ -2162,6 +2629,13 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
         thread_id=thread.id, assistant_id=assistant.id
     )
 
+    update_operation_progress(
+        operation_id,
+        phase="saving",
+        message="Saving source metadata",
+        detail="Persisting the source component and summary.",
+        progress=86,
+    )
     print(thread)
     print(run)
     
@@ -2194,16 +2668,51 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
     # Store the document in MongoDB
     component_id = component_collection.insert_one(component_metadata).inserted_id
 
+    update_operation_progress(
+        operation_id,
+        phase="complete",
+        message="Source summary is ready",
+        detail="The source component was saved to the workspace.",
+        progress=100,
+        status_value="completed",
+    )
     # Return the component ID with the type
     return {"component_id": str(component_id), "type": file_extension, flow_type: flow_type}
 
-def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
+def openai_mindmap_generator(
+    file: UploadFile,
+    flow_id: str,
+    flow_type: str,
+    operation_id: str | None = None,
+):
     try:
+        update_operation_progress(
+            operation_id,
+            phase="checking_settings",
+            message="Checking AI settings",
+            detail="Verifying OpenAI configuration before deriving the workspace.",
+            progress=18,
+        )
         require_settings("openai_api_key")
     except MissingConfigurationError as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Missing AI settings",
+            detail=str(exc),
+            progress=100,
+            status_value="failed",
+        )
         raise configuration_http_error(exc) from exc
 
-    source_context = prepare_source_upload(file, flow_id)
+    update_operation_progress(
+        operation_id,
+        phase="extracting",
+        message="Reading source document",
+        detail="Validating the source and preparing document metadata.",
+        progress=28,
+    )
+    source_context = prepare_ai_intake_upload(file, flow_id)
     source_document = source_context["source_document"]
     file_bytes = source_context["file_bytes"]
     file_extension = source_document["type"]
@@ -2211,6 +2720,13 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
     if len(file_bytes) == 0:
         raise ValueError("The uploaded file is actually empty!")
 
+    update_operation_progress(
+        operation_id,
+        phase="uploading_to_ai",
+        message="Uploading source to AI workspace",
+        detail="Creating an AI file-search workspace for mind map derivation.",
+        progress=42,
+    )
     assistant = openai.beta.assistants.create(
         name="MindMap Builder",
         instructions="Your task is to create the mindmap of the document",
@@ -2252,7 +2768,7 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
     elif file_extension == "html":
         mime_type = "text/html"
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     elif file_extension == "md":
         mime_type = "text/markdown"
@@ -2264,11 +2780,18 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
             "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         )
         messages_file = openai.files.create(
-            file=(file.filename, file_bytes, mime_type), purpose="assistants"
+            file=(source_document["filename"], file_bytes, mime_type), purpose="assistants"
         )
     else:
         raise ValueError("Unsupported file type")
     print("======================================", file_extension)
+    update_operation_progress(
+        operation_id,
+        phase="ai_deriving",
+        message="AI is deriving workspace nodes",
+        detail="The model is generating a React Flow compatible mind map.",
+        progress=64,
+    )
     thread = openai.beta.threads.create(
         messages=[
             {
@@ -2359,6 +2882,7 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
                 - **RETURN ONLY THE VALID JSON OBJECT AND NO ADDITIONAL COMMENTS**.
                 - Do **not** include any explanations, text, or additional information.
                 - Maintain the format with double curly braces `{{` and `}}` as shown in the format.
+                {append_ai_graph_prompt_contract("")}
                 """,     
 
                 "attachments": [
@@ -2387,14 +2911,14 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
 
     print(message_content.value)
 
-    response_json = (
-            message_content.value.replace("```json", "")
-            .replace("```", "")
-            .replace("\n", "")
-            .strip()
-        )
-
-    response_json = json.loads(response_json)
+    update_operation_progress(
+        operation_id,
+        phase="grounding",
+        message="Grounding generated nodes",
+        detail="Checking graph shape and attaching source references where possible.",
+        progress=82,
+    )
+    response_json = parse_ai_mindmap_or_422(message_content.value)
     response_json = ground_mindmap_with_source_refs(response_json, source_context)
 
     component_metadata = {
@@ -2411,6 +2935,14 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
 
     component_id = component_collection.insert_one(component_metadata).inserted_id
     flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
+    update_operation_progress(
+        operation_id,
+        phase="complete",
+        message="Workspace structure is ready",
+        detail="The generated mind map was saved to the workspace.",
+        progress=100,
+        status_value="completed",
+    )
     return {
         "flow_id": flow_id,
         "flow_name": flow["flow_name"],
@@ -2521,39 +3053,148 @@ def get_page_len(file: UploadFile):
 
 @app.post("/component-create-pdf")
 def create_pdf_component(
-    file: UploadFile, flow_id: str = Form(...), processing_type: str = Form(...)
+    file: UploadFile,
+    flow_id: str = Form(...),
+    processing_type: str = Form(...),
+    operation_id: str | None = Form(None),
 ):
+    update_operation_progress(
+        operation_id,
+        phase="validating",
+        message="Validating PDF upload",
+        detail=file.filename or "",
+        progress=12,
+    )
     flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
     try:
         upload = validate_upload_bytes(file.filename, read_upload_bytes(file))
     except DocumentIngestionError as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="PDF validation failed",
+            detail=str(exc),
+            progress=100,
+            status_value="failed",
+        )
         raise ingestion_http_error(exc) from exc
 
     if upload["extension"] == "pdf":
         print(get_page_len(file))
         check_page_length = get_page_len(file)
         if processing_type == "gpt" and not check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type='manual')
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type='manual', operation_id=operation_id)
         elif processing_type == "aws" and flow["flow_type"] == 'manual':
-            return use_aws_textract(file, flow_id=flow_id, flow_type='manual')
+            update_operation_progress(
+                operation_id,
+                phase="extracting",
+                message="Extracting PDF with AWS Textract",
+                detail="Large PDF extraction can take a few minutes.",
+                progress=35,
+            )
+            result = use_aws_textract(file, flow_id=flow_id, flow_type='manual')
+            update_operation_progress(
+                operation_id,
+                phase="complete",
+                message="PDF source is ready",
+                detail="The source component was saved to the workspace.",
+                progress=100,
+                status_value="completed",
+            )
+            return result
         elif processing_type == "custom" and flow["flow_type"] == 'manual':
-            return camelot_pdf_processing(flow_id, file, 'manual')
+            update_operation_progress(
+                operation_id,
+                phase="extracting",
+                message="Extracting PDF tables and text",
+                detail="DocMap is parsing pages and tables before saving the source.",
+                progress=35,
+            )
+            result = camelot_pdf_processing(flow_id, file, 'manual')
+            update_operation_progress(
+                operation_id,
+                phase="complete",
+                message="PDF source is ready",
+                detail="The source component was saved to the workspace.",
+                progress=100,
+                status_value="completed",
+            )
+            return result
         elif processing_type == "gpt" and not check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type='automatic')
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type='automatic', operation_id=operation_id)
         elif processing_type == "aws" and flow["flow_type"] == 'automatic':
-            return use_aws_textract(file, flow_id=flow_id, flow_type='automatic')
+            update_operation_progress(
+                operation_id,
+                phase="extracting",
+                message="Extracting PDF with AWS Textract",
+                detail="Large PDF extraction can take a few minutes.",
+                progress=35,
+            )
+            result = use_aws_textract(file, flow_id=flow_id, flow_type='automatic')
+            update_operation_progress(
+                operation_id,
+                phase="complete",
+                message="Generated PDF workspace is ready",
+                detail="The derived mind map was saved to the workspace.",
+                progress=100,
+                status_value="completed",
+            )
+            return result
         elif processing_type == "custom" and flow["flow_type"] == 'automatic':
-            return camelot_pdf_processing(flow_id, file, 'automatic')
+            update_operation_progress(
+                operation_id,
+                phase="extracting",
+                message="Extracting PDF tables and text",
+                detail="DocMap is parsing pages and tables before deriving nodes.",
+                progress=35,
+            )
+            result = camelot_pdf_processing(flow_id, file, 'automatic')
+            update_operation_progress(
+                operation_id,
+                phase="complete",
+                message="Generated PDF workspace is ready",
+                detail="The derived mind map was saved to the workspace.",
+                progress=100,
+                status_value="completed",
+            )
+            return result
         else:
             traceback.print_exc()
+            update_operation_progress(
+                operation_id,
+                phase="failed",
+                message="PDF exceeds selected processing limits",
+                detail="Try AWS or custom PDF processing for larger files.",
+                progress=100,
+                status_value="failed",
+            )
             return HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
     else:
         traceback.print_exc()
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="PDF validation failed",
+            detail="Only PDF files are allowed.",
+            progress=100,
+            status_value="failed",
+        )
         raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
 
 @app.post("/component-create-img")
-async def create_img_component(flow_id: str = Form(...), file: UploadFile = File(...)):
+async def create_img_component(
+    flow_id: str = Form(...),
+    file: UploadFile = File(...),
+    operation_id: str | None = Form(None),
+):
     try:
+        update_operation_progress(
+            operation_id,
+            phase="validating",
+            message="Validating image upload",
+            detail=file.filename or "",
+            progress=12,
+        )
         flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
         MAX_IMAGE_SIZE_MB = 16
         ALLOWED_MIME_TYPES = {
@@ -2576,6 +3217,12 @@ async def create_img_component(flow_id: str = Form(...), file: UploadFile = File
             raise HTTPException(status_code=400, detail="Image exceeds 16MB size limit")
 
         image_base64 = base64.b64encode(contents).decode("utf-8")
+        source_context = binary_source_context(
+            filename=file.filename,
+            file_bytes=contents,
+            source_type="image",
+            flow_id=flow_id,
+        )
         
         if flow["flow_type"] == 'manual':
 
@@ -2585,10 +3232,21 @@ async def create_img_component(flow_id: str = Form(...), file: UploadFile = File
                 "mime_type": file.content_type,
                 "type": "image",
                 "base64_image": image_base64,
-                "processing_type": "gemini",
+                "processing_type": "openai",
+                "instructions": "",
+                "persona_name": "DocMap reviewer",
+                **source_metadata_fields(source_context),
             }
 
             component_id = component_collection.insert_one(component_metadata).inserted_id
+            update_operation_progress(
+                operation_id,
+                phase="complete",
+                message="Image source is ready",
+                detail="The image component was saved to the workspace.",
+                progress=100,
+                status_value="completed",
+            )
 
             return {
                 "message": "Image component created successfully",
@@ -2596,114 +3254,44 @@ async def create_img_component(flow_id: str = Form(...), file: UploadFile = File
                 "type": "image",
             }
         
-        else:
-
-            image_part = {"mime_type": file.content_type, "data": contents}
-            
-            template = f"""You are tasked with generating a JSON mind map for given image file and that should be compatible with React Flow for rendering a flow diagram which should cover all the details and important aspects of the component for which multiple nodes can be required. The mind map should adhere to the following rules:
-
-                1. **Node Types:**
-                - There will always be one `dataSource` node, which serves as the root of the flow.
-                - There will be `question` node which will be connected to the subsequent `response` node.
-                - The `question` node can be connected to data sources or other `response` nodes.
-                - There will be `response` for the above question
-                
-                2. **Node Relationships:**
-                - `response` nodes may also connect to each other if it improves the logical flow or visualization.
-                - `question` node will always have a `response` node
-                - `dataSource` node will always be connected to a question node
-
-                3. **Node Properties:**
-                - Each node should have:
-                    - `id` (unique identifier of 12 or 24 digit unique uuid or nanoid)
-                    - `type` (`dataSource` or `response`)
-                    - `position` (coordinates in the form {{ "x": <number>, "y": <number> }} for layout)
-                    - `measured` (an object defining width and height):
-                        {{
-                            "width": <number>,
-                            "height": <number>
-                        }}
-                    - `targetPosition` (position of the target connection, default to `"left"`)
-                    - `sourcePosition` (position of the source connection, default to `"right"`)
-                    - `selected` (boolean, default to `false`)
-                    - `deletable` (boolean, default to `true` for `response` and `false` for `dataSource`)
-
-                4. **Node Data Format:**
-                - `dataSource` Node:
-                    - `data` contains the following properties:
-                        {{
-                            "prompt": "<data source description>",
-                            "name": "image", !!!DOESN"T CHANGES 
-                            "content": "<file name or content>",
-                            "flow_id": "{flow_id}",
-                            "file": "{file.filename}"  // Empty object or file metadata
-                        }}
-                5. **Question Data Format:**
-                - `question` Node:
-                    - `data` contains the following properties:
-                        {{
-                            "question": "<the question asked for the response>",
-                            "component_id": "<component reference ID - unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                            "component_type" : "image",
-                        }}
-                6. **RESPONSE NODE FORMAT**
-                - `response` Node:
-                    - `data` contains nested properties:
-                        {{
-                            "id": "<unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                            "type": "response" !!DOESN'T CHANGE,
-                            "data": {{
-                                "question": "<question text, if applicable>",
-                                "summ": "<!!give me a detailed answer for the above question>",
-                                "df": [],
-                                "graph": "",
-                                "flow_id": "{flow_id}",
-                                "component_id": "<component reference ID - unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                                "component_type": "image"
-                            }}
-                        }}
-
-                7. **Connections:**
-                - Connections between nodes should be represented by edges, with the following format:
-                    - `id` (unique identifier for the edge)
-                    - `source` (ID of the source node)
-                    - `target` (ID of the target node)
-                    - `type` (optional, defaults to `default`)
-                    - 'animated' !!WILL ALWAYS BE TRUE
-
-                8. **Viewport Configuration:**
-                - Include a `viewport` object that specifies:
-                    - `x` (horizontal position of the viewport)
-                    - `y` (vertical position of the viewport)
-                    - `zoom` (zoom level for initial rendering)
-
-                ### Additional Considerations:
-                - Ensure that the node positions are distributed properly to avoid overlap.
-                - Prioritize connecting `response` nodes where it adds logical structure to the flow.
-
-                ### IMPORTANT:
-                - **RETURN ONLY THE VALID JSON OBJECT AND NO ADDITIONAL COMMENTS**.
-                - Do **not** include any explanations, text, or additional information.
-                - Maintain the format with double curly braces `{{` and `}}` as shown in the format.
-                """
-                
-        response = model.generate_content(contents=[template, image_part])
-
-        response_json = response.text
-        response_json =  response_json.replace("```json", "").replace("```", "").replace("\n", "").strip()
-        response_json = json.loads(response_json)
+        update_operation_progress(
+            operation_id,
+            phase="ai_deriving",
+            message="AI is reading the image",
+            detail="Deriving reviewable workspace nodes from the image.",
+            progress=62,
+        )
+        response_json = generate_image_mindmap(
+            file_name=file.filename,
+            mime_type=file.content_type,
+            contents=contents,
+            flow_id=flow_id,
+            model=OPENAI_DEFAULT_MODEL,
+        )
         
+        response_json = ground_mindmap_with_source_refs(response_json, source_context)
         print(response_json)
         
         component_metadata = {
-            "flow_id": flow_id,
+            "flow_id": ObjectId(flow_id),
             "name": file.filename,
             "type": "image",
-            "processing_type": "gemini",
+            "processing_type": "openai",
+            "instructions": "",
+            "persona_name": "DocMap reviewer",
             "mindmap_json": response_json,
+            **source_metadata_fields(source_context),
         }
 
         component_id = component_collection.insert_one(component_metadata).inserted_id
+        update_operation_progress(
+            operation_id,
+            phase="complete",
+            message="Generated image workspace is ready",
+            detail="The derived mind map was saved to the workspace.",
+            progress=100,
+            status_value="completed",
+        )
 
         return {
             "flow_id" : ObjectId(flow_id),
@@ -2714,16 +3302,43 @@ async def create_img_component(flow_id: str = Form(...), file: UploadFile = File
             "flow_type": "automatic"
         }  
 
+    except HTTPException as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Image upload failed",
+            detail=str(exc.detail),
+            progress=100,
+            status_value="failed",
+        )
+        raise
     except Exception as e:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Image upload failed",
+            detail=str(e),
+            progress=100,
+            status_value="failed",
+        )
         print(f"Error in /component-create-img endpoint: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 @app.post("/component-create-audio")
 async def create_audio_component(
-    flow_id: str = Form(...), file: UploadFile = File(...)
+    flow_id: str = Form(...),
+    file: UploadFile = File(...),
+    operation_id: str | None = Form(None),
 ):
     try:
+        update_operation_progress(
+            operation_id,
+            phase="validating",
+            message="Validating audio upload",
+            detail=file.filename or "",
+            progress=12,
+        )
         flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
         MAX_AUDIO_SIZE_MB = 16
         ALLOWED_MIME_TYPES = {
@@ -2749,6 +3364,12 @@ async def create_audio_component(
             raise HTTPException(status_code=400, detail="Audio exceeds 16MB size limit")
 
         audio_base64 = base64.b64encode(contents).decode("utf-8")
+        source_context = binary_source_context(
+            filename=file.filename,
+            file_bytes=contents,
+            source_type="audio",
+            flow_id=flow_id,
+        )
         
         if flow["flow_type"] == 'manual':
 
@@ -2758,10 +3379,21 @@ async def create_audio_component(
                 "mime_type": file.content_type,
                 "type": "audio",
                 "base64_audio": audio_base64,
-                "processing_type": "gemini",
+                "processing_type": "openai",
+                "instructions": "",
+                "persona_name": "DocMap reviewer",
+                **source_metadata_fields(source_context),
             }
 
             component_id = component_collection.insert_one(component_metadata).inserted_id
+            update_operation_progress(
+                operation_id,
+                phase="complete",
+                message="Audio source is ready",
+                detail="The audio component was saved to the workspace.",
+                progress=100,
+                status_value="completed",
+            )
 
             return {
                 "message": "Audio component created successfully",
@@ -2769,112 +3401,55 @@ async def create_audio_component(
                 "type": "audio",
             }
             
-        else:
-            audio_part = {"mime_type": file.content_type, "data": contents}
-            
-            template = f"""You are tasked with generating a JSON mind map for given audio file and that should be compatible with React Flow for rendering a flow diagram which should cover all the details and important aspects of the component for which multiple nodes can be required. The mind map should adhere to the following rules:
-
-                1. **Node Types:**
-                - There will always be one `dataSource` node, which serves as the root of the flow.
-                - There will be `question` node which will be connected to the subsequent `response` node.
-                - The `question` node can be connected to data sources or other `response` nodes.
-                - There will be `response` for the above question
-                
-                2. **Node Relationships:**
-                - `response` nodes may also connect to each other if it improves the logical flow or visualization.
-                - `question` node will always have a `response` node
-                - `dataSource` node will always be connected to a question node
-
-                3. **Node Properties:**
-                - Each node should have:
-                    - `id` (unique identifier of 12 or 24 digit unique uuid or nanoid)
-                    - `type` (`dataSource` or `response`)
-                    - `position` (coordinates in the form {{ "x": <number>, "y": <number> }} for layout)
-                    - `measured` (an object defining width and height):
-                        {{
-                            "width": <number>,
-                            "height": <number>
-                        }}
-                    - `targetPosition` (position of the target connection, default to `"left"`)
-                    - `sourcePosition` (position of the source connection, default to `"right"`)
-                    - `selected` (boolean, default to `false`)
-                    - `deletable` (boolean, default to `true` for `response` and `false` for `dataSource`)
-
-                4. **Node Data Format:**
-                - `dataSource` Node:
-                    - `data` contains the following properties:
-                        {{
-                            "prompt": "<data source description>",
-                            "name": "audio", !!!DOESN"T CHANGES 
-                            "content": "<file name or content>",
-                            "flow_id": "{flow_id}",
-                            "file": "{file.filename}"  // Empty object or file metadata
-                        }}
-                5. **Question Data Format:**
-                - `question` Node:
-                    - `data` contains the following properties:
-                        {{
-                            "question": "<the question asked for the response>",
-                            "component_id": "<component reference ID - unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                            "component_type" : "audio",
-                        }}
-                6. **RESPONSE NODE FORMAT**
-                - `response` Node:
-                    - `data` contains nested properties:
-                        {{
-                            "id": "<unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                            "type": "response" !!DOESN'T CHANGE,
-                            "data": {{
-                                "question": "<question text, if applicable>",
-                                "summ": "<!!give me a detailed answer for the above question>",
-                                "df": [],
-                                "graph": "",
-                                "flow_id": "{flow_id}",
-                                "component_id": "<component reference ID - unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                                "component_type": "audio"
-                            }}
-                        }}
-
-                7. **Connections:**
-                - Connections between nodes should be represented by edges, with the following format:
-                    - `id` (unique identifier for the edge)
-                    - `source` (ID of the source node)
-                    - `target` (ID of the target node)
-                    - `type` (optional, defaults to `default`)
-                    - 'animated' !!WILL ALWAYS BE TRUE
-
-                8. **Viewport Configuration:**
-                - Include a `viewport` object that specifies:
-                    - `x` (horizontal position of the viewport)
-                    - `y` (vertical position of the viewport)
-                    - `zoom` (zoom level for initial rendering)
-
-                ### Additional Considerations:
-                - Ensure that the node positions are distributed properly to avoid overlap.
-                - Prioritize connecting `response` nodes where it adds logical structure to the flow.
-
-                ### IMPORTANT:
-                - **RETURN ONLY THE VALID JSON OBJECT AND NO ADDITIONAL COMMENTS**.
-                - Do **not** include any explanations, text, or additional information.
-                - Maintain the format with double curly braces `{{` and `}}` as shown in the format.
-                """
-
-        response = model.generate_content(contents=[template, audio_part])
-
-        response_json = response.text
-        response_json =  response_json.replace("```json", "").replace("```", "").replace("\n", "").strip()
-        response_json = json.loads(response_json); 
+        update_operation_progress(
+            operation_id,
+            phase="transcribing",
+            message="Transcribing audio",
+            detail="AI is converting the audio to text.",
+            progress=52,
+        )
+        transcript = transcribe_audio(
+            file_name=file.filename,
+            mime_type=file.content_type,
+            contents=contents,
+        )
+        update_operation_progress(
+            operation_id,
+            phase="ai_deriving",
+            message="AI is deriving workspace nodes",
+            detail="Building a mind map from the transcript.",
+            progress=72,
+        )
+        response_json = generate_audio_mindmap(
+            file_name=file.filename,
+            transcript=transcript,
+            flow_id=flow_id,
+            model=OPENAI_DEFAULT_MODEL,
+        )
+        response_json = ground_mindmap_with_source_refs(response_json, source_context)
         print(response_json)
         
         component_metadata = {
             "flow_id": ObjectId(flow_id),
             "name": file.filename,
             "type": "audio",
-            "processing_type": "gemini",
+            "processing_type": "openai",
+            "instructions": "",
+            "persona_name": "DocMap reviewer",
+            "transcript": transcript,
             "mindmap_json": response_json,
+            **source_metadata_fields(source_context),
         }
 
         component_id = component_collection.insert_one(component_metadata).inserted_id
+        update_operation_progress(
+            operation_id,
+            phase="complete",
+            message="Generated audio workspace is ready",
+            detail="The derived mind map was saved to the workspace.",
+            progress=100,
+            status_value="completed",
+        )
 
         return {
             "flow_id" : flow_id,
@@ -2885,19 +3460,51 @@ async def create_audio_component(
             "flow_type": "automatic"
         }
 
+    except HTTPException as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Audio upload failed",
+            detail=str(exc.detail),
+            progress=100,
+            status_value="failed",
+        )
+        raise
     except Exception as e:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Audio upload failed",
+            detail=str(e),
+            progress=100,
+            status_value="failed",
+        )
         print(f"Error in /component-create-audio endpoint: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 @app.post("/component-create-youtube")
 def create_youtube_component(
-    flow_id: str = Form(...), youtube_url: str = Form(...)
+    flow_id: str = Form(...),
+    youtube_url: str = Form(...),
+    operation_id: str | None = Form(None),
 ):
     try:
+        update_operation_progress(
+            operation_id,
+            phase="validating",
+            message="Preparing YouTube source",
+            detail=youtube_url,
+            progress=12,
+        )
         flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
         
         print(youtube_url)
+        source_context = virtual_source_context(
+            label=youtube_url,
+            source_type="youtube",
+            flow_id=flow_id,
+        )
         
         if flow["flow_type"] == 'manual':
             component_metadata = {
@@ -2905,9 +3512,20 @@ def create_youtube_component(
                 "youtube_url": youtube_url,
                 "type": "youtube",
                 "processing_type": "gemini",
+                "instructions": "",
+                "persona_name": "DocMap reviewer",
+                **source_metadata_fields(source_context),
             }
 
             component_id = component_collection.insert_one(component_metadata).inserted_id
+            update_operation_progress(
+                operation_id,
+                phase="complete",
+                message="YouTube source is ready",
+                detail="The YouTube source was saved to the workspace.",
+                progress=100,
+                status_value="completed",
+            )
 
             return {
                 "message": "Youtube component created successfully",
@@ -3006,13 +3624,19 @@ def create_youtube_component(
                 - Maintain the format with double curly braces `{{` and `}}` as shown in the format.
                 """
 
+        update_operation_progress(
+            operation_id,
+            phase="ai_deriving",
+            message="AI is reading the YouTube source",
+            detail="Deriving reviewable workspace nodes from the video URL.",
+            progress=64,
+        )
         response = model_vertexai.generate_content(
             contents=[template, Part.from_uri(youtube_url, mime_type)]
         )
 
-        response_json = response.text
-        response_json =  response_json.replace("```json", "").replace("```", "").replace("\n", "").strip()
-        response_json = json.loads(response_json)
+        response_json = parse_ai_mindmap_or_422(response.text)
+        response_json = ground_mindmap_with_source_refs(response_json, source_context)
         
         print(response_json)
         
@@ -3021,10 +3645,21 @@ def create_youtube_component(
             "youtube_url": youtube_url,
             "type": "youtube",
             "processing_type": "gemini",
+            "instructions": "",
+            "persona_name": "DocMap reviewer",
             "mindmap_json": response_json,
+            **source_metadata_fields(source_context),
         }
 
         component_id = component_collection.insert_one(component_metadata).inserted_id
+        update_operation_progress(
+            operation_id,
+            phase="complete",
+            message="Generated YouTube workspace is ready",
+            detail="The derived mind map was saved to the workspace.",
+            progress=100,
+            status_value="completed",
+        )
 
         return {
             "flow_id" : flow_id,
@@ -3036,17 +3671,44 @@ def create_youtube_component(
         }
             
 
+    except HTTPException as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="YouTube source failed",
+            detail=str(exc.detail),
+            progress=100,
+            status_value="failed",
+        )
+        raise
     except Exception as e:
         traceback.print_exc()
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="YouTube source failed",
+            detail=str(e),
+            progress=100,
+            status_value="failed",
+        )
         print(f"Error in /component-create-youtube endpoint: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 @app.post("/component-create-video")
 async def create_video_component(
-    flow_id: str = Form(...), file: UploadFile = File(...)
+    flow_id: str = Form(...),
+    file: UploadFile = File(...),
+    operation_id: str | None = Form(None),
 ):
     try:
+        update_operation_progress(
+            operation_id,
+            phase="validating",
+            message="Validating video upload",
+            detail=file.filename or "",
+            progress=12,
+        )
         flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
         MAX_VIDEO_SIZE_MB = 16
         ALLOWED_MIME_TYPES = {
@@ -3074,12 +3736,13 @@ async def create_video_component(
         if size_in_mb > MAX_VIDEO_SIZE_MB:
             raise HTTPException(status_code=400, detail="Video exceeds 16MB size limit")
 
-        unique_id = str(uuid4())
-        s3_key = f"uploads/{flow_id}/videos/{unique_id}_{file.filename}"
-
-        upload_to_s3(contents, bucket_name, s3_key)
-
-        video_url = f"https://{bucket_name}.s3.amazonaws.com/{s3_key}"
+        video_base64 = base64.b64encode(contents).decode("utf-8")
+        source_context = binary_source_context(
+            filename=file.filename,
+            file_bytes=contents,
+            source_type="video",
+            flow_id=flow_id,
+        )
         
         if flow["flow_type"] == 'manual':
 
@@ -3088,11 +3751,22 @@ async def create_video_component(
                 "name": file.filename,
                 "mime_type": file.content_type,
                 "type": "video",
-                "video_url": video_url,
-                "processing_type": "gemini",
+                "base64_video": video_base64,
+                "processing_type": "openai_local_frames",
+                "instructions": "",
+                "persona_name": "DocMap reviewer",
+                **source_metadata_fields(source_context),
             }
 
             component_id = component_collection.insert_one(component_metadata).inserted_id
+            update_operation_progress(
+                operation_id,
+                phase="complete",
+                message="Video source is ready",
+                detail="The video component was saved to the workspace.",
+                progress=100,
+                status_value="completed",
+            )
 
             return {
                 "message": "Video component created successfully",
@@ -3100,118 +3774,50 @@ async def create_video_component(
                 "type": "video",
             }
             
-        else:
-            
-            mime_type = "video/*"
-            
-            template = f"""
-                You are tasked with generating a JSON mind map for give video and should be compatible with React Flow for rendering a flow diagram which should cover all the details and important aspects of the component for which multiple nodes can be required. The mind map should adhere to the following rules:
-
-                1. **Node Types:**
-                - There will always be one `dataSource` node, which serves as the root of the flow.
-                - There will be `question` node which will be connected to the subsequent `response` node.
-                - The `question` node can be connected to data sources or other `response` nodes.
-                - There will be `response` for the above question
-                
-                2. **Node Relationships:**
-                - `response` nodes may also connect to each other if it improves the logical flow or visualization.
-                - `question` node will always have a `response` node
-                - `dataSource` node will always be connected to a question node
-
-                3. **Node Properties:**
-                - Each node should have:
-                    - `id` (unique identifier of 12 or 24 digit unique uuid or nanoid)
-                    - `type` (`dataSource` or `response`)
-                    - `position` (coordinates in the form {{ "x": <number>, "y": <number> }} for layout)
-                    - `measured` (an object defining width and height):
-                        {{
-                            "width": <number>,
-                            "height": <number>
-                        }}
-                    - `targetPosition` (position of the target connection, default to `"left"`)
-                    - `sourcePosition` (position of the source connection, default to `"right"`)
-                    - `selected` (boolean, default to `false`)
-                    - `deletable` (boolean, default to `true` for `response` and `false` for `dataSource`)
-
-                4. **Node Data Format:**
-                - `dataSource` Node:
-                    - `data` contains the following properties:
-                        {{
-                            "prompt": "<data source description>",
-                            "name": "{file.filename}", !!!DOESN"T CHANGES 
-                            "content": "<file name or content>",
-                            "flow_id": "{flow_id}",
-                            "file": "{file.filename}"  // Empty object or file metadata
-                        }}
-                5. **Question Data Format:**
-                - `question` Node:
-                    - `data` contains the following properties:
-                        {{
-                            "question": "<the question asked for the response>",
-                            "component_id": "<component reference ID - unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                            "component_type" : "video",
-                        }}
-                6. **RESPONSE NODE FORMAT**
-                - `response` Node:
-                    - `data` contains nested properties:
-                        {{
-                            "id": "<unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                            "type": "response" !!DOESN'T CHANGE,
-                            "data": {{
-                                "question": "<question text, if applicable>",
-                                "summ": "<!!give me a detailed answer for the above question>",
-                                "df": [],
-                                "graph": "",
-                                "flow_id": "{flow_id}",
-                                "component_id": "<component reference ID - unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                                "component_type": "video"
-                            }}
-                        }}
-
-                7. **Connections:**
-                - Connections between nodes should be represented by edges, with the following format:
-                    - `id` (unique identifier for the edge)
-                    - `source` (ID of the source node)
-                    - `target` (ID of the target node)
-                    - `type` (optional, defaults to `default`)
-                    - 'animated' !!WILL ALWAYS BE TRUE
-
-                8. **Viewport Configuration:**
-                - Include a `viewport` object that specifies:
-                    - `x` (horizontal position of the viewport)
-                    - `y` (vertical position of the viewport)
-                    - `zoom` (zoom level for initial rendering)
-
-                ### Additional Considerations:
-                - Ensure that the node positions are distributed properly to avoid overlap.
-                - Prioritize connecting `response` nodes where it adds logical structure to the flow.
-
-                ### IMPORTANT:
-                - **RETURN ONLY THE VALID JSON OBJECT AND NO ADDITIONAL COMMENTS**.
-                - Do **not** include any explanations, text, or additional information.
-                - Maintain the format with double curly braces `{{` and `}}` as shown in the format.
-                """
-
-        response = model_vertexai.generate_content(
-            contents=[template, Part.from_uri(video_url, mime_type)]
+        update_operation_progress(
+            operation_id,
+            phase="ai_deriving",
+            message="AI is sampling and reading video",
+            detail="Deriving reviewable workspace nodes from video frames and audio.",
+            progress=64,
         )
-
-        response_json = response.text
-        response_json =  response_json.replace("```json", "").replace("```", "").replace("\n", "").strip()
+        response_json = generate_video_mindmap(
+            file_name=file.filename,
+            mime_type=file.content_type,
+            contents=contents,
+            flow_id=flow_id,
+            model=OPENAI_DEFAULT_MODEL,
+        )
         
-        response_json = json.loads(response_json)
-        
+        response_json = ground_mindmap_with_source_refs(response_json, source_context)
         print(response_json)
                 
         component_metadata = {
             "flow_id": ObjectId(flow_id),
-            "video_url": video_url,
+            "name": file.filename,
             "type": "video",
-            "processing_type": "gemini",
+            "processing_type": "openai_local_video",
+            "instructions": "",
+            "persona_name": "DocMap reviewer",
+            "audio_status": response_json.get("metadata", {})
+            .get("video_audio", {})
+            .get("status", ""),
+            "transcript": response_json.get("metadata", {})
+            .get("video_audio", {})
+            .get("transcript", ""),
             "mindmap_json": response_json,
+            **source_metadata_fields(source_context),
         }
 
         component_id = component_collection.insert_one(component_metadata).inserted_id
+        update_operation_progress(
+            operation_id,
+            phase="complete",
+            message="Generated video workspace is ready",
+            detail="The derived mind map was saved to the workspace.",
+            progress=100,
+            status_value="completed",
+        )
 
         return {
             "flow_id" : flow_id,
@@ -3222,124 +3828,350 @@ async def create_video_component(
             "flow_type": "automatic"
         }
             
+    except HTTPException as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Video upload failed",
+            detail=str(exc.detail),
+            progress=100,
+            status_value="failed",
+        )
+        raise
     except Exception as e:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Video upload failed",
+            detail=str(e),
+            progress=100,
+            status_value="failed",
+        )
         print(f"Error in /component-create-video endpoint: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 @app.post("/component-create-txt")
-def create_txt_component(file: UploadFile, flow_id: str = Form(...)):
+def create_txt_component(
+    file: UploadFile,
+    flow_id: str = Form(...),
+    operation_id: str | None = Form(None),
+):
+    update_operation_progress(
+        operation_id,
+        phase="validating",
+        message="Validating text upload",
+        detail=file.filename or "",
+        progress=12,
+    )
     flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
     try:
         upload = validate_upload_bytes(file.filename, read_upload_bytes(file))
     except DocumentIngestionError as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Text validation failed",
+            detail=str(exc),
+            progress=100,
+            status_value="failed",
+        )
         raise ingestion_http_error(exc) from exc
 
     if upload["extension"] == "txt":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"])
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
         elif check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"])
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
         else:
             traceback.print_exc()
+            update_operation_progress(
+                operation_id,
+                phase="failed",
+                message="Text source exceeds AI token limit",
+                detail="Split the file into smaller sources and try again.",
+                progress=100,
+                status_value="failed",
+            )
             return HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
     else:
         traceback.print_exc()
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Text validation failed",
+            detail="Only TXT files are allowed.",
+            progress=100,
+            status_value="failed",
+        )
         raise HTTPException(status_code=400, detail="Only TXT files are allowed.")
 
 
 @app.post("/component-create-md")
-def create_md_component(file: UploadFile, flow_id: str = Form(...)):
+def create_md_component(
+    file: UploadFile,
+    flow_id: str = Form(...),
+    operation_id: str | None = Form(None),
+):
+    update_operation_progress(
+        operation_id,
+        phase="validating",
+        message="Validating Markdown upload",
+        detail=file.filename or "",
+        progress=12,
+    )
     flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
     try:
         upload = validate_upload_bytes(file.filename, read_upload_bytes(file))
     except DocumentIngestionError as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Markdown validation failed",
+            detail=str(exc),
+            progress=100,
+            status_value="failed",
+        )
         raise ingestion_http_error(exc) from exc
 
     if upload["extension"] == "md":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"])
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
         elif check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"])
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
         else:
             traceback.print_exc()
+            update_operation_progress(
+                operation_id,
+                phase="failed",
+                message="Markdown source exceeds AI token limit",
+                detail="Split the file into smaller sources and try again.",
+                progress=100,
+                status_value="failed",
+            )
             return HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
     else:
         traceback.print_exc()
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Markdown validation failed",
+            detail="Only Markdown files are allowed.",
+            progress=100,
+            status_value="failed",
+        )
         raise HTTPException(status_code=400, detail="Only MarkDown files are allowed.")
 
 
 @app.post("/component-create-pptx")
-def create_pptx_component(file: UploadFile, flow_id: str = Form(...)):
+def create_pptx_component(
+    file: UploadFile,
+    flow_id: str = Form(...),
+    operation_id: str | None = Form(None),
+):
+    update_operation_progress(
+        operation_id,
+        phase="validating",
+        message="Validating PPTX upload",
+        detail=file.filename or "",
+        progress=12,
+    )
     flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
-    if file.filename.endswith(".pptx"):
+    try:
+        upload = validate_ai_intake_bytes(file.filename, read_upload_bytes(file))
+    except DocumentIngestionError as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="PPTX validation failed",
+            detail=str(exc),
+            progress=100,
+            status_value="failed",
+        )
+        raise ingestion_http_error(exc) from exc
+
+    if upload["extension"] == "pptx":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"])
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
         elif check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"])
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
         else:
             traceback.print_exc()
+            update_operation_progress(
+                operation_id,
+                phase="failed",
+                message="PPTX source exceeds AI token limit",
+                detail="Split the deck into smaller sources and try again.",
+                progress=100,
+                status_value="failed",
+            )
             return HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
     else:
         traceback.print_exc()
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="PPTX validation failed",
+            detail="Only PPTX files are allowed.",
+            progress=100,
+            status_value="failed",
+        )
         raise HTTPException(status_code=400, detail="Only PPTX files are allowed.")
 
 
 @app.post("/component-create-html")
-def create_html_component(file: UploadFile, flow_id: str = Form(...)):
+def create_html_component(
+    file: UploadFile,
+    flow_id: str = Form(...),
+    operation_id: str | None = Form(None),
+):
+    update_operation_progress(
+        operation_id,
+        phase="validating",
+        message="Validating HTML upload",
+        detail=file.filename or "",
+        progress=12,
+    )
     flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
-    if file.filename.endswith(".html"):
+    try:
+        upload = validate_ai_intake_bytes(file.filename, read_upload_bytes(file))
+    except DocumentIngestionError as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="HTML validation failed",
+            detail=str(exc),
+            progress=100,
+            status_value="failed",
+        )
+        raise ingestion_http_error(exc) from exc
+
+    if upload["extension"] == "html":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"])
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
         elif check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"])
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
         else:
             traceback.print_exc()
+            update_operation_progress(
+                operation_id,
+                phase="failed",
+                message="HTML source exceeds AI token limit",
+                detail="Split the file into smaller sources and try again.",
+                progress=100,
+                status_value="failed",
+            )
             return HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
     else:
         traceback.print_exc()
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="HTML validation failed",
+            detail="Only HTML files are allowed.",
+            progress=100,
+            status_value="failed",
+        )
         raise HTTPException(status_code=400, detail="Only HTML files are allowed.")
 
 
 @app.post("/component-create-docx")
-def create_docx_component(file: UploadFile, flow_id: str = Form(...)):
+def create_docx_component(
+    file: UploadFile,
+    flow_id: str = Form(...),
+    operation_id: str | None = Form(None),
+):
+    update_operation_progress(
+        operation_id,
+        phase="validating",
+        message="Validating DOCX upload",
+        detail=file.filename or "",
+        progress=12,
+    )
     flow = get_upload_flow_or_400(flow_id)
     try:
         upload = validate_upload_bytes(file.filename, read_upload_bytes(file))
     except DocumentIngestionError as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="DOCX validation failed",
+            detail=str(exc),
+            progress=100,
+            status_value="failed",
+        )
         raise ingestion_http_error(exc) from exc
 
     if upload["extension"] == "docx":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"])
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
         elif check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"])
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
         else:
             traceback.print_exc()
+            update_operation_progress(
+                operation_id,
+                phase="failed",
+                message="DOCX source exceeds AI token limit",
+                detail="Split the file into smaller sources and try again.",
+                progress=100,
+                status_value="failed",
+            )
             raise HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
     else:
         traceback.print_exc()
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="DOCX validation failed",
+            detail="Only DOCX files are allowed.",
+            progress=100,
+            status_value="failed",
+        )
         raise HTTPException(status_code=400, detail="Only DOCX files are allowed.")
 
 
 @app.post("/component-create-csv")
 def create_csv_component(
-    file: UploadFile = File(...), flow_id: str = Form(...), header_row: int = Form(...)
+    file: UploadFile = File(...),
+    flow_id: str = Form(...),
+    header_row: int = Form(...),
+    operation_id: str | None = Form(None),
 ):
     try:
+        update_operation_progress(
+            operation_id,
+            phase="validating",
+            message="Preparing CSV source",
+            detail=file.filename,
+            progress=10,
+        )
         flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
         if flow["flow_type"] != 'manual':
             raise HTTPException(status_code=400, detail="Only Manual Mindmap is supported for CSV.")
-        if not file.filename.endswith(".csv"):
+        if not (file.filename or "").lower().endswith(".csv"):
             raise HTTPException(status_code=400, detail="Only CSV files are allowed.")
 
         file_bytes = file.file.read()
+        update_operation_progress(
+            operation_id,
+            phase="extracting",
+            message="Reading CSV table",
+            detail="Checking duplicates and source metadata.",
+            progress=25,
+        )
         file_hash = calculate_file_hash(file_bytes)
+        source_context = binary_source_context(
+            filename=file.filename,
+            file_bytes=file_bytes,
+            source_type="csv",
+            flow_id=flow_id,
+        )
 
         existing_component = component_collection.find_one(
             {"file_hash": file_hash, "flow_id": ObjectId(flow_id)}
@@ -3356,6 +4188,13 @@ def create_csv_component(
         s3_key = folder + file_name
         upload_to_s3(file_bytes, bucket_name, s3_key)
         print("uploaded")
+        update_operation_progress(
+            operation_id,
+            phase="importing",
+            message="Importing CSV into the query engine",
+            detail="Creating a temporary table and reading headers.",
+            progress=48,
+        )
 
         sql_con = sqlite3.connect("csv_data.db")
         buffer = BytesIO(file_bytes)
@@ -3370,6 +4209,13 @@ def create_csv_component(
         df.to_sql(name=unique_table_name, con=sql_con, if_exists="replace", index=False)
         sql_con.close()
         csvBot.connect_to_sqlite("csv_data.db")
+        update_operation_progress(
+            operation_id,
+            phase="ai_reading",
+            message="AI is reading the CSV schema",
+            detail=f"{len(df.columns)} columns were detected.",
+            progress=68,
+        )
 
         df_ddl = csvBot.run_sql(
             f"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = '{unique_table_name}'"
@@ -3377,6 +4223,13 @@ def create_csv_component(
 
         for ddl in df_ddl["sql"].to_list():
             csvBot.train(ddl=ddl)
+        update_operation_progress(
+            operation_id,
+            phase="ai_deriving",
+            message="AI is preparing CSV query context",
+            detail="Training data source metadata for follow-up questions.",
+            progress=84,
+        )
 
         training_data = csvBot.get_training_data()
         print(training_data)
@@ -3390,16 +4243,43 @@ def create_csv_component(
             "type": "csv",
             "s3_path": s3_key,
             "created_at": datetime.datetime.utcnow(),
+            **source_metadata_fields(source_context),
         }
         component_id = component_collection.insert_one(component_metadata).inserted_id
+        update_operation_progress(
+            operation_id,
+            phase="complete",
+            message="CSV source ready",
+            detail=file.filename,
+            progress=100,
+            status_value="completed",
+        )
         return {
             "component_id": str(component_id),
             "type": "csv",
             "message": "Component created successfully",
         }
 
+    except HTTPException as e:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="CSV source could not be added",
+            detail=str(e.detail),
+            progress=100,
+            status_value="failed",
+        )
+        raise e
     except Exception as e:
         print(f"Error in /component-create-csv endpoint: {e}")
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="CSV source could not be added",
+            detail=str(e),
+            progress=100,
+            status_value="failed",
+        )
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
@@ -3407,10 +4287,86 @@ def create_csv_component(
 async def create_web_crawler(
     flow_id: str = Form(...),
     web_url: str = Form(...),
+    operation_id: str | None = Form(None),
 ):
     try:
+        update_operation_progress(
+            operation_id,
+            phase="validating",
+            message="Preparing web source",
+            detail=web_url,
+            progress=12,
+        )
         flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
         flow_type = flow["flow_type"]
+        source_context = virtual_source_context(
+            label=web_url,
+            source_type="web",
+            flow_id=flow_id,
+        )
+        if flow_type == "manual":
+            component_metadata = {
+                "flow_id": ObjectId(flow_id),
+                "web_url": web_url,
+                "type": "web",
+                "processing_type": "openai_web_search",
+                **source_metadata_fields(source_context),
+            }
+            component_id = component_collection.insert_one(component_metadata).inserted_id
+            update_operation_progress(
+                operation_id,
+                phase="complete",
+                message="Web source is ready",
+                detail="The web source was saved to the workspace.",
+                progress=100,
+                status_value="completed",
+            )
+            return {
+                "component_id": str(component_id),
+                "type": "web",
+                "message": "Web component created successfully",
+            }
+
+        update_operation_progress(
+            operation_id,
+            phase="ai_deriving",
+            message="AI is reading the web page",
+            detail="Deriving reviewable workspace nodes from the URL.",
+            progress=64,
+        )
+        response_json = generate_web_mindmap(
+            url=web_url,
+            flow_id=flow_id,
+            model=OPENAI_DEFAULT_MODEL,
+        )
+        response_json = ground_mindmap_with_source_refs(response_json, source_context)
+
+        component_metadata = {
+            "flow_id": ObjectId(flow_id),
+            "web_url": web_url,
+            "type": "web",
+            "processing_type": "openai_web_search",
+            "mindmap_json": response_json,
+            **source_metadata_fields(source_context),
+        }
+
+        component_id = component_collection.insert_one(component_metadata).inserted_id
+        update_operation_progress(
+            operation_id,
+            phase="complete",
+            message="Generated web workspace is ready",
+            detail="The derived mind map was saved to the workspace.",
+            progress=100,
+            status_value="completed",
+        )
+
+        return {
+            "component_id": str(component_id),
+            "type": "web",
+            "mindmap_json": response_json,
+            "flow_type": flow_type,
+        }
+
         unique_id = str(uuid4())
 
         async with AsyncWebCrawler() as crawler:
@@ -3620,9 +4576,7 @@ async def create_web_crawler(
         for index, annotation in enumerate(annotations):
             message_content.value = message_content.value.replace(annotation.text, f"[{index}]")
 
-        response_json = message_content.value.replace("```json", "").replace("```", "").replace("\n", "").strip()
-        
-        response_json = json.loads(response_json)
+        response_json = parse_ai_mindmap_or_422(message_content.value)
         print(response_json)
 
         component_metadata = {
@@ -3638,6 +4592,14 @@ async def create_web_crawler(
         }
 
         component_id = component_collection.insert_one(component_metadata).inserted_id
+        update_operation_progress(
+            operation_id,
+            phase="complete",
+            message="Generated web workspace is ready",
+            detail="The derived mind map was saved to the workspace.",
+            progress=100,
+            status_value="completed",
+        )
 
         return {
             "component_id": str(component_id),
@@ -3646,7 +4608,25 @@ async def create_web_crawler(
             "flow_type": flow_type
         }
 
+    except HTTPException as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Web source failed",
+            detail=str(exc.detail),
+            progress=100,
+            status_value="failed",
+        )
+        raise
     except Exception as e:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Web source failed",
+            detail=str(e),
+            progress=100,
+            status_value="failed",
+        )
         print(f"Error in /component-create-crawl endpoint: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal Server Error")
@@ -4479,8 +5459,8 @@ def IMG_QA(request: ImgNodeQueryRequest):
             }
         )
 
-        instructions = record["instructions"]
-        persona_name = record["persona_name"]
+        instructions = record.get("instructions", "")
+        persona_name = record.get("persona_name", "DocMap reviewer")
         base64_image = record["base64_image"]
         mime_type = record["mime_type"]
         image_bytes = base64.b64decode(base64_image)
@@ -4613,8 +5593,8 @@ def AUDIO_QA(request: AudioNodeQueryRequest):
             }
         )
         
-        instructions = record["instructions"]
-        persona_name = record["persona_name"]
+        instructions = record.get("instructions", "")
+        persona_name = record.get("persona_name", "DocMap reviewer")
 
         base64_audio = record["base64_audio"]
         mime_type = record["mime_type"]
@@ -4745,8 +5725,8 @@ def YOUTUBE_QA(request: YoutubeNodeQueryRequest):
             }
         )
 
-        instructions = record["instructions"]
-        persona_name = record["persona_name"]
+        instructions = record.get("instructions", "")
+        persona_name = record.get("persona_name", "DocMap reviewer")
         
         youtube_url = record["youtube_url"]
         mime_type = "video/*"
@@ -4877,11 +5857,20 @@ def VIDEO_QA(request: VideoNodeQueryRequest):
             }
         )
 
-        instructions = record["instructions"]
-        persona_name = record["persona_name"]
+        instructions = record.get("instructions", "")
+        persona_name = record.get("persona_name", "DocMap reviewer")
         
-        video_url = record["video_url"]
-        mime_type = record["mime_type"]
+        video_url = record.get("video_url")
+        mime_type = record.get("mime_type", "video/*")
+        if not video_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Video Q&A for local uploaded videos needs a transcript-backed "
+                    "or externally addressable video source. Regenerate the map from "
+                    "the video source or use the generated mind map review views."
+                ),
+            )
 
         template = f"""
           You are an AI assistant tasked with answering the user’s question based on the provided question and persona. Return the results in **JSON format** with the structure below:  
@@ -5086,27 +6075,70 @@ def get_flow_details(flow_id: str):
 @app.post("/create_sql_component/", response_model=SQLComponentResponse)
 def create_sql_component(request: SQLComponentRequest):
     try:
+        update_operation_progress(
+            request.operation_id,
+            phase="validating",
+            message="Preparing SQL source",
+            detail=request.table_name,
+            progress=12,
+        )
         flow = flow_collection.find_one({"_id": ObjectId(request.flow_id)})
         
         if flow["flow_type"] != 'manual':
             raise HTTPException(status_code=400, detail="Only Manual Mindmap is supported for SQL.")
         
+        update_operation_progress(
+            request.operation_id,
+            phase="schema",
+            message="Reading SQL schema",
+            detail=f"Looking for tables matching {request.table_name}.",
+            progress=38,
+        )
         df_ddl = sqlBot.run_sql("SELECT type, sql FROM sqlite_master WHERE sql IS NOT NULL AND name LIKE '%" + request.table_name + "%'")
         print(df_ddl)
 
+        update_operation_progress(
+            request.operation_id,
+            phase="ai_reading",
+            message="AI is reading SQL table context",
+            detail="Training available table definitions for questions.",
+            progress=68,
+        )
         for ddl in df_ddl['sql'].to_list():
             sqlBot.train(ddl=ddl)
 
         training_data = sqlBot.get_training_data()
         print(training_data)
+        update_operation_progress(
+            request.operation_id,
+            phase="saving",
+            message="Adding SQL source node",
+            detail=request.table_name,
+            progress=88,
+        )
 
         component_data = {
             "flow_id": ObjectId(request.flow_id),
             "type": "sql",
             "table_name": request.table_name,
+            **source_metadata_fields(
+                virtual_source_context(
+                    label=request.table_name,
+                    source_type="sql",
+                    flow_id=request.flow_id,
+                )
+            ),
         }
 
         component_id = component_collection.insert_one(component_data).inserted_id
+        update_operation_progress(
+            request.operation_id,
+            phase="complete",
+            message="SQL source ready",
+            detail=request.table_name,
+            progress=100,
+            status_value="completed",
+        )
 
         return SQLComponentResponse(
             component_id=str(component_id),
@@ -5114,8 +6146,26 @@ def create_sql_component(request: SQLComponentRequest):
             message="Component created successfully",
         )
 
+    except HTTPException as e:
+        update_operation_progress(
+            request.operation_id,
+            phase="failed",
+            message="SQL source could not be added",
+            detail=str(e.detail),
+            progress=100,
+            status_value="failed",
+        )
+        raise e
     except Exception as e:
         print(f"Error in /create_sql_component/: {e}")
+        update_operation_progress(
+            request.operation_id,
+            phase="failed",
+            message="SQL source could not be added",
+            detail=str(e),
+            progress=100,
+            status_value="failed",
+        )
         raise HTTPException(
             status_code=500, detail=f"Error creating SQL component: {str(e)}"
         )

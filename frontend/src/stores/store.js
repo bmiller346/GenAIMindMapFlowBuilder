@@ -2,6 +2,11 @@ import { applyEdgeChanges, applyNodeChanges } from '@xyflow/react';
 import { create } from 'zustand';
 import SQLSvg from "../assets/sql.svg";
 import CSVSvg from "../assets/csv.svg";
+import {
+    createWorkspaceEdge,
+    createWorkspaceNode,
+    updateWorkspaceNode
+} from '../utils/manualNodes';
 
 // Sample
 const data = {
@@ -200,6 +205,7 @@ const useStore = create((set, get) => ({
     edges: [],
     activeView: 'mindmap',
     selectedBranchId: undefined,
+    inspectorNodeId: undefined,
     workspaceBrief: {
         configured: false,
         preset: 'custom',
@@ -225,6 +231,8 @@ const useStore = create((set, get) => ({
         review_rules: ''
     },
     viewport: {},
+    sourceLibrary: [],
+    generatedHelperPreviews: {},
     onNodesChange: (change) => {
         console.log("Test");
         set({
@@ -242,14 +250,56 @@ const useStore = create((set, get) => ({
     setEdges: (edges) => {
         set({ edges });
     },
+    createNode: (options = {}) => {
+        const node = createWorkspaceNode(options);
+        set({ nodes: [...get().nodes, node] });
+        return node;
+    },
+    updateNode: (nodeId, patch = {}) => {
+        let updatedNode;
+        set({
+            nodes: get().nodes.map((node) => {
+                if (node.id !== nodeId) {
+                    return node;
+                }
+                updatedNode = updateWorkspaceNode(node, patch);
+                return updatedNode;
+            })
+        });
+        return updatedNode;
+    },
+    createEdge: (source, target, options = {}) => {
+        const edge = createWorkspaceEdge(source, target, options);
+        set({ edges: [...get().edges, edge] });
+        return edge;
+    },
     setActiveView: (activeView) => {
         set({ activeView });
     },
     setSelectedBranchId: (selectedBranchId) => {
         set({ selectedBranchId });
     },
+    setInspectorNodeId: (inspectorNodeId) => {
+        set({ inspectorNodeId });
+    },
     setWorkspaceBrief: (workspaceBrief) => {
         set({ workspaceBrief });
+    },
+    setSourceLibrary: (sourceLibrary) => {
+        set({ sourceLibrary: Array.isArray(sourceLibrary) ? sourceLibrary : [] });
+    },
+    setGeneratedHelperPreview: (key, preview) => {
+        set({
+            generatedHelperPreviews: {
+                ...get().generatedHelperPreviews,
+                [key]: preview
+            }
+        });
+    },
+    clearGeneratedHelperPreview: (key) => {
+        const next = { ...get().generatedHelperPreviews };
+        delete next[key];
+        set({ generatedHelperPreviews: next });
     },
     uploadFile: (id, file) => {
         set({
@@ -262,8 +312,12 @@ const useStore = create((set, get) => ({
             })
         });
     },
-    setViewPort: (vp) => {
-        set({ vp })
+    setViewPort: (...args) => {
+        const viewport =
+            args.length === 1
+                ? args[0]
+                : { x: args[0] || 0, y: args[1] || 0, zoom: args[2] || 1 };
+        set({ viewport })
     }
 }));
 

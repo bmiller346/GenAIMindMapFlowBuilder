@@ -7,11 +7,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from documents.ingestion import (
     DocumentIngestionError,
     build_source_document,
+    build_ai_intake_source_document,
     chunk_source_segments,
     chunk_text,
     deterministic_chunk_id,
     source_segments_from_text,
     sanitize_filename,
+    validate_ai_intake_bytes,
     validate_upload_bytes,
 )
 
@@ -21,8 +23,28 @@ def test_sanitize_filename_removes_paths_and_keeps_extension_lowercase():
 
 
 def test_validate_upload_rejects_unsupported_extensions():
-    with pytest.raises(DocumentIngestionError):
+    with pytest.raises(DocumentIngestionError) as exc:
         validate_upload_bytes("demo.exe", b"not a document")
+    assert "source-traceable document pipeline" in str(exc.value)
+    assert "PDF, DOCX, Markdown, or TXT" in str(exc.value)
+
+
+def test_strict_document_upload_rejects_ai_intake_only_extensions():
+    with pytest.raises(DocumentIngestionError) as exc:
+        validate_upload_bytes("slides.pptx", b"presentation bytes")
+    assert "source-traceable document pipeline" in str(exc.value)
+    assert "matching AI intake option" in str(exc.value)
+
+
+def test_ai_intake_upload_accepts_pptx_and_html_without_chunk_contract():
+    pptx_upload = validate_ai_intake_bytes("Deck.PPTX", b"presentation bytes")
+    html_source = build_ai_intake_source_document("Page.HTML", b"<h1>Scope</h1>")
+
+    assert pptx_upload["filename"] == "Deck.pptx"
+    assert pptx_upload["extension"] == "pptx"
+    assert html_source["filename"] == "Page.html"
+    assert html_source["type"] == "html"
+    assert html_source["id"].startswith("src_")
 
 
 def test_source_document_metadata_is_hash_and_version_based():

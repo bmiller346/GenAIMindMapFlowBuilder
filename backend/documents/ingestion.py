@@ -8,6 +8,8 @@ from pathlib import PurePath
 from zipfile import BadZipFile
 
 ALLOWED_DOCUMENT_EXTENSIONS = frozenset({"pdf", "docx", "md", "txt"})
+ALLOWED_AI_INTAKE_EXTENSIONS = frozenset({"pdf", "docx", "md", "txt", "pptx", "html"})
+SOURCE_TRACEABLE_DOCUMENT_LABEL = "PDF, DOCX, Markdown, or TXT"
 DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_CHUNK_CHARS = 2200
 MIN_CHUNK_CHARS = 400
@@ -80,12 +82,37 @@ def file_sha256(file_bytes: bytes) -> str:
 
 
 def validate_upload_bytes(filename: str, file_bytes: bytes) -> dict:
+    return validate_file_upload_bytes(
+        filename,
+        file_bytes,
+        ALLOWED_DOCUMENT_EXTENSIONS,
+        unsupported_message=(
+            "This source cannot enter the source-traceable document pipeline. "
+            f"Upload {SOURCE_TRACEABLE_DOCUMENT_LABEL} for chunked citations, "
+            "or use the matching AI intake option for non-document sources."
+        ),
+    )
+
+
+def validate_ai_intake_bytes(filename: str, file_bytes: bytes) -> dict:
+    return validate_file_upload_bytes(filename, file_bytes, ALLOWED_AI_INTAKE_EXTENSIONS)
+
+
+def validate_file_upload_bytes(
+    filename: str,
+    file_bytes: bytes,
+    allowed_extensions: frozenset[str],
+    unsupported_message: str = "",
+) -> dict:
     sanitized_filename = sanitize_filename(filename)
     extension = sanitized_filename.rsplit(".", 1)[-1].lower() if "." in sanitized_filename else ""
 
-    if extension not in ALLOWED_DOCUMENT_EXTENSIONS:
-        allowed = ", ".join(sorted(ALLOWED_DOCUMENT_EXTENSIONS))
-        raise DocumentIngestionError(f"Unsupported file type '{extension}'. Allowed types: {allowed}.")
+    if extension not in allowed_extensions:
+        allowed = ", ".join(sorted(allowed_extensions))
+        guidance = unsupported_message or f"Allowed types: {allowed}."
+        raise DocumentIngestionError(
+            f"Unsupported file type '{extension}'. {guidance}"
+        )
 
     if not file_bytes:
         raise DocumentIngestionError("The uploaded file is empty.")
@@ -106,6 +133,15 @@ def validate_upload_bytes(filename: str, file_bytes: bytes) -> dict:
 
 def build_source_document(filename: str, file_bytes: bytes, version: int = 1) -> dict:
     upload = validate_upload_bytes(filename, file_bytes)
+    return source_document_from_upload(upload, version)
+
+
+def build_ai_intake_source_document(filename: str, file_bytes: bytes, version: int = 1) -> dict:
+    upload = validate_ai_intake_bytes(filename, file_bytes)
+    return source_document_from_upload(upload, version)
+
+
+def source_document_from_upload(upload: dict, version: int = 1) -> dict:
     source_document = SourceDocument(
         id=f"src_{upload['file_hash'][:16]}_v{version}",
         filename=upload["filename"],
@@ -312,7 +348,10 @@ def extract_source_segments(file_bytes: bytes, extension: str, fallback_text: st
         text = fallback_text or file_bytes.decode("utf-8", errors="ignore")
         return source_segments_from_text(text, extension)
 
-    raise DocumentIngestionError(f"Unsupported file type '{extension}'.")
+    raise DocumentIngestionError(
+        f"Unsupported file type '{extension}'. "
+        f"Only {SOURCE_TRACEABLE_DOCUMENT_LABEL} produce source-traceable chunks."
+    )
 
 
 def _append_chunk(

@@ -60,6 +60,66 @@ class MondayClient:
             "responses": responses,
         }
 
+    def build_existing_group_preflight_operation(
+        self,
+        board_id: str,
+        group_id: str,
+        template_id: str = "",
+    ) -> dict:
+        template = resolve_monday_template(template_id)
+        column_ids = sorted(set(template.get("column_map", {}).values()))
+        return {
+            "method": "POST",
+            "url": self.base_url,
+            "client_key": "monday-existing-group-preflight",
+            "query": (
+                "query DocMapMondayPreflight($board_ids: [ID!]) { "
+                "boards(ids: $board_ids) { id name "
+                "groups { id title } "
+                "columns { id title type settings_str } } }"
+            ),
+            "variables": {"board_ids": [str(board_id)]},
+            "metadata": {
+                "board_id": str(board_id),
+                "group_id": group_id,
+                "template_id": template.get("id", ""),
+                "required_column_ids": column_ids,
+                "required_column_types": _required_column_types(template),
+            },
+        }
+
+    def preflight_existing_group(
+        self,
+        board_id: str,
+        group_id: str,
+        template_id: str = "",
+        dry_run: bool = True,
+    ) -> dict:
+        operation = self.build_existing_group_preflight_operation(
+            board_id,
+            group_id,
+            template_id=template_id,
+        )
+        if dry_run:
+            return {
+                "mode": "dry_run",
+                "board_id": str(board_id),
+                "group_id": group_id,
+                "template": resolve_monday_template(template_id),
+                "operation": operation,
+            }
+
+        response = self._post(operation)
+        return {
+            "mode": "executed",
+            "board_id": str(board_id),
+            "group_id": group_id,
+            "template": resolve_monday_template(template_id),
+            "operation": operation,
+            "response": response,
+            "preflight": assess_existing_group_preflight(response, operation),
+        }
+
     def build_status_pull_operations(
         self,
         refs_by_node_id: dict[str, dict],
@@ -193,3 +253,133 @@ class MondayClient:
             "Authorization": self.token,
             "Content-Type": "application/json",
         }
+
+
+def assess_existing_group_preflight(response: dict, operation: dict) -> dict:
+    metadata = operation.get("metadata", {})
+    board_id = str(metadata.get("board_id", ""))
+    group_id = metadata.get("group_id", "")
+    required_column_ids = metadata.get("required_column_ids", [])
+    required_column_types = metadata.get("required_column_types", {})
+    board = _board_from_response(response, board_id)
+    issues = []
+    warnings = []
+
+    if not board:
+        issues.append(
+            {
+                "code": "monday_board_not_found",
+                "message": f"monday board {board_id} was not returned.",
+            }
+        )
+        return {
+            "ok": False,
+            "board_found": False,
+            "group_found": False,
+            "missing_column_ids": required_column_ids,
+            "type_mismatches": [],
+            "issues": issues,
+            "warnings": warnings,
+        }
+
+    groups = board.get("groups", []) if isinstance(board.get("groups"), list) else []
+    columns = board.get("columns", []) if isinstance(board.get("columns"), list) else []
+    columns_by_id = {
+        str(column.get("id", "")): column
+        for column in columns
+        if isinstance(column, dict) and column.get("id")
+    }
+    group_found = any(str(group.get("id", "")) == group_id for group in groups)
+    if not group_found:
+        issues.append(
+            {
+                "code": "monday_group_not_found",
+                "message": f"monday group {group_id} was not returned for board {board_id}.",
+            }
+        )
+
+    missing_column_ids = [
+        column_id
+        for column_id in required_column_ids
+        if column_id not in columns_by_id
+    ]
+    for column_id in missing_column_ids:
+        issues.append(
+            {
+                "code": "monday_column_not_found",
+                "column_id": column_id,
+                "message": f"monday column {column_id} was not returned for board {board_id}.",
+            }
+        )
+
+    type_mismatches = []
+    for column_id, expected_type in required_column_types.items():
+        column = columns_by_id.get(column_id)
+        if not column:
+            continue
+        actual_type = str(column.get("type", ""))
+        if expected_type and actual_type and actual_type != expected_type:
+            mismatch = {
+                "column_id": column_id,
+                "expected_type": expected_type,
+                "actual_type": actual_type,
+            }
+            type_mismatches.append(mismatch)
+            issues.append(
+                {
+                    "code": "monday_column_type_mismatch",
+                    "message": (
+                        f"monday column {column_id} is {actual_type}, "
+                        f"expected {expected_type}."
+                    ),
+                    **mismatch,
+                }
+            )
+
+    if required_column_types:
+        warnings.append(
+            {
+                "code": "monday_status_labels_unverified",
+                "message": (
+                    "Preflight checks status column type, but item-specific labels "
+                    "are validated by monday during item creation."
+                ),
+            }
+        )
+
+    return {
+        "ok": not issues,
+        "board_found": True,
+        "group_found": group_found,
+        "board": {
+            "id": str(board.get("id", "")),
+            "name": board.get("name", ""),
+        },
+        "missing_column_ids": missing_column_ids,
+        "type_mismatches": type_mismatches,
+        "issues": issues,
+        "warnings": warnings,
+    }
+
+
+def _required_column_types(template: dict) -> dict:
+    value_types = template.get("column_value_types", {})
+    column_map = template.get("column_map", {})
+    monday_type_by_value_type = {"status": "status", "date": "date"}
+    return {
+        column_map[source_key]: monday_type
+        for source_key, value_type in value_types.items()
+        for monday_type in [monday_type_by_value_type.get(value_type)]
+        if monday_type and column_map.get(source_key)
+    }
+
+
+def _board_from_response(response: dict, board_id: str) -> dict:
+    data = response.get("data", {}) if isinstance(response, dict) else {}
+    boards = data.get("boards", []) if isinstance(data, dict) else []
+    if not isinstance(boards, list):
+        return {}
+    for board in boards:
+        if isinstance(board, dict) and str(board.get("id", "")) == str(board_id):
+            return board
+    return boards[0] if boards and isinstance(boards[0], dict) else {}

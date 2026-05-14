@@ -5,6 +5,16 @@ from graph.schemas import ExportBatch
 from .mapper import map_task_node_to_monday_item
 from .templates import resolve_monday_template
 
+MONDAY_GROUP_CREATION_POLICY = {
+    "mvp_scope": "existing_board_existing_group_only",
+    "will_create_groups": False,
+    "decision": (
+        "MVP exports require the user to choose an existing monday board and group. "
+        "Automatic group creation from DocMap categories is deferred until conflict "
+        "handling and target-template governance exist."
+    ),
+}
+
 
 def select_monday_task_nodes(graph: dict) -> list[dict]:
     staged_nodes = [
@@ -112,6 +122,7 @@ def export_tasks_to_monday_payload(
             "will_create_items": len(task_nodes),
             "will_use_existing_board": bool(board_id),
             "will_use_existing_group": bool(group_id),
+            "group_creation_policy": MONDAY_GROUP_CREATION_POLICY,
         },
         "items": [
             {

@@ -138,6 +138,7 @@ def test_mvp_upload_extract_chunk_flow_rejects_non_primary_formats():
         ingest_supported_document("legacy-demo.html", b"<h1>Not MVP</h1>")
     except DocumentIngestionError as exc:
         assert "Unsupported file type" in str(exc)
+        assert "source-traceable document pipeline" in str(exc)
     else:
         raise AssertionError("Expected unsupported HTML upload to be rejected.")
 
