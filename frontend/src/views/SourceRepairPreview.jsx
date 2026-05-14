@@ -2,6 +2,8 @@
 import { useMemo, useState } from 'react';
 import { getSourceRepairPreviewRows } from './graphProjection';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
+import useActivityStore from '../stores/activityStore';
+import flowStore from '../stores/flowStore';
 
 const getNestedData = (data) => {
     if (data?.data && typeof data.data === 'object') {
@@ -50,6 +52,9 @@ const SourceRepairPreview = ({ nodes, projection, setNodes, setActiveView }) => 
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const flowId = flowStore((s) => s.flow_id);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
 
     const toggleRow = (repairId) => {
         setSelectedIds(() => {
@@ -115,6 +120,17 @@ const SourceRepairPreview = ({ nodes, projection, setNodes, setActiveView }) => 
             })
         );
         setSelectedIds(new Set());
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        addActivity({
+            status: 'completed',
+            title: 'Accepted source repairs',
+            detail: `Accepted ${activeIds.size} source repair${
+                activeIds.size === 1 ? '' : 's'
+            }.`,
+            context: 'Helper: Source Librarian'
+        });
         setActiveView('table');
     };
 

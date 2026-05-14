@@ -23,6 +23,12 @@ import NodeInspector from './global-components/NodeInspector.jsx';
 import GraphValidationPanel from './global-components/GraphValidationPanel.jsx';
 import LocalViewsPanel from './views/LocalViewsPanel.jsx';
 import WorkspaceBriefPanel from './global-components/WorkspaceBriefPanel.jsx';
+import ActivityPanel from './global-components/ActivityPanel.jsx';
+import SourcesPanel from './global-components/SourcesPanel.jsx';
+import IntegrationsPanel from './global-components/IntegrationsPanel.jsx';
+import AutomationsPanel from './global-components/AutomationsPanel.jsx';
+import ManualNodeControls from './global-components/ManualNodeControls.jsx';
+import AiHelpersPanel from './global-components/AiHelpersPanel.jsx';
 import { getLocalSetting, setLocalSetting, SETTINGS_KEYS } from './config/localSettings';
 const App = () => {
     const nodeType = useMemo(() => nodeTypes, []);
@@ -35,7 +41,10 @@ const App = () => {
         setNodes: state.setNodes,
         setEdges: state.setEdges,
         activeView: state.activeView,
-        setSelectedBranchId: state.setSelectedBranchId
+        setSelectedBranchId: state.setSelectedBranchId,
+        inspectorNodeId: state.inspectorNodeId,
+        setInspectorNodeId: state.setInspectorNodeId,
+        setViewPort: state.setViewPort
     });
     const {
         trigger,
@@ -46,46 +55,47 @@ const App = () => {
         setNodes,
         setEdges,
         activeView,
-        setSelectedBranchId
+        setSelectedBranchId,
+        inspectorNodeId,
+        setInspectorNodeId,
+        setViewPort
     } = useStore(useShallow(selector));
     const areNodesIntialised = useNodesInitialized();
     const [askMultipleClass, setAskMultipleClass] = useState();
     const [isDrawer, setIsDrawer] = useState(false);
     const setRfInstance = flowStore((s) => s.setRfInstance);
     const [selectedNodes, setSelectedNodes] = useState();
-    const [selectedNodeId, setSelectedNodeId] = useState();
     const [validationReport, setValidationReport] = useState();
     const reactFlow = useReactFlow();
     const { fitView } = useReactFlow();
     const popNode = modalStore((s) => s.popNode);
     const [flowList, setFlowList] = useState([]);
+    const [isSourcesOpen, setIsSourcesOpen] = useState(false);
+    const [isAiHelpersOpen, setIsAiHelpersOpen] = useState(false);
     const [lightMode, setLightMode] = useState(
         () => getLocalSetting(SETTINGS_KEYS.theme) === 'light'
     );
     const flow_id = flowStore((s) => s.flow_id);
-    const flow_type = flowStore((s) => s.flow_type);
     const selectedNodeIssues = useMemo(() => {
-        if (!selectedNodeId || !validationReport?.issues) {
+        if (!inspectorNodeId || !validationReport?.issues) {
             return [];
         }
 
         return validationReport.issues.filter(
-            (issue) => issue.nodeId === selectedNodeId
+            (issue) => issue.nodeId === inspectorNodeId
         );
-    }, [selectedNodeId, validationReport]);
+    }, [inspectorNodeId, validationReport]);
     const closeNodeInspector = useCallback(() => {
-        setSelectedNodeId(undefined);
-        setSelectedBranchId(undefined);
+        setInspectorNodeId(undefined);
         setNodes(
             nodes.map((node) =>
                 node.selected ? { ...node, selected: false } : node
             )
         );
-    }, [nodes, setNodes, setSelectedBranchId]);
+    }, [nodes, setInspectorNodeId, setNodes]);
 
     const onChange = useCallback(
         ({ nodes }) => {
-            setSelectedNodeId(nodes.length === 1 ? nodes[0].id : undefined);
             setSelectedBranchId(nodes.length === 1 ? nodes[0].id : undefined);
             const responseNodes = nodes.filter(
                 (ele) => ele.type === 'response'
@@ -116,16 +126,6 @@ const App = () => {
     useOnSelectionChange({
         onChange
     });
-
-    const showDataSource = () => {
-        if (flow_type === 'automatic' && nodes.length > 0) {
-            console.log("false")
-            return false
-        } else {
-        console.log("true", flow_type, nodes)
-        return true
-        }
-    }
 
     // const setFlowId = flowStore((s) => s.setFlow);
     // const flow_id = flowStore((s) => s.flow_id);
@@ -169,14 +169,14 @@ const App = () => {
                     getLayoutedElements(data, edges);
                 setNodes(newNodes);
                 setEdges(newEdges);
-                fitView(nodes);
+                fitView({ nodes, maxZoom: 1 });
                 popNode();
             }, 1000);
         }
     }, [areNodesIntialised, trigger]);
 
     useEffect(() => {
-        fitView();
+        fitView({ maxZoom: 1 });
     }, [trigger]);
 
     useEffect(() => {
@@ -199,15 +199,29 @@ const App = () => {
                 setIsDrawer={setIsDrawer}
                 flowList={flowList}
                 setFlowList={setFlowList}
+                onOpenSources={() => setIsSourcesOpen(true)}
+                onToggleAiHelpers={() =>
+                    setIsAiHelpersOpen((current) => !current)
+                }
             />
+            <ActivityPanel />
+            <SourcesPanel
+                isOpen={isSourcesOpen}
+                onClose={() => setIsSourcesOpen(false)}
+                onSelectNode={setInspectorNodeId}
+            />
+            <IntegrationsPanel validationReport={validationReport} />
+            <AutomationsPanel validationReport={validationReport} />
             <ReactFlow
                 nodeTypes={nodeType}
                 nodes={nodes}
                 edges={edges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
+                onMoveEnd={(event, viewport) => setViewPort(viewport)}
                 colorMode={lightMode ? 'light' : 'dark'}
                 fitView={true}
+                fitViewOptions={{ maxZoom: 1 }}
                 proOptions={{ hideAttribution: true }}
                 onInit={setRfInstance}
                 minZoom={-1}
@@ -219,7 +233,8 @@ const App = () => {
                 >
                     <div className="workspace-flow-controls">
                         <WorkspaceBriefPanel />
-                        {showDataSource() ? <AddDataSource /> : null}
+                        <ManualNodeControls />
+                        <AddDataSource />
                     </div>
                 </Panel>
                 <Panel position="bottom">
@@ -236,7 +251,7 @@ const App = () => {
                         flowId={flow_id}
                         nodes={nodes}
                         edges={edges}
-                        onSelectNode={setSelectedNodeId}
+                        onSelectNode={setInspectorNodeId}
                         onReportChange={setValidationReport}
                     />
                 </Panel>
@@ -244,14 +259,23 @@ const App = () => {
                     position="top-center"
                     style={isDrawer ? { display: 'none' } : { display: 'block' }}
                 >
-                    <LocalViewsPanel hidden={false} />
+                    <LocalViewsPanel
+                        hidden={false}
+                        onSelectNode={setInspectorNodeId}
+                    />
+                </Panel>
+                <Panel
+                    position="bottom-right"
+                    style={isDrawer ? { display: 'none' } : { display: 'block' }}
+                >
+                    <AiHelpersPanel hidden={!isAiHelpersOpen} />
                 </Panel>
                 <Panel
                     position="top-right"
                     style={isDrawer ? { display: 'none' } : { display: 'block' }}
                 >
                     <NodeInspector
-                        selectedNodeId={selectedNodeId}
+                        selectedNodeId={inspectorNodeId}
                         validationIssues={selectedNodeIssues}
                         onClose={closeNodeInspector}
                     />

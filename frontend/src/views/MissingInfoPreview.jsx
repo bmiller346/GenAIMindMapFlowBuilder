@@ -2,6 +2,8 @@
 import { useMemo, useState } from 'react';
 import { getMissingInfoPreviewRows } from './graphProjection';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
+import useActivityStore from '../stores/activityStore';
+import flowStore from '../stores/flowStore';
 
 const sourceLabel = (node) => {
     const ref = node.source_ref || {};
@@ -23,6 +25,9 @@ const MissingInfoPreview = ({ nodes, projection, setNodes, setActiveView }) => {
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const flowId = flowStore((s) => s.flow_id);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
 
     const toggleRow = (nodeId) => {
         setSelectedIds(() => {
@@ -74,6 +79,17 @@ const MissingInfoPreview = ({ nodes, projection, setNodes, setActiveView }) => {
             })
         );
         setSelectedIds(new Set());
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        addActivity({
+            status: 'completed',
+            title: 'Accepted gap review',
+            detail: `Accepted ${activeIds.size} missing-information finding${
+                activeIds.size === 1 ? '' : 's'
+            }.`,
+            context: 'Helper: Reviewer'
+        });
         setActiveView('table');
     };
 

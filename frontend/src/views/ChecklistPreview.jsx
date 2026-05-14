@@ -2,6 +2,8 @@
 import { useMemo, useState } from 'react';
 import { getChecklistPreviewRows } from './graphProjection';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
+import useActivityStore from '../stores/activityStore';
+import flowStore from '../stores/flowStore';
 
 const sourceLabel = (node) => {
     const ref = node.source_ref || {};
@@ -23,6 +25,9 @@ const ChecklistPreview = ({ nodes, projection, setNodes, setActiveView }) => {
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const flowId = flowStore((s) => s.flow_id);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
 
     const toggleRow = (nodeId) => {
         setSelectedIds(() => {
@@ -75,6 +80,17 @@ const ChecklistPreview = ({ nodes, projection, setNodes, setActiveView }) => {
             })
         );
         setSelectedIds(new Set());
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        addActivity({
+            status: 'completed',
+            title: 'Accepted checklist preview',
+            detail: `Accepted ${activeIds.size} checklist candidate${
+                activeIds.size === 1 ? '' : 's'
+            }.`,
+            context: 'Helper: Project Planner'
+        });
         setActiveView('table');
     };
 

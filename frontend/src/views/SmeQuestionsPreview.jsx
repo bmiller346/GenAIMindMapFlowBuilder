@@ -2,6 +2,8 @@
 import { useMemo, useState } from 'react';
 import { getSmeQuestionPreviewRows } from './graphProjection';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
+import useActivityStore from '../stores/activityStore';
+import flowStore from '../stores/flowStore';
 
 const SmeQuestionsPreview = ({ nodes, projection, setNodes, setActiveView }) => {
     const previewRows = useMemo(
@@ -14,6 +16,9 @@ const SmeQuestionsPreview = ({ nodes, projection, setNodes, setActiveView }) => 
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const flowId = flowStore((s) => s.flow_id);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
 
     const toggleRow = (questionId) => {
         setSelectedIds(() => {
@@ -78,6 +83,17 @@ const SmeQuestionsPreview = ({ nodes, projection, setNodes, setActiveView }) => 
             })
         );
         setSelectedIds(new Set());
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        addActivity({
+            status: 'completed',
+            title: 'Accepted SME questions',
+            detail: `Accepted ${activeIds.size} SME question${
+                activeIds.size === 1 ? '' : 's'
+            }.`,
+            context: 'Helper: Reviewer'
+        });
         setActiveView('table');
     };
 

@@ -14,6 +14,8 @@ import SourceRepairPreview from './SourceRepairPreview';
 import MondaySelectionInput from './MondaySelectionInput';
 import MondayStatusBackPreview from './MondayStatusBackPreview';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
+import useActivityStore from '../stores/activityStore';
+import flowStore from '../stores/flowStore';
 
 const CORE_VIEWS = [
     { id: 'mindmap', label: 'Map' },
@@ -27,7 +29,7 @@ const REVIEW_VIEWS = [
     { id: 'checklist', label: 'Checklist' },
     { id: 'gaps', label: 'Gaps' },
     { id: 'sme', label: 'SME Qs' },
-    { id: 'sources', label: 'Sources' }
+    { id: 'sources', label: 'Source repair' }
 ];
 
 const HANDOFF_VIEWS = [
@@ -87,7 +89,7 @@ const EmptyState = ({ activeView }) => (
     </div>
 );
 
-const LocalViewsPanel = ({ hidden }) => {
+const LocalViewsPanel = ({ hidden, onSelectNode }) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -107,6 +109,9 @@ const LocalViewsPanel = ({ hidden }) => {
         setSelectedBranchId
     } = useStore(useShallow(selector));
     const [acceptedPreviewIds, setAcceptedPreviewIds] = useState(new Set());
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const flowId = flowStore((s) => s.flow_id);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
 
     const projection = useMemo(
         () => buildGraphProjection(nodes, edges, selectedBranchId),
@@ -139,6 +144,11 @@ const LocalViewsPanel = ({ hidden }) => {
             }
             return next;
         });
+    };
+
+    const selectBranch = (nodeId) => {
+        setSelectedBranchId(nodeId);
+        onSelectNode?.(nodeId);
     };
 
     const acceptTaskPreview = () => {
@@ -180,6 +190,17 @@ const LocalViewsPanel = ({ hidden }) => {
             })
         );
         setAcceptedPreviewIds(new Set());
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        addActivity({
+            status: 'completed',
+            title: 'Accepted task preview',
+            detail: `Accepted ${activePreviewIds.size} branch-to-task candidate${
+                activePreviewIds.size === 1 ? '' : 's'
+            }.`,
+            context: selectedRoot ? `Scope: ${selectedRoot.title}` : 'Scope: whole graph'
+        });
         setActiveView('tasks');
     };
 
@@ -257,7 +278,7 @@ const LocalViewsPanel = ({ hidden }) => {
                             childrenByParent={projection.childrenByParent}
                             nodeLookup={projection.nodeLookup}
                             depth={0}
-                            onSelectBranch={setSelectedBranchId}
+                            onSelectBranch={selectBranch}
                         />
                     ))}
                 </ol>
