@@ -10,6 +10,7 @@ import {
 } from '../utils/flowSnapshots';
 import { createWorkspaceNode } from '../utils/manualNodes';
 import useActivityStore from '../stores/activityStore';
+import useAutomationStore from '../stores/automationStore';
 
 const ManualNodeControls = () => {
     const [isPreparingWorkspace, setIsPreparingWorkspace] = useState(false);
@@ -29,6 +30,7 @@ const ManualNodeControls = () => {
     const setSaveStatus = flowStore((state) => state.setSaveStatus);
     const setActivityEvents = useActivityStore((state) => state.setActivityEvents);
     const recordActivity = useActivityStore((state) => state.recordActivity);
+    const setAutomations = useAutomationStore((state) => state.setAutomations);
 
     const nextPosition = (baseNodes) => ({
         x: baseNodes.length * 80,
@@ -54,6 +56,7 @@ const ManualNodeControls = () => {
 
         setFlow(response.data.flow_id);
         setActivityEvents([], response.data.flow_id);
+        setAutomations(EMPTY_FLOW_SNAPSHOT.automations || []);
         setFlowName(response.data.flow_name || 'New Flow');
         setFlowType(response.data.flow_type || 'manual');
         setEdges([]);
@@ -86,6 +89,7 @@ const ManualNodeControls = () => {
             const snapshot = parseFlowSnapshot(workspace.flow_json);
             setFlow(workspace.flow_id);
             setActivityEvents(snapshot.activity_events || [], workspace.flow_id);
+            setAutomations(snapshot.automations || []);
             setFlowName(workspace.flow_name);
             setFlowType(workspace.flow_type || 'manual');
             setEdges(snapshot.edges);

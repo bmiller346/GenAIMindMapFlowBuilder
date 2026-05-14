@@ -8,6 +8,7 @@ import axios from 'axios';
 import { useReactFlow } from '@xyflow/react';
 import { parseFlowSnapshot, stringifyFlowSnapshot } from '../utils/flowSnapshots';
 import useActivityStore from '../stores/activityStore';
+import useAutomationStore from '../stores/automationStore';
 
 const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
     const pushNode = modalStore((s) => s.pushNode);
@@ -20,6 +21,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
     const setActivityEvents = useActivityStore((s) => s.setActivityEvents);
     const recordActivity = useActivityStore((s) => s.recordActivity);
+    const setAutomations = useAutomationStore((s) => s.setAutomations);
     const { fitView, setViewport } = useReactFlow();
     const selector = (state) => ({
         trigger: state.trigger,
@@ -53,6 +55,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
         if (data.flow_json?.length > 0) {
             const flow = parseFlowSnapshot(data.flow_json);
             setActivityEvents(flow.activity_events || [], data.flow_id);
+            setAutomations(flow.automations || []);
             recordActivity({
                 type: 'workspace_opened',
                 title: 'Opened workspace',
@@ -104,6 +107,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
         } else {
             const emptySnapshot = parseFlowSnapshot('');
             setActivityEvents(emptySnapshot.activity_events || [], data.flow_id);
+            setAutomations(emptySnapshot.automations || []);
             recordActivity({
                 type: 'workspace_opened',
                 title: 'Opened empty workspace',

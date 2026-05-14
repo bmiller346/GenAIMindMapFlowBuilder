@@ -9,6 +9,7 @@ import ErrorModal from './ErrorModal';
 import errorStore from '../stores/errorStore';
 import { EMPTY_FLOW_SNAPSHOT, stringifyFlowSnapshot } from '../utils/flowSnapshots';
 import useActivityStore from '../stores/activityStore';
+import useAutomationStore from '../stores/automationStore';
 
 const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
    const selector = (state) => ({
@@ -34,6 +35,7 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
     const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
     const setActivityEvents = useActivityStore((s) => s.setActivityEvents);
     const recordActivity = useActivityStore((s) => s.recordActivity);
+    const setAutomations = useAutomationStore((s) => s.setAutomations);
     const popNode = modalStore((s) => s.popNode);
     const pushNode = modalStore((s) => s.pushNode);
 
@@ -79,6 +81,7 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
     const setupNewFlow = (res, { openSourcePicker = false } = {}) => {
         setFlow(res.data.flow_id);
         setActivityEvents([], res.data.flow_id);
+        setAutomations(EMPTY_FLOW_SNAPSHOT.automations || []);
         setFlowType(res.data.flow_type);
         setIsDrawer(false);
         setNodes([]);

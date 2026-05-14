@@ -13,7 +13,6 @@ import {
 import errorStore from '../stores/errorStore';
 import ErrorModal from '../modals/ErrorModal';
 import SettingsModal from '../modals/SettingsModal';
-import WorkspaceBriefModal from '../modals/WorkspaceBriefModal';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -23,26 +22,22 @@ import {
     stringifyFlowSnapshot
 } from '../utils/flowSnapshots';
 import useActivityStore from '../stores/activityStore';
-import useWorkspacePanelStore from '../stores/workspacePanelStore';
+import useAutomationStore from '../stores/automationStore';
+import { createSourceLibrarySnapshot } from '../views/graphProjection';
 const Header = ({
     isDrawer,
     setIsDrawer,
     setFlowList,
     lightMode,
-    setLightMode,
-    onOpenSources
+    setLightMode
 }) => {
     const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
-    const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
-    const toggleActivity = useActivityStore((s) => s.toggleActivity);
-    const toggleWorkspacePanel = useWorkspacePanelStore((s) => s.togglePanel);
     const recordActivity = useActivityStore((s) => s.recordActivity);
     const setActivityEvents = useActivityStore((s) => s.setActivityEvents);
     const setActivityWorkspace = useActivityStore((s) => s.setActivityWorkspace);
     const activityEvents = useActivityStore((s) => s.activities);
-    const runningActivityCount = useActivityStore((s) =>
-        s.activities.filter((activity) => activity.status === 'running').length
-    );
+    const automations = useAutomationStore((s) => s.automations);
+    const setAutomations = useAutomationStore((s) => s.setAutomations);
     const autosaveTimerRef = useRef();
     const exportInFlightRef = useRef(false);
     const pushNode = modalStore((s) => s.pushNode);
@@ -53,7 +48,6 @@ const Header = ({
     const flow_name = flowStore((s) => s.flow_name);
     const setFlowName = flowStore((s) => s.setFlowName);
     const setFlowType = flowStore((s) => s.setFlowType);
-    const setFlowSummary = flowStore((s) => s.setFlowSummary);
     const saveStatus = flowStore((s) => s.saveStatus);
     const lastSavedSnapshot = flowStore((s) => s.lastSavedSnapshot);
     const lastSavedFingerprint = flowStore((s) => s.lastSavedFingerprint);
@@ -74,8 +68,10 @@ const Header = ({
         setEdges: s.setEdges,
         setViewPort: s.setViewPort,
         setWorkspaceBrief: s.setWorkspaceBrief,
+        setSourceLibrary: s.setSourceLibrary,
         viewport: s.viewport,
-        workspaceBrief: s.workspaceBrief
+        workspaceBrief: s.workspaceBrief,
+        sourceLibrary: s.sourceLibrary
     });
     const setTheme = flowStore((s) => s.setTheme);
     const {
@@ -88,8 +84,10 @@ const Header = ({
         setEdges,
         setViewPort,
         setWorkspaceBrief,
+        setSourceLibrary,
         viewport,
-        workspaceBrief
+        workspaceBrief,
+        sourceLibrary
     } = useStore(useShallow(selector));
     const { getNodes, setViewport } = useReactFlow();
     const exportFormats = [
@@ -228,9 +226,25 @@ const Header = ({
             edges,
             viewport,
             workspaceBrief,
-            activityEvents: useActivityStore.getState().activities
+            sourceLibrary: createSourceLibrarySnapshot({
+                nodes,
+                edges,
+                workspaceBrief,
+                sourceLibrary
+            }),
+            activityEvents: useActivityStore.getState().activities,
+            automations: useAutomationStore.getState().automations
         });
-    }, [activityEvents, edges, nodes, rfInstance, viewport, workspaceBrief]);
+    }, [
+        activityEvents,
+        automations,
+        edges,
+        nodes,
+        rfInstance,
+        sourceLibrary,
+        viewport,
+        workspaceBrief
+    ]);
 
     useEffect(() => {
         setActivityWorkspace(flow_id || '');
@@ -990,7 +1004,9 @@ const Header = ({
         setNodes(snapshot.nodes || []);
         setEdges(snapshot.edges || []);
         setWorkspaceBrief(snapshot.workspace_brief || {});
+        setSourceLibrary(snapshot.source_library || []);
         setActivityEvents(snapshot.activity_events || [], flow_id);
+        setAutomations(snapshot.automations || []);
         const nextViewport = snapshot.viewport || {};
         setViewPort(nextViewport);
         if (nextViewport) {
@@ -1011,25 +1027,6 @@ const Header = ({
                     : flow
             )
         );
-    };
-
-    const changeFlowType = (nextType) => {
-        if (!flow_id || nextType === flow_type) {
-            return;
-        }
-
-        setFlowType(nextType);
-        syncActiveFlowType(nextType);
-        recordActivity({
-            type: 'workspace_mode_changed',
-            title: 'Changed workspace mode',
-            summary: `Workspace mode changed to ${nextType}.`,
-            metadata: {
-                previous_type: flow_type,
-                next_type: nextType
-            }
-        });
-        setSaveStatus('dirty');
     };
 
     const revertFlow = async () => {
@@ -1057,7 +1054,8 @@ const Header = ({
             });
             const revertedSnapshot = {
                 ...snapshot,
-                activity_events: useActivityStore.getState().activities
+                activity_events: useActivityStore.getState().activities,
+                automations: useAutomationStore.getState().automations
             };
             await saveFlowCall(name, revertedSnapshot);
             setSavedSnapshot(
@@ -1080,7 +1078,8 @@ const Header = ({
             });
             const revertedSnapshot = {
                 ...lastSavedSnapshot,
-                activity_events: useActivityStore.getState().activities
+                activity_events: useActivityStore.getState().activities,
+                automations: useAutomationStore.getState().automations
             };
             await saveFlowCall(lastSavedFlowName, revertedSnapshot);
             setSavedSnapshot(
@@ -1098,28 +1097,6 @@ const Header = ({
         }
 
         event.currentTarget.blur();
-    };
-
-    const flowSummary = () => {
-        pushNode(LoadingModal);
-        console.log('THIS IS FLOW ID', flow_id);
-        const data = {
-            flow_id: flow_id
-        };
-        axios
-            .post(`http://localhost:8000/flow-summarizer`, data, {
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then((res) => {
-                setFlowSummary(res.data.response);
-                popNode();
-                import('../modals/FlowSummary').then(({ default: FlowSummary }) => {
-                    pushNode(FlowSummary);
-                });
-            })
-            .catch((err) => manageErrors(err));
     };
 
     const getFlowList = () => {
@@ -1142,25 +1119,12 @@ const Header = ({
     };
 
     const openSettings = () => {
-        setIsAiMenuOpen(false);
         setIsExportMenuOpen(false);
         pushNode(SettingsModal);
     };
 
-    const openWorkspaceBrief = () => {
-        setIsAiMenuOpen(false);
-        setIsExportMenuOpen(false);
-        pushNode(WorkspaceBriefModal);
-    };
-
     const toggleExportMenu = () => {
-        setIsAiMenuOpen(false);
         setIsExportMenuOpen((prev) => !prev);
-    };
-
-    const toggleAiMenu = () => {
-        setIsExportMenuOpen(false);
-        setIsAiMenuOpen((prev) => !prev);
     };
 
     const hasWorkspace = Boolean(flow_id);
@@ -1216,61 +1180,6 @@ const Header = ({
                 />
             </div>
             <div className="button header-actions">
-                <div className="flow-mode-toggle" aria-label="Workspace mode">
-                    <button
-                        type="button"
-                        className={flow_type !== 'automatic' ? 'active' : ''}
-                        onClick={() => changeFlowType('manual')}
-                        disabled={!flow_id || saveStatus === 'saving'}
-                    >
-                        Manual
-                    </button>
-                    <button
-                        type="button"
-                        className={flow_type === 'automatic' ? 'active' : ''}
-                        onClick={() => changeFlowType('automatic')}
-                        disabled={!flow_id || saveStatus === 'saving'}
-                    >
-                        Auto
-                    </button>
-                </div>
-                <button
-                    type="button"
-                    className="header-action header-action-secondary"
-                    onClick={openWorkspaceBrief}
-                >
-                    Brief
-                </button>
-                <button
-                    type="button"
-                    className="header-action header-action-secondary"
-                    onClick={toggleActivity}
-                >
-                    {runningActivityCount
-                        ? `Activity ${runningActivityCount}`
-                        : 'Activity'}
-                </button>
-                <button
-                    type="button"
-                    className="header-action header-action-secondary"
-                    onClick={onOpenSources}
-                >
-                    Sources
-                </button>
-                <button
-                    type="button"
-                    className="header-action header-action-secondary"
-                    onClick={() => toggleWorkspacePanel('integrations')}
-                >
-                    Integrations
-                </button>
-                <button
-                    type="button"
-                    className="header-action header-action-secondary"
-                    onClick={() => toggleWorkspacePanel('automations')}
-                >
-                    Automations
-                </button>
                 <div className="export-actions">
                     <button
                         type="button"
@@ -1356,31 +1265,6 @@ const Header = ({
                         </div>
                     ) : null}
                 </div>
-                {flow_type !== 'automatic' ? (
-                    <div className="export-actions">
-                        <button
-                            type="button"
-                            className="header-action header-action-secondary"
-                            onClick={toggleAiMenu}
-                        >
-                            AI actions
-                        </button>
-                        {isAiMenuOpen ? (
-                            <div className="export-menu ai-actions-menu">
-                                <p className="export-menu-label">Workspace</p>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setIsAiMenuOpen(false);
-                                        flowSummary();
-                                    }}
-                                >
-                                    Summarize workspace
-                                </button>
-                            </div>
-                        ) : null}
-                    </div>
-                ) : null}
                 {canSave ? (
                     <>
                         <button
