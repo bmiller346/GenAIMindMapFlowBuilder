@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, status, File, Depends, Form
+from fastapi import FastAPI, HTTPException, UploadFile, status, File, Depends, Form, Response
 from pymongo import MongoClient
 from bson import ObjectId
 import boto3
@@ -92,6 +92,19 @@ from pptx import Presentation
 import tiktoken
 import traceback
 from dotenv import load_dotenv
+from export.csv_tasks import export_task_rows
+from export.internal_graph_json import export_internal_graph
+from export.workspace_graph import (
+    build_workspace_graph,
+    graph_to_markdown,
+    graph_to_mermaid,
+    graph_to_mmd_json,
+    graph_to_opml,
+    graph_to_task_rows,
+    select_branch,
+)
+from integrations.miro.exporter import export_branch_to_miro_payload
+from integrations.monday.exporter import export_tasks_to_monday_payload
 
 load_dotenv()
 
@@ -102,6 +115,11 @@ gcp_project_id_str = os.getenv("gcp_project_id")
 aws_access_key_id_str = os.getenv("aws_access_key_id")
 aws_secret_access_key_str = os.getenv("aws_secret_access_key")
 bucket_name = os.getenv("bucket_name")
+OPENAI_DEFAULT_MODEL = os.getenv("openai_default_model", "gpt-5.5")
+OPENAI_REASONING_MODEL = os.getenv("openai_reasoning_model", "gpt-5.4")
+OPENAI_EMBEDDING_MODEL = os.getenv(
+    "openai_embedding_model", "text-embedding-3-large"
+)
 
 credentials = service_account.Credentials.from_service_account_file(
     "./ai-interview-poc-2b5cf8540f16.json"
@@ -140,7 +158,7 @@ class CSVBot(ChromaDB_VectorStore, OpenAI_Chat):
 sqlBot = SQLBot(
     config={
         "api_key": openai_api_key_str,
-        "model": "gpt-4o",
+        "model": OPENAI_DEFAULT_MODEL,
         "temperature": 0,
         "path": "./SQLVectorStore",
         "client": "persistent",
@@ -151,7 +169,7 @@ sqlBot = SQLBot(
 csvBot = CSVBot(
     config={
         "api_key": openai_api_key_str,
-        "model": "gpt-4o",
+        "model": OPENAI_DEFAULT_MODEL,
         "temperature": 0,
         "path": "./CSVVectorStore",
         "client": "persistent",
@@ -209,7 +227,7 @@ s3_client = boto3.client(
 
 
 embedding_function = OpenAIEmbeddings(
-    model="text-embedding-ada-002", api_key=openai_api_key_str
+    model=OPENAI_EMBEDDING_MODEL, api_key=openai_api_key_str
 )
 
 persistent_client = chromadb.PersistentClient()
@@ -223,10 +241,10 @@ vector_store_from_client = Chroma(
 PDFCollection = persistent_client.get_collection("pdfs")
 
 text_splitter = SemanticChunker(
-    OpenAIEmbeddings(model="text-embedding-ada-002", api_key=openai_api_key_str)
+    OpenAIEmbeddings(model=OPENAI_EMBEDDING_MODEL, api_key=openai_api_key_str)
 )
 
-llm = ChatOpenAI(model="gpt-4o", api_key=openai_api_key_str)
+llm = ChatOpenAI(model=OPENAI_REASONING_MODEL, api_key=openai_api_key_str)
 
 def calculate_file_hash(file):
     hasher = sha256()
@@ -1091,6 +1109,110 @@ def update_flow(update_data: Flow):
         )
 
 
+def get_workspace_graph_or_404(flow_id: str) -> dict:
+    if not ObjectId.is_valid(flow_id):
+        raise HTTPException(status_code=400, detail="Invalid workspace id format.")
+
+    flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
+    if not flow:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+
+    return build_workspace_graph(flow)
+
+
+def get_workspace_branch_or_404(flow_id: str, node_id: str) -> dict:
+    graph = get_workspace_graph_or_404(flow_id)
+
+    if not any(node["id"] == node_id for node in graph["nodes"]):
+        raise HTTPException(status_code=404, detail="Branch root node not found.")
+
+    return select_branch(graph, node_id)
+
+
+@app.get("/api/workspaces/{flow_id}/exports/json")
+def export_workspace_json(flow_id: str):
+    return get_workspace_graph_or_404(flow_id)
+
+
+@app.get("/api/workspaces/{flow_id}/exports/markdown")
+def export_workspace_markdown(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    return Response(
+        content=graph_to_markdown(graph),
+        media_type="text/markdown",
+    )
+
+
+@app.get("/api/workspaces/{flow_id}/exports/csv")
+def export_workspace_csv(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    rows = graph_to_task_rows(graph)
+    return Response(
+        content=export_task_rows(rows),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{flow_id}-tasks.csv"'
+        },
+    )
+
+
+@app.get("/api/workspaces/{flow_id}/exports/opml")
+def export_workspace_opml(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    return Response(
+        content=graph_to_opml(graph),
+        media_type="application/xml",
+    )
+
+
+@app.get("/api/workspaces/{flow_id}/exports/mmd-json")
+def export_workspace_mmd_json(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    return graph_to_mmd_json(graph)
+
+
+@app.get("/api/workspaces/{flow_id}/exports/mermaid")
+def export_workspace_mermaid(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    return Response(
+        content=graph_to_mermaid(graph),
+        media_type="text/plain",
+    )
+
+
+@app.get("/api/workspaces/{flow_id}/branches/{node_id}/exports/json")
+def export_branch_json(flow_id: str, node_id: str):
+    return get_workspace_branch_or_404(flow_id, node_id)
+
+
+@app.post("/api/workspaces/{flow_id}/export/miro")
+def preview_workspace_miro_export(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    return export_branch_to_miro_payload(graph["nodes"])
+
+
+@app.post("/api/workspaces/{flow_id}/branches/{node_id}/export/miro")
+def preview_branch_miro_export(flow_id: str, node_id: str):
+    branch = get_workspace_branch_or_404(flow_id, node_id)
+    return export_branch_to_miro_payload(branch["nodes"])
+
+
+@app.post("/api/workspaces/{flow_id}/export/monday")
+def preview_workspace_monday_export(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    task_node_ids = {task["node_id"] for task in graph["tasks"]}
+    task_nodes = [node for node in graph["nodes"] if node["id"] in task_node_ids]
+    return export_tasks_to_monday_payload(task_nodes)
+
+
+@app.post("/api/workspaces/{flow_id}/branches/{node_id}/export/monday")
+def preview_branch_monday_export(flow_id: str, node_id: str):
+    branch = get_workspace_branch_or_404(flow_id, node_id)
+    task_node_ids = {task["node_id"] for task in branch["tasks"]}
+    task_nodes = [node for node in branch["nodes"] if node["id"] in task_node_ids]
+    return export_tasks_to_monday_payload(task_nodes)
+
+
 def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
     file.file.seek(0)
     file_bytes = file.file.read()
@@ -1102,7 +1224,7 @@ def get_summary_from_openai(file: UploadFile, flow_id: str, flow_type: str):
     assistant = openai.beta.assistants.create(
         name="Summarize agent",
         instructions="Your task is to only summarize the document",
-        model="gpt-4o",
+        model=OPENAI_DEFAULT_MODEL,
         tools=[{"type": "file_search"}],
     )
     vector_store = openai.beta.vector_stores.create(name=f"{file_extension}_{flow_id}")
@@ -1221,7 +1343,7 @@ def openai_mindmap_generator(file: UploadFile, flow_id: str, flow_type: str):
     assistant = openai.beta.assistants.create(
         name="MindMap Builder",
         instructions="Your task is to create the mindmap of the document",
-        model="gpt-4o",
+        model=OPENAI_DEFAULT_MODEL,
         tools=[{"type": "file_search"}],
     )
     vector_store = openai.beta.vector_stores.create(name=f"{file_extension}_mindmap_{flow_id}")
@@ -2412,7 +2534,7 @@ async def create_web_crawler(
             assistant = openai.beta.assistants.create(
                 name="Summarize agent",
                 instructions="Your task is to only summarize the document",
-                model="gpt-4o",
+                model=OPENAI_DEFAULT_MODEL,
                 tools=[{"type": "file_search"}],
             )
             vector_store = openai.beta.vector_stores.create(name=f"web_{flow_id}")
@@ -2482,7 +2604,7 @@ async def create_web_crawler(
             assistant = openai.beta.assistants.create(
             name="MindMap Builder",
             instructions="Your task is to create the mindmap of the document",
-            model="gpt-4o",
+            model=OPENAI_DEFAULT_MODEL,
             tools=[{"type": "file_search"}],
             )
             vector_store = openai.beta.vector_stores.create(name=f"web_mindmap_{flow_id}")

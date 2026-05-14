@@ -650,6 +650,30 @@ input:focus {
   min-width: 25rem;
 }
 
+.prompt-model-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.prompt-model-selector > label {
+  font-size: 0.95rem;
+  opacity: 0.7;
+}
+
+.prompt-model-selector > select {
+  border-radius: 0.75rem;
+  border: 1px solid var(--question-border);
+  background-color: var(--input-bar-color);
+  color: var(--font-color);
+  padding: 0.85rem 1rem;
+  outline: none;
+}
+
+.prompt-model-selector > select:focus {
+  border-color: #eece47;
+}
+
 .prompt-container {
   display: flex;
   flex-direction: row;
@@ -661,6 +685,19 @@ input:focus {
   font-size: 1.25rem;
   width: 100%;
   border-radius: 0.75rem;
+}
+
+.prompt-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.prompt-card-model,
+.prompt-model-name {
+  font-size: 0.8rem;
+  line-height: 1rem;
+  opacity: 0.65;
 }
 
 .prompt-container:hover {

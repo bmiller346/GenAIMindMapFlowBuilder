@@ -1,5 +1,12 @@
-const model_name = 'gpt-4o';
-const genericAdvisor = {
+export const supportedOpenAIModels = ['gpt-5.4', 'gpt-5.5'];
+export const defaultOpenAIModel = 'gpt-5.5';
+
+const resolveModelName = (selectedModel) =>
+    supportedOpenAIModels.includes(selectedModel)
+        ? selectedModel
+        : defaultOpenAIModel;
+
+const genericAdvisor = (modelName) => ({
     instructions: `
     You are a Strategic Advisor with expertise in problem-solving, structured thinking, and communication. You help individuals and teams break down complex problems, synthesize information, and form actionable strategies across any domain — from personal goals to business operations.
 
@@ -14,10 +21,10 @@ const genericAdvisor = {
     temperature: 0.6,
     top_p: 0.4,
     persona_name: 'Strategic Advisor',
-    model_name: model_name
-};
+    model_name: modelName
+});
 
-const researchAssistant = {
+const researchAssistant = (modelName) => ({
     instructions: `
     You are a Research Assistant. Your job is to analyze information, summarize it clearly, and assist in generating insights or helping with writing, planning, and organizing content across various subjects — from science to humanities to technology.
 
@@ -32,10 +39,10 @@ const researchAssistant = {
     temperature: 0.5,
     top_p: 0.3,
     persona_name: 'Research Assistant',
-    model_name: model_name
-};
+    model_name: modelName
+});
 
-const productivityCoach = {
+const productivityCoach = (modelName) => ({
     instructions: `
     You are a Productivity Coach. Your role is to help individuals and teams become more effective in how they manage time, energy, and priorities. You analyze behavior, suggest tools or routines, and help track progress toward personal and professional goals.
 
@@ -50,10 +57,10 @@ const productivityCoach = {
     temperature: 0.7,
     top_p: 0.4,
     persona_name: 'Productivity Coach',
-    model_name: model_name
-};
+    model_name: modelName
+});
 
-const dataInterpreter = {
+const dataInterpreter = (modelName) => ({
     instructions: `
     You are a Data Interpreter. Your main task is to analyze any structured or unstructured data and translate it into human-readable summaries, visuals, or actionable points. You work across any subject or industry, making sense of information and presenting it in a useful format.
 
@@ -68,26 +75,28 @@ const dataInterpreter = {
     temperature: 0.6,
     top_p: 0.3,
     persona_name: 'Data Interpreter',
-    model_name: model_name
-};
+    model_name: modelName
+});
 
-const getPrompts = (agentName, customPrompt) => {
+const getPrompts = (agentName, customPrompt, selectedModel) => {
+    const modelName = resolveModelName(selectedModel);
+
     switch (agentName) {
         case 'Strategic Advisor':
-            return genericAdvisor;
+            return genericAdvisor(modelName);
         case 'Research Assistant':
-            return researchAssistant;
+            return researchAssistant(modelName);
         case 'Productivity Coach':
-            return productivityCoach;
+            return productivityCoach(modelName);
         case 'Data Interpreter':
-            return dataInterpreter;
+            return dataInterpreter(modelName);
         case 'Custom Prompts':
             return {
                 instructions: customPrompt,
                 temperature: 0.5,
                 top_p: 0.3,
                 persona_name: 'Custom Prompts',
-                model_name: model_name
+                model_name: modelName
             };
     }
 };

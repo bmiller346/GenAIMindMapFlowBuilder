@@ -9,7 +9,7 @@ const DataSourceContainer = ({ id, data }) => {
 	return (
 		<div className="data-source-container">
 			{flow_type === 'manual' 
-			? <PromptSelector id={id} prompt={data.prompt} name={data.name} />
+			? <PromptSelector id={id} prompt={data.prompt} modelName={data.model_name} name={data.name} />
 			: null
 			}
 			<DataSource id={id} data={data} />

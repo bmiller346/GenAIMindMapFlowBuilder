@@ -3,8 +3,7 @@ import PROMPTSvg from "../assets/prompt.svg"
 import RIGHTArrow from "../assets/right.svg"
 import PromptModal from "../modals/PromptModal";
 import modalStore from "../stores/modalStore"
-import useStore from "../stores/store";
-const PromptSelector = ({ id, prompt }) => {
+const PromptSelector = ({ id, prompt, modelName }) => {
 	const selector = (state) => ({
 		pushNode: state.pushNode,
 		setSourceId: state.setSourceId
@@ -25,6 +24,7 @@ const PromptSelector = ({ id, prompt }) => {
 						Answering as
 					</h4>
 					<p className="values">{prompt}</p>
+					{modelName ? <p className="prompt-model-name">{modelName}</p> : null}
 				</div>
 			</div>
 			<img src={RIGHTArrow} alt="Prompt svg" />

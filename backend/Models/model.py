@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Literal
 
 class Flow(BaseModel):
     flow_id: str
@@ -181,7 +181,7 @@ class ComponentFollowUpQueryRequest(BaseModel):
     temperature: float
     top_p : float
     instructions: str
-    model_name : str
+    model_name : Literal["gpt-5.4", "gpt-5.5"]
 
 class ComponentFollowUpQueryResponse(BaseModel):
     id : str

@@ -1,157 +1,220 @@
-# 🧠 GenAI Mind Map Flow Builder (Gnosis)
+# DocMap Workspace
 
-**GenAI Mind Map Flow Builder** is a cutting-edge, AI-powered tool designed to convert complex, multi-format data into structured, interactive mind maps. Powered by LLMs like OpenAI GPT-4o and Google Gemini, it allows users to process, query, visualize, and summarize knowledge extracted from diverse sources.
+This fork is being reshaped from a broad AI demo into a document-to-structured-workspace engine.
 
-## 📺 Watch Demo on YouTube
-[![IMAGE ALT TEXT HERE](https://img.youtube.com/vi/sxvKbQI7Wl0/0.jpg)](https://youtu.be/sxvKbQI7Wl0)
----
+## Product Goal
 
-## 🚀 Key Features
+Upload `PDF`, `DOCX`, `Markdown`, or `TXT`, extract structure with AI, and persist one normalized workspace graph that can be rendered as multiple views:
 
-### 🔗 **Multi-Source Data Integration**
-- Upload or connect multiple data sources including:
-  - Documents, csv, web pages, databases, images, audio, and video
-- Add unlimited data sources in one flow
-- Reuse and interlink previous answers
+- Mind map
+- Outline
+- Task list
+- Table
+- Markdown export
 
-### 🧠 **AI-Powered Mind Map Generation**
-- Uses OpenAI GPT-4o and Google Gemini to:
-  - Extract data insights and visualize them with graph and dataframes (tables)
-  - Ask multiple questions on multiple data sources
-  - Generate mind maps automatically for single data source
-  - Prepare PDF Report for the entire flow
+The key architectural rule is simple:
 
-### 🧭 **Two Mind Map Modes**
-- **Automatic Mode**:
-  - Upload any one source
-  - Mind map and summaries are auto-generated with dataframes and graph visualization
-- **Manual Mode**:
-  - Upload/connect multiple sources as you can
-  - AI suggests follow-up questions based on context
-  - You can:
-    - Ask Answers on follow-up questions
-    - Ask your own questions
-    - Generate PDF report
-  - AI replies in a 3-part format:
-    1. 🧾 **Answer**
-    2. 📊 **Data Table / DataFrame (if applicable)**
-    3. 🌐 **Graph (if applicable)**
+`one persistent graph -> many views`
 
-### 🔁 **Cross-Source Questioning**
-- Ask questions across:
-  - Multiple sources
-  - Previous AI responses
-- Link insights between different data nodes
+Mind map data should not become a second silo. Tasks should not be copied into a separate truth source. Views should be projections of the same workspace model.
 
-### 📚 **Mind Map to Report**
-- Export entire flow as an AI-generated structured PDF report (Insights will be generated)
-- Auto-capture questions, answers, tables, graphs, and source traceability
+## Platform Fit
 
-### 📤 **Export Options**
-- Download/share mind maps as images or JSON
-- Export complete flow as a detailed report (PDF)
-- Print-friendly visualization
+This fork is best positioned as the missing middle layer in a company stack that already uses Miro and monday.com:
 
----
+- This app: document ingestion, structure extraction, normalized graph, source citations
+- Miro: visual collaboration and SME review
+- monday.com: task execution and status tracking
 
-## 📁 Supported Data Sources
+That means this product should optimize for export and sync bridges, not try to replace either platform.
 
-| Category      | Supported Formats |
-|---------------|-------------------|
-| **Documents**     | `.pdf`, `.docx`, `.txt`, `.md` |
-| **Spreadsheets**  | `.csv` |
-| **Presentations** | `.pptx` |
-| **Images**        | `.jpg`, `.jpeg`, `.png`, `.webp`, `.svg` |
-| **Audio**         | `.wav`, `.mp3`, `.aac`, `.ogg`, `.flac`, `.mpeg`, `.aiff` |
-| **Video**         | `.mp4`, `.webm`, `.wmv`, `.flv`, `.mov`, `.3gpp`, etc. |
-| **Web Pages**     | Web URLs, HTML files |
-| **YouTube**       | Public YouTube Video links|
-| **Databases**     | SQL (MySQL, PostgreSQL, SQLite), etc
+## Current Direction
 
----
+This repo still contains upstream demo-era capabilities such as web, media, SQL, and Gemini paths. Those remain in the codebase, but the fork direction is now centered on the DocMap MVP:
 
-## 🖼️ Screenshots
+1. Upload one `pdf` or `docx`
+2. Extract text and structure
+3. Generate a hierarchical graph
+4. Render an editable mind map
+5. Preserve source references
+6. Convert selected branches into task-oriented views
+7. Export JSON, Markdown, and PNG
 
-### 🏠 Landing Page
-![Landing Page](./screenshots/image1.png)
-![Landing Page](./screenshots/image2.png)
-![Landing Page](./screenshots/image3.png)
+## OpenAI Model Strategy
 
-### 📁 Create Flow & Add Sources
-![Add Sources](./screenshots/image4.png)
-![Add Sources](./screenshots/image5.png)
-![Add Sources](./screenshots/image6.png)
+The project now treats OpenAI as the primary model path for document workflows.
 
-### 👤 Choose Agent / Persona
-![Choose Agent](./screenshots/image7.png)
+- Supported selectable models in the persona UI: `gpt-5.4`, `gpt-5.5`
+- Default generation model: `gpt-5.5`
+- Default reasoning/support model: `gpt-5.4`
+- Default embedding model: `text-embedding-3-large`
 
-### 🤖 Follow-Up Questions & AI Responses
-![Follow-Up Questions](./screenshots/image8.png)
-![Follow-Up Questions](./screenshots/image9.png)
+These defaults are controlled in `backend/app.py` through environment variables:
 
-### ❓ Custom Q&A Interface
-![Custom Questions](./screenshots/image10.png)
-![Custom Questions](./screenshots/image11.png)
-
-### ➕ Add More Sources & Continue Flow
-![More Sources](./screenshots/image12.png)
-![More Sources](./screenshots/image13.png)
-![More Sources](./screenshots/image14.png)
-![More Sources](./screenshots/image15.png)
-
-### 🔁 Ask Questions on Previous Responses
-![Follow-up on Previous Nodes](./screenshots/image16.png)
-![Follow-up on Previous Nodes](./screenshots/image17.png)
-
-### 🧩 Visualize Complete Mind Map Flow
-![Full Mind Map Flow](./screenshots/image18.png)
-
-### 🧾 Summarize Complete Flow
-![Flow Summary](./screenshots/image19.png)
-![Flow Summary](./screenshots/image20.png)
-
-### ⚡ Auto Mind Map from PDFs, Videos, and More
-![Auto Mind Mapping](./screenshots/image21.png)
-![Auto Mind Mapping](./screenshots/image22.png)
-![Auto Mind Mapping](./screenshots/image23.png)
-
----
-
-## 🛠️ Tech Stack
-
-| Layer        | Tech |
-|--------------|------|
-| **Frontend** | ReactJS, CSS |
-| **Backend**  | FastAPI (Python) |
-| **AI Models**| OpenAI GPT-4o, Google Gemini Pro |
-| **Storage**  | Local File System, AWS S3 |
-| **Database** | MongoDB, SQLite |
-| **Vector Store** | ChromaDB (configurable) |
-
----
-
-## ⚙️ Setup Instructions
-
-### 🔁 Clone the Repository
-
-```bash
-git clone https://github.com/NextGenAILabs/GenAIMindMapFlowBuilder.git
-cd GenAIMindMapFlowBuilder
+```env
+openai_default_model=gpt-5.5
+openai_reasoning_model=gpt-5.4
+openai_embedding_model=text-embedding-3-large
 ```
 
-### 🔧 Backend Setup (FastAPI + Poetry)
+The current backend still uses legacy assistant-style OpenAI flows in several places. That is now a modernization target rather than the desired long-term architecture.
+
+## Product Spec Snapshot
+
+### Source of truth
+
+```text
+Workspace
+├── Source Documents
+├── Document Chunks
+├── Nodes
+├── Edges
+├── Source References
+├── Tasks
+├── External Refs
+└── View State
+```
+
+### View projections
+
+```text
+Normalized Graph
+├── Mind Map View
+├── Outline View
+├── Task List View
+├── Table View
+└── Markdown Export
+```
+
+### Integration projections
+
+```text
+Normalized Graph
+├── Miro Board / Frame Export
+├── monday.com Board / Group / Item Export
+├── MMD-compatible JSON
+├── OPML with attributes
+└── CSV task export
+```
+
+### Controlled node types
+
+```text
+category
+concept
+standard
+workflow
+procedure
+decision
+risk
+requirement
+task
+reference
+definition
+question
+dependency
+needs_review
+```
+
+## MVP Acceptance Criteria
+
+1. User uploads one PDF or DOCX.
+2. System extracts document text.
+3. System generates a hierarchical node graph.
+4. User sees an editable mind map.
+5. Nodes can retain source references.
+6. User can convert a selected branch into task-oriented output.
+7. User can export PNG and Markdown.
+8. User can save and reopen a workspace.
+
+## Integration Direction
+
+### Miro first
+
+Miro is the best first external integration because it extends the visual review workflow you liked without forcing Miro to become the system of record.
+
+Recommended export order:
+
+1. Selected branch to Miro frame
+2. Whole workspace to Miro board
+3. Native mind map export where viable
+4. Fallback shapes and connectors export
+
+Each exported object should preserve the internal node ID and app backlink so later sync is possible.
+
+### monday.com second
+
+monday.com should receive only the actionable subset of the graph:
+
+- `task`
+- `procedure`
+- `needs_review`
+- optionally review-ready `workflow` nodes
+
+Recommended export order:
+
+1. Branch-to-task preview
+2. Export tasks to existing board/group
+3. Create board from workspace template
+4. Pull status back into the app
+
+### MMD / OPML compatibility
+
+Miro Mind Map Downloader style exports are useful compatibility targets, especially:
+
+- MMD-compatible JSON
+- OPML with attributes
+- Hierarchy CSV
+
+These should be treated as bridge formats, not the internal canonical model.
+
+## Roadmap
+
+### Phase 1
+- Narrow ingestion around `pdf`, `docx`, `md`, and `txt`
+- Improve graph generation contracts
+- Replace hardcoded model choices with GPT-5.4 / GPT-5.5 defaults and selection
+- Add stable internal IDs and neutral export scaffolding
+
+### Phase 2
+- Normalize workspace persistence for nodes, edges, refs, and tasks
+- Add source citation panels and review states
+- Add true outline and table projections from the same graph
+- Add JSON, Markdown, CSV, and OPML exports
+
+### Phase 3
+- Add branch-to-task preview and acceptance flow
+- Add Miro export with shapes/connectors fallback
+- Store `external_refs` for Miro objects
+- Reduce or retire duplicate legacy flows
+
+### Phase 4
+- Add monday.com task export and board mapping
+- Pull monday statuses back into the app
+- Pull Miro review metadata/comments where feasible
+- Migrate legacy assistant-style OpenAI calls to cleaner modern OpenAI patterns
+
+## Repo Notes
+
+- [`AGENT.md`](./AGENT.md): compact operating guide for future agentic work
+- [`AGENTS.md`](./AGENTS.md): short rules for tooling-aware agents
+- `backend/app.py`: current backend integration hub
+- `frontend/src/prompts/promptsModel.js`: persona prompts and selectable OpenAI models
+
+## Setup
+
+### Backend
 
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate (Windows)
-
+.venv\Scripts\activate
 pip install poetry
 poetry install
 uvicorn app:app --reload
 ```
 
-### 💻 Frontend Setup (React)
+### Frontend
 
 ```bash
 cd frontend
@@ -159,62 +222,24 @@ npm install
 npm run dev
 ```
 
----
+## Environment Variables
 
-## 🔐 Environment Variables
-
-Create a `.env` file inside the `backend/` folder:
+Create `backend/.env`:
 
 ```env
-# .env
 mongo_db_url=
 openai_api_key=
+openai_default_model=gpt-5.5
+openai_reasoning_model=gpt-5.4
+openai_embedding_model=text-embedding-3-large
+
 gemini_api_key=
+gcp_project_id=
 aws_access_key_id=
 aws_secret_access_key=
 bucket_name=
 ```
 
-> Replace values with actual credentials.
+## Important Caveat
 
----
-
-## 🧪 Example Workflow
-
-1. Upload a `.pdf`, connect a SQL database, or paste a URL
-2. AI reads and summarizes data
-3. System builds a visual mind map
-4. Ask follow-ups, skip them, or ask custom questions
-5. Explore answers (text + table + graph)
-6. Export final report as a shareable PDF
-
----
-
-## 🤖 AI Integration Details
-
-| Model          | Purpose |
-|----------------|---------|
-| **OpenAI GPT-4o** | NLP, summarization, Q&A, flow generation |
-| **Google Gemini Pro** | Multimodal input (text, image, video), deeper analysis |
-
----
-
-## 💡 Inspirations
-
-- [NotebookLM (Google)](https://notebooklm.google/)
-- [Obsidian Mind Map Plugin](https://obsidian.md/)
-- [Miro](https://miro.com/)
-- [Whimsical](https://whimsical.com/)
-- [Notion AI](https://www.notion.so/product/ai)
-
----
-
-## 📝 LICENSE:
-<a rel="license" href="http://creativecommons.org/licenses/by-nc-nd/4.0/"><img alt="Creative Commons Licence" style="border-width:0" src="https://i.creativecommons.org/l/by-nc-nd/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-nc-nd/4.0/">Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License</a>.
-
----
-
-## 📬 Contact
-
-📧 **Email**: [nextgenailabs99@gmail.com](mailto:nextgenailabs99@gmail.com)
-
+This fork now has a clearer target than the upstream project, but the backend is still carrying legacy implementation patterns and a wide feature surface. The intended next step is consolidation, not more sprawl.
