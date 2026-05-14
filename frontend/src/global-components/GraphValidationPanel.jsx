@@ -1,6 +1,7 @@
 /* eslint-disable react/prop-types */
 import axios from 'axios';
 import { useEffect, useMemo, useState } from 'react';
+import useActivityStore from '../stores/activityStore';
 
 const TASK_TYPES = new Set(['task', 'procedure', 'workflow', 'needs_review']);
 const LOW_CONFIDENCE_THRESHOLD = 0.6;
@@ -386,6 +387,7 @@ const GraphValidationPanel = ({
     const [issueFilter, setIssueFilter] = useState('all');
     const [issueSearch, setIssueSearch] = useState('');
     const [refreshCounter, setRefreshCounter] = useState(0);
+    const recordActivity = useActivityStore((s) => s.recordActivity);
     const localReport = useMemo(
         () => buildValidationReport(nodes, edges),
         [nodes, edges]
@@ -462,10 +464,36 @@ const GraphValidationPanel = ({
                 if (normalizedReport) {
                     setBackendReport(normalizedReport);
                     setBackendStatus('ready');
+                    recordActivity({
+                        type: 'validation_run',
+                        title: 'Validated graph',
+                        summary: normalizedReport.isValid
+                            ? 'Backend validation completed without schema errors.'
+                            : 'Backend validation found issues.',
+                        node_ids: normalizedReport.issues
+                            .map((issue) => issue.nodeId)
+                            .filter(Boolean),
+                        metadata: {
+                            source: 'backend',
+                            errors: normalizedReport.summary.errors,
+                            warnings: normalizedReport.summary.warnings,
+                            info: normalizedReport.summary.info,
+                            repaired: normalizedReport.repaired
+                        }
+                    });
                 } else {
                     setBackendReport(undefined);
                     setBackendStatus('fallback');
                     setBackendError('Backend response did not include validation_report.');
+                    recordActivity({
+                        type: 'validation_run',
+                        title: 'Validated graph locally',
+                        summary:
+                            'Backend validation did not return a report, so local checks are shown.',
+                        metadata: {
+                            source: 'local_fallback'
+                        }
+                    });
                 }
             } catch (err) {
                 if (isCancelled) {
@@ -477,6 +505,17 @@ const GraphValidationPanel = ({
                 setBackendError(
                     err.response?.statusText || err.message || 'Backend validation unavailable.'
                 );
+                recordActivity({
+                    type: 'validation_run',
+                    title: 'Validated graph locally',
+                    summary:
+                        err.response?.statusText ||
+                        err.message ||
+                        'Backend validation unavailable.',
+                    metadata: {
+                        source: 'local_fallback'
+                    }
+                });
             }
         };
 
@@ -485,7 +524,7 @@ const GraphValidationPanel = ({
         return () => {
             isCancelled = true;
         };
-    }, [flowId, refreshCounter]);
+    }, [flowId, recordActivity, refreshCounter]);
 
     if (nodes.length === 0) {
         return null;

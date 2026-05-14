@@ -18,6 +18,12 @@ import errorStore from '../stores/errorStore';
 import DELETESvg from '../assets/delete.svg';
 import { useReactFlow } from '@xyflow/react';
 import { sourceUploadLoading } from '../config/loadingStates';
+import useActivityStore from '../stores/activityStore';
+import { isCanceledRequest, requestErrorMessage } from '../utils/requestErrors';
+import {
+    createOperationSnapshot,
+    restoreOperationSnapshot
+} from '../utils/operationSnapshots';
 
 const DocxModal = () => {
     const selector = (state) => ({
@@ -27,16 +33,21 @@ const DocxModal = () => {
         edges: state.edges,
         setNodes: state.setNodes,
         setEdges: state.setEdges,
-        setViewPort: state.setViewPort
+        setViewPort: state.setViewPort,
+        workspaceBrief: state.workspaceBrief,
+        setWorkspaceBrief: state.setWorkspaceBrief,
+        viewport: state.viewport
     });
     const flowId = flowStore((s) => s.flow_id);
     const setFlowId = flowStore((s) => s.setFlow);
     const flow_id = flowStore((s) => s.flow_id);
     const setFlowName = flowStore((s) => s.setFlowName);
-    const { fitView } = useReactFlow();
+    const { fitView, setViewport } = useReactFlow();
     const [file, setFile] = useState();
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const updateActivity = useActivityStore((s) => s.updateActivity);
     // const csvAccept = ".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
     const docxAccept = '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -47,7 +58,10 @@ const DocxModal = () => {
         edges,
         setNodes,
         setEdges,
-        setViewPort
+        setViewPort,
+        workspaceBrief,
+        setWorkspaceBrief,
+        viewport
     } = useStore(useShallow(selector));
 
     const showError = (statusCode, message) => {
@@ -67,19 +81,81 @@ const DocxModal = () => {
             return;
         }
 
+        const operationId = nanoid();
         const data = {
             file: file,
+            operationId
         };
-        pushNode(LoadingModal, sourceUploadLoading('DOCX', file?.name));
+        const undoSnapshot = createOperationSnapshot({
+            nodes,
+            edges,
+            viewport,
+            workspaceBrief
+        });
+        const controller = new AbortController();
+        const activityId = addActivity({
+            type: 'source_upload_started',
+            title: 'Adding DOCX source',
+            detail: file?.name,
+            context: 'Uploading, extracting text, and deriving workspace structure.'
+        });
+        pushNode(LoadingModal, {
+            ...sourceUploadLoading('DOCX', file?.name),
+            operationId,
+            onCancel: () => {
+                controller.abort();
+                updateActivity(activityId, {
+                    type: 'source_upload_canceled',
+                    status: 'canceled',
+                    context: 'Upload request was canceled.'
+                });
+                popNode();
+            }
+        });
+        const undoSourceAdd = () => {
+            restoreOperationSnapshot({
+                snapshot: undoSnapshot,
+                setNodes,
+                setEdges,
+                setWorkspaceBrief,
+                setViewPort,
+                setViewport
+            });
+            updateActivity(activityId, {
+                status: 'completed',
+                context: 'DOCX source add was undone.',
+                undo: undefined
+            });
+        };
         const [url, body, headerConfig] = setRequestData('docx', currentFlowId, data);
         axios
             .post(`http://localhost:8000/${url}`, body, {
                 headers: {
                     'Content-Type': headerConfig
-                }
+                },
+                signal: controller.signal
             })
-            .then((res) => setupNodes(res.data))
-            .catch((err) => manageErrors(err));
+            .then((res) => {
+                updateActivity(activityId, {
+                    type: 'source_upload_completed',
+                    status: 'completed',
+                    source_ids: [file?.name],
+                    context: 'DOCX source was added to the workspace.',
+                    undo: undoSourceAdd
+                });
+                setupNodes(res.data);
+            })
+            .catch((err) => {
+                if (isCanceledRequest(err)) {
+                    return;
+                }
+                updateActivity(activityId, {
+                    type: 'source_upload_failed',
+                    status: 'failed',
+                    context: requestErrorMessage(err)
+                });
+                manageErrors(err);
+            });
     };
 
     const setupNodes = (data) => {
@@ -95,7 +171,6 @@ const DocxModal = () => {
     }
     const setupFlow = (data) => {
         console.log("SETUUUUUUUUUUUUUUUUUUP new flow")
-        pushNode(LoadingModal);
         setFlowId(data.flow_id);
         console.log('DEDEDE', data);
         setFlowName(data.flow_name);
@@ -122,6 +197,7 @@ const DocxModal = () => {
                     data.flow_id,
                     nodes
                 );
+                popNode();
             } else {
                 console.log('Flow error');
             }
@@ -150,10 +226,7 @@ const DocxModal = () => {
     const manageErrors = (err) => {
         console.log(err);
         const statusCode = err.response?.status || err.status || 500;
-        const message = err.response?.data?.detail
-            || err.response?.statusText
-            || (err.request ? 'The backend did not return a response. Check that the API server is running and try again.' : err.message)
-            || 'Unable to upload DOCX source.';
+        const message = requestErrorMessage(err);
         setStatus(statusCode);
         setMsg(message);
         popNode();
@@ -181,6 +254,7 @@ const DocxModal = () => {
         }
 
         setTrigger(!trigger);
+        popNode();
     };
 
     const handleFileUpload = (e) => {

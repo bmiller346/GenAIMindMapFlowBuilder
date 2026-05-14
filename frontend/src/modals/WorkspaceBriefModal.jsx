@@ -1,7 +1,17 @@
 import { useState } from 'react';
+import { useReactFlow } from '@xyflow/react';
 import CROSSSvg from '../assets/cross.svg';
+import LoadingModal from './LoadingModal';
 import modalStore from '../stores/modalStore';
 import useStore from '../stores/store';
+import flowStore from '../stores/flowStore';
+import useActivityStore from '../stores/activityStore';
+import { briefDraftLoading } from '../config/loadingStates';
+import { createBriefDraftGraph } from '../utils/briefDraftGraph';
+import {
+    createOperationSnapshot,
+    restoreOperationSnapshot
+} from '../utils/operationSnapshots';
 
 const OUTPUT_GROUPS = [
     {
@@ -218,10 +228,24 @@ const getSourceNames = (nodes) =>
         .filter(Boolean);
 
 const WorkspaceBriefModal = () => {
+    const { setViewport } = useReactFlow();
     const popNode = modalStore((s) => s.popNode);
+    const pushNode = modalStore((s) => s.pushNode);
     const nodes = useStore((s) => s.nodes);
+    const edges = useStore((s) => s.edges);
+    const setNodes = useStore((s) => s.setNodes);
+    const setEdges = useStore((s) => s.setEdges);
+    const trigger = useStore((s) => s.trigger);
+    const setTrigger = useStore((s) => s.setTrigger);
     const workspaceBrief = useStore((s) => s.workspaceBrief);
     const setWorkspaceBrief = useStore((s) => s.setWorkspaceBrief);
+    const viewport = useStore((s) => s.viewport);
+    const setViewPort = useStore((s) => s.setViewPort);
+    const flowId = flowStore((s) => s.flow_id);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const updateActivity = useActivityStore((s) => s.updateActivity);
+    const recordActivity = useActivityStore((s) => s.recordActivity);
     const [draft, setDraft] = useState({
         ...DEFAULT_BRIEF,
         ...(workspaceBrief || {}),
@@ -339,20 +363,131 @@ const WorkspaceBriefModal = () => {
         }));
     };
 
+    const normalizeBrief = () => ({
+        ...draft,
+        configured: true,
+        goal: draft.goal.trim(),
+        audience: draft.audience.trim(),
+        domain_context: draft.domain_context.trim(),
+        review_rules: draft.review_rules.trim(),
+        desired_outputs: uniqueValues(draft.desired_outputs || []),
+        node_types: uniqueValues(draft.node_types || []),
+        review_policy: uniqueValues(draft.review_policy || [])
+    });
+
     const saveBrief = () => {
-        setWorkspaceBrief({
-            ...draft,
-            configured: true,
-            goal: draft.goal.trim(),
-            audience: draft.audience.trim(),
-            domain_context: draft.domain_context.trim(),
-            review_rules: draft.review_rules.trim(),
-            desired_outputs: uniqueValues(draft.desired_outputs || []),
-            node_types: uniqueValues(draft.node_types || []),
-            review_policy: uniqueValues(draft.review_policy || [])
+        setWorkspaceBrief(normalizeBrief());
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        recordActivity({
+            type: 'brief_saved',
+            title: 'Saved workspace brief',
+            summary: normalizeBrief().goal || 'Updated DocMap setup.',
+            metadata: {
+                preset: normalizeBrief().preset,
+                source_mode: normalizeBrief().source_mode
+            }
         });
         setSaved(true);
     };
+
+    const deriveFromBrief = () => {
+        const normalizedBrief = normalizeBrief();
+        const nextBrief = sourceNames.length
+            ? normalizedBrief
+            : {
+                  ...normalizedBrief,
+                  source_mode: 'context_only',
+                  assumptions_allowed: true
+              };
+        const undoSnapshot = createOperationSnapshot({
+            nodes,
+            edges,
+            viewport,
+            workspaceBrief
+        });
+        const activityId = addActivity({
+            type: 'brief_derive_started',
+            title: 'Deriving from brief',
+            detail: nextBrief.goal || nextBrief.preset,
+            context: 'Creating reviewable starter nodes from the workspace brief.'
+        });
+        let canceled = false;
+        let timeoutId;
+
+        const restoreFromActivity = () => {
+            restoreOperationSnapshot({
+                snapshot: undoSnapshot,
+                setNodes,
+                setEdges,
+                setWorkspaceBrief,
+                setViewPort,
+                setViewport
+            });
+            updateActivity(activityId, {
+                status: 'completed',
+                context: 'Brief draft was undone.',
+                undo: undefined
+            });
+        };
+
+        pushNode(LoadingModal, {
+            ...briefDraftLoading(nextBrief),
+            cancelLabel: 'Cancel draft',
+            onCancel: () => {
+                canceled = true;
+                window.clearTimeout(timeoutId);
+            updateActivity(activityId, {
+                type: 'brief_derive_canceled',
+                status: 'canceled',
+                context: 'Brief derivation was canceled before applying.'
+            });
+                popNode();
+            }
+        });
+
+        timeoutId = window.setTimeout(() => {
+            if (canceled) {
+                return;
+            }
+
+            const origin = {
+                x: nodes.length ? Math.max(...nodes.map((node) => node.position?.x || 0)) + 560 : 80,
+                y: nodes.length ? Math.min(...nodes.map((node) => node.position?.y || 0)) : 80
+            };
+            const draftGraph = createBriefDraftGraph({
+                brief: nextBrief,
+                flowId,
+                origin
+            });
+            setWorkspaceBrief(nextBrief);
+            setNodes([...nodes, ...draftGraph.nodes]);
+            setEdges([...edges, ...draftGraph.edges]);
+            setTrigger(!trigger);
+            if (!nodes.length) {
+                const nextViewport = { x: 70, y: 130, zoom: 0.55 };
+                setViewPort(nextViewport);
+                setViewport(nextViewport, { duration: 250 });
+            }
+            if (flowId) {
+                setSaveStatus('dirty');
+            }
+            updateActivity(activityId, {
+                type: 'brief_derive_completed',
+                status: 'completed',
+                context: 'Brief-derived nodes were added and marked for review.',
+                node_ids: draftGraph.nodes.map((node) => node.id),
+                undo: restoreFromActivity
+            });
+            popNode();
+        }, 700);
+    };
+
+    const canGenerateDraft =
+        draft.goal.trim().length > 0 ||
+        draft.domain_context.trim().length > 0 ||
+        draft.audience.trim().length > 0;
 
     return (
         <div className="modal-container workspace-brief-modal">
@@ -603,11 +738,21 @@ const WorkspaceBriefModal = () => {
             </details>
 
             {saved ? (
-                <p className="workspace-brief-saved">DocMap setup saved to this workspace.</p>
+                <p className="workspace-brief-saved">
+                    DocMap setup saved. Autosave will persist it with this workspace.
+                </p>
             ) : null}
             <div className="buttons">
                 <button id="cancel" type="button" onClick={() => popNode()}>
                     Close
+                </button>
+                <button
+                    className="workspace-brief-draft-button"
+                    type="button"
+                    onClick={deriveFromBrief}
+                    disabled={!canGenerateDraft}
+                >
+                    Derive from brief
                 </button>
                 <button id="add" type="button" onClick={saveBrief}>
                     Save setup

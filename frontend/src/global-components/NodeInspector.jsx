@@ -2,6 +2,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
+import flowStore from '../stores/flowStore';
+import useActivityStore from '../stores/activityStore';
 
 const NODE_TYPES = [
     'category',
@@ -76,6 +78,9 @@ const getExternalRefs = (data) => {
     return refs && typeof refs === 'object' ? refs : {};
 };
 
+const isEmptyValue = (value) =>
+    value === undefined || value === null || String(value).trim() === '';
+
 const hasCitation = (draft) =>
     Boolean(
         draft.source_document ||
@@ -118,15 +123,20 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
         setNodes: state.setNodes
     });
     const { nodes, setNodes } = useStore(useShallow(selector));
+    const flowId = flowStore((state) => state.flow_id);
+    const setSaveStatus = flowStore((state) => state.setSaveStatus);
+    const recordActivity = useActivityStore((state) => state.recordActivity);
     const selectedNode = useMemo(
         () => nodes.find((node) => node.id === selectedNodeId),
         [nodes, selectedNodeId]
     );
     const [draft, setDraft] = useState({});
+    const [applyMessage, setApplyMessage] = useState('');
 
     useEffect(() => {
         if (!selectedNode) {
             setDraft({});
+            setApplyMessage('');
             return;
         }
 
@@ -159,10 +169,12 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
 
     const updateDraft = (key, value) => {
         setDraft((current) => ({ ...current, [key]: value }));
+        setApplyMessage('');
     };
 
     const saveMetadata = () => {
         const existingExternalRefs = getExternalRefs(selectedNode?.data || {});
+        const existingSourceRefs = getSourceRefs(selectedNode?.data || {});
         const sourceRefs =
             draft.source_document ||
             draft.source_page ||
@@ -170,16 +182,18 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
             draft.source_quote
                 ? [
                       {
+                          ...(existingSourceRefs[0] || {}),
                           document_id: draft.source_document,
                           page: draft.source_page,
                           section: draft.source_section,
                           quote_snippet: draft.source_quote,
                           confidence: draft.confidence
-                      }
+                      },
+                      ...existingSourceRefs.slice(1)
                   ]
-                : [];
+                : existingSourceRefs.slice(1);
 
-        const externalRefs = {};
+        const externalRefs = { ...existingExternalRefs };
         if (draft.miro_board_id || draft.miro_item_id || existingExternalRefs.miro) {
             externalRefs.miro = {
                 ...(existingExternalRefs.miro || {}),
@@ -198,6 +212,15 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                 item_id: draft.monday_item_id
             };
         }
+        Object.keys(externalRefs).forEach((provider) => {
+            if (
+                externalRefs[provider] &&
+                typeof externalRefs[provider] === 'object' &&
+                Object.values(externalRefs[provider]).every(isEmptyValue)
+            ) {
+                delete externalRefs[provider];
+            }
+        });
 
         setNodes(
             nodes.map((node) => {
@@ -217,10 +240,39 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                         due_date: draft.due_date,
                         confidence: draft.confidence,
                         source_refs: sourceRefs,
-                        external_refs: externalRefs
+                        external_refs: externalRefs,
+                        ...(node.data?.manual
+                            ? {
+                                  data: {
+                                      ...(node.data?.data || {}),
+                                      summ: draft.title || node.data?.data?.summ
+                                  }
+                              }
+                            : {})
                     }
                 };
             })
+        );
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        recordActivity({
+            type: 'node_metadata_applied',
+            title: 'Node metadata applied',
+            summary: `Updated metadata for ${draft.title || selectedNode.id}.`,
+            node_ids: [selectedNode.id],
+            source_ids: draft.source_document ? [draft.source_document] : [],
+            metadata: {
+                node_type: draft.node_type,
+                status: draft.status,
+                priority: draft.priority,
+                has_source: isSourceBacked
+            }
+        });
+        setApplyMessage(
+            flowId
+                ? 'Applied locally. Save or autosave will persist this workspace.'
+                : 'Applied locally. Create or open a workspace to persist it.'
         );
     };
 
@@ -359,7 +411,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                 ) : null}
 
                 <div className="node-inspector-section">
-                    <p>Source reference</p>
+                    <p>Primary source reference</p>
                     <div
                         className={`node-citation-card ${
                             isSourceBacked
@@ -406,6 +458,12 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                                 </article>
                             ))}
                         </div>
+                    ) : null}
+                    {sourceRefList.length > 1 ? (
+                        <p className="node-inspector-help">
+                            Editing fields below updates the primary source only. Other
+                            citations remain attached to the node.
+                        </p>
                     ) : null}
                     <label>
                         Document
@@ -507,6 +565,11 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
             </div>
 
             <div className="node-inspector-actions">
+                {applyMessage ? (
+                    <span className="node-inspector-apply-message">
+                        {applyMessage}
+                    </span>
+                ) : null}
                 <button type="button" onClick={saveMetadata}>
                     Apply
                 </button>

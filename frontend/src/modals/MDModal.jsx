@@ -18,18 +18,26 @@ import errorStore from '../stores/errorStore';
 import DELETESvg from '../assets/delete.svg';
 import { useReactFlow } from '@xyflow/react';
 import { sourceUploadLoading } from '../config/loadingStates';
+import useActivityStore from '../stores/activityStore';
+import { isCanceledRequest, requestErrorMessage } from '../utils/requestErrors';
+import {
+    createOperationSnapshot,
+    restoreOperationSnapshot
+} from '../utils/operationSnapshots';
 
 const MDModal = () => {
     const flowId = flowStore((s) => s.flow_id);
     const [file, setFile] = useState();
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const updateActivity = useActivityStore((s) => s.updateActivity);
     // const csvAccept = ".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
     const markdownAccept = '.md,.markdown,text/markdown,text/x-markdown';
     const setFlowId = flowStore((s) => s.setFlow);
     const flow_id = flowStore((s) => s.flow_id);
     const setFlowName = flowStore((s) => s.setFlowName);
-    const { fitView } = useReactFlow();
+    const { fitView, setViewport } = useReactFlow();
     const selector = (state) => ({
         trigger: state.trigger,
         setTrigger: state.setTrigger,
@@ -37,7 +45,10 @@ const MDModal = () => {
         edges: state.edges,
         setNodes: state.setNodes,
         setEdges: state.setEdges,
-        setViewPort: state.setViewPort
+        setViewPort: state.setViewPort,
+        workspaceBrief: state.workspaceBrief,
+        setWorkspaceBrief: state.setWorkspaceBrief,
+        viewport: state.viewport
     });
 
     const {
@@ -47,26 +58,91 @@ const MDModal = () => {
         edges,
         setNodes,
         setEdges,
-        setViewPort
+        setViewPort,
+        workspaceBrief,
+        setWorkspaceBrief,
+        viewport
     } = useStore(useShallow(selector));
 
 
 
 
     const addDataSource = (e) => {
+        const operationId = nanoid();
         const data = {
             file: file,
+            operationId
         };
-        pushNode(LoadingModal, sourceUploadLoading('Markdown', file?.name));
+        const undoSnapshot = createOperationSnapshot({
+            nodes,
+            edges,
+            viewport,
+            workspaceBrief
+        });
+        const controller = new AbortController();
+        const activityId = addActivity({
+            type: 'source_upload_started',
+            title: 'Adding Markdown source',
+            detail: file?.name,
+            context: 'Uploading, extracting text, and deriving workspace structure.'
+        });
+        pushNode(LoadingModal, {
+            ...sourceUploadLoading('Markdown', file?.name),
+            operationId,
+            onCancel: () => {
+                controller.abort();
+                updateActivity(activityId, {
+                    type: 'source_upload_canceled',
+                    status: 'canceled',
+                    context: 'Upload request was canceled.'
+                });
+                popNode();
+            }
+        });
+        const undoSourceAdd = () => {
+            restoreOperationSnapshot({
+                snapshot: undoSnapshot,
+                setNodes,
+                setEdges,
+                setWorkspaceBrief,
+                setViewPort,
+                setViewport
+            });
+            updateActivity(activityId, {
+                status: 'completed',
+                context: 'Markdown source add was undone.',
+                undo: undefined
+            });
+        };
         const [url, body, headerConfig] = setRequestData('md', flowId, data);
         axios
             .post(`http://localhost:8000/${url}`, body, {
                 headers: {
                     'Content-Type': headerConfig
-                }
+                },
+                signal: controller.signal
             })
-            .then((res) => setupNodes(res.data))
-            .catch((err) => manageErrors(err));
+            .then((res) => {
+                updateActivity(activityId, {
+                    type: 'source_upload_completed',
+                    status: 'completed',
+                    source_ids: [file?.name],
+                    context: 'Markdown source was added to the workspace.',
+                    undo: undoSourceAdd
+                });
+                setupNodes(res.data);
+            })
+            .catch((err) => {
+                if (isCanceledRequest(err)) {
+                    return;
+                }
+                updateActivity(activityId, {
+                    type: 'source_upload_failed',
+                    status: 'failed',
+                    context: requestErrorMessage(err)
+                });
+                manageErrors(err);
+            });
     };
 
     const setupNodes = (data) => {
@@ -82,7 +158,6 @@ const MDModal = () => {
     }
     const setupFlow = (data) => {
         console.log("SETUUUUUUUUUUUUUUUUUUP new flow")
-        pushNode(LoadingModal);
         setFlowId(data.flow_id);
         console.log('DEDEDE', data);
         setFlowName(data.flow_name);
@@ -109,6 +184,7 @@ const MDModal = () => {
                     data.flow_id,
                     nodes
                 );
+                popNode();
             } else {
                 console.log('Flow error');
             }
@@ -135,9 +211,9 @@ const MDModal = () => {
     const manageErrors = (err) => {
         console.log(err);
         console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
-        setStatus(err.status);
-        setMsg(err.response.statusText);
+        console.log('Errroross', err.response?.statusText);
+        setStatus(err.response?.status || err.status || 500);
+        setMsg(requestErrorMessage(err));
         popNode();
         pushNode(ErrorModal);
     };
@@ -163,6 +239,7 @@ const MDModal = () => {
         }
 
         setTrigger(!trigger);
+        popNode();
     };
 
     const handleFileUpload = (e) => {
