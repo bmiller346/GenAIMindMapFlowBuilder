@@ -49,7 +49,7 @@ const PDFModal = () => {
         setEdges,
         setViewPort
     } = useStore(useShallow(selector));
-    const pdfAccept = 'application/pdf';
+    const pdfAccept = '.pdf,application/pdf';
     const [processingType, setProcessingType] = useState('gpt');
     const addDataSource = (e) => {
         const data = {

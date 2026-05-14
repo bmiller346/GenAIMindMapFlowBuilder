@@ -25,7 +25,6 @@ const flowId = flowStore((s) => s.flow_id);
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     // const csvAccept = ".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-    const markdownAccept = 'text/markdown';
     const setFlowId = flowStore((s) => s.setFlow);
     const flow_id = flowStore((s) => s.flow_id);
     const setFlowName = flowStore((s) => s.setFlowName);
@@ -49,7 +48,7 @@ const flowId = flowStore((s) => s.flow_id);
         setEdges,
         setViewPort
     } = useStore(useShallow(selector));
-    const textAccept = 'text/plain';
+    const textAccept = '.txt,text/plain';
 
 
 

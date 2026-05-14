@@ -38,7 +38,7 @@ const DocxModal = () => {
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     // const csvAccept = ".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-    const docxAccept = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const docxAccept = '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
     const {
         trigger,

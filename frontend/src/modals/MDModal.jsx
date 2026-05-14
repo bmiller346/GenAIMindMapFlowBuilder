@@ -25,7 +25,7 @@ const MDModal = () => {
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     // const csvAccept = ".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-    const markdownAccept = 'text/markdown';
+    const markdownAccept = '.md,.markdown,text/markdown,text/x-markdown';
     const setFlowId = flowStore((s) => s.setFlow);
     const flow_id = flowStore((s) => s.flow_id);
     const setFlowName = flowStore((s) => s.setFlowName);
