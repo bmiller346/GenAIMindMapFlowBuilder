@@ -1,5 +1,5 @@
 import { create } from "zustand";
-const flowStore = create((set) => ({
+const flowStore = create((set, get) => ({
 	flow_id: undefined,
 	theme: false,
 	setTheme: (updTheme) => {
@@ -10,7 +10,14 @@ const flowStore = create((set) => ({
 	setFlow: (id) => {
 		console.log("DEBUGGGGGGGGGGGGGGG", id)
 		set({
-			flow_id: id
+			flow_id: id,
+			lastSavedSnapshot: undefined,
+			lastSavedFingerprint: '',
+			lastSavedFlowName: undefined,
+			lastSavedFlowType: undefined,
+			lastSavedAt: undefined,
+			lastSaveError: undefined,
+			saveStatus: 'idle'
 		})
 	},
 	rfInstance: undefined,
@@ -34,6 +41,33 @@ const flowStore = create((set) => ({
 	setFlowType: (type_of_flow) => {
 		set({
 			flow_type: type_of_flow
+		})
+	},
+	saveStatus: 'idle',
+	lastSavedSnapshot: undefined,
+	lastSavedFingerprint: '',
+	lastSavedFlowName: undefined,
+	lastSavedFlowType: undefined,
+	lastSavedAt: undefined,
+	lastSaveError: undefined,
+	setSaveStatus: (saveStatus) => {
+		set({ saveStatus })
+	},
+	setSavedSnapshot: (snapshot, fingerprint, flowName, flowType) => {
+		set({
+			lastSavedSnapshot: snapshot,
+			lastSavedFingerprint: fingerprint,
+			lastSavedFlowName: flowName,
+			lastSavedFlowType: flowType || get().flow_type || 'manual',
+			lastSavedAt: new Date().toISOString(),
+			lastSaveError: undefined,
+			saveStatus: 'saved'
+		})
+	},
+	setSaveError: (error) => {
+		set({
+			lastSaveError: error,
+			saveStatus: 'error'
 		})
 	}
 }));

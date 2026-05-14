@@ -27,6 +27,8 @@ import { LandingCards } from './global-components/LandingCards';
 import ExampleCards from './global-components/ExampleCards';
 import TestimonialCards from './global-components/TestimonialCards';
 import { useEffect, useState } from 'react';
+import './Landing.css';
+
 export const Landing = () => {
     const [selectedVideo, setSelectedVideo] = useState('Sources')
 

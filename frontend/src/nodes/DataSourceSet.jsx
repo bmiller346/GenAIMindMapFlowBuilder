@@ -127,7 +127,14 @@ const DataSourceSet = ({ data }) => {
                     src={data.img}
                     alt=""
                 />
-                <p>{data.content}</p>
+                <span className="data-source-set-copy">
+                    <p>{data.content}</p>
+                    {data.mode || data.detail ? (
+                        <small>
+                            {[data.mode, data.detail].filter(Boolean).join(" | ")}
+                        </small>
+                    ) : null}
+                </span>
             </div>
             <img
                 src={RIGHTArrow}

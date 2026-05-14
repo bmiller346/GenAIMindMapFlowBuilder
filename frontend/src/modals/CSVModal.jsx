@@ -7,6 +7,7 @@ import { nanoid } from "nanoid"
 import useStore from "../stores/store"
 import { useShallow } from "zustand/shallow"
 import modalStore from "../stores/modalStore"
+import { useReactFlow } from "@xyflow/react"
 import axios from "axios"
 import LoadingModal from "./LoadingModal"
 import setRequestData from "../config/setRequestData"
@@ -15,35 +16,115 @@ import DataSourceSet from "../nodes/DataSourceSet"
 import DataSourceSelect from "../global-components/DataSourceSelect"
 import ErrorModal from "./ErrorModal"
 import errorStore from "../stores/errorStore"
+import { sourceUploadLoading } from "../config/loadingStates"
+import useActivityStore from "../stores/activityStore"
+import { isCanceledRequest, requestErrorMessage } from "../utils/requestErrors"
+import {
+	createSourceUndoHandler,
+	createSourceUndoSnapshot
+} from "../utils/sourceOperationActivity"
 
 const CSVModal = () => {
 	const selector = (state) => ({
 		trigger: state.trigger,
 		setTrigger: state.setTrigger,
 		nodes: state.nodes,
-		setNodes: state.setNodes
+		edges: state.edges,
+		setNodes: state.setNodes,
+		setEdges: state.setEdges,
+		setViewPort: state.setViewPort,
+		workspaceBrief: state.workspaceBrief,
+		setWorkspaceBrief: state.setWorkspaceBrief,
+		viewport: state.viewport
 	})
 	const flowId = flowStore((s) => s.flow_id)
-	const { trigger, setTrigger, nodes, setNodes } = useStore(useShallow(selector));
+	const {
+		trigger,
+		setTrigger,
+		nodes,
+		edges,
+		setNodes,
+		setEdges,
+		setViewPort,
+		workspaceBrief,
+		setWorkspaceBrief,
+		viewport
+	} = useStore(useShallow(selector));
 	const [header_row, setHeaderRow] = useState()
 	const [file, setFile] = useState();
 	const pushNode = modalStore((s) => s.pushNode);
 	const popNode = modalStore((s) => s.popNode);
+	const { setViewport } = useReactFlow();
+	const addActivity = useActivityStore((s) => s.addActivity);
+	const updateActivity = useActivityStore((s) => s.updateActivity);
 	const csvAccept = ".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
 
 	const addDataSource = (e) => {
+		const operationId = nanoid();
+		const controller = new AbortController();
+		const undoSnapshot = createSourceUndoSnapshot({
+			nodes,
+			edges,
+			viewport,
+			workspaceBrief
+		});
+		const activityId = addActivity({
+			title: "Adding CSV source",
+			detail: file?.name,
+			context: "Uploading the table, reading columns, and preparing query context."
+		});
 		const data = {
 			file: file,
-			header_row: header_row
+			header_row: header_row,
+			operationId
 		}
-		pushNode(LoadingModal);
+		pushNode(LoadingModal, {
+			...sourceUploadLoading("CSV", file?.name),
+			operationId,
+			onCancel: () => {
+				controller.abort();
+				updateActivity(activityId, {
+					status: "canceled",
+					context: "CSV upload request was canceled."
+				});
+				popNode();
+			}
+		});
+		const undoSourceAdd = createSourceUndoHandler({
+			activityId,
+			snapshot: undoSnapshot,
+			updateActivity,
+			setNodes,
+			setEdges,
+			setWorkspaceBrief,
+			setViewPort,
+			setViewport,
+			context: "CSV source add was undone."
+		});
 		const [url, body, headerConfig] = setRequestData("csv", flowId, data);
 		axios.post(`http://localhost:8000/${url}`, body, {
 			headers: {
 				'Content-Type': headerConfig
-			}
-		}).then((res) => manageNodes(res.data))
-			.catch((err) => manageErrors(err))
+			},
+			signal: controller.signal
+		}).then((res) => {
+			updateActivity(activityId, {
+				status: "completed",
+				context: "CSV source was added to the workspace.",
+				undo: undoSourceAdd
+			});
+			manageNodes(res.data)
+		})
+			.catch((err) => {
+				if (isCanceledRequest(err)) {
+					return;
+				}
+				updateActivity(activityId, {
+					status: "failed",
+					context: requestErrorMessage(err)
+				});
+				manageErrors(err)
+			})
 
 	}
 
@@ -58,9 +139,9 @@ const CSVModal = () => {
 	const manageErrors = (err) => {
 		console.log(err)
 		console.log("Errroro", err.status)
-		console.log("Errroross", err.response.statusText)
+		console.log("Errroross", err.response?.statusText)
 		setStatus(err.status)
-		setMsg(err.response.statusText)
+		setMsg(requestErrorMessage(err))
 		popNode()
 		pushNode(ErrorModal)
 	}
@@ -87,6 +168,7 @@ const CSVModal = () => {
 		}
 
 		setTrigger(!trigger)
+		popNode()
 
 	}
 

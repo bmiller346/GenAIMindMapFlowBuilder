@@ -17,12 +17,14 @@
     "desktop:build:self-contained": "npm run desktop:build:frontend && npm run desktop:prepare:self-contained && electron-builder -c",
     "desktop:check": "node --check electron/main.js && node --check electron/preload.js && node --check scripts/desktop-dev.mjs && node --check scripts/build-frontend.mjs && node --check scripts/prepare-desktop-resources.mjs",
     "infra:mongo:up": "docker-compose -f docker-compose.yml up -d mongo",
+    "infra:mongo:local": "powershell -ExecutionPolicy Bypass -File scripts/start-local-mongo.ps1",
     "infra:mongo:down": "docker-compose -f docker-compose.yml down",
     "infra:mongo:logs": "docker-compose -f docker-compose.yml logs -f mongo"
   },
   "devDependencies": {
     "electron": "^38.1.2",
     "electron-builder": "^26.0.12",
+    "ffmpeg-static": "^5.3.0",
     "wait-on": "^7.2.0"
   },
   "build": {
@@ -49,6 +51,13 @@
       {
         "from": ".desktop-resources/backend",
         "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".desktop-resources/ffmpeg",
+        "to": "ffmpeg",
         "filter": [
           "**/*"
         ]

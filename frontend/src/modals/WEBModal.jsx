@@ -16,6 +16,13 @@ import errorStore from "../stores/errorStore";
 import ErrorModal from "./ErrorModal";
 import DELETESvg from '../assets/delete.svg';
 import { useReactFlow } from '@xyflow/react';
+import { sourceUploadLoading } from '../config/loadingStates';
+import useActivityStore from '../stores/activityStore';
+import { isCanceledRequest, requestErrorMessage } from '../utils/requestErrors';
+import {
+    createSourceUndoHandler,
+    createSourceUndoSnapshot
+} from '../utils/sourceOperationActivity';
 const WEBModal = () => {
 	const selector = (state) => ({
         trigger: state.trigger,
@@ -24,7 +31,10 @@ const WEBModal = () => {
         edges: state.edges,
         setNodes: state.setNodes,
         setEdges: state.setEdges,
-        setViewPort: state.setViewPort
+        setViewPort: state.setViewPort,
+        workspaceBrief: state.workspaceBrief,
+        setWorkspaceBrief: state.setWorkspaceBrief,
+        viewport: state.viewport
     });
 	const pushNode = modalStore((s) => s.pushNode)
 	const flowId = flowStore((s) => s.flow_id)
@@ -35,7 +45,10 @@ const WEBModal = () => {
         edges,
         setNodes,
         setEdges,
-        setViewPort
+        setViewPort,
+        workspaceBrief,
+        setWorkspaceBrief,
+        viewport
     } = useStore(useShallow(selector));
 	const [url, setUrl] = useState("");
 	const popNode = modalStore((s) => s.popNode);
@@ -43,21 +56,76 @@ const WEBModal = () => {
 	const setFlowId = flowStore((s) => s.setFlow);
     const flow_id = flowStore((s) => s.flow_id);
     const setFlowName = flowStore((s) => s.setFlowName);
-    const { fitView } = useReactFlow();
+    const { fitView, setViewport } = useReactFlow();
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const updateActivity = useActivityStore((s) => s.updateActivity);
 
 	const addDataSource = (e) => {
+		const operationId = nanoid();
+		const controller = new AbortController();
+		const undoSnapshot = createSourceUndoSnapshot({
+			nodes,
+			edges,
+			viewport,
+			workspaceBrief
+		});
+		const activityId = addActivity({
+			title: 'Adding web source',
+			detail: url,
+			context: 'Reading a web page and deriving workspace structure.'
+		});
 		const data = {
-			content: url
+			content: url,
+			operationId
 		}
-		pushNode(LoadingModal);
+		pushNode(LoadingModal, {
+			...sourceUploadLoading('web page', url),
+			operationId,
+			onCancel: () => {
+				controller.abort();
+				updateActivity(activityId, {
+					status: 'canceled',
+					context: 'Web source request was canceled.'
+				});
+				popNode();
+			}
+		});
+		const undoSourceAdd = createSourceUndoHandler({
+			activityId,
+			snapshot: undoSnapshot,
+			updateActivity,
+			setNodes,
+			setEdges,
+			setWorkspaceBrief,
+			setViewPort,
+			setViewport,
+			context: 'Web source add was undone.'
+		});
 		const [url_hit, body, headerConfig] = setRequestData("web", flowId, data);
 		console.log("Testtttttt", url_hit, body, headerConfig)
 		axios.post(`http://localhost:8000/${url_hit}`, body, {
 			headers: {
 				'Content-Type': headerConfig
-			}
-		}).then((res) => setupNodes(res.data))
-			.catch((err) => manageErrors(err))
+			},
+			signal: controller.signal
+		}).then((res) => {
+			updateActivity(activityId, {
+				status: 'completed',
+				context: 'Web source was added to the workspace.',
+				undo: undoSourceAdd
+			});
+			setupNodes(res.data)
+		})
+			.catch((err) => {
+				if (isCanceledRequest(err)) {
+					return;
+				}
+				updateActivity(activityId, {
+					status: 'failed',
+					context: requestErrorMessage(err)
+				});
+				manageErrors(err)
+			})
 	}
 
 	const setupNodes = (data) => {
@@ -73,7 +141,6 @@ const WEBModal = () => {
     }
     const setupFlow = (data) => {
         console.log("SETUUUUUUUUUUUUUUUUUUP new flow")
-        pushNode(LoadingModal);
         setFlowId(data.flow_id);
         console.log('DEDEDE', data);
         setFlowName(data.flow_name);
@@ -100,6 +167,7 @@ const WEBModal = () => {
                     data.flow_id,
                     nodes
                 );
+                popNode();
             } else {
                 console.log('Flow error');
             }
@@ -124,9 +192,9 @@ const WEBModal = () => {
 	const manageErrors = (err) => {
 		console.log(err)
 		console.log("Errroro", err.status)
-		console.log("Errroross", err.response.statusText)
-		setStatus(err.status)
-		setMsg(err.response.statusText)
+		console.log("Errroross", err.response?.statusText)
+		setStatus(err.response?.status || err.status || 500)
+		setMsg(requestErrorMessage(err))
 		popNode()
 		pushNode(ErrorModal)
 	}
@@ -150,6 +218,7 @@ const WEBModal = () => {
 			setNodes(newArr)
 		}
 		setTrigger(!trigger)
+		popNode()
 	}
 	return (
         <div className="modal-container">

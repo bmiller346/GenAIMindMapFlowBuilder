@@ -100,122 +100,9 @@ const Header = ({
     ];
     const imageExportFormats = [
         { id: 'png', label: 'PNG', extension: 'png' },
-        { id: 'svg', label: 'SVG', extension: 'svg' }
+        { id: 'svg', label: 'SVG', extension: 'svg' },
+        { id: 'pdf', label: 'PDF', extension: 'pdf' }
     ];
-    const bridgeExportFormats = [
-        {
-            id: 'miro',
-            label: 'Miro dry-run preview',
-            extension: 'miro-preview.json'
-        },
-        {
-            id: 'monday',
-            label: 'monday confirmed payload',
-            extension: 'monday-batch.json'
-        }
-    ];
-    const workspaceMiroFormats = [
-        {
-            id: 'miro-board-plan',
-            label: 'Workspace Miro board plan',
-            extension: 'miro-board-plan.json',
-            dryRun: true,
-            endpoint: 'board'
-        },
-        {
-            id: 'miro-board-push',
-            label: 'Push workspace to Miro',
-            extension: 'miro-board-result.json',
-            dryRun: false,
-            endpoint: 'board'
-        },
-        {
-            id: 'miro-sme-review-plan',
-            label: 'SME review Miro board plan',
-            extension: 'miro-sme-review-plan.json',
-            dryRun: true,
-            endpoint: 'sme-review'
-        },
-        {
-            id: 'miro-sme-review-push',
-            label: 'Push SME review board to Miro',
-            extension: 'miro-sme-review-result.json',
-            dryRun: false,
-            endpoint: 'sme-review'
-        },
-        {
-            id: 'miro-native-mindmap-plan',
-            label: 'Native Miro mind map plan',
-            extension: 'miro-native-mindmap-plan.json',
-            dryRun: true,
-            endpoint: 'native-mindmap'
-        }
-    ];
-    const mondayExistingGroupFormats = [
-        {
-            id: 'monday-existing-plan',
-            label: 'monday existing group plan',
-            extension: 'monday-existing-plan.json',
-            dryRun: true,
-            scope: 'workspace',
-            templateId: 'autodesk_building_block_review'
-        },
-        {
-            id: 'monday-existing-push',
-            label: 'Push workspace tasks to monday',
-            extension: 'monday-existing-result.json',
-            dryRun: false,
-            scope: 'workspace',
-            templateId: 'autodesk_building_block_review'
-        },
-        {
-            id: 'monday-branch-existing-plan',
-            label: 'Selected branch monday plan',
-            extension: 'monday-branch-existing-plan.json',
-            dryRun: true,
-            scope: 'branch',
-            templateId: 'autodesk_building_block_review'
-        },
-        {
-            id: 'monday-branch-existing-push',
-            label: 'Push selected branch tasks to monday',
-            extension: 'monday-branch-existing-result.json',
-            dryRun: false,
-            scope: 'branch',
-            templateId: 'autodesk_building_block_review'
-        }
-    ];
-    const mondayStatusPullFormats = [
-        {
-            id: 'monday-status-plan',
-            label: 'monday status pull plan',
-            extension: 'monday-status-plan.json',
-            dryRun: true,
-            apply: false
-        },
-        {
-            id: 'monday-status-apply',
-            label: 'Pull monday status into nodes',
-            extension: 'monday-status-result.json',
-            dryRun: false,
-            apply: true
-        }
-    ];
-    const selectedBranchMiroFormats = [
-        {
-            id: 'miro-frame-plan',
-            label: 'Selected branch Miro frame plan',
-            extension: 'miro-frame-plan.json',
-            dryRun: true
-        },
-        {
-            id: 'miro-frame-push',
-            label: 'Push selected branch to Miro',
-            extension: 'miro-frame-result.json',
-            dryRun: false
-        }
-    ];
-
     const buildCurrentSnapshot = useCallback(() => {
         const flowObject = rfInstance?.toObject
             ? rfInstance.toObject()
@@ -259,6 +146,29 @@ const Header = ({
         () => stringifyFlowSnapshot(currentSnapshot),
         [currentSnapshot]
     );
+
+    const buildLatestSnapshotFromStores = useCallback(() => {
+        const latestState = useStore.getState();
+        const flowObject = rfInstance?.toObject
+            ? rfInstance.toObject()
+            : { nodes: [], edges: [], viewport: {} };
+
+        return createFlowSnapshot({
+            flowObject,
+            nodes: latestState.nodes,
+            edges: latestState.edges,
+            viewport: latestState.viewport,
+            workspaceBrief: latestState.workspaceBrief,
+            sourceLibrary: createSourceLibrarySnapshot({
+                nodes: latestState.nodes,
+                edges: latestState.edges,
+                workspaceBrief: latestState.workspaceBrief,
+                sourceLibrary: latestState.sourceLibrary
+            }),
+            activityEvents: useActivityStore.getState().activities,
+            automations: useAutomationStore.getState().automations
+        });
+    }, [rfInstance]);
 
     const hasUnsavedChanges = Boolean(
         flow_id &&
@@ -312,7 +222,19 @@ const Header = ({
             const savedSnapshot = buildCurrentSnapshot();
             const savedFingerprint = stringifyFlowSnapshot(savedSnapshot);
             await saveFlowCall(undefined, savedSnapshot);
-            setSavedSnapshot(savedSnapshot, savedFingerprint, flow_name, flow_type);
+            const latestSnapshot = buildLatestSnapshotFromStores();
+            const latestFingerprint = stringifyFlowSnapshot(latestSnapshot);
+            const latestFlowState = flowStore.getState();
+
+            if (
+                latestFingerprint === savedFingerprint &&
+                latestFlowState.flow_name === flow_name &&
+                latestFlowState.flow_type === flow_type
+            ) {
+                setSavedSnapshot(savedSnapshot, savedFingerprint, flow_name, flow_type);
+            } else {
+                setSaveStatus('dirty');
+            }
             if (showLoading) {
                 popNode();
             }
@@ -913,6 +835,36 @@ const Header = ({
         };
     };
 
+    const downloadMindMapPdf = async (viewport, exportOptions, fileName) => {
+        const [{ toPng }, jsPdfModule] = await Promise.all([
+            import('html-to-image'),
+            import('jspdf')
+        ]);
+        const pngUrl = await toPng(viewport, exportOptions);
+        const jsPDF = jsPdfModule.default;
+        const pdf = new jsPDF({
+            orientation: 'landscape',
+            unit: 'mm',
+            format: 'a4'
+        });
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const margin = 10;
+        const availableWidth = pageWidth - margin * 2;
+        const availableHeight = pageHeight - margin * 2;
+        const imageRatio = 1920 / 1080;
+        const pageRatio = availableWidth / availableHeight;
+        const imageWidth =
+            imageRatio > pageRatio ? availableWidth : availableHeight * imageRatio;
+        const imageHeight =
+            imageRatio > pageRatio ? availableWidth / imageRatio : availableHeight;
+        const x = (pageWidth - imageWidth) / 2;
+        const y = (pageHeight - imageHeight) / 2;
+
+        pdf.addImage(pngUrl, 'PNG', x, y, imageWidth, imageHeight);
+        pdf.save(fileName);
+    };
+
     const downloadMindMap = async (format) => {
         const viewport = document.querySelector('.react-flow__viewport');
         if (!viewport) {
@@ -930,6 +882,8 @@ const Header = ({
                 const { toSvg } = await import('html-to-image');
                 const svgUrl = await toSvg(viewport, exportOptions);
                 triggerUrlDownload(svgUrl, fileName);
+            } else if (format.id === 'pdf') {
+                await downloadMindMapPdf(viewport, exportOptions, fileName);
             } else {
                 const { toPng } = await import('html-to-image');
                 const pngUrl = await toPng(viewport, exportOptions);
@@ -1207,57 +1161,6 @@ const Header = ({
                                     key={format.id}
                                     type="button"
                                     onClick={() => exportWorkspace(format)}
-                                >
-                                    {format.label}
-                                </button>
-                            ))}
-                            <div className="export-menu-divider" />
-                            <p className="export-menu-label">Preview payloads</p>
-                            {bridgeExportFormats.map((format) => (
-                                <button
-                                    key={format.id}
-                                    type="button"
-                                    onClick={() => exportBridgePayload(format)}
-                                >
-                                    {format.label}
-                                </button>
-                            ))}
-                            <div className="export-menu-divider" />
-                            <p className="export-menu-label">Miro</p>
-                            {workspaceMiroFormats.map((format) => (
-                                <button
-                                    key={format.id}
-                                    type="button"
-                                    onClick={() => exportWorkspaceMiroBoard(format)}
-                                >
-                                    {format.label}
-                                </button>
-                            ))}
-                            {selectedBranchMiroFormats.map((format) => (
-                                <button
-                                    key={format.id}
-                                    type="button"
-                                    onClick={() => exportSelectedBranchMiroFrame(format)}
-                                >
-                                    {format.label}
-                                </button>
-                            ))}
-                            <div className="export-menu-divider" />
-                            <p className="export-menu-label">monday.com</p>
-                            {mondayExistingGroupFormats.map((format) => (
-                                <button
-                                    key={format.id}
-                                    type="button"
-                                    onClick={() => exportMondayExistingGroup(format)}
-                                >
-                                    {format.label}
-                                </button>
-                            ))}
-                            {mondayStatusPullFormats.map((format) => (
-                                <button
-                                    key={format.id}
-                                    type="button"
-                                    onClick={() => pullMondayStatuses(format)}
                                 >
                                     {format.label}
                                 </button>

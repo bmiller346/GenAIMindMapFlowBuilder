@@ -1,7 +1,7 @@
 import PDFSvg from '../assets/docx.svg';
 import CROSSSvg from '../assets/cross.svg';
 import RIGHTArrow from '../assets/right.svg';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import InputBar from '../helpful-components/InputBar';
 import { nanoid } from 'nanoid';
 import useStore from '../stores/store';
@@ -24,6 +24,10 @@ import {
     createOperationSnapshot,
     restoreOperationSnapshot
 } from '../utils/operationSnapshots';
+import {
+    createFlowSnapshot,
+    stringifyFlowSnapshot
+} from '../utils/flowSnapshots';
 
 const DocxModal = () => {
     const selector = (state) => ({
@@ -42,8 +46,13 @@ const DocxModal = () => {
     const setFlowId = flowStore((s) => s.setFlow);
     const flow_id = flowStore((s) => s.flow_id);
     const setFlowName = flowStore((s) => s.setFlowName);
+    const flowName = flowStore((s) => s.flow_name);
+    const flowType = flowStore((s) => s.flow_type);
+    const setFlowType = flowStore((s) => s.setFlowType);
+    const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
     const { fitView, setViewport } = useReactFlow();
     const [file, setFile] = useState();
+    const fileInputRef = useRef(null);
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const addActivity = useActivityStore((s) => s.addActivity);
@@ -70,14 +79,62 @@ const DocxModal = () => {
         pushNode(ErrorModal);
     };
 
-    const addDataSource = (e) => {
-        const currentFlowId = flowStore.getState().flow_id || flowId;
+    const ensureWorkspace = async () => {
+        const currentFlow = flowStore.getState();
+        if (currentFlow.flow_id && currentFlow.flow_id !== 'undefined') {
+            return currentFlow.flow_id;
+        }
+
+        const snapshot = createFlowSnapshot({
+            nodes,
+            edges,
+            viewport,
+            workspaceBrief
+        });
+        const nextFlowName = currentFlow.flow_name || flowName || 'Untitled workspace';
+        const nextFlowType = currentFlow.flow_type || flowType || 'manual';
+        const response = await axios.post(
+            'http://localhost:8000/create-flow',
+            {
+                flow_name: nextFlowName,
+                summary: 'Workspace created for source upload',
+                flow_json: stringifyFlowSnapshot(snapshot),
+                flow_type: nextFlowType
+            },
+            {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        setFlowId(response.data.flow_id);
+        setFlowName(response.data.flow_name || nextFlowName);
+        setFlowType(response.data.flow_type || nextFlowType);
+        setSavedSnapshot(
+            snapshot,
+            stringifyFlowSnapshot(snapshot),
+            response.data.flow_name || nextFlowName,
+            response.data.flow_type || nextFlowType
+        );
+
+        return response.data.flow_id;
+    };
+
+    const addDataSource = async (e) => {
         if (!file) {
             showError(400, 'Choose a DOCX file before uploading.');
             return;
         }
-        if (!currentFlowId || currentFlowId === 'undefined') {
-            showError(400, 'Create or open a workspace before uploading a DOCX source.');
+
+        let currentFlowId;
+        try {
+            currentFlowId = await ensureWorkspace();
+        } catch (err) {
+            showError(
+                err.response?.status || err.status || 500,
+                requestErrorMessage(err)
+            );
             return;
         }
 
@@ -258,7 +315,11 @@ const DocxModal = () => {
     };
 
     const handleFileUpload = (e) => {
-        setFile(e.target.files[0]);
+        setFile(e.target.files?.[0]);
+    };
+
+    const openFilePicker = () => {
+        fileInputRef.current?.click();
     };
 
     const handleChange = (e) => {
@@ -282,9 +343,10 @@ const DocxModal = () => {
                 />
             </div>
             <div className="data-source-input">
-                <label
-                    htmlFor="filesUp"
+                <button
+                    type="button"
                     className="data-source-set"
+                    onClick={openFilePicker}
                 >
                     <div>
                         <img
@@ -298,9 +360,10 @@ const DocxModal = () => {
                         src={RIGHTArrow}
                         alt={'RIght arrow'}
                     />
-                </label>
+                </button>
                 <input
-                    id="filesUp"
+                    ref={fileInputRef}
+                    id="docxFileUpload"
                     type="file"
                     accept={docxAccept}
                     style={{ display: 'none' }}

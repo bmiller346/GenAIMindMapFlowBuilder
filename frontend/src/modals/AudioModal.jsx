@@ -16,38 +16,117 @@ import DataSourceSet from '../nodes/DataSourceSet';
 import DataSourceSelect from '../global-components/DataSourceSelect';
 import ErrorModal from './ErrorModal';
 import errorStore from '../stores/errorStore';
+import { sourceUploadLoading } from '../config/loadingStates';
+import { useReactFlow } from '@xyflow/react';
+import useActivityStore from '../stores/activityStore';
+import { isCanceledRequest, requestErrorMessage } from '../utils/requestErrors';
+import {
+    createSourceUndoHandler,
+    createSourceUndoSnapshot
+} from '../utils/sourceOperationActivity';
 
 const AudioModal = () => {
     const selector = (state) => ({
         trigger: state.trigger,
         setTrigger: state.setTrigger,
         nodes: state.nodes,
-        setNodes: state.setNodes
+        edges: state.edges,
+        setNodes: state.setNodes,
+        setEdges: state.setEdges,
+        workspaceBrief: state.workspaceBrief,
+        setWorkspaceBrief: state.setWorkspaceBrief,
+        viewport: state.viewport,
+        setViewPort: state.setViewPort
     });
     const flowId = flowStore((s) => s.flow_id);
-    const { trigger, setTrigger, nodes, setNodes } = useStore(
-        useShallow(selector)
-    );
+    const {
+        trigger,
+        setTrigger,
+        nodes,
+        edges,
+        setNodes,
+        setEdges,
+        workspaceBrief,
+        setWorkspaceBrief,
+        viewport,
+        setViewPort
+    } = useStore(useShallow(selector));
     const [file, setFile] = useState();
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const audioAccept = 'audio/*';
+    const { setViewport } = useReactFlow();
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const updateActivity = useActivityStore((s) => s.updateActivity);
 
 
     const addDataSource = (e) => {
+        const operationId = nanoid();
+        const controller = new AbortController();
+        const undoSnapshot = createSourceUndoSnapshot({
+            nodes,
+            edges,
+            viewport,
+            workspaceBrief
+        });
+        const activityId = addActivity({
+            title: 'Adding audio source',
+            detail: file?.name,
+            context: 'Uploading audio and preparing workspace context.'
+        });
         const data = {
             file: file,
+            operationId
         };
-        pushNode(LoadingModal);
+        pushNode(LoadingModal, {
+            ...sourceUploadLoading('audio', file?.name),
+            operationId,
+            onCancel: () => {
+                controller.abort();
+                updateActivity(activityId, {
+                    status: 'canceled',
+                    context: 'Audio upload request was canceled.'
+                });
+                popNode();
+            }
+        });
+        const undoSourceAdd = createSourceUndoHandler({
+            activityId,
+            snapshot: undoSnapshot,
+            updateActivity,
+            setNodes,
+            setEdges,
+            setWorkspaceBrief,
+            setViewPort,
+            setViewport,
+            context: 'Audio source add was undone.'
+        });
         const [url, body, headerConfig] = setRequestData('audio', flowId, data);
         axios
             .post(`http://localhost:8000/${url}`, body, {
                 headers: {
                     'Content-Type': headerConfig
-                }
+                },
+                signal: controller.signal
             })
-            .then((res) => manageNodes(res.data))
-            .catch((err) => manageErrors(err));
+            .then((res) => {
+                updateActivity(activityId, {
+                    status: 'completed',
+                    context: 'Audio source was added to the workspace.',
+                    undo: undoSourceAdd
+                });
+                manageNodes(res.data);
+            })
+            .catch((err) => {
+                if (isCanceledRequest(err)) {
+                    return;
+                }
+                updateActivity(activityId, {
+                    status: 'failed',
+                    context: requestErrorMessage(err)
+                });
+                manageErrors(err);
+            });
     };
 
     const selector2 = (state) => ({
@@ -63,9 +142,9 @@ const AudioModal = () => {
     const manageErrors = (err) => {
         console.log(err);
         console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
-        setStatus(err.status);
-        setMsg(err.response.statusText);
+        console.log('Errroross', err.response?.statusText);
+        setStatus(err.response?.status || err.status || 500);
+        setMsg(requestErrorMessage(err));
         popNode();
         pushNode(ErrorModal);
     };
@@ -91,6 +170,7 @@ const AudioModal = () => {
         }
 
         setTrigger(!trigger);
+        popNode();
     };
 
     const handleFileUpload = (e) => {

@@ -110,6 +110,7 @@ const IntegrationsPanel = ({ validationReport }) => {
             setNodes: state.setNodes
         }))
     );
+    const setActiveView = useStore((state) => state.setActiveView);
     const flowId = flowStore((s) => s.flow_id);
     const flowName = flowStore((s) => s.flow_name);
     const addActivity = useActivityStore((s) => s.addActivity);
@@ -388,6 +389,23 @@ const IntegrationsPanel = ({ validationReport }) => {
                 </button>
             </div>
             <div className="integration-cards">
+                <article className="integration-card integration-handoff-card">
+                    <div className="integration-card-title">
+                        <div>
+                            <strong>Handoff preparation</strong>
+                            <span>Stage and review monday payload inputs before push.</span>
+                        </div>
+                        <span className="ready">Local</span>
+                    </div>
+                    <div className="integration-actions">
+                        <button type="button" onClick={() => setActiveView('mondayInput')}>
+                            Stage monday input
+                        </button>
+                        <button type="button" onClick={() => setActiveView('mondayStatus')}>
+                            Review monday status
+                        </button>
+                    </div>
+                </article>
                 {summaries.map((summary) => (
                     <article key={summary.provider} className="integration-card">
                         <div className="integration-card-title">

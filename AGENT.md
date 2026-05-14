@@ -88,15 +88,14 @@ Agents should treat these contracts as coordination rules across ingestion, grap
 ## Roadmap Source Of Truth
 Use `ROADMAP.md` as the living project tracker.
 
-Current phase: Phase 1.5, graph reliability layer.
+Current phase: Phase 4 Integration Readiness / ExportBatch Hardening.
 
 Next best work:
-1. Attach source refs to AI-generated nodes where possible.
-2. Mark low-confidence generated nodes as `needs_review`.
-3. Add environment-based API key handling and document required variables.
-4. Add export snapshot tests for neutral, Miro, and monday payloads.
-5. Implement selected-branch export to a Miro frame using shapes/connectors.
-6. Implement monday task export to an existing board/group after auth configuration is in place.
+1. Verify MVP Required acceptance with fixture uploads, save/reopen, and JSON/Markdown export.
+2. Stabilize `WorkspaceBrief` as a durable schema and wire a dedicated derive-from-brief generation action.
+3. Exercise monday export to a real existing board/group and verify status pullback does not overwrite canonical graph structure.
+4. Harden standalone Electron settings so user-owned API keys are stored outside renderer `localStorage`.
+5. Verify the quarantined legacy landing path stays hidden by default while remaining available behind an explicit browser flag for compatibility checks.
 
 ## Parallel Work Lanes
 Use the detailed ownership map in `ROADMAP.md`.

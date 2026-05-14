@@ -4,6 +4,8 @@ import {
     buildMondaySelectionInput,
     buildMondaySelectionManifest
 } from './mondaySelectionProjection';
+import useActivityStore from '../stores/activityStore';
+import flowStore from '../stores/flowStore';
 
 const sourceLabel = (row) => {
     const ref = row.source_refs?.[0] || {};
@@ -19,16 +21,106 @@ const flowLabel = (flow) =>
         .replaceAll('_', ' ')
         .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
+const generatedItems = (preview) =>
+    Array.isArray(preview?.preview_items) ? preview.preview_items : [];
+
+const generatedMutation = (item) =>
+    item?.proposed_mutation?.integration_operator_preview || {};
+
 const MondaySelectionInput = ({
     nodes,
     projection,
     selectedBranchId,
     setNodes,
-    setActiveView
+    setActiveView,
+    generatedPreview,
+    onRejectGeneratedPreview
 }) => {
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const flowId = flowStore((s) => s.flow_id);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
     const selectionRows = useMemo(
-        () => buildMondaySelectionInput(nodes, projection),
-        [nodes, projection]
+        () => {
+            const baseRows = buildMondaySelectionInput(nodes, projection);
+            const baseIds = new Set(baseRows.map((row) => row.id));
+            const nodeById = new Map(nodes.map((node) => [node.id, node]));
+            const items = generatedItems(generatedPreview);
+            const itemByNodeId = new Map(items.map((item) => [item.node_id, item]));
+            const mergedRows = baseRows.map((row) => {
+                const item = itemByNodeId.get(row.id);
+                const mutation = generatedMutation(item);
+                if (!item) {
+                    return row;
+                }
+
+                return {
+                    ...row,
+                    generated_preview_item: item,
+                    handoff_readiness: mutation,
+                    included: row.included || mutation.readiness === 'staged_not_pushed',
+                    selection_reason: [
+                        ...row.selection_reason,
+                        mutation.explanation || item.rationale
+                    ].filter(Boolean)
+                };
+            });
+            const generatedRows = items
+                .filter((item) => !baseIds.has(item.node_id))
+                .map((item) => {
+                    const node = nodeById.get(item.node_id) || {};
+                    const mutation = generatedMutation(item);
+                    const title =
+                        node.data?.title ||
+                        node.data?.question ||
+                        node.data?.content ||
+                        item.title;
+
+                    return {
+                        id: item.node_id,
+                        title,
+                        status: node.data?.status || 'needs_review',
+                        priority: node.data?.priority || '',
+                        owner_id: node.data?.owner_id || '',
+                        due_date: node.data?.due_date || '',
+                        confidence: item.confidence,
+                        node_type: node.data?.node_type || node.type || 'task',
+                        source_refs: item.source_refs || [],
+                        local_preview_acceptances: [],
+                        accepted_flows: ['generated_integration_operator_handoff'],
+                        group_key: item.node_id,
+                        group_title: title,
+                        template_hints: {
+                            board_template: 'autodesk_building_block_review',
+                            item_kind: 'task',
+                            group_strategy: 'generated_handoff_review',
+                            requires_review: true,
+                            source_status: item.source_refs?.length
+                                ? 'source_attached'
+                                : 'source_missing',
+                            selection_reasons: [mutation.explanation || item.rationale]
+                        },
+                        selection_reason: [mutation.explanation || item.rationale],
+                        generated_preview_item: item,
+                        handoff_readiness: mutation,
+                        included: mutation.readiness === 'staged_not_pushed',
+                        monday_item_input: {
+                            name: title,
+                            node_id: item.node_id,
+                            status: node.data?.status || 'needs_review',
+                            review_state: node.data?.status || 'needs_review',
+                            priority: node.data?.priority || '',
+                            owner: node.data?.owner_id || '',
+                            due_date: node.data?.due_date || '',
+                            confidence: item.confidence,
+                            node_type: node.data?.node_type || node.type || 'task',
+                            template_hints: {}
+                        }
+                    };
+                });
+
+            return [...mergedRows, ...generatedRows];
+        },
+        [nodes, projection, generatedPreview]
     );
     const defaultIds = useMemo(
         () => new Set(selectionRows.filter((row) => row.included).map((row) => row.id)),
@@ -80,7 +172,7 @@ const MondaySelectionInput = ({
                         ...node.data,
                         ...(isSelected
                             ? {
-                                  monday_selection_input: {
+                        monday_selection_input: {
                                       selected: true,
                                       selected_at: selectedAt,
                                       selection_id: manifest.selection_id,
@@ -94,6 +186,16 @@ const MondaySelectionInput = ({
                                   }
                               }
                             : {}),
+                        ...(row?.generated_preview_item
+                            ? {
+                                  integration_operator_preview: {
+                                      ...row.handoff_readiness,
+                                      preview_id: generatedPreview?.preview_id || '',
+                                      preview_item_id: row.generated_preview_item.id || '',
+                                      accepted_at: selectedAt
+                                  }
+                              }
+                            : {}),
                         ...(isManifestOwner
                             ? {
                                   monday_selection_manifest: manifest
@@ -104,7 +206,31 @@ const MondaySelectionInput = ({
             })
         );
         setSelectedIds(new Set());
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        addActivity({
+            status: 'completed',
+            title: 'Accepted integration handoff preview',
+            detail: `Staged ${activeIds.size} monday handoff candidate${
+                activeIds.size === 1 ? '' : 's'
+            }.`,
+            context: generatedPreview
+                ? 'Source: generated Integration Operator preview'
+                : 'Source: local handoff projection'
+        });
         setActiveView('table');
+    };
+
+    const rejectGeneratedPreview = () => {
+        onRejectGeneratedPreview?.();
+        addActivity({
+            status: 'canceled',
+            title: 'Rejected integration handoff preview',
+            detail: `Rejected ${generatedItems(generatedPreview).length} generated handoff item${
+                generatedItems(generatedPreview).length === 1 ? '' : 's'
+            }.`
+        });
     };
 
     const selectedCount = selectionRows.filter((row) => activeIds.has(row.id)).length;
@@ -122,6 +248,11 @@ const MondaySelectionInput = ({
                 <button type="button" onClick={stageMondaySelection}>
                     Stage selected
                 </button>
+                {generatedPreview ? (
+                    <button type="button" onClick={rejectGeneratedPreview}>
+                        Reject generated
+                    </button>
+                ) : null}
             </div>
             <div className="local-table-wrap">
                 <table className="local-projection-table">
@@ -133,6 +264,7 @@ const MondaySelectionInput = ({
                             <th>Group</th>
                             <th>Accepted flows</th>
                             <th>Source</th>
+                            <th>Readiness</th>
                             <th>Reason</th>
                         </tr>
                     </thead>
@@ -156,6 +288,7 @@ const MondaySelectionInput = ({
                                         : '-'}
                                 </td>
                                 <td>{sourceLabel(row)}</td>
+                                <td>{row.handoff_readiness?.readiness || '-'}</td>
                                 <td>{row.selection_reason.join(', ') || '-'}</td>
                             </tr>
                         ))}

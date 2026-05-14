@@ -20,7 +20,6 @@ const setDataSource = (data) => {
 				title: "Enter Table Name",
 				content: data.content
 			}
-			break;
 		case ("csv"):
 			return {
 				img: CSVSvg,

@@ -493,6 +493,57 @@ Agent 2 Source Librarian and Reviewer generation is now implemented:
 - Added backend coverage for citation-backed and assumption-backed Source
   Librarian and Reviewer outputs.
 
+Agent 3 Project Planner generation and accept flow is now implemented:
+
+- Added Project Planner `task_projection` and `checklist_projection`
+  generation with deterministic fallback previews.
+- Added `POST /api/workspaces/{id}/ai/project-planner/preview`.
+- Wired Project Planner helper actions to backend preview generation.
+- Generated task previews can be accepted into node task metadata with
+  generated preview IDs and review status.
+- Generated checklist previews can be accepted into checklist metadata while
+  preserving source and assumption context.
+- Added backend coverage for generated planner item validation and reviewable
+  acceptance metadata.
+
+Agent 4 Integration Operator, Activity, and end-to-end polish is now
+implemented:
+
+- Added Integration Operator `handoff_readiness` and `sync_issue_review`
+  generation with deterministic fallback previews.
+- Added `POST /api/workspaces/{id}/ai/integration-operator/preview`.
+- Wired Integration Operator helper actions to backend preview generation and
+  the shared generated-preview frontend cache.
+- Generated handoff readiness previews can be inspected and staged from the
+  monday selection input view.
+- Generated sync issue previews can be inspected and staged from the monday
+  status-back view.
+- Generated preview generation failures, acceptances, and rejections create
+  Activity entries across helper workflows.
+- Added Playwright coverage for Integration Operator invocation, preview
+  display, acceptance, and Activity entry.
+
+Phase 6 integration verification completed on 2026-05-14:
+
+- Backend: `python -m poetry run pytest --basetemp=.pytest-tmp` from
+  `backend` passed, 95 tests.
+- Frontend unit checks passed:
+  - `npm run test:source-library`
+  - `npm run test:manual-nodes`
+  - `npm run test:flow-snapshots`
+- Frontend quality gates passed:
+  - `npm run lint`
+  - `npm run build`
+- End-to-end: `npx playwright test` passed, 6 tests.
+
+Residual release note:
+
+- The Phase 6 helper-preview loop is release-candidate ready based on the
+  verification above.
+- The repository worktree still contains unrelated dirty and untracked files
+  from adjacent workstreams; those should be reviewed before producing a final
+  release commit.
+
 ## Recommended Agent Workstreams
 
 This roadmap can be split cleanly across four implementation agents.

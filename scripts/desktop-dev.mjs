@@ -1,16 +1,90 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
+const frontendHost = '127.0.0.1';
+const frontendPort = 5173;
+const execFileAsync = promisify(execFile);
 
 const electronBin = process.platform === 'win32'
   ? path.join(repoRoot, 'node_modules', '.bin', 'electron.cmd')
   : path.join(repoRoot, 'node_modules', '.bin', 'electron');
 
 const children = [];
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getPortOwnerPids(port) {
+  if (process.platform !== 'win32') {
+    return Promise.resolve([]);
+  }
+
+  return execFileAsync('netstat.exe', ['-ano', '-p', 'tcp'], {
+    windowsHide: true
+  })
+    .then(({ stdout }) => stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim().split(/\s+/))
+      .filter((columns) => columns.length >= 5)
+      .filter(([, localAddress, , state]) => state === 'LISTENING' && localAddress.endsWith(`:${port}`))
+      .map((columns) => Number.parseInt(columns.at(-1), 10))
+      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid))
+    .then((pids) => [...new Set(pids)])
+    .catch(() => []);
+}
+
+async function stopPortOwners(port) {
+  const pids = await getPortOwnerPids(port);
+
+  if (pids.length === 0) {
+    return;
+  }
+
+  console.log(`[dev] port ${port} is already in use; stopping stale listener(s): ${pids.join(', ')}`);
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid);
+    } catch {
+      // The process may have exited after we inspected the port.
+    }
+  }
+}
+
+function canBindPort(host, port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+
+    server.once('error', () => resolve(false));
+    server.once('listening', () => {
+      server.close(() => resolve(true));
+    });
+    server.listen(port, host);
+  });
+}
+
+async function waitForPort(port, host, expectedFree, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const isFree = await canBindPort(host, port);
+
+    if (isFree === expectedFree) {
+      return true;
+    }
+
+    await sleep(150);
+  }
+
+  return false;
+}
 
 function spawnChecked(label, command, args, options = {}) {
   const child = spawn(command, args, {
@@ -54,18 +128,41 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-spawnChecked(
-  'vite',
-  process.platform === 'win32' ? 'npm.cmd' : 'npm',
-  ['--prefix', 'frontend', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173', '--strictPort']
-);
+async function main() {
+  await stopPortOwners(frontendPort);
 
-setTimeout(() => {
+  const portReady = await waitForPort(frontendPort, frontendHost, true);
+
+  if (!portReady) {
+    console.error(`[dev] port ${frontendPort} is still in use after cleanup; refusing to start on the wrong app.`);
+    process.exit(1);
+  }
+
+  spawnChecked(
+    'vite',
+    process.platform === 'win32' ? 'npm.cmd' : 'npm',
+    ['--prefix', 'frontend', 'run', 'dev', '--', '--host', frontendHost, '--port', String(frontendPort), '--strictPort']
+  );
+
+  const viteReady = await waitForPort(frontendPort, frontendHost, false, 10000);
+
+  if (!viteReady) {
+    console.error(`[dev] vite did not bind ${frontendHost}:${frontendPort} in time.`);
+    shutdown();
+    process.exit(1);
+  }
+
   spawnChecked('electron', electronBin, ['.'], {
     env: {
       ...process.env,
       DOCMAP_ELECTRON_DEV: '1',
-      DOCMAP_FRONTEND_URL: 'http://127.0.0.1:5173'
+      DOCMAP_FRONTEND_URL: `http://${frontendHost}:${frontendPort}`
     }
   });
-}, 1500);
+}
+
+main().catch((error) => {
+  console.error(error);
+  shutdown();
+  process.exit(1);
+});

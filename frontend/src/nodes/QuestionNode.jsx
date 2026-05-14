@@ -15,10 +15,16 @@ import generateHexId from '../utils/setUpHex';
 import errorStore from '../stores/errorStore';
 import ErrorModal from '../modals/ErrorModal';
 import { questionAnswerLoading } from '../config/loadingStates';
+import useActivityStore from '../stores/activityStore';
+import { isCanceledRequest, requestErrorMessage } from '../utils/requestErrors';
+import {
+    createOperationSnapshot,
+    restoreOperationSnapshot
+} from '../utils/operationSnapshots';
 
 const QuestionNode = ({ id, position, data  }) => {
     console.log('HERE QUESTION NODE', data, position, id);
-    const { deleteElements } = useReactFlow();
+    const { deleteElements, setViewport } = useReactFlow();
     const selector = (state) => ({
         trigger: state.trigger,
         setTrigger: state.setTrigger,
@@ -26,14 +32,26 @@ const QuestionNode = ({ id, position, data  }) => {
         setNodes: state.setNodes,
         edges: state.edges,
         setEdges: state.setEdges,
-        workspaceBrief: state.workspaceBrief
+        workspaceBrief: state.workspaceBrief,
+        viewport: state.viewport,
+        setWorkspaceBrief: state.setWorkspaceBrief,
+        setViewPort: state.setViewPort
     });
     const connections = useNodeConnections({
         type: 'source'
     });
-    const { nodes, setNodes, edges, setEdges, trigger, setTrigger, workspaceBrief } = useStore(
-        useShallow(selector)
-    );
+    const {
+        nodes,
+        setNodes,
+        edges,
+        setEdges,
+        trigger,
+        setTrigger,
+        workspaceBrief,
+        viewport,
+        setWorkspaceBrief,
+        setViewPort
+    } = useStore(useShallow(selector));
     const currNodeObj = nodes.find((ele) => ele.id === id);
     console.log('ASSSKSKSK QUESTION', currNodeObj);
     const [question, setQuestion] = useState(() => {
@@ -44,6 +62,8 @@ const QuestionNode = ({ id, position, data  }) => {
     });
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const updateActivity = useActivityStore((s) => s.updateActivity);
     const flowId = flowStore((s) => s.flow_id);
 
     const deleteFollowUpQuestion = (component_id) => {
@@ -158,7 +178,7 @@ const QuestionNode = ({ id, position, data  }) => {
         console.log(question);
     }, [question]);
 
-    const askQuestion = () => {
+    const askQuestion = (controller, activityId, undoAnswerDerivation) => {
         console.log('THIS IS A TEST', data);
         const [url, body, config] = setQuestionApi(
             data.component_type,
@@ -170,9 +190,29 @@ const QuestionNode = ({ id, position, data  }) => {
             workspaceBrief
         );
         axios
-            .post(`http://localhost:8000/${url}`, body, config)
-            .then((res) => setResponse(res.data))
-            .catch((err) => manageErrors(err));
+            .post(`http://localhost:8000/${url}`, body, {
+                ...config,
+                signal: controller.signal
+            })
+            .then((res) => {
+                updateActivity(activityId, {
+                    status: 'completed',
+                    context: 'Answer node was added to the workspace.',
+                    undo: undoAnswerDerivation
+                });
+                setResponse(res.data);
+                popNode();
+            })
+            .catch((err) => {
+                if (isCanceledRequest(err)) {
+                    return;
+                }
+                updateActivity(activityId, {
+                    status: 'failed',
+                    context: requestErrorMessage(err)
+                });
+                manageErrors(err);
+            });
         // 	const formData = new FormData();
         // 	const dataString = {
         // 		component_id: data.component_id,
@@ -203,9 +243,9 @@ const QuestionNode = ({ id, position, data  }) => {
     const manageErrors = (err) => {
         console.log(err);
         console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
-        setStatus(err.status);
-        setMsg(err.response.statusText);
+        console.log('Errroross', err.response?.statusText);
+        setStatus(err.response?.status || err.status || 500);
+        setMsg(requestErrorMessage(err));
         popNode();
         pushNode(ErrorModal);
     };
@@ -218,8 +258,47 @@ const QuestionNode = ({ id, position, data  }) => {
             const currentNode = nodes.find((ele) => ele.id === id);
             currentNode.data.question = question;
             setNodes(nodes);
-            pushNode(LoadingModal, questionAnswerLoading(workspaceBrief));
-            askQuestion();
+            const undoSnapshot = createOperationSnapshot({
+                nodes,
+                edges,
+                viewport,
+                workspaceBrief
+            });
+            const controller = new AbortController();
+            const activityId = addActivity({
+                title: 'Deriving answer',
+                detail: question,
+                context: workspaceBrief?.goal
+                    ? `Workspace goal: ${workspaceBrief.goal}`
+                    : 'Using connected source context.'
+            });
+            pushNode(LoadingModal, {
+                ...questionAnswerLoading(workspaceBrief),
+                onCancel: () => {
+                    controller.abort();
+                    updateActivity(activityId, {
+                        status: 'canceled',
+                        context: 'Question request was canceled.'
+                    });
+                    popNode();
+                }
+            });
+            const undoAnswerDerivation = () => {
+                restoreOperationSnapshot({
+                    snapshot: undoSnapshot,
+                    setNodes,
+                    setEdges,
+                    setWorkspaceBrief,
+                    setViewPort,
+                    setViewport
+                });
+                updateActivity(activityId, {
+                    status: 'completed',
+                    context: 'Answer derivation was undone.',
+                    undo: undefined
+                });
+            };
+            askQuestion(controller, activityId, undoAnswerDerivation);
         }
     };
 

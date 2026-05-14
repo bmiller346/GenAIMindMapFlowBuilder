@@ -13,27 +13,89 @@ const LoadingModal = ({
     detail = 'This can take a moment for larger files or AI-generated workspaces.',
     steps = DEFAULT_STEPS,
     context = '',
-    aiContext = ''
+    aiContext = '',
+    operationId,
+    onCancel,
+    cancelLabel = 'Cancel request'
 }) => {
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
+    const [backendProgress, setBackendProgress] = useState();
     const currentStepIndex = useMemo(() => {
+        if (backendProgress?.progress !== undefined) {
+            return Math.min(
+                Math.floor((backendProgress.progress / 100) * steps.length),
+                steps.length - 1
+            );
+        }
         const index = Math.min(
             Math.floor(elapsedSeconds / 7),
             steps.length - 1
         );
         return index;
-    }, [elapsedSeconds, steps]);
-    const currentStep = steps[currentStepIndex] || DEFAULT_STEPS[0];
-    const progressPercent = Math.min(
-        94,
-        Math.max(
-            8,
-            Math.round(
-                ((currentStepIndex + 1) / Math.max(steps.length, 1)) * 82 +
-                    Math.min(elapsedSeconds * 1.5, 12)
-            )
-        )
-    );
+    }, [backendProgress, elapsedSeconds, steps]);
+    const currentStep =
+        backendProgress?.message || steps[currentStepIndex] || DEFAULT_STEPS[0];
+    const progressPercent =
+        backendProgress?.progress !== undefined
+            ? backendProgress.progress
+            : Math.min(
+                  94,
+                  Math.max(
+                      8,
+                      Math.round(
+                          ((currentStepIndex + 1) / Math.max(steps.length, 1)) * 82 +
+                              Math.min(elapsedSeconds * 1.5, 12)
+                      )
+                  )
+              );
+    const detailText = backendProgress?.detail || detail;
+    const progressStatus = backendProgress?.status;
+
+    useEffect(() => {
+        if (!operationId) {
+            return undefined;
+        }
+
+        let canceled = false;
+        const loadProgress = async () => {
+            try {
+                const response = await fetch(
+                    `http://localhost:8000/operations/${operationId}`
+                );
+                if (!response.ok || canceled) {
+                    return;
+                }
+                const nextProgress = await response.json();
+                if (!canceled) {
+                    setBackendProgress(nextProgress);
+                }
+            } catch (error) {
+                console.warn('Unable to load operation progress', error);
+            }
+        };
+
+        loadProgress();
+        const interval = window.setInterval(loadProgress, 900);
+
+        return () => {
+            canceled = true;
+            window.clearInterval(interval);
+        };
+    }, [operationId]);
+
+    const stepIsActive = (index) => {
+        if (backendProgress?.progress !== undefined) {
+            return (
+                index <=
+                Math.floor((backendProgress.progress / 100) * Math.max(steps.length - 1, 1))
+            );
+        }
+        return index <= currentStepIndex;
+    };
+
+    const statusLabel = progressStatus
+        ? progressStatus.charAt(0).toUpperCase() + progressStatus.slice(1)
+        : '';
 
     useEffect(() => {
         const interval = window.setInterval(() => {
@@ -49,7 +111,7 @@ const LoadingModal = ({
             <div className="loading-modal-copy">
                 <h2>{title}</h2>
                 <p>{currentStep}</p>
-                <span>{detail}</span>
+                <span>{detailText}</span>
             </div>
             {context || aiContext ? (
                 <div className="loading-modal-context">
@@ -71,15 +133,23 @@ const LoadingModal = ({
                 {steps.map((step, index) => (
                     <span
                         key={step}
-                        className={index <= currentStepIndex ? 'active' : ''}
+                        className={stepIsActive(index) ? 'active' : ''}
                     />
                 ))}
             </div>
             <p className="loading-modal-elapsed">
-                {elapsedSeconds < 3
-                    ? 'Starting now'
-                    : `${elapsedSeconds}s elapsed`}
+                {statusLabel ? `${statusLabel} · ` : ''}
+                {elapsedSeconds < 3 ? 'Starting now' : `${elapsedSeconds}s elapsed`}
             </p>
+            {onCancel ? (
+                <button
+                    className="loading-modal-cancel"
+                    type="button"
+                    onClick={onCancel}
+                >
+                    {cancelLabel}
+                </button>
+            ) : null}
         </div>
     );
 };

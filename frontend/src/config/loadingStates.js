@@ -13,6 +13,21 @@ export const sourceUploadLoading = (sourceType, fileName) => ({
     ]
 });
 
+export const structuredSourceLoading = (sourceType, label) => ({
+    title: `Connecting ${sourceType} source`,
+    detail: label
+        ? `${label} is being validated and prepared for DocMap.`
+        : 'The data source is being validated and prepared for DocMap.',
+    context: 'DocMap is reading the source shape and preparing it for questions and derived nodes.',
+    aiContext: 'AI phase: learning the available fields, relationships, and query surface.',
+    steps: [
+        'Validating source',
+        'Reading schema',
+        'Training query context',
+        'Adding source node'
+    ]
+});
+
 export const questionAnswerLoading = (brief) => ({
     title: 'Deriving answer',
     detail: 'The AI is using connected source context and the current workspace brief.',
@@ -25,5 +40,20 @@ export const questionAnswerLoading = (brief) => ({
         'AI is reading source passages',
         'AI is reasoning over the brief',
         'Preparing answer node'
+    ]
+});
+
+export const briefDraftLoading = (brief) => ({
+    title: 'Deriving brief draft',
+    detail: 'DocMap is turning the workspace setup into reviewable starter nodes.',
+    context: brief?.goal
+        ? `Workspace goal: ${brief.goal}`
+        : 'No source document is attached, so this draft will be marked for review.',
+    aiContext: 'Context phase: applying the brief, marking assumptions, and preparing an undoable workspace update.',
+    steps: [
+        'Reading workspace setup',
+        'Structuring requested outputs',
+        'Marking assumptions Needs Review',
+        'Updating workspace'
     ]
 });

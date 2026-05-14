@@ -7,6 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "test:source-library": "node --test tests/sourceLibraryProjection.test.mjs",
+    "test:manual-nodes": "node --test tests/manualNodes.test.mjs",
+    "test:flow-snapshots": "node --test tests/flowSnapshots.test.mjs",
+    "test:e2e": "playwright test",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -35,6 +39,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
+    "@playwright/test": "^1.60.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",

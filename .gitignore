@@ -25,6 +25,8 @@ node_modules
 dist
 dist-ssr
 .desktop-resources/
+.local/
+screenshots/
 *.local
 
 # Editor directories and files

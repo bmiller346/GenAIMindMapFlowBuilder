@@ -16,6 +16,13 @@ import DataSourceSelect from '../global-components/DataSourceSelect';
 import ErrorModal from './ErrorModal';
 import errorStore from '../stores/errorStore';
 import { useReactFlow } from '@xyflow/react';
+import { sourceUploadLoading } from '../config/loadingStates';
+import useActivityStore from '../stores/activityStore';
+import { isCanceledRequest, requestErrorMessage } from '../utils/requestErrors';
+import {
+    createSourceUndoHandler,
+    createSourceUndoSnapshot
+} from '../utils/sourceOperationActivity';
 
 const HTMLModal = () => {
     const selector = (state) => ({
@@ -25,7 +32,10 @@ const HTMLModal = () => {
         edges: state.edges,
         setNodes: state.setNodes,
         setEdges: state.setEdges,
-        setViewPort: state.setViewPort
+        setViewPort: state.setViewPort,
+        workspaceBrief: state.workspaceBrief,
+        setWorkspaceBrief: state.setWorkspaceBrief,
+        viewport: state.viewport
     });
     const flowId = flowStore((s) => s.flow_id);
     const {
@@ -35,7 +45,10 @@ const HTMLModal = () => {
         edges,
         setNodes,
         setEdges,
-        setViewPort
+        setViewPort,
+        workspaceBrief,
+        setWorkspaceBrief,
+        viewport
     } = useStore(useShallow(selector));
 
     const setFlowId = flowStore((s) => s.setFlow);
@@ -44,23 +57,78 @@ const HTMLModal = () => {
     const [file, setFile] = useState();
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
-    const modalAccept = 'text/html';
-    const { fitView } = useReactFlow();
+    const modalAccept = '.html,.htm,text/html';
+    const { fitView, setViewport } = useReactFlow();
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const updateActivity = useActivityStore((s) => s.updateActivity);
     
     const addDataSource = (e) => {
+        const operationId = nanoid();
+        const controller = new AbortController();
+        const undoSnapshot = createSourceUndoSnapshot({
+            nodes,
+            edges,
+            viewport,
+            workspaceBrief
+        });
+        const activityId = addActivity({
+            title: 'Adding HTML source',
+            detail: file?.name,
+            context: 'Uploading, extracting HTML text, and deriving workspace structure.'
+        });
         const data = {
-            file: file
+            file: file,
+            operationId
         };
-        pushNode(LoadingModal);
+        pushNode(LoadingModal, {
+            ...sourceUploadLoading('HTML', file?.name),
+            operationId,
+            onCancel: () => {
+                controller.abort();
+                updateActivity(activityId, {
+                    status: 'canceled',
+                    context: 'HTML upload request was canceled.'
+                });
+                popNode();
+            }
+        });
+        const undoSourceAdd = createSourceUndoHandler({
+            activityId,
+            snapshot: undoSnapshot,
+            updateActivity,
+            setNodes,
+            setEdges,
+            setWorkspaceBrief,
+            setViewPort,
+            setViewport,
+            context: 'HTML source add was undone.'
+        });
         const [url, body, headerConfig] = setRequestData('html', flowId, data);
         axios
             .post(`http://localhost:8000/${url}`, body, {
                 headers: {
                     'Content-Type': headerConfig
-                }
+                },
+                signal: controller.signal
             })
-            .then((res) => setupNodes(res.data))
-            .catch((err) => manageErrors(err));
+            .then((res) => {
+                updateActivity(activityId, {
+                    status: 'completed',
+                    context: 'HTML source was added to the workspace.',
+                    undo: undoSourceAdd
+                });
+                setupNodes(res.data);
+            })
+            .catch((err) => {
+                if (isCanceledRequest(err)) {
+                    return;
+                }
+                updateActivity(activityId, {
+                    status: 'failed',
+                    context: requestErrorMessage(err)
+                });
+                manageErrors(err);
+            });
     };
 
     const setupNodes = (data) => {
@@ -77,7 +145,6 @@ const HTMLModal = () => {
 
     const setupFlow = (data) => {
         console.log('SETUUUUUUUUUUUUUUUUUUP new flow');
-        pushNode(LoadingModal);
         setFlowId(data.flow_id);
         console.log('DEDEDE', data);
         setFlowName(data.flow_name);
@@ -104,6 +171,7 @@ const HTMLModal = () => {
                     data.flow_id,
                     nodes
                 );
+                popNode();
             } else {
                 console.log('Flow error');
             }
@@ -131,9 +199,9 @@ const HTMLModal = () => {
     const manageErrors = (err) => {
         console.log(err);
         console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
-        setStatus(err.status);
-        setMsg(err.response.statusText);
+        console.log('Errroross', err.response?.statusText);
+        setStatus(err.response?.status || err.status || 500);
+        setMsg(requestErrorMessage(err));
         popNode();
         pushNode(ErrorModal);
     };
@@ -159,6 +227,7 @@ const HTMLModal = () => {
         }
 
         setTrigger(!trigger);
+        popNode();
     };
 
     const handleFileUpload = (e) => {

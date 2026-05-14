@@ -2,7 +2,7 @@ import SQLSvg from '../assets/sql.svg';
 import CROSSSvg from '../assets/cross.svg';
 import InputBar from '../helpful-components/InputBar';
 import { nanoid } from 'nanoid';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import useStore from '../stores/store';
 import { useShallow } from 'zustand/shallow';
 import modalStore from '../stores/modalStore';
@@ -14,35 +14,115 @@ import flowStore from '../stores/flowStore';
 import DataSourceSelect from '../global-components/DataSourceSelect';
 import errorStore from '../stores/errorStore';
 import ErrorModal from './ErrorModal';
+import { structuredSourceLoading } from '../config/loadingStates';
+import useActivityStore from '../stores/activityStore';
+import { isCanceledRequest, requestErrorMessage } from '../utils/requestErrors';
+import {
+    createSourceUndoHandler,
+    createSourceUndoSnapshot
+} from '../utils/sourceOperationActivity';
 const SQLModal = () => {
     const selector = (state) => ({
         nodes: state.nodes,
+        edges: state.edges,
         setNodes: state.setNodes,
+        setEdges: state.setEdges,
         trigger: state.trigger,
-        setTrigger: state.setTrigger
+        setTrigger: state.setTrigger,
+        setViewPort: state.setViewPort,
+        workspaceBrief: state.workspaceBrief,
+        setWorkspaceBrief: state.setWorkspaceBrief,
+        viewport: state.viewport
     });
-    const { nodes, setNodes, trigger, setTrigger } = useStore(
+    const {
+        nodes,
+        edges,
+        setNodes,
+        setEdges,
+        trigger,
+        setTrigger,
+        setViewPort,
+        workspaceBrief,
+        setWorkspaceBrief,
+        viewport
+    } = useStore(
         useShallow(selector)
     );
     const [tableName, setTableName] = useState('');
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const flowId = flowStore((s) => s.flow_id);
+    const { setViewport } = useReactFlow();
+    const addActivity = useActivityStore((s) => s.addActivity);
+    const updateActivity = useActivityStore((s) => s.updateActivity);
     const addDataSource = (e) => {
+        const operationId = nanoid();
+        const controller = new AbortController();
+        const undoSnapshot = createSourceUndoSnapshot({
+            nodes,
+            edges,
+            viewport,
+            workspaceBrief
+        });
+        const activityId = addActivity({
+            title: 'Connecting SQL source',
+            detail: tableName,
+            context: 'Reading schema, training query context, and adding a source node.'
+        });
         const data = {
-            content: tableName
+            content: tableName,
+            operationId
         };
-        pushNode(LoadingModal);
+        pushNode(LoadingModal, {
+            ...structuredSourceLoading('SQL', tableName),
+            operationId,
+            onCancel: () => {
+                controller.abort();
+                updateActivity(activityId, {
+                    status: 'canceled',
+                    context: 'SQL source connection request was canceled.'
+                });
+                popNode();
+            }
+        });
+        const undoSourceAdd = createSourceUndoHandler({
+            activityId,
+            snapshot: undoSnapshot,
+            updateActivity,
+            setNodes,
+            setEdges,
+            setWorkspaceBrief,
+            setViewPort,
+            setViewport,
+            context: 'SQL source add was undone.'
+        });
         const [url, body, headerConfig] = setRequestData('sql', flowId, data);
         console.log('Testtttttt', url, body, headerConfig);
         axios
             .post(`http://localhost:8000/${url}`, body, {
                 headers: {
                     'Content-Type': headerConfig
-                }
+                },
+                signal: controller.signal
             })
-            .then((res) => manageNodes(res.data))
-            .catch((err) => manageErrors(err));
+            .then((res) => {
+                updateActivity(activityId, {
+                    status: 'completed',
+                    context: 'SQL source was added to the workspace.',
+                    undo: undoSourceAdd
+                });
+                manageNodes(res.data);
+            })
+            .catch((err) => {
+                if (isCanceledRequest(err)) {
+                    return;
+                }
+                updateActivity(activityId, {
+                    status: 'failed',
+                    context: requestErrorMessage(err)
+                });
+                manageErrors(err);
+            });
     };
 
     const selector2 = (state) => ({
@@ -58,9 +138,9 @@ const SQLModal = () => {
     const manageErrors = (err) => {
         console.log(err);
         console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
+        console.log('Errroross', err.response?.statusText);
         setStatus(err.status);
-        setMsg(err.response.statusText);
+        setMsg(requestErrorMessage(err));
         popNode();
         pushNode(ErrorModal);
     };
@@ -85,6 +165,7 @@ const SQLModal = () => {
             setNodes(newArr);
         }
         setTrigger(!trigger);
+        popNode();
         console.log('Managing nodes finished');
     };
 

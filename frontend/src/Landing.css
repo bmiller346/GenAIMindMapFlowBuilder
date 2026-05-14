@@ -1,0 +1,245 @@
+.landing-page {
+  max-width: 100vw;
+  background-image: url("./assets/landing-background.png");
+  background-size: 100%;
+  background-repeat: no-repeat;
+  color: black;
+  font-family: "Inter", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 700;
+  line-height: 100%;
+  background-color: white;
+}
+
+.landing-section-1 {
+  height: 100vh;
+  display: flex;
+  justify-content: space-evenly;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.landing-logo {
+  display: flex;
+  align-items: center;
+  gap:  0.75rem;
+  font-family: "Inter", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 700;
+  line-height: 100%;
+  font-size: 14px;
+  opacity: 65%;
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: "Inter", sans-serif;
+  background-color: white;
+  box-shadow: 0px 0px 120px 20px rgba(255, 255, 255, 0.8);
+  position: relative;
+  z-index: 10;
+}
+
+.hero > h1 {
+  font-weight: 600;
+  font-size: 5rem;
+  letter-spacing: 0;
+  line-height: 100%;
+  max-width: 34.0625rem;
+}
+
+.hero > h2 {
+  margin-top: 1rem;
+  font-weight: 400;
+  font-size: 1.5rem;
+  letter-spacing: 0;
+  line-height: 100%;
+  max-width: 39.6875rem;
+  text-align: center;
+}
+
+.hero >div {
+  margin-top: 2rem;
+}
+
+.supported-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 1.625rem;
+  font-weight: 600;
+  letter-spacing: 15%;
+  line-height: 100%;
+  opacity: 65%;
+}
+
+.supported-inputs> .actual-inputs {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.actual-inputs > div {
+  display: flex;
+}
+
+.landing-cards {
+  display: flex;
+  background-color: #F6F6F6;
+  border-radius: 1.6rem;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 11.1px 11.1px;
+}
+
+.landing-cards>img:hover{
+  cursor:default !important;
+}
+
+.landing-cards:hover{
+  cursor:default;
+}
+
+.landing-buttons {
+  display: flex;
+  gap: 1.3125rem;
+  flex-direction: row;
+}
+
+.example-section {
+  margin: 0 10.125rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  height: 100vh;
+}
+
+.example-card {
+  width: 22.72rem;
+  background-color: #000;
+  color: white;
+  border-radius: 25.6px;
+  height: 5.5rem;
+  padding: 24px;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  font-size: 24px !important;
+  font-weight: 600;
+  font-family: "Inter", sans-serif;
+}
+
+.example-card > h4 {
+  font-size: 24px !important;
+  font-weight: 600;
+  font-family: "Inter", sans-serif;
+}
+
+.example-cards {
+  display: flex;
+  justify-content: space-between;
+  width: 80%;
+}
+
+.example-video {
+  width: 80%;
+  aspect-ratio: 16/9;
+  height: auto;
+}
+
+.landing-section-2 {
+  margin: 0 10.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2.68rem;
+  min-height: 520px;
+  justify-content: center;
+  align-items: center;
+}
+
+.testimonial-section {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.testimonial {
+  padding: 1.75rem;
+  display: flex;
+  gap: 1.25rem;
+  flex-direction: column;
+  font-family: "Inter", sans-serif;
+  font-weight: 500;
+  border-radius: 25.6px;
+  flex: 1
+}
+
+.testimonial > h1 {
+  font-size: 1.5rem;
+}
+
+#try-now {
+  background-color: black;
+  border-radius: 2rem;
+  padding: 0.75rem 2.625rem;
+  outline: none;
+  border: none;
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 100%;
+  letter-spacing: 0;
+  font-family: "Inter", sans-serif;
+  color: white;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 6.125rem;
+  padding-bottom: 2rem;
+}
+
+#contact {
+  color: rgba(0, 0, 0, 1);
+  font-family: "Inter", sans-serif;
+  font-size: 14px;
+  line-height: 100%;
+  letter-spacing: 0;
+  opacity: 50%;
+  font-weight: 400;
+}
+
+#try-now:hover {
+  scale: 1.05;
+  cursor: pointer;
+}
+
+#github {
+  background-color: white;
+  color: black;
+  border: 1px solid black;
+  border-radius: 2rem;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 100%;
+  letter-spacing: 0;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: "Inter", sans-serif;
+}
+
+#github:hover {
+  scale: 1.05;
+  cursor: pointer;
+}

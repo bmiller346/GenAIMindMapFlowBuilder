@@ -1,14 +1,17 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 const repoRoot = path.resolve(__dirname, '..');
 const stagingRoot = path.join(repoRoot, '.desktop-resources');
 const backendSource = path.join(repoRoot, 'backend');
 const backendTarget = path.join(stagingRoot, 'backend');
+const ffmpegTarget = path.join(stagingRoot, 'ffmpeg');
 const includeVenv = process.argv.includes('--include-venv');
 
 function isInside(parent, child) {
@@ -38,6 +41,27 @@ function shouldCopy(src) {
   }
 
   return true;
+}
+
+async function copyBundledFfmpeg() {
+  let ffmpegPath = '';
+  try {
+    ffmpegPath = require('ffmpeg-static');
+  } catch {
+    ffmpegPath = '';
+  }
+
+  if (!ffmpegPath) {
+    console.warn('ffmpeg-static is not installed; packaged local video audio extraction will fall back to PATH.');
+    return;
+  }
+
+  await fs.mkdir(ffmpegTarget, { recursive: true });
+  const executableName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  const targetPath = path.join(ffmpegTarget, executableName);
+  await fs.copyFile(ffmpegPath, targetPath);
+  await fs.chmod(targetPath, 0o755);
+  console.log(`Prepared bundled ffmpeg at ${targetPath}`);
 }
 
 if (!isInside(repoRoot, stagingRoot)) {
@@ -87,6 +111,8 @@ if (process.platform === 'win32') {
     filter: shouldCopy
   });
 }
+
+await copyBundledFfmpeg();
 
 console.log(`Prepared desktop backend resources at ${backendTarget}`);
 console.log(includeVenv ? 'Included backend .venv for self-contained packaging.' : 'Skipped backend .venv for thin packaging.');

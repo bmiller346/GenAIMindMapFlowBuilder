@@ -1,40 +1,101 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import CROSSSvg from '../assets/cross.svg';
 import modalStore from '../stores/modalStore';
 import {
-    getLocalSetting,
-    setLocalSetting,
-    SETTINGS_KEYS
+    CREDENTIAL_RETENTION_OPTIONS,
+    clearCredentialSettings,
+    getCredentialStorageInfo,
+    getCredentialStorageMode,
+    getCredentialSettings,
+    saveCredentialSettings
 } from '../config/localSettings';
 
 const SettingsModal = () => {
     const popNode = modalStore((s) => s.popNode);
-    const [openaiApiKey, setOpenaiApiKey] = useState(() =>
-        getLocalSetting(SETTINGS_KEYS.openaiApiKey)
-    );
-    const [miroApiToken, setMiroApiToken] = useState(() =>
-        getLocalSetting(SETTINGS_KEYS.miroApiToken)
-    );
-    const [mondayApiToken, setMondayApiToken] = useState(() =>
-        getLocalSetting(SETTINGS_KEYS.mondayApiToken)
-    );
+    const [openaiApiKey, setOpenaiApiKey] = useState('');
+    const [miroApiToken, setMiroApiToken] = useState('');
+    const [mondayApiToken, setMondayApiToken] = useState('');
+    const [credentialRetentionDays, setCredentialRetentionDays] = useState(30);
     const [saved, setSaved] = useState(false);
+    const [error, setError] = useState('');
+    const [showOpenaiApiKey, setShowOpenaiApiKey] = useState(false);
+    const [storageInfo, setStorageInfo] = useState({
+        encrypted: false,
+        persistence: 'browser-local'
+    });
+    const credentialStorageMode = getCredentialStorageMode();
 
-    const saveSettings = () => {
-        setLocalSetting(SETTINGS_KEYS.openaiApiKey, openaiApiKey.trim());
-        setLocalSetting(SETTINGS_KEYS.miroApiToken, miroApiToken.trim());
-        setLocalSetting(SETTINGS_KEYS.mondayApiToken, mondayApiToken.trim());
-        setSaved(true);
+    useEffect(() => {
+        let mounted = true;
+        getCredentialStorageInfo().then((info) => {
+            if (mounted) {
+                setStorageInfo(info);
+            }
+        });
+        getCredentialSettings().then((settings) => {
+            if (!mounted) {
+                return;
+            }
+
+            setOpenaiApiKey(settings.openaiApiKey);
+            setMiroApiToken(settings.miroApiToken);
+            setMondayApiToken(settings.mondayApiToken);
+            setCredentialRetentionDays(settings.credentialRetentionDays || 30);
+        }).catch(() => {
+            if (mounted) {
+                setError('Could not load saved settings.');
+            }
+        });
+
+        return () => {
+            mounted = false;
+        };
+    }, []);
+
+    const saveSettings = async () => {
+        setError('');
+        const nextSettings = {
+            openaiApiKey: openaiApiKey.trim(),
+            miroApiToken: miroApiToken.trim(),
+            mondayApiToken: mondayApiToken.trim(),
+            credentialRetentionDays
+        };
+
+        try {
+            const persistedSettings = await saveCredentialSettings(nextSettings);
+            setOpenaiApiKey(persistedSettings.openaiApiKey);
+            setMiroApiToken(persistedSettings.miroApiToken);
+            setMondayApiToken(persistedSettings.mondayApiToken);
+            setCredentialRetentionDays(
+                persistedSettings.credentialRetentionDays || credentialRetentionDays
+            );
+            if (
+                nextSettings.openaiApiKey &&
+                persistedSettings.openaiApiKey !== nextSettings.openaiApiKey
+            ) {
+                throw new Error('OpenAI API key was not available after save.');
+            }
+            setSaved(true);
+            popNode();
+        } catch (saveError) {
+            setSaved(false);
+            setError(saveError.message || 'Settings could not be saved.');
+        }
     };
 
-    const clearSettings = () => {
+    const clearSettings = async () => {
+        setError('');
         setOpenaiApiKey('');
         setMiroApiToken('');
         setMondayApiToken('');
-        setLocalSetting(SETTINGS_KEYS.openaiApiKey, '');
-        setLocalSetting(SETTINGS_KEYS.miroApiToken, '');
-        setLocalSetting(SETTINGS_KEYS.mondayApiToken, '');
-        setSaved(true);
+        setCredentialRetentionDays(30);
+        try {
+            await clearCredentialSettings();
+            setSaved(true);
+        } catch {
+            setSaved(false);
+            setError('Settings could not be cleared.');
+        }
     };
 
     return (
@@ -50,19 +111,35 @@ const SettingsModal = () => {
                 />
             </div>
             <p className="settings-note">
-                Keys are saved on this device and sent only to the local DocMap backend.
-                They are not written to the project `.env` file.
+                {credentialStorageMode === 'desktop'
+                    ? 'Keys are saved as Electron app data for your selected retention window and sent only to the DocMap backend. They are not written to the project `.env` file.'
+                    : 'For browser testing, keys use your selected retention window and are sent only to the configured DocMap backend. Hosted production should use server-side credentials or an authenticated vault.'}
             </p>
+            {credentialStorageMode === 'desktop' && !storageInfo.encrypted ? (
+                <p className="settings-warning">
+                    Secure desktop storage is unavailable right now. Keys will be
+                    saved locally without OS encryption for testing convenience.
+                </p>
+            ) : null}
             <div className="input-bar">
                 <label htmlFor="openai-api-key">OpenAI API key</label>
-                <input
-                    id="openai-api-key"
-                    type="password"
-                    autoComplete="off"
-                    placeholder="sk-..."
-                    value={openaiApiKey}
-                    onChange={(event) => setOpenaiApiKey(event.target.value)}
-                />
+                <div className="settings-secret-row">
+                    <input
+                        id="openai-api-key"
+                        type={showOpenaiApiKey ? 'text' : 'password'}
+                        autoComplete="off"
+                        placeholder="sk-..."
+                        value={openaiApiKey}
+                        onChange={(event) => setOpenaiApiKey(event.target.value)}
+                    />
+                    <button
+                        type="button"
+                        className="settings-secret-toggle"
+                        onClick={() => setShowOpenaiApiKey((visible) => !visible)}
+                    >
+                        {showOpenaiApiKey ? 'Hide' : 'Preview'}
+                    </button>
+                </div>
             </div>
             <div className="input-bar">
                 <label htmlFor="miro-api-token">Miro token optional</label>
@@ -84,7 +161,30 @@ const SettingsModal = () => {
                     onChange={(event) => setMondayApiToken(event.target.value)}
                 />
             </div>
-            {saved ? <p className="settings-saved">Settings saved for this device.</p> : null}
+            <div className="input-bar">
+                <label htmlFor="credential-retention">Remember keys for</label>
+                <select
+                    id="credential-retention"
+                    value={credentialRetentionDays}
+                    onChange={(event) =>
+                        setCredentialRetentionDays(Number(event.target.value))
+                    }
+                >
+                    {CREDENTIAL_RETENTION_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                            {option.label}
+                        </option>
+                    ))}
+                </select>
+            </div>
+            {saved ? (
+                <p className="settings-saved">
+                    {credentialRetentionDays === 0
+                        ? 'Settings saved for this app session.'
+                        : `Settings saved for ${credentialRetentionDays} days.`}
+                </p>
+            ) : null}
+            {error ? <p className="settings-warning">{error}</p> : null}
             <div className="buttons">
                 <button
                     id="cancel"

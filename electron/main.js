@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const { app, BrowserWindow, Menu, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, safeStorage, shell } = require('electron');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,8 +19,12 @@ const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 
 let mainWindow = null;
 let backendProcess = null;
+let sessionCredentialSettings = null;
 
 const isDev = !app.isPackaged;
+const CREDENTIAL_SETTING_KEYS = new Set(['openaiApiKey', 'miroApiToken', 'mondayApiToken']);
+const DEFAULT_CREDENTIAL_RETENTION_DAYS = 30;
+const ALLOWED_CREDENTIAL_RETENTION_DAYS = new Set([0, 30, 60, 90]);
 
 function ignoreBrokenPipe(error) {
   if (error?.code !== 'EPIPE') {
@@ -63,6 +67,16 @@ function resolveBackendDir() {
   return resolveAppPath('backend');
 }
 
+function resolveBundledFfmpeg() {
+  const executableName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  const candidates = [
+    resolveAppPath('ffmpeg', executableName),
+    path.resolve(__dirname, '..', 'node_modules', 'ffmpeg-static', executableName)
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) || '';
+}
+
 function resolveFrontendIndex() {
   return resolveAppPath('frontend', 'dist', 'index.html');
 }
@@ -71,6 +85,214 @@ function resolveDesktopIcon(fileName = 'docmap.png') {
   return isDev
     ? path.resolve(__dirname, 'assets', fileName)
     : path.join(process.resourcesPath, 'electron', 'assets', fileName);
+}
+
+function resolveCredentialSettingsPath() {
+  return path.join(app.getPath('userData'), 'credential-settings.json');
+}
+
+function emptyCredentialSettings() {
+  return {
+    openaiApiKey: '',
+    miroApiToken: '',
+    mondayApiToken: '',
+    credentialRetentionDays: DEFAULT_CREDENTIAL_RETENTION_DAYS,
+    expiresAt: ''
+  };
+}
+
+function normalizeCredentialSettings(settings = {}) {
+  const normalized = emptyCredentialSettings();
+
+  for (const key of CREDENTIAL_SETTING_KEYS) {
+    const value = settings[key];
+    normalized[key] = typeof value === 'string' ? value.trim() : '';
+  }
+
+  const retentionDays = Number(settings.credentialRetentionDays);
+  normalized.credentialRetentionDays = ALLOWED_CREDENTIAL_RETENTION_DAYS.has(retentionDays)
+    ? retentionDays
+    : DEFAULT_CREDENTIAL_RETENTION_DAYS;
+  normalized.expiresAt =
+    typeof settings.expiresAt === 'string' ? settings.expiresAt : '';
+
+  return normalized;
+}
+
+function hasCredentialValues(settings = {}) {
+  return Array.from(CREDENTIAL_SETTING_KEYS).some((key) => Boolean(settings[key]));
+}
+
+function expirationForRetentionDays(retentionDays) {
+  if (retentionDays === 0) {
+    return '';
+  }
+
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + retentionDays);
+  return expiresAt.toISOString();
+}
+
+function isCredentialSettingsExpired(settings) {
+  if (!settings?.expiresAt) {
+    return false;
+  }
+
+  return Date.parse(settings.expiresAt) <= Date.now();
+}
+
+function canEncryptCredentialSettings() {
+  return Boolean(safeStorage?.isEncryptionAvailable?.());
+}
+
+function serializeCredentialSettings(settings) {
+  const normalized = normalizeCredentialSettings(settings);
+  const expiresAt =
+    normalized.credentialRetentionDays === 0
+      ? ''
+      : normalized.expiresAt || expirationForRetentionDays(normalized.credentialRetentionDays);
+
+  if (!canEncryptCredentialSettings()) {
+    return {
+      encoding: 'plain-v1',
+      credentialRetentionDays: normalized.credentialRetentionDays,
+      expiresAt,
+      values: normalized
+    };
+  }
+
+  return {
+    encoding: 'safeStorage-v1',
+    credentialRetentionDays: normalized.credentialRetentionDays,
+    expiresAt,
+    values: Object.fromEntries(
+      Array.from(CREDENTIAL_SETTING_KEYS).map((key) => [
+        key,
+        normalized[key] ? safeStorage.encryptString(normalized[key]).toString('base64') : ''
+      ])
+    )
+  };
+}
+
+function deserializeCredentialSettings(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return emptyCredentialSettings();
+  }
+
+  if (payload.encoding === 'safeStorage-v1') {
+    const values = {
+      ...emptyCredentialSettings(),
+      credentialRetentionDays: payload.credentialRetentionDays,
+      expiresAt: payload.expiresAt
+    };
+    for (const key of CREDENTIAL_SETTING_KEYS) {
+      const encrypted = payload.values?.[key];
+      if (!encrypted || typeof encrypted !== 'string') {
+        values[key] = '';
+        continue;
+      }
+
+      try {
+        values[key] = safeStorage.decryptString(Buffer.from(encrypted, 'base64'));
+      } catch (error) {
+        safeError(`[docmap-settings] Could not decrypt ${key}: ${error.message}`);
+        values[key] = '';
+      }
+    }
+    return normalizeCredentialSettings(values);
+  }
+
+  if (payload.encoding === 'plain-v1' || payload.values) {
+    return normalizeCredentialSettings({
+      ...(payload.values || {}),
+      credentialRetentionDays: payload.credentialRetentionDays,
+      expiresAt: payload.expiresAt
+    });
+  }
+
+  return normalizeCredentialSettings(payload);
+}
+
+function readCredentialSettings() {
+  if (sessionCredentialSettings) {
+    return sessionCredentialSettings;
+  }
+
+  const settingsPath = resolveCredentialSettingsPath();
+  if (!fs.existsSync(settingsPath)) {
+    return emptyCredentialSettings();
+  }
+
+  try {
+    const settings = deserializeCredentialSettings(
+      JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+    );
+    if (isCredentialSettingsExpired(settings)) {
+      clearCredentialSettings();
+      return emptyCredentialSettings();
+    }
+
+    return settings;
+  } catch (error) {
+    safeError(`[docmap-settings] Could not read credential settings: ${error.message}`);
+    return emptyCredentialSettings();
+  }
+}
+
+function writeCredentialSettings(settings) {
+  const normalized = normalizeCredentialSettings(settings);
+  if (!hasCredentialValues(normalized)) {
+    clearCredentialSettings();
+    return;
+  }
+
+  if (normalized.credentialRetentionDays === 0) {
+    sessionCredentialSettings = normalized;
+    const settingsPath = resolveCredentialSettingsPath();
+    if (fs.existsSync(settingsPath)) {
+      fs.unlinkSync(settingsPath);
+    }
+    return;
+  }
+
+  sessionCredentialSettings = null;
+  const settingsPath = resolveCredentialSettingsPath();
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(
+    settingsPath,
+    `${JSON.stringify(serializeCredentialSettings(normalized), null, 2)}\n`,
+    { mode: 0o600 }
+  );
+}
+
+function clearCredentialSettings() {
+  sessionCredentialSettings = null;
+  const settingsPath = resolveCredentialSettingsPath();
+  if (fs.existsSync(settingsPath)) {
+    fs.unlinkSync(settingsPath);
+  }
+}
+
+function credentialStorageInfo() {
+  const encrypted = canEncryptCredentialSettings();
+  return {
+    encrypted,
+    persistence: encrypted ? 'encrypted-device' : 'local-device'
+  };
+}
+
+function installCredentialSettingsIpc() {
+  ipcMain.handle('docmap:credentials:storage-info', () => credentialStorageInfo());
+  ipcMain.handle('docmap:credentials:get', () => readCredentialSettings());
+  ipcMain.handle('docmap:credentials:save', (_event, settings) => {
+    const normalized = normalizeCredentialSettings(settings);
+    writeCredentialSettings(normalized);
+    return readCredentialSettings();
+  });
+  ipcMain.handle('docmap:credentials:clear', () => {
+    clearCredentialSettings();
+    return emptyCredentialSettings();
+  });
 }
 
 function packagedVenvPython() {
@@ -143,6 +365,7 @@ function startBackend() {
 
   const backendDir = resolveBackendDir();
   const { command, args } = backendCommand();
+  const bundledFfmpeg = resolveBundledFfmpeg();
   const venvScripts = process.platform === 'win32'
     ? path.join(backendDir, '.venv', 'Scripts')
     : path.join(backendDir, '.venv', 'bin');
@@ -154,6 +377,7 @@ function startBackend() {
       PATH: fs.existsSync(venvScripts)
         ? `${venvScripts}${path.delimiter}${process.env.PATH || ''}`
         : process.env.PATH,
+      DOCMAP_FFMPEG_PATH: bundledFfmpeg || process.env.DOCMAP_FFMPEG_PATH || '',
       PYTHONUNBUFFERED: '1'
     },
     windowsHide: true,
@@ -332,6 +556,7 @@ function stopBackend() {
 
 app.whenReady().then(async () => {
   app.setName('DocMap');
+  installCredentialSettingsIpc();
   installMenu();
   startBackend();
   await createWindow();

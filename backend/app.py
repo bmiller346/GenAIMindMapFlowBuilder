@@ -551,21 +551,31 @@ def prepare_source_upload(file: UploadFile, flow_id: str, expected_extension: st
     if expected_extension and upload["extension"] != expected_extension:
         raise DocumentIngestionError(f"Only {expected_extension.upper()} files are allowed.")
 
-    existing_component = component_collection.find_one(
-        {"file_hash": upload["file_hash"], "flow_id": ObjectId(flow_id)}
-    )
+    try:
+        existing_component = component_collection.find_one(
+            {"file_hash": upload["file_hash"], "flow_id": ObjectId(flow_id)}
+        )
+        existing_versions = component_collection.count_documents(
+            {
+                "flow_id": ObjectId(flow_id),
+                "source_document.filename": upload["filename"],
+            }
+        )
+    except PyMongoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Source uploads need MongoDB so document metadata and source references can be saved. "
+                "Start MongoDB, then reopen or create a workspace and try the DOCX upload again."
+            ),
+        ) from exc
+
     if existing_component:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="File already exists in the workspace.",
         )
 
-    existing_versions = component_collection.count_documents(
-        {
-            "flow_id": ObjectId(flow_id),
-            "source_document.filename": upload["filename"],
-        }
-    )
     return ingest_supported_document(
         upload["filename"],
         file_bytes,
@@ -580,21 +590,31 @@ def prepare_ai_intake_upload(file: UploadFile, flow_id: str) -> dict:
     if upload["extension"] in ALLOWED_DOCUMENT_EXTENSIONS:
         return prepare_source_upload(file, flow_id)
 
-    existing_component = component_collection.find_one(
-        {"file_hash": upload["file_hash"], "flow_id": ObjectId(flow_id)}
-    )
+    try:
+        existing_component = component_collection.find_one(
+            {"file_hash": upload["file_hash"], "flow_id": ObjectId(flow_id)}
+        )
+        existing_versions = component_collection.count_documents(
+            {
+                "flow_id": ObjectId(flow_id),
+                "source_document.filename": upload["filename"],
+            }
+        )
+    except PyMongoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Source uploads need MongoDB so document metadata and source references can be saved. "
+                "Start MongoDB, then reopen or create a workspace and try the upload again."
+            ),
+        ) from exc
+
     if existing_component:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="File already exists in the workspace.",
         )
 
-    existing_versions = component_collection.count_documents(
-        {
-            "flow_id": ObjectId(flow_id),
-            "source_document.filename": upload["filename"],
-        }
-    )
     source_document = build_ai_intake_source_document(
         upload["filename"],
         file_bytes,
@@ -4108,21 +4128,38 @@ def create_docx_component(
 
     if upload["extension"] == "docx":
         check_page_length = is_within_gpt4o_token_limit(file)
-        if check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
-        elif check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
-        else:
+        try:
+            if check_page_length and flow["flow_type"] == 'manual':
+                return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+            elif check_page_length and flow["flow_type"] == 'automatic':
+                return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+            else:
+                traceback.print_exc()
+                update_operation_progress(
+                    operation_id,
+                    phase="failed",
+                    message="DOCX source exceeds AI token limit",
+                    detail="Split the file into smaller sources and try again.",
+                    progress=100,
+                    status_value="failed",
+                )
+                raise HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
+        except HTTPException:
+            raise
+        except Exception as exc:
             traceback.print_exc()
             update_operation_progress(
                 operation_id,
                 phase="failed",
-                message="DOCX source exceeds AI token limit",
-                detail="Split the file into smaller sources and try again.",
+                message="DOCX processing failed",
+                detail=str(exc),
                 progress=100,
                 status_value="failed",
             )
-            raise HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"DOCX processing failed: {str(exc)}",
+            ) from exc
     else:
         traceback.print_exc()
         update_operation_progress(

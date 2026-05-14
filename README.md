@@ -12,9 +12,10 @@ Miro and monday.com are bridge/projection endpoints. DocMap remains the canonica
 
 ## Current Product Focus
 
-The MVP lane is intentionally narrow:
+The MVP lane is intentionally narrow, but source intake can include more than office documents:
 
 - Upload `PDF`, `DOCX`, `Markdown`, or `TXT`.
+- Add web, image, audio, and video sources when their parser path is available.
 - Extract text with source-aware metadata where possible.
 - Chunk documents deterministically.
 - Generate schema-valid graph JSON.
@@ -23,7 +24,7 @@ The MVP lane is intentionally narrow:
 - Export reviewable JSON, Markdown, CSV, OPML, Mermaid, MMD JSON, PNG, and SVG.
 - Preview or push selected graph projections to Miro and monday.com when configured.
 
-The repo still contains upstream demo-era surfaces such as media, SQL, web, Gemini, and AWS paths. Keep those treated as legacy/optional unless they are part of a specific roadmap slice.
+The source picker is organized by intake mode rather than by old/new status: workspace brief, documents, web, media, and data. PDF, DOCX, Markdown, and TXT are the strict source-traceable MVP document paths today; image, audio, video, and web now use OpenAI-backed default paths instead of Gemini, AWS upload, or crawler-first execution. Local video samples frames and extracts/transcribes local audio with the bundled desktop `ffmpeg` binary, `DOCMAP_FFMPEG_PATH`, or a PATH-provided `ffmpeg` before graph generation. YouTube, PPTX, HTML, CSV, and SQL remain useful AI intake paths whose provenance contracts should be hardened as they graduate into the same traceability model.
 
 ## Repository Layout
 
@@ -34,6 +35,7 @@ electron/     Desktop shell for local standalone use
 scripts/      Desktop build and launch helpers
 ROADMAP.md    Living engineering roadmap
 DESKTOP.md    Detailed Electron packaging notes
+DEVELOPER_NOTES.md  Reviewer handoff notes, validation status, caveats
 AGENT.md      Compact guide for agentic development work
 ```
 
@@ -43,7 +45,7 @@ AGENT.md      Compact guide for agentic development work
 - Node.js 20 or newer
 - Python 3.11
 - Poetry available through `python -m poetry`
-- Docker Desktop for MongoDB-backed document uploads
+- Docker Desktop for MongoDB-backed document uploads, or the local MongoDB fallback on this workstation
 
 MongoDB is required for source document metadata, document chunks, and source references. Basic workspace listing can fall back to a local JSON store during development, but document ingestion should be tested with MongoDB running.
 
@@ -77,6 +79,12 @@ Start MongoDB when you need document uploads:
 npm run infra:mongo:up
 ```
 
+If Docker Desktop is blocked by WSL on this Windows workstation, start the installed MongoDB server directly:
+
+```powershell
+npm run infra:mongo:local
+```
+
 Stop MongoDB when you are done:
 
 ```powershell
@@ -98,6 +106,7 @@ openai_default_model=gpt-5.5
 openai_reasoning_model=gpt-5.4
 openai_embedding_model=text-embedding-3-large
 DOCMAP_MAX_UPLOAD_BYTES=26214400
+DOCMAP_FFMPEG_PATH=
 miro_api_token=
 monday_api_token=
 ```
@@ -112,6 +121,16 @@ aws_access_key_id=
 aws_secret_access_key=
 bucket_name=
 ```
+
+Gemini, GCP, and AWS variables are only for legacy or explicitly selected compatibility paths. The default DocMap source flow should rely on the OpenAI key plus local extraction where possible.
+
+Optional legacy UI flags:
+
+```js
+localStorage.setItem('docmap:showLegacyLanding', 'true');
+```
+
+That flag preserves the forked demo landing page for comparison and reintegration checks without putting it on the default DocMap MVP path.
 
 OpenAI-backed endpoints return `503` with the missing setting name when no key is available. Upload validation restricts extensions, sanitizes filenames, hashes file bytes, and defaults to a 25 MB upload limit when `DOCMAP_MAX_UPLOAD_BYTES` is omitted.
 
@@ -331,9 +350,9 @@ npm run desktop:build:frontend
 npm run desktop:start
 ```
 
-### Vite Reports Large Assets
+### Legacy Demo Assets
 
-The build is currently chunked to avoid JavaScript chunk warnings, but bundled demo media assets are still large. That is expected until the old landing/demo media is moved out of the app bundle or loaded lazily from an external asset location.
+The old landing/demo page is lazy-loaded and hidden behind `docmap:showLegacyLanding`. Its video assets may still be emitted as separate build assets, but they are not part of the default DocMap route unless that legacy flag is enabled.
 
 ## Roadmap
 
