@@ -16,17 +16,35 @@ import SettingsModal from '../modals/SettingsModal';
 import WorkspaceBriefModal from '../modals/WorkspaceBriefModal';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+    createFlowSnapshot,
+    parseFlowSnapshot,
+    stringifyFlowSnapshot
+} from '../utils/flowSnapshots';
+import useActivityStore from '../stores/activityStore';
+import useWorkspacePanelStore from '../stores/workspacePanelStore';
 const Header = ({
     isDrawer,
     setIsDrawer,
     setFlowList,
     lightMode,
-    setLightMode
+    setLightMode,
+    onOpenSources
 }) => {
     const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
     const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
-    const [saveState, setSaveState] = useState('idle');
+    const toggleActivity = useActivityStore((s) => s.toggleActivity);
+    const toggleWorkspacePanel = useWorkspacePanelStore((s) => s.togglePanel);
+    const recordActivity = useActivityStore((s) => s.recordActivity);
+    const setActivityEvents = useActivityStore((s) => s.setActivityEvents);
+    const setActivityWorkspace = useActivityStore((s) => s.setActivityWorkspace);
+    const activityEvents = useActivityStore((s) => s.activities);
+    const runningActivityCount = useActivityStore((s) =>
+        s.activities.filter((activity) => activity.status === 'running').length
+    );
+    const autosaveTimerRef = useRef();
+    const exportInFlightRef = useRef(false);
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const flow_id = flowStore((s) => s.flow_id);
@@ -34,7 +52,18 @@ const Header = ({
     const rfInstance = flowStore((s) => s.rfInstance);
     const flow_name = flowStore((s) => s.flow_name);
     const setFlowName = flowStore((s) => s.setFlowName);
+    const setFlowType = flowStore((s) => s.setFlowType);
     const setFlowSummary = flowStore((s) => s.setFlowSummary);
+    const saveStatus = flowStore((s) => s.saveStatus);
+    const lastSavedSnapshot = flowStore((s) => s.lastSavedSnapshot);
+    const lastSavedFingerprint = flowStore((s) => s.lastSavedFingerprint);
+    const lastSavedFlowName = flowStore((s) => s.lastSavedFlowName);
+    const lastSavedFlowType = flowStore((s) => s.lastSavedFlowType);
+    const lastSavedAt = flowStore((s) => s.lastSavedAt);
+    const lastSaveError = flowStore((s) => s.lastSaveError);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
+    const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
+    const setSaveError = flowStore((s) => s.setSaveError);
     const selector = (s) => ({
         trigger: s.trigger,
         setTrigger: s.setTrigger,
@@ -42,6 +71,10 @@ const Header = ({
         edges: s.edges,
         selectedBranchId: s.selectedBranchId,
         setNodes: s.setNodes,
+        setEdges: s.setEdges,
+        setViewPort: s.setViewPort,
+        setWorkspaceBrief: s.setWorkspaceBrief,
+        viewport: s.viewport,
         workspaceBrief: s.workspaceBrief
     });
     const setTheme = flowStore((s) => s.setTheme);
@@ -52,9 +85,13 @@ const Header = ({
         edges,
         selectedBranchId,
         setNodes,
+        setEdges,
+        setViewPort,
+        setWorkspaceBrief,
+        viewport,
         workspaceBrief
     } = useStore(useShallow(selector));
-    const { getNodes } = useReactFlow();
+    const { getNodes, setViewport } = useReactFlow();
     const exportFormats = [
         { id: 'json', label: 'JSON', extension: 'json' },
         { id: 'markdown', label: 'Markdown', extension: 'md' },
@@ -181,34 +218,107 @@ const Header = ({
         }
     ];
 
-    const saveFlow = async () => {
-        setSaveState('saving');
-        pushNode(LoadingModal);
-        try {
-            await saveFlowCall();
-            popNode();
-            setSaveState('saved');
-        } catch (err) {
-            setSaveState('error');
-            manageErrors(err);
-        }
-    };
-
-    const saveFlowCall = (nameOverride) => {
+    const buildCurrentSnapshot = useCallback(() => {
         const flowObject = rfInstance?.toObject
             ? rfInstance.toObject()
             : { nodes: [], edges: [], viewport: {} };
-        const flow_json = JSON.stringify({
-            ...flowObject,
+        return createFlowSnapshot({
+            flowObject,
             nodes,
             edges,
-            workspace_brief: workspaceBrief
+            viewport,
+            workspaceBrief,
+            activityEvents: useActivityStore.getState().activities
         });
+    }, [activityEvents, edges, nodes, rfInstance, viewport, workspaceBrief]);
+
+    useEffect(() => {
+        setActivityWorkspace(flow_id || '');
+    }, [flow_id, setActivityWorkspace]);
+
+    const currentSnapshot = useMemo(
+        () => buildCurrentSnapshot(),
+        [buildCurrentSnapshot]
+    );
+
+    const currentFingerprint = useMemo(
+        () => stringifyFlowSnapshot(currentSnapshot),
+        [currentSnapshot]
+    );
+
+    const hasUnsavedChanges = Boolean(
+        flow_id &&
+        lastSavedFingerprint &&
+        (currentFingerprint !== lastSavedFingerprint ||
+            flow_name !== lastSavedFlowName ||
+            flow_type !== lastSavedFlowType)
+    );
+
+    useEffect(() => {
+        if (!flow_id || !lastSavedFingerprint || !hasUnsavedChanges) {
+            return;
+        }
+
+        if (saveStatus !== 'saving' && saveStatus !== 'error') {
+            setSaveStatus('dirty');
+        }
+    }, [
+        flow_id,
+        flow_name,
+        flow_type,
+        hasUnsavedChanges,
+        lastSavedFingerprint,
+        lastSavedFlowName,
+        lastSavedFlowType,
+        saveStatus,
+        setSaveStatus
+    ]);
+
+    const saveFlow = async ({ showLoading = true } = {}) => {
+        if (!flow_id) {
+            return;
+        }
+
+        setSaveStatus('saving');
+        if (showLoading) {
+            pushNode(LoadingModal);
+        }
+        try {
+            recordActivity({
+                type: showLoading ? 'save_manual' : 'autosave_persisted',
+                title: showLoading ? 'Saved workspace' : 'Autosaved workspace',
+                summary: showLoading
+                    ? 'Saved the current workspace snapshot.'
+                    : 'Persisted local workspace changes.',
+                metadata: {
+                    nodes: nodes.length,
+                    edges: edges.length
+                }
+            });
+            const savedSnapshot = buildCurrentSnapshot();
+            const savedFingerprint = stringifyFlowSnapshot(savedSnapshot);
+            await saveFlowCall(undefined, savedSnapshot);
+            setSavedSnapshot(savedSnapshot, savedFingerprint, flow_name, flow_type);
+            if (showLoading) {
+                popNode();
+            }
+        } catch (err) {
+            setSaveError(err?.message || 'Autosave failed');
+            if (showLoading) {
+                manageErrors(err);
+            }
+        }
+    };
+
+    const saveFlowCall = (nameOverride, snapshotOverride) => {
+        const flow_json = stringifyFlowSnapshot(
+            snapshotOverride || buildCurrentSnapshot()
+        );
         const data = {
             flow_id: flow_id,
             flow_name: nameOverride ?? flow_name,
             flow_json: flow_json,
-            flow_type: flow_type,
+            flow_type: flow_type || 'manual',
             summary: 'Please work'
         };
         console.log('JSON DATA', data);
@@ -218,6 +328,19 @@ const Header = ({
             }
         });
     };
+
+    useEffect(() => {
+        if (!hasUnsavedChanges || saveStatus === 'saving') {
+            return;
+        }
+
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = setTimeout(() => {
+            saveFlow({ showLoading: false });
+        }, 1500);
+
+        return () => clearTimeout(autosaveTimerRef.current);
+    }, [currentFingerprint, flow_name, flow_type, hasUnsavedChanges, saveStatus]);
 
     const selector2 = (state) => ({
         status: state.status,
@@ -272,6 +395,9 @@ const Header = ({
     };
 
     const exportWorkspace = async (format) => {
+        if (exportInFlightRef.current) {
+            return;
+        }
         if (!flow_id) {
             setStatus(400);
             setMsg('Create or open a workspace before exporting.');
@@ -280,6 +406,7 @@ const Header = ({
         }
 
         pushNode(LoadingModal);
+        exportInFlightRef.current = true;
         try {
             await saveFlowCall();
             const response = await axios.get(
@@ -290,10 +417,21 @@ const Header = ({
             );
             const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
             triggerFileDownload(response.data, fileName);
+            recordActivity({
+                type: 'export_file_downloaded',
+                title: `Exported ${format.label}`,
+                summary: `Downloaded ${fileName}.`,
+                metadata: {
+                    format: format.id,
+                    file_name: fileName
+                }
+            });
             setIsExportMenuOpen(false);
             popNode();
         } catch (err) {
             manageErrors(err);
+        } finally {
+            exportInFlightRef.current = false;
         }
     };
 
@@ -333,6 +471,19 @@ const Header = ({
             });
             const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
             triggerFileDownload(blob, fileName);
+            recordActivity({
+                type:
+                    format.id === 'monday'
+                        ? 'integration_monday_payload_exported'
+                        : 'export_bridge_payload',
+                title: format.label,
+                summary: `Downloaded ${fileName}.`,
+                integration: format.id === 'monday' ? 'monday' : '',
+                metadata: {
+                    format: format.id,
+                    file_name: fileName
+                }
+            });
             setIsExportMenuOpen(false);
             popNode();
         } catch (err) {
@@ -440,6 +591,22 @@ const Header = ({
             });
             const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
             triggerFileDownload(blob, fileName);
+            recordActivity({
+                type: format.dryRun
+                    ? 'integration_miro_dry_run'
+                    : 'integration_miro_push',
+                title: format.label,
+                summary: format.dryRun
+                    ? 'Generated a Miro workspace preview.'
+                    : 'Pushed workspace data to Miro.',
+                integration: 'miro',
+                node_ids: Object.keys(response.data.external_refs || {}),
+                metadata: {
+                    board_id: boardId.trim(),
+                    endpoint: format.endpoint,
+                    file_name: fileName
+                }
+            });
             setIsExportMenuOpen(false);
             popNode();
         } catch (err) {
@@ -499,6 +666,24 @@ const Header = ({
             });
             const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
             triggerFileDownload(blob, fileName);
+            recordActivity({
+                type: format.dryRun
+                    ? 'integration_miro_branch_dry_run'
+                    : 'integration_miro_branch_push',
+                title: format.label,
+                summary: format.dryRun
+                    ? 'Generated a selected-branch Miro preview.'
+                    : 'Pushed the selected branch to Miro.',
+                integration: 'miro',
+                node_ids: [
+                    selectedBranchId,
+                    ...Object.keys(response.data.external_refs || {})
+                ],
+                metadata: {
+                    board_id: boardId.trim(),
+                    file_name: fileName
+                }
+            });
             setIsExportMenuOpen(false);
             popNode();
         } catch (err) {
@@ -566,6 +751,26 @@ const Header = ({
             });
             const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
             triggerFileDownload(blob, fileName);
+            recordActivity({
+                type: format.dryRun
+                    ? 'integration_monday_dry_run'
+                    : 'integration_monday_push',
+                title: format.label,
+                summary: format.dryRun
+                    ? 'Generated a monday export preview.'
+                    : 'Pushed workspace tasks to monday.',
+                integration: 'monday',
+                node_ids: [
+                    ...(format.scope === 'branch' ? [selectedBranchId] : []),
+                    ...Object.keys(response.data.external_refs || {})
+                ],
+                metadata: {
+                    board_id: target.boardId,
+                    group_id: target.groupId,
+                    scope: format.scope,
+                    file_name: fileName
+                }
+            });
             setIsExportMenuOpen(false);
             popNode();
         } catch (err) {
@@ -657,6 +862,25 @@ const Header = ({
             });
             const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
             triggerFileDownload(blob, fileName);
+            recordActivity({
+                type: format.dryRun
+                    ? 'integration_monday_status_dry_run'
+                    : 'integration_monday_status_pull',
+                title: format.label,
+                summary: format.dryRun
+                    ? 'Generated a monday status pull preview.'
+                    : 'Pulled monday statuses into matching nodes.',
+                integration: 'monday',
+                node_ids: Object.keys(
+                    response.data.status_projections ||
+                        response.data.status_updates ||
+                        {}
+                ),
+                metadata: {
+                    apply: format.apply,
+                    file_name: fileName
+                }
+            });
             setIsExportMenuOpen(false);
             popNode();
         } catch (err) {
@@ -697,6 +921,15 @@ const Header = ({
                 const pngUrl = await toPng(viewport, exportOptions);
                 triggerUrlDownload(pngUrl, fileName);
             }
+            recordActivity({
+                type: 'export_image_downloaded',
+                title: `Exported ${format.label} image`,
+                summary: `Downloaded ${fileName}.`,
+                metadata: {
+                    format: format.id,
+                    file_name: fileName
+                }
+            });
             setIsExportMenuOpen(false);
         } catch (err) {
             manageErrors(err);
@@ -718,7 +951,9 @@ const Header = ({
         console.log(nextName);
         setFlowName(nextName);
         syncActiveFlowName(nextName);
-        setSaveState('idle');
+        if (flow_id) {
+            setSaveStatus('dirty');
+        }
     };
 
     const commitFlowName = async (nextName = flow_name) => {
@@ -726,13 +961,134 @@ const Header = ({
             return;
         }
 
-        setSaveState('saving');
+        setSaveStatus('saving');
         try {
-            await saveFlowCall(nextName);
-            setSaveState('saved');
+            recordActivity({
+                type: 'workspace_renamed',
+                title: 'Renamed workspace',
+                summary: `Workspace name changed to ${nextName || 'Untitled workspace'}.`,
+                metadata: {
+                    previous_name: flow_name,
+                    next_name: nextName
+                }
+            });
+            const savedSnapshot = buildCurrentSnapshot();
+            await saveFlowCall(nextName, savedSnapshot);
+            setSavedSnapshot(
+                savedSnapshot,
+                stringifyFlowSnapshot(savedSnapshot),
+                nextName,
+                flow_type
+            );
         } catch (err) {
-            setSaveState('error');
+            setSaveError(err?.message || 'Save failed');
             manageErrors(err);
+        }
+    };
+
+    const applySnapshotToWorkspace = (snapshot, name) => {
+        setNodes(snapshot.nodes || []);
+        setEdges(snapshot.edges || []);
+        setWorkspaceBrief(snapshot.workspace_brief || {});
+        setActivityEvents(snapshot.activity_events || [], flow_id);
+        const nextViewport = snapshot.viewport || {};
+        setViewPort(nextViewport);
+        if (nextViewport) {
+            const { x = 0, y = 0, zoom = 1 } = nextViewport;
+            setViewport({ x, y, zoom });
+        }
+        if (name !== undefined) {
+            setFlowName(name);
+            syncActiveFlowName(name);
+        }
+    };
+
+    const syncActiveFlowType = (nextType) => {
+        setFlowList((currentList) =>
+            currentList.map((flow) =>
+                flow.flow_id === flow_id
+                    ? { ...flow, flow_type: nextType }
+                    : flow
+            )
+        );
+    };
+
+    const changeFlowType = (nextType) => {
+        if (!flow_id || nextType === flow_type) {
+            return;
+        }
+
+        setFlowType(nextType);
+        syncActiveFlowType(nextType);
+        recordActivity({
+            type: 'workspace_mode_changed',
+            title: 'Changed workspace mode',
+            summary: `Workspace mode changed to ${nextType}.`,
+            metadata: {
+                previous_type: flow_type,
+                next_type: nextType
+            }
+        });
+        setSaveStatus('dirty');
+    };
+
+    const revertFlow = async () => {
+        if (!lastSavedSnapshot || !flow_id) {
+            return;
+        }
+
+        clearTimeout(autosaveTimerRef.current);
+        setSaveStatus('saving');
+        try {
+            const response = await axios.get(`http://localhost:8000/flows/${flow_id}`);
+            const snapshot = parseFlowSnapshot(response.data.flow_json);
+            const name = response.data.flow_name;
+            setFlowType(response.data.flow_type || 'manual');
+            syncActiveFlowType(response.data.flow_type || 'manual');
+            applySnapshotToWorkspace(snapshot, name);
+            recordActivity({
+                type: 'revert_snapshot_restored',
+                title: 'Reverted workspace',
+                summary:
+                    'Restored the last persisted workspace snapshot. The revert was kept in activity.',
+                metadata: {
+                    restored_from: 'backend'
+                }
+            });
+            const revertedSnapshot = {
+                ...snapshot,
+                activity_events: useActivityStore.getState().activities
+            };
+            await saveFlowCall(name, revertedSnapshot);
+            setSavedSnapshot(
+                revertedSnapshot,
+                stringifyFlowSnapshot(revertedSnapshot),
+                name,
+                response.data.flow_type || 'manual'
+            );
+            return;
+        } catch (err) {
+            applySnapshotToWorkspace(lastSavedSnapshot, lastSavedFlowName);
+            recordActivity({
+                type: 'revert_snapshot_restored',
+                title: 'Reverted workspace',
+                summary:
+                    'Restored the last local saved snapshot. The revert was kept in activity.',
+                metadata: {
+                    restored_from: 'local'
+                }
+            });
+            const revertedSnapshot = {
+                ...lastSavedSnapshot,
+                activity_events: useActivityStore.getState().activities
+            };
+            await saveFlowCall(lastSavedFlowName, revertedSnapshot);
+            setSavedSnapshot(
+                revertedSnapshot,
+                stringifyFlowSnapshot(revertedSnapshot),
+                lastSavedFlowName,
+                lastSavedFlowType
+            );
         }
     };
 
@@ -808,19 +1164,34 @@ const Header = ({
     };
 
     const hasWorkspace = Boolean(flow_id);
-    const canSave = hasWorkspace && (nodes.length > 0 || edges.length > 0);
+    const canSave = hasWorkspace;
+    const canRevert =
+        hasWorkspace && Boolean(lastSavedSnapshot) && saveStatus !== 'saving';
     const saveLabel =
-        saveState === 'saving'
+        saveStatus === 'saving'
             ? 'Saving...'
-            : saveState === 'saved'
+            : saveStatus === 'saved'
                 ? 'Saved'
-                : saveState === 'error'
+                : saveStatus === 'dirty'
+                    ? 'Unsaved'
+                    : saveStatus === 'error'
                     ? 'Retry save'
                     : 'Save now';
-
-    // useEffect(() => {
-    // 	getFlowList();
-    // }, [isDrawer])
+    const saveStatusMessage =
+        saveStatus === 'saving'
+            ? 'Autosaving...'
+            : saveStatus === 'dirty'
+                ? 'Unsaved changes'
+                : saveStatus === 'error'
+                    ? lastSaveError || 'Autosave failed'
+                    : lastSavedAt
+                        ? `Saved ${new Date(lastSavedAt).toLocaleTimeString([], {
+                              hour: 'numeric',
+                              minute: '2-digit'
+                          })}`
+                        : hasWorkspace
+                            ? 'Ready to save'
+                            : 'Open or create a workspace';
 
     return (
         <div
@@ -845,12 +1216,60 @@ const Header = ({
                 />
             </div>
             <div className="button header-actions">
+                <div className="flow-mode-toggle" aria-label="Workspace mode">
+                    <button
+                        type="button"
+                        className={flow_type !== 'automatic' ? 'active' : ''}
+                        onClick={() => changeFlowType('manual')}
+                        disabled={!flow_id || saveStatus === 'saving'}
+                    >
+                        Manual
+                    </button>
+                    <button
+                        type="button"
+                        className={flow_type === 'automatic' ? 'active' : ''}
+                        onClick={() => changeFlowType('automatic')}
+                        disabled={!flow_id || saveStatus === 'saving'}
+                    >
+                        Auto
+                    </button>
+                </div>
                 <button
                     type="button"
                     className="header-action header-action-secondary"
                     onClick={openWorkspaceBrief}
                 >
                     Brief
+                </button>
+                <button
+                    type="button"
+                    className="header-action header-action-secondary"
+                    onClick={toggleActivity}
+                >
+                    {runningActivityCount
+                        ? `Activity ${runningActivityCount}`
+                        : 'Activity'}
+                </button>
+                <button
+                    type="button"
+                    className="header-action header-action-secondary"
+                    onClick={onOpenSources}
+                >
+                    Sources
+                </button>
+                <button
+                    type="button"
+                    className="header-action header-action-secondary"
+                    onClick={() => toggleWorkspacePanel('integrations')}
+                >
+                    Integrations
+                </button>
+                <button
+                    type="button"
+                    className="header-action header-action-secondary"
+                    onClick={() => toggleWorkspacePanel('automations')}
+                >
+                    Automations
                 </button>
                 <div className="export-actions">
                     <button
@@ -963,16 +1382,35 @@ const Header = ({
                     </div>
                 ) : null}
                 {canSave ? (
-                    <button
-                        type="button"
-                        className={`header-action save-now ${saveState}`}
-                        onClick={() => saveFlow()}
-                        disabled={saveState === 'saving'}
-                    >
-                        {saveLabel}
-                    </button>
+                    <>
+                        <button
+                            type="button"
+                            className={`header-action save-now ${saveStatus}`}
+                            onClick={() => saveFlow()}
+                            disabled={saveStatus === 'saving'}
+                        >
+                            {saveLabel}
+                        </button>
+                        <button
+                            type="button"
+                            className="header-action header-action-secondary revert-flow"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={revertFlow}
+                            disabled={!canRevert}
+                        >
+                            Revert
+                        </button>
+                        <span
+                            className={`save-status save-status-${saveStatus}`}
+                            aria-live="polite"
+                        >
+                            {saveStatusMessage}
+                        </span>
+                    </>
                 ) : (
-                    <span className="save-status">Autosave ready</span>
+                    <span className="save-status" aria-live="polite">
+                        {saveStatusMessage}
+                    </span>
                 )}
                 <button
                     type="button"

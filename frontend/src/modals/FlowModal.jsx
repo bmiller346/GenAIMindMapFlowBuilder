@@ -7,6 +7,8 @@ import flowStore from '../stores/flowStore';
 import DataSourceSelect from '../global-components/DataSourceSelect';
 import ErrorModal from './ErrorModal';
 import errorStore from '../stores/errorStore';
+import { EMPTY_FLOW_SNAPSHOT, stringifyFlowSnapshot } from '../utils/flowSnapshots';
+import useActivityStore from '../stores/activityStore';
 
 const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
    const selector = (state) => ({
@@ -14,6 +16,7 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
         setTrigger: state.setTrigger,
         setNodes: state.setNodes,
         setEdges: state.setEdges,
+        setWorkspaceBrief: state.setWorkspaceBrief,
         setViewPort: state.setViewPort
     });
 
@@ -22,11 +25,15 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
         setTrigger,
         setNodes,
         setEdges,
+        setWorkspaceBrief,
         setViewPort
     } = useStore(useShallow(selector));
     const setFlow = flowStore((s) => s.setFlow);
     const setFlowName = flowStore((s) => s.setFlowName);
     const setFlowType = flowStore((s) => s.setFlowType);
+    const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
+    const setActivityEvents = useActivityStore((s) => s.setActivityEvents);
+    const recordActivity = useActivityStore((s) => s.recordActivity);
     const popNode = modalStore((s) => s.popNode);
     const pushNode = modalStore((s) => s.pushNode);
 
@@ -70,14 +77,31 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
 
 
     const setupNewFlow = (res, { openSourcePicker = false } = {}) => {
-        console.log("SERVER RESPONSE", res.data)
         setFlow(res.data.flow_id);
-        setFlowType(res.data.flow_type)
+        setActivityEvents([], res.data.flow_id);
+        setFlowType(res.data.flow_type);
         setIsDrawer(false);
         setNodes([]);
         setEdges([]);
+        setWorkspaceBrief({});
         setViewPort({});
         setFlowName('New Flow');
+        setSavedSnapshot(
+            EMPTY_FLOW_SNAPSHOT,
+            stringifyFlowSnapshot(EMPTY_FLOW_SNAPSHOT),
+            'New Flow'
+        );
+        recordActivity({
+            type: 'workspace_created',
+            title: 'Created workspace',
+            summary:
+                res.data.flow_type === 'automatic'
+                    ? 'Started an auto-generated workspace.'
+                    : 'Started a blank workspace.',
+            metadata: {
+                flow_type: res.data.flow_type || 'manual'
+            }
+        });
         setTrigger(!trigger);
         if (openSourcePicker) {
             pushNode(DataSourceSelect);
@@ -85,8 +109,6 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
     };
 
     const selector2 = (state) => ({
-        status: state.status,
-        message: state.message,
         setStatus: state.setStatus,
         setMsg: state.setMsg
     });
