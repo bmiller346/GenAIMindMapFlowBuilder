@@ -259,7 +259,7 @@ test('AI slash preview commands do not structurally mutate nodes or edges', asyn
 
     await page.locator('.node-title-input').first().fill('/ai');
     const beforeCommand = JSON.parse(state.savedFlowJson);
-    await page.locator('.node-slash-menu').getByRole('button', { name: /^AI helpers/ }).click();
+    await page.locator('.node-slash-menu').getByRole('button', { name: /^Review branch/ }).click();
     await expect(page.locator('.local-branch-control')).toContainText('/');
     const afterCommand = JSON.parse(state.savedFlowJson);
 
