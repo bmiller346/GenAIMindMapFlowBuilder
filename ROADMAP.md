@@ -28,6 +28,8 @@ Recently verified:
 
 - Backend roadmap-relevant tests pass: 125 passed.
 - Frontend production build passes with `npm run build`.
+- AI draft-session frontend contract tests pass with
+  `node --test frontend/tests/aiDraftSessions.test.mjs`.
 - Strict AI graph contract validation exists and is covered by tests.
 - Document ingestion, source refs, graph validation, exports, Miro payloads,
   monday existing-group export, monday template mapping, monday status pull,
@@ -267,6 +269,8 @@ These are the features required to call the core MVP functional.
 - [x] `AIActionRun` schema for node/branch/workspace AI action history,
   previews, accept/reject status, source scope, prompt profile, and generated
   node IDs.
+- [x] `AIDraftSession`, `AIDraftRevision`, draft item, preview diff, accept
+  mode, and accept result contracts for Ask AI draft-first graph mutation.
 
 ## Still Needed For Fully Functional MVP
 
@@ -303,70 +307,92 @@ Core product rules:
   training guide, data/table interpreter, and custom graph-building intents.
 - [ ] All Ask AI outputs are draft-first and conversation-editable before
   graph mutation.
+- [x] `AIDraftSession` and `AIDraftRevision` are not canonical graph state;
+  they are temporary/reviewable proposal state until explicit acceptance.
 - [ ] A draft session may contain proposed nodes, edges, annotations, tasks,
-  checklist items, outline sections, table rows, presentation sections, and
+  checklist items, outline sections, table rows, kanban cards, charts, flow
+  charts, presentation sections, handoff packages, SME questions, and
   source-repair suggestions.
+- [ ] Draft sessions can be scoped to workspace, selected source document,
+  selected branch, selected node, or multi-selected nodes.
 - [ ] Users can refine a draft with follow-up prompts such as "add this
   manufacturer", "split by product line", "make this a checklist", "append only
   cited items", or "compare this to the new document".
 - [ ] Users can add sources mid-session; the draft session can re-run coverage,
   citation repair, contradiction checks, and append proposals against the new
   context.
-- [ ] Accepting a draft supports explicit modes: append to selected scope,
+- [x] Accepting a draft supports explicit modes: append to selected scope,
   replace selected branch, merge into matching nodes, accept selected items,
   accept cited-only, or store as review notes.
+- [x] Acceptance must show a preview diff: added nodes, added edges, updated
+  nodes, review outputs, and unsourced items that will become `needs_review`.
 - [ ] Rejected or canceled drafts leave no canonical graph mutation, but may
   retain an auditable AIActionRun record.
+- [x] Draft revisions can be discarded without affecting the canonical graph.
+- [x] Accepted draft changes create an undoable graph revision or equivalent
+  revert point.
 
 Backend architecture:
 
-- [ ] Add a durable `AIDraftSession` schema with session ID, workspace ID,
+- [x] Add a durable `AIDraftSession` schema with session ID, workspace ID,
   scope, role/profile, intent, prompt history, selected model policy, draft
   revisions, source refs, validation reports, and accept/reject history.
-- [ ] Add `AIDraftRevision` records for each model turn so users can compare,
+- [x] Add `AIDraftRevision` records for each model turn so users can compare,
   restore, or branch from earlier drafts.
-- [ ] Route draft generation and revision through Responses API via the DocMap
+- [x] Route draft generation and revision through Responses API via the DocMap
   AI provider adapter, not legacy Assistants paths.
-- [ ] Define strict JSON schemas for draft session responses: graph draft,
+- [x] Define strict JSON schemas for draft session responses: graph draft,
   patch/diff proposal, source coverage report, task/checklist projection,
   outline projection, table projection, presentation projection, and review
   annotations.
-- [ ] Add an intent classifier that maps plain language to capability,
+- [x] Add an intent classifier that maps plain language to capability,
   expected output shape, risk level, and model policy.
-- [ ] Add model policy levels: Speed, Balanced, Deep Review, and Explicit
+- [x] Add model policy levels: Speed, Balanced, Deep Review, and Explicit
   Model. The UI may show friendly labels while metadata records the actual
   selected model and reason.
 - [ ] Add source-context builder support for selected node, branch, workspace,
   uploaded source chunks, source library gaps, and current draft session state.
-- [ ] Add graph-diff generation that emits patch operations instead of only
+  Backend/provider draft generation now includes workspace/node/branch/
+  multi-node scoping, uploaded source chunks, and prior draft session state;
+  source-library gap retrieval and add-source reconciliation still need
+  integration.
+- [x] Add graph-diff generation that emits patch operations instead of only
   whole replacement graphs.
-- [ ] Enforce backend validation before accept: schema validity, edge targets,
+- [x] Add preview-diff summaries for accept decisions, including counts like
+  added nodes, relationship edges, updated nodes, checklist items, and
+  `needs_review` repairs.
+- [x] Enforce backend validation before accept: schema validity, edge targets,
   duplicate IDs, source refs, review state, confidence, and external-ref safety.
-- [ ] Backend must mark accepted uncited generated nodes `needs_review`; frontend
+- [x] Backend must mark accepted uncited generated nodes `needs_review`; frontend
   marking remains only a UX convenience.
-- [ ] Persist accepted draft metadata into `AIActionRun` and graph node metadata
+- [x] Persist accepted draft metadata into `AIActionRun` and graph node metadata
   so save/reload/export preserves provenance.
-- [ ] Provide a fixture/mock provider for offline draft-session tests.
+- [x] Provide a fixture/mock provider for offline draft-session tests.
 
 Frontend UX:
 
-- [ ] Replace the current one-shot Ask AI preview card with an AI Draft Session
+- [x] Replace the current one-shot Ask AI preview card with an AI Draft Session
   panel that supports conversation, revision history, structured preview tabs,
   and explicit accept modes.
-- [ ] Show scope, role/profile, intent, model policy, selected model, model
-  reason, source coverage, token/cost risk tier, and validation status.
-- [ ] Show draft content in multiple projections: mind map diff, outline,
+- [x] Show scope, role/profile, intent, model policy, selected model, model
+  reason, source coverage, and preview-diff status in the draft panel.
+- [ ] Show token/cost risk tier and full validation status in the draft panel
+  once backend/provider metadata is available.
+- [x] Show draft content in multiple projections: mind map diff, outline,
   checklist, task list, table, kanban, and presentation sections where
   applicable.
-- [ ] Let users select individual draft items before accept.
-- [ ] Let users choose append / replace / merge / cited-only / notes-only at
+- [x] Let users select individual draft items before accept.
+- [x] Let users choose append / replace / merge / cited-only / notes-only at
   accept time.
+- [x] Show a human-readable preview diff before accept, for example:
+  `+12 nodes`, `+4 edges`, `~2 nodes updated`, `!5 marked needs_review`.
 - [ ] Show source-backed, needs-review, assumption, low-confidence, duplicate,
   and conflict badges directly in the draft panel.
-- [ ] Support conversational refinement against the current draft without
+- [x] Support conversational refinement against the current draft without
   closing the panel.
 - [ ] Support "add another source" from inside the draft session and re-run
-  coverage against the new source.
+  coverage against the new source. The UI hook opens the existing source picker;
+  source-aware re-run still needs backend/provider integration.
 - [ ] Preserve keyboard-friendly controls and predictable focus behavior for
   repeated drafting.
 - [ ] Keep the current source draft review panel as the specialized source
@@ -374,25 +400,40 @@ Frontend UX:
 
 Acceptance criteria:
 
-- [ ] Prompt "create a mind map for cereals by manufacturer" creates a draft
+- [ ] User can create an AI draft from selected node, selected branch, selected
+  source, selected nodes, or whole workspace.
+- [x] Prompt "create a mind map for cereals by manufacturer" creates a draft
   session with manufacturer branches and proposed child nodes, without mutating
-  the graph.
-- [ ] Follow-up "what about General Mills?" revises the same draft session and
+  the graph. Covered by offline Responses fixture provider tests.
+- [x] Follow-up "what about General Mills?" revises the same draft session and
   shows a new revision before accept.
-- [ ] User can accept only selected manufacturers into the graph.
+- [x] User can revise a draft repeatedly without mutating the canonical graph.
+- [ ] User can compare draft output to the current graph before accepting.
+- [x] User can accept only selected manufacturers into the graph.
+- [x] User can accept all, accept selected, append, replace, or merge.
 - [ ] User can add a source document mid-session and ask the system to reconcile
   the draft against it.
+- [x] Accepted changes run through canonical graph validation before persistence.
 - [ ] Source-backed accepted nodes retain citations after save/reload/export.
-- [ ] Unsourced accepted nodes are persisted as `needs_review`.
+- [x] Unsourced accepted nodes are persisted as `needs_review`.
+- [x] Draft sessions can be discarded without graph changes.
+- [x] Accepted draft changes create a graph revision or undo point.
 - [ ] Auto model selection records actual model and reason in the draft session
-  and AIActionRun.
-- [ ] Explicit model selection records the selected model and does not override
-  policy elsewhere.
+  and AIActionRun. Backend/provider draft generation records this in the draft
+  session metadata; AIActionRun propagation still needs endpoint integration
+  verification.
+- [x] Explicit model selection records the selected model and does not override
+  policy elsewhere. Backend/provider tests verify explicit model selection wins;
+  browser/end-to-end verification remains part of the broader drafting-table
+  test.
 - [ ] Browser-level test covers draft creation, follow-up revision, selected
   accept, save/reload, and source/review indicators.
-- [ ] Backend tests cover intent classification, Responses request construction,
+- [x] Backend tests cover intent classification, Responses request construction,
   schema parsing, graph diff validation, accept modes, and provenance
   persistence.
+- [x] Backend graph-diff tests cover append/replace/merge/selected/cited-only/
+  notes-only accept behavior, orphan-edge prevention, duplicate-ID-safe merge,
+  unsourced `needs_review`, and undo snapshot creation.
 
 ### Node AI Actions And Prompt Profiles
 

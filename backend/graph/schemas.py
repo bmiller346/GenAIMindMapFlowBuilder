@@ -2,6 +2,16 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 
+GRAPH_PATCH_OPERATIONS = {
+    "add_node",
+    "add_edge",
+    "update_node",
+    "remove_node",
+    "remove_edge",
+    "attach_note",
+}
+
+
 class GraphSchemaError(ValueError):
     def __init__(self, errors: list[str]):
         super().__init__("Graph schema validation failed.")
@@ -109,6 +119,21 @@ class GraphEdge:
     id: str = ""
     relationship_type: str = "contains"
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class GraphPatchOperation:
+    op: str
+    id: str = ""
+    node_id: str = ""
+    edge_id: str = ""
+    source_node_id: str = ""
+    target_node_id: str = ""
+    value: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def model_dump(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(slots=True)

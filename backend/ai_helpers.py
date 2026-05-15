@@ -11,13 +11,21 @@ from typing import Any
 from ai.roles import get_prompt_profile, list_prompt_profiles
 from ai.schemas import (
     AI_ACTION_PREVIEW_CONTRACT_VERSION,
+    AIDRAFT_ACCEPT_MODES,
+    AIDRAFT_SCOPE_TYPES,
+    AI_DRAFT_SESSION_CONTRACT_VERSION,
+    AI_DRAFT_OUTPUT_SHAPES,
+    AI_DRAFT_REVISION_OUTPUT_SCHEMA,
     AI_HELPER_PREVIEW_CONTRACT,
     AI_HELPER_PREVIEW_CONTRACT_VERSION,
     json_object_response_format,
 )
-from ai_model_policy import choose_openai_model
+from ai.providers import DocMapAIProvider, DocMapGenerationRequest
+from ai.responses_client import OpenAIResponsesDocMapProvider
+from ai_model_policy import choose_openai_model, normalize_model_policy
 from config import MissingConfigurationError, get_setting
 from graph.schemas import GraphSchemaError
+from graph.validation import validate_and_repair_graph
 
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
@@ -478,6 +486,1024 @@ def generate_ai_action_preview(
         },
     }
     return validate_ai_action_preview(preview)
+
+
+def normalize_ai_draft_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(scope, dict):
+        return {"type": "workspace"}
+
+    scope_type = scope.get("type") or "workspace"
+    if scope_type not in AIDRAFT_SCOPE_TYPES:
+        return {"type": "workspace"}
+
+    normalized: dict[str, Any] = {"type": scope_type}
+    for key in ("node_id", "source_id"):
+        value = scope.get(key)
+        if isinstance(value, str) and value.strip():
+            normalized[key] = value.strip()
+    if scope_type == "nodes":
+        node_ids = scope.get("node_ids")
+        normalized["node_ids"] = [
+            node_id.strip()
+            for node_id in node_ids
+            if isinstance(node_id, str) and node_id.strip()
+        ] if isinstance(node_ids, list) else []
+    return normalized
+
+
+def build_ai_draft_session(
+    *,
+    workspace_id: str,
+    prompt: str,
+    scope: dict[str, Any] | None = None,
+    role: str = "",
+    intent: str = "",
+    draft_nodes: list[dict[str, Any]] | None = None,
+    draft_edges: list[dict[str, Any]] | None = None,
+    draft_items: list[dict[str, Any]] | None = None,
+    draft_annotations: list[dict[str, Any]] | None = None,
+    model_policy: dict[str, Any] | str | None = None,
+    selected_model: str = "",
+    model_reason: str = "",
+    source_refs: list[dict[str, Any]] | None = None,
+    revisions: list[dict[str, Any]] | None = None,
+    ai_action_run: dict[str, Any] | None = None,
+    created_by: str = "user",
+    session_id: str | None = None,
+    revision_id: str | None = None,
+    created_at: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    created_at = created_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    normalized_model_policy = (
+        model_policy
+        if isinstance(model_policy, dict)
+        else {"policy": str(model_policy or "balanced")}
+    )
+    session = {
+        "session_id": session_id or f"ai_draft_session_{_utc_token()}",
+        "workspace_id": str(workspace_id or ""),
+        "scope": normalize_ai_draft_scope(scope),
+        "role": str(role or ""),
+        "intent": str(intent or ""),
+        "prompt_history": [
+            {
+                "prompt": str(prompt or ""),
+                "content": str(prompt or ""),
+                "role": "user",
+                "created_at": created_at,
+                "created_by": created_by or "user",
+            }
+        ] if _has_text(prompt) else [],
+        "model_policy": normalized_model_policy,
+        "selected_model": str(selected_model or ""),
+        "model_reason": str(model_reason or ""),
+        "revisions": revisions or [],
+        "source_refs": source_refs or [],
+        "validation_reports": [],
+        "accept_history": [],
+        "status": "drafting",
+        "ai_action_run": ai_action_run,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "created_by": created_by or "user",
+        "metadata": {
+            **(metadata or {}),
+            "canonical": False,
+        },
+    }
+    if revisions is None and (
+        draft_nodes is not None
+        or draft_edges is not None
+        or draft_items is not None
+        or draft_annotations is not None
+    ):
+        revision = build_ai_draft_revision(
+            session=session,
+            prompt=prompt,
+            draft_nodes=draft_nodes or [],
+            draft_edges=draft_edges or [],
+            draft_annotations=draft_annotations or [],
+            draft_items=draft_items,
+            model=selected_model,
+            revision_id=revision_id,
+            created_at=created_at,
+        )
+        session["revisions"] = [revision]
+        session["validation_reports"] = [revision["validation_report"]]
+        session["source_refs"] = source_refs or _source_refs_from_revision(revision)
+    return validate_ai_draft_session(session)
+
+
+def build_ai_draft_revision(
+    *,
+    session: dict[str, Any],
+    prompt: str,
+    draft_nodes: list[dict[str, Any]] | None = None,
+    draft_edges: list[dict[str, Any]] | None = None,
+    draft_annotations: list[dict[str, Any]] | None = None,
+    draft_items: list[dict[str, Any]] | None = None,
+    model: str = "",
+    validation_report: dict[str, Any] | None = None,
+    preview_diff: dict[str, Any] | None = None,
+    revision_id: str | None = None,
+    created_at: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    nodes = deepcopy(draft_nodes or [])
+    edges = deepcopy(draft_edges or [])
+    annotations = deepcopy(draft_annotations or [])
+    report = validation_report or validate_ai_action_drafts_for_accept(nodes, edges)
+    revision = {
+        "revision_id": revision_id or f"ai_draft_revision_{_utc_token()}",
+        "session_id": session.get("session_id", ""),
+        "prompt": str(prompt or ""),
+        "draft_items": draft_items if draft_items is not None else _draft_items_from_revision_parts(nodes, edges, annotations),
+        "draft_nodes": nodes,
+        "draft_edges": edges,
+        "draft_annotations": annotations,
+        "preview_diff": preview_diff or build_ai_draft_preview_diff(nodes, edges, annotations, report, []),
+        "validation_report": report,
+        "created_at": created_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "model": str(model or ""),
+        "metadata": {
+            **(metadata or {}),
+            "canonical": False,
+            "ai_draft_session_contract_version": AI_DRAFT_SESSION_CONTRACT_VERSION,
+        },
+    }
+    return validate_ai_draft_revision(revision)
+
+
+def append_ai_draft_revision(
+    session: dict[str, Any],
+    revision: dict[str, Any],
+    *,
+    prompt: str | None = None,
+    created_by: str = "user",
+) -> dict[str, Any]:
+    updated = validate_ai_draft_session(session)
+    normalized_revision = validate_ai_draft_revision(revision)
+    updated["revisions"].append(normalized_revision)
+    if _has_text(prompt):
+        updated["prompt_history"].append(
+            {
+                "prompt": str(prompt).strip(),
+                "content": str(prompt).strip(),
+                "created_at": normalized_revision["created_at"],
+                "created_by": created_by or "user",
+                "revision_id": normalized_revision["revision_id"],
+            }
+        )
+    updated["validation_reports"].append(normalized_revision["validation_report"])
+    updated["updated_at"] = normalized_revision["created_at"]
+    return validate_ai_draft_session(updated)
+
+
+def revise_ai_draft_session(
+    session: dict[str, Any],
+    *,
+    prompt: str,
+    draft_nodes: list[dict[str, Any]] | None = None,
+    draft_edges: list[dict[str, Any]] | None = None,
+    draft_items: list[dict[str, Any]] | None = None,
+    draft_annotations: list[dict[str, Any]] | None = None,
+    model: str = "",
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    normalized_session = validate_ai_draft_session(session)
+    revision = build_ai_draft_revision(
+        session=normalized_session,
+        prompt=prompt,
+        draft_nodes=draft_nodes or [],
+        draft_edges=draft_edges or [],
+        draft_annotations=draft_annotations or [],
+        draft_items=draft_items,
+        model=model or normalized_session.get("selected_model", ""),
+        created_at=created_at,
+    )
+    updated = append_ai_draft_revision(
+        normalized_session,
+        revision,
+        prompt=prompt,
+        created_by=normalized_session.get("created_by", "user"),
+    )
+    if updated.get("prompt_history"):
+        updated["prompt_history"][-1]["content"] = str(prompt or "")
+        updated["prompt_history"][-1]["role"] = "user"
+    updated["source_refs"] = _merge_source_refs(
+        updated.get("source_refs", []),
+        _source_refs_from_revision(revision),
+    )
+    return validate_ai_draft_session(updated)
+
+
+def latest_ai_draft_revision(session: dict[str, Any], revision_id: str | None = None) -> dict[str, Any]:
+    revisions = session.get("revisions", []) if isinstance(session, dict) else []
+    if revision_id:
+        for revision in revisions:
+            if isinstance(revision, dict) and revision.get("revision_id") == revision_id:
+                return validate_ai_draft_revision(revision)
+        raise GraphSchemaError([f"ai_draft_session.revision_id: unknown revision '{revision_id}'"])
+    if not revisions:
+        raise GraphSchemaError(["ai_draft_session.revisions: at least one revision is required"])
+    return validate_ai_draft_revision(revisions[-1])
+
+
+def build_ai_draft_preview_diff(
+    draft_nodes: list[dict[str, Any]] | dict[str, Any],
+    draft_edges: list[dict[str, Any]] | None = None,
+    draft_annotations: list[dict[str, Any]] | None = None,
+    validation_report: dict[str, Any] | None = None,
+    accepted_item_ids: list[str] | None = None,
+    *,
+    mode: str = "append",
+    selected_item_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    if isinstance(draft_nodes, dict):
+        session = draft_nodes
+        revision = latest_ai_draft_revision(session)
+        selected_ids = {
+            item_id
+            for item_id in (selected_item_ids or [])
+            if isinstance(item_id, str) and item_id.strip()
+        }
+        selected_nodes = _selected_draft_nodes(revision, mode, selected_ids)
+        selected_edges = _selected_draft_edges(revision, selected_nodes, mode)
+        selected_annotations = deepcopy(revision.get("draft_annotations", [])) if mode == "notes_only" else []
+        report = validate_ai_action_drafts_for_accept(
+            deepcopy(selected_nodes),
+            deepcopy(selected_edges),
+        )
+        ids = _accepted_item_ids(revision, selected_nodes, selected_edges, selected_annotations, selected_ids)
+        return _draft_preview_diff_payload(
+            selected_nodes,
+            selected_edges,
+            selected_annotations,
+            report,
+            ids,
+        )
+
+    draft_edges = draft_edges or []
+    draft_annotations = draft_annotations or []
+    validation_report = validation_report or {}
+    accepted_item_ids = accepted_item_ids or []
+    return _draft_preview_diff_payload(
+        draft_nodes,
+        draft_edges,
+        draft_annotations,
+        validation_report,
+        accepted_item_ids,
+    )
+
+
+def _draft_preview_diff_payload(
+    draft_nodes: list[dict[str, Any]],
+    draft_edges: list[dict[str, Any]],
+    draft_annotations: list[dict[str, Any]],
+    validation_report: dict[str, Any],
+    accepted_item_ids: list[str],
+) -> dict[str, Any]:
+    added_node_ids = [node.get("id", "") for node in draft_nodes if isinstance(node, dict)]
+    added_edge_ids = [edge.get("id", "") for edge in draft_edges if isinstance(edge, dict)]
+    updated_node_ids: list[str] = []
+    needs_review_repairs = [
+        issue
+        for issue in validation_report.get("issues", [])
+        if isinstance(issue, dict) and issue.get("code") in {"missing_source_ref", "uncited_ai_node"}
+    ] if isinstance(validation_report, dict) else []
+    return {
+        "added_nodes": len(added_node_ids),
+        "added_edges": len(added_edge_ids),
+        "updated_nodes": len(updated_node_ids),
+        "review_outputs": len([item for item in draft_annotations if isinstance(item, dict)]),
+        "needs_review_repairs": len(needs_review_repairs),
+        "added_node_ids": added_node_ids,
+        "added_edge_ids": added_edge_ids,
+        "updated_node_ids": updated_node_ids,
+        "review_output_ids": [item.get("id", "") for item in draft_annotations if isinstance(item, dict)],
+        "needs_review_repair_issues": needs_review_repairs,
+        "accepted_item_ids": accepted_item_ids,
+        "summary": _preview_diff_summary(
+            added_nodes=len(added_node_ids),
+            added_edges=len(added_edge_ids),
+            updated_nodes=len(updated_node_ids),
+            needs_review_repairs=len(needs_review_repairs),
+        ),
+    }
+
+
+def accept_ai_draft_revision(
+    graph: dict[str, Any],
+    session: dict[str, Any],
+    *,
+    revision_id: str | None = None,
+    accept_mode: str = "append",
+    selected_item_ids: list[str] | None = None,
+    accepted_by: str = "user",
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    if accept_mode not in AIDRAFT_ACCEPT_MODES:
+        raise GraphSchemaError([f"ai_draft_accept.mode: unsupported mode '{accept_mode}'"])
+
+    original_graph = deepcopy(graph)
+    revision = latest_ai_draft_revision(session, revision_id)
+    selected_ids = {
+        item_id
+        for item_id in (selected_item_ids or [])
+        if isinstance(item_id, str) and item_id.strip()
+    }
+    candidate_graph = deepcopy(graph)
+    candidate_graph.setdefault("workspace", {})
+    candidate_graph.setdefault("nodes", [])
+    candidate_graph.setdefault("edges", [])
+    candidate_graph.setdefault("tasks", [])
+
+    accepted_nodes, accepted_edges, review_outputs, patch_operations = _build_ai_draft_graph_patch(
+        candidate_graph,
+        session,
+        revision,
+        accept_mode=accept_mode,
+        selected_ids=selected_ids,
+        accepted_by=accepted_by,
+    )
+
+    if accept_mode != "notes_only":
+        candidate_graph["nodes"] = candidate_graph.get("nodes", []) + accepted_nodes
+        candidate_graph["edges"] = candidate_graph.get("edges", []) + accepted_edges
+    if review_outputs or accept_mode == "notes_only":
+        _attach_ai_draft_revision_notes(
+            candidate_graph,
+            session,
+            revision,
+            review_outputs=review_outputs,
+            accepted_by=accepted_by,
+            patch_operations=patch_operations,
+        )
+
+    repaired_graph = validate_and_repair_graph(candidate_graph)
+    accepted_item_ids = _accepted_item_ids(revision, accepted_nodes, accepted_edges, review_outputs, selected_ids)
+    preview_diff = build_ai_draft_preview_diff(
+        accepted_nodes,
+        accepted_edges,
+        review_outputs,
+        repaired_graph.get("validation_report", {}),
+        accepted_item_ids,
+    )
+    accepted_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    result = {
+        "accept_id": f"ai_draft_accept_{_utc_token()}",
+        "session_id": session.get("session_id", ""),
+        "revision_id": revision.get("revision_id", ""),
+        "workspace_id": session.get("workspace_id", ""),
+        "mode": accept_mode,
+        "accepted_item_ids": accepted_item_ids,
+        "accepted_node_ids": [node.get("id", "") for node in accepted_nodes],
+        "accepted_edge_ids": [edge.get("id", "") for edge in accepted_edges],
+        "review_outputs": review_outputs,
+        "preview_diff": preview_diff,
+        "patch_operations": patch_operations,
+        "validation_report": repaired_graph.get("validation_report", {}),
+        "graph_revision_id": f"graph_revision_{_utc_token()}",
+        "undo": {
+            "kind": "full_graph_snapshot",
+            "before_graph": original_graph,
+        },
+        "accepted_at": accepted_at,
+        "accepted_by": accepted_by or "user",
+        "metadata": {
+            "ai_draft_session_contract_version": AI_DRAFT_SESSION_CONTRACT_VERSION,
+        },
+    }
+    updated_session = validate_ai_draft_session(session)
+    updated_session["status"] = "accepted"
+    updated_session["updated_at"] = accepted_at
+    updated_session["accept_history"].append(result)
+    if isinstance(updated_session.get("ai_action_run"), dict):
+        updated_session["ai_action_run"]["status"] = "accepted"
+        updated_session["ai_action_run"]["generated_node_ids"] = result["accepted_node_ids"]
+    return repaired_graph, validate_ai_draft_session(updated_session), result
+
+
+def accept_ai_draft_session(
+    graph: dict[str, Any],
+    session: dict[str, Any],
+    *,
+    mode: str = "append",
+    selected_item_ids: list[str] | None = None,
+    accepted_by: str = "user",
+    accepted_at: str | None = None,
+) -> dict[str, Any]:
+    accepted_graph, accepted_session, accept_result = accept_ai_draft_revision(
+        graph,
+        session,
+        accept_mode=mode,
+        selected_item_ids=selected_item_ids,
+        accepted_by=accepted_by,
+    )
+    if accepted_at:
+        accept_result["accepted_at"] = accepted_at
+        if accepted_session.get("accept_history"):
+            accepted_session["accept_history"][-1]["accepted_at"] = accepted_at
+    return {
+        "graph": accepted_graph,
+        "session": accepted_session,
+        "accept_result": {
+            **accept_result,
+            "canonical_graph_mutated": mode != "notes_only",
+        },
+    }
+
+
+def discard_ai_draft_session(
+    session: dict[str, Any],
+    *,
+    discarded_by: str = "user",
+) -> dict[str, Any]:
+    updated = validate_ai_draft_session(session)
+    discarded_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    updated["status"] = "discarded"
+    updated["updated_at"] = discarded_at
+    updated.setdefault("metadata", {})["discarded_by"] = discarded_by or "user"
+    updated["metadata"]["discarded_at"] = discarded_at
+    if isinstance(updated.get("ai_action_run"), dict):
+        updated["ai_action_run"]["status"] = "rejected"
+    return validate_ai_draft_session(updated)
+
+
+def validate_ai_draft_session(payload: dict[str, Any]) -> dict[str, Any]:
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        raise GraphSchemaError(["ai_draft_session: must be an object"])
+
+    normalized = deepcopy(payload)
+    for key in ("session_id", "workspace_id", "status"):
+        _require_string(normalized, key, "ai_draft_session", errors)
+    scope = normalized.get("scope")
+    if not isinstance(scope, dict):
+        errors.append("ai_draft_session.scope: must be an object")
+    else:
+        normalized["scope"] = normalize_ai_draft_scope(scope)
+        _validate_ai_draft_scope(normalized["scope"], errors)
+
+    for key in ("prompt_history", "revisions", "source_refs", "validation_reports", "accept_history"):
+        if not isinstance(normalized.get(key, []), list):
+            errors.append(f"ai_draft_session.{key}: must be a list")
+            normalized[key] = []
+    if normalized.get("status") not in {"draft", "drafting", "accepted", "discarded"}:
+        errors.append("ai_draft_session.status: must be draft, drafting, accepted, or discarded")
+    if normalized.get("model_policy") is not None and not isinstance(normalized.get("model_policy"), dict):
+        errors.append("ai_draft_session.model_policy: must be an object")
+    if normalized.get("metadata") is not None and not isinstance(normalized.get("metadata"), dict):
+        errors.append("ai_draft_session.metadata: must be an object")
+    for index, revision in enumerate(normalized.get("revisions", [])):
+        try:
+            normalized["revisions"][index] = validate_ai_draft_revision(revision)
+        except GraphSchemaError as exc:
+            errors.extend(exc.errors)
+    if isinstance(normalized.get("ai_action_run"), dict):
+        try:
+            normalized["ai_action_run"] = validate_ai_action_run(normalized["ai_action_run"])
+        except GraphSchemaError as exc:
+            errors.extend(exc.errors)
+
+    if errors:
+        raise GraphSchemaError(errors)
+
+    normalized.setdefault("role", "")
+    normalized.setdefault("intent", "")
+    normalized.setdefault("model_policy", {})
+    normalized.setdefault("selected_model", "")
+    normalized.setdefault("model_reason", "")
+    normalized.setdefault("created_at", "")
+    normalized.setdefault("updated_at", "")
+    normalized.setdefault("created_by", "user")
+    metadata = normalized.get("metadata") if isinstance(normalized.get("metadata"), dict) else {}
+    metadata["ai_draft_session_contract_version"] = AI_DRAFT_SESSION_CONTRACT_VERSION
+    metadata["canonical"] = False
+    normalized["metadata"] = metadata
+    return normalized
+
+
+def validate_ai_draft_revision(payload: dict[str, Any]) -> dict[str, Any]:
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        raise GraphSchemaError(["ai_draft_revision: must be an object"])
+
+    normalized = deepcopy(payload)
+    for key in ("revision_id", "session_id", "created_at"):
+        _require_string(normalized, key, "ai_draft_revision", errors)
+    for key in ("draft_items", "draft_nodes", "draft_edges", "draft_annotations"):
+        if not isinstance(normalized.get(key, []), list):
+            errors.append(f"ai_draft_revision.{key}: must be a list")
+            normalized[key] = []
+    if not isinstance(normalized.get("preview_diff", {}), dict):
+        errors.append("ai_draft_revision.preview_diff: must be an object")
+    if not isinstance(normalized.get("validation_report", {}), dict):
+        errors.append("ai_draft_revision.validation_report: must be an object")
+    if not isinstance(normalized.get("metadata", {}), dict):
+        errors.append("ai_draft_revision.metadata: must be an object")
+
+    if errors:
+        raise GraphSchemaError(errors)
+
+    normalized.setdefault("prompt", "")
+    normalized.setdefault("model", "")
+    normalized.setdefault("preview_diff", {})
+    normalized.setdefault("validation_report", {})
+    normalized.setdefault("metadata", {})
+    normalized["metadata"]["ai_draft_session_contract_version"] = AI_DRAFT_SESSION_CONTRACT_VERSION
+    normalized["metadata"]["canonical"] = False
+    return normalized
+
+
+def _draft_items_from_revision_parts(
+    draft_nodes: list[dict[str, Any]],
+    draft_edges: list[dict[str, Any]],
+    draft_annotations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for node in draft_nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id", ""))
+        items.append(
+            {
+                "id": f"item_{node_id}",
+                "item_type": "node",
+                "title": str(node.get("title") or node_id or "Draft node"),
+                "content": str(node.get("summary") or ""),
+                "source_refs": deepcopy(node.get("source_refs", [])) if isinstance(node.get("source_refs"), list) else [],
+                "assumptions": [],
+                "status": "draft",
+                "selected": True,
+                "metadata": {"node_id": node_id},
+            }
+        )
+    for edge in draft_edges:
+        if not isinstance(edge, dict):
+            continue
+        edge_id = str(edge.get("id", ""))
+        items.append(
+            {
+                "id": f"item_{edge_id}",
+                "item_type": "edge",
+                "title": edge_id or "Draft edge",
+                "content": str(edge.get("relationship_type") or "contains"),
+                "source_refs": [],
+                "assumptions": [],
+                "status": "draft",
+                "selected": True,
+                "metadata": {"edge_id": edge_id},
+            }
+        )
+    for annotation in draft_annotations:
+        if not isinstance(annotation, dict):
+            continue
+        annotation_id = str(annotation.get("id", ""))
+        items.append(
+            {
+                "id": f"item_{annotation_id}",
+                "item_type": "annotation",
+                "title": str(annotation.get("title") or annotation_id or "Draft note"),
+                "content": str(annotation.get("content") or annotation.get("summary") or ""),
+                "source_refs": deepcopy(annotation.get("source_refs", [])) if isinstance(annotation.get("source_refs"), list) else [],
+                "assumptions": deepcopy(annotation.get("assumptions", [])) if isinstance(annotation.get("assumptions"), list) else [],
+                "status": "draft",
+                "selected": True,
+                "metadata": {"annotation_id": annotation_id},
+            }
+        )
+    return items
+
+
+def _selected_draft_nodes(
+    revision: dict[str, Any],
+    accept_mode: str,
+    selected_ids: set[str],
+) -> list[dict[str, Any]]:
+    if accept_mode == "notes_only":
+        return []
+    nodes = deepcopy(revision.get("draft_nodes", []))
+    if accept_mode == "selected" and not selected_ids:
+        return []
+    if accept_mode == "cited_only":
+        nodes = [node for node in nodes if isinstance(node, dict) and node.get("source_refs")]
+    if accept_mode == "selected" and selected_ids:
+        item_node_ids = _selected_metadata_ids(revision, selected_ids, "node_id")
+        nodes = [
+            node
+            for node in nodes
+            if isinstance(node, dict)
+            and (node.get("id") in selected_ids or node.get("id") in item_node_ids)
+        ]
+    return [node for node in nodes if isinstance(node, dict)]
+
+
+def _selected_draft_edges(
+    revision: dict[str, Any],
+    accepted_nodes: list[dict[str, Any]],
+    accept_mode: str,
+) -> list[dict[str, Any]]:
+    if accept_mode == "notes_only":
+        return []
+    accepted_node_ids = {node.get("id") for node in accepted_nodes}
+    edges = []
+    for edge in deepcopy(revision.get("draft_edges", [])):
+        if not isinstance(edge, dict):
+            continue
+        target = edge.get("target_node_id")
+        source = edge.get("source_node_id")
+        if target in accepted_node_ids and (source in accepted_node_ids or source):
+            edges.append(edge)
+    return edges
+
+
+def _accepted_item_ids(
+    revision: dict[str, Any],
+    accepted_nodes: list[dict[str, Any]],
+    accepted_edges: list[dict[str, Any]],
+    review_outputs: list[dict[str, Any]],
+    selected_ids: set[str],
+) -> list[str]:
+    accepted_raw_ids = {
+        *[node.get("id") for node in accepted_nodes if isinstance(node, dict)],
+        *[edge.get("id") for edge in accepted_edges if isinstance(edge, dict)],
+        *[item.get("id") for item in review_outputs if isinstance(item, dict)],
+    }
+    item_ids = []
+    for item in revision.get("draft_items", []):
+        if not isinstance(item, dict):
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        raw_id = metadata.get("node_id") or metadata.get("edge_id") or metadata.get("annotation_id")
+        item_id = item.get("id")
+        if item_id in selected_ids or raw_id in accepted_raw_ids:
+            item_ids.append(str(item_id))
+    return item_ids
+
+
+def _selected_metadata_ids(
+    revision: dict[str, Any],
+    selected_ids: set[str],
+    metadata_key: str,
+) -> set[str]:
+    ids: set[str] = set()
+    for item in revision.get("draft_items", []):
+        if not isinstance(item, dict) or item.get("id") not in selected_ids:
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        value = metadata.get(metadata_key)
+        if isinstance(value, str) and value:
+            ids.add(value)
+    return ids
+
+
+def _build_ai_draft_graph_patch(
+    graph: dict[str, Any],
+    session: dict[str, Any],
+    revision: dict[str, Any],
+    *,
+    accept_mode: str,
+    selected_ids: set[str],
+    accepted_by: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    patch_operations: list[dict[str, Any]] = []
+    if accept_mode == "replace":
+        _remove_scope_branch_for_replace(graph, session, patch_operations)
+
+    if accept_mode == "notes_only":
+        return [], [], deepcopy(revision.get("draft_annotations", [])), patch_operations
+
+    selected_nodes = _selected_draft_nodes(revision, accept_mode, selected_ids)
+    selected_edges = _selected_draft_edges(revision, selected_nodes, accept_mode)
+    existing_node_ids = {node.get("id") for node in graph.get("nodes", []) if isinstance(node, dict)}
+    existing_by_id = _existing_nodes_by_id(graph)
+    existing_by_title = _existing_nodes_by_title(graph)
+    id_map: dict[str, str] = {}
+    accepted_nodes: list[dict[str, Any]] = []
+
+    for draft_node in selected_nodes:
+        node = _accepted_revision_node(
+            draft_node,
+            session=session,
+            revision=revision,
+            accepted_by=accepted_by,
+        )
+        original_id = str(node.get("id") or f"draft_node_{_utc_token()}")
+        merge_target = _merge_target_for_node(node, existing_by_id, existing_by_title) if accept_mode == "merge" else None
+
+        if merge_target:
+            id_map[original_id] = str(merge_target.get("id", original_id))
+            _merge_draft_node_into_existing(merge_target, node, session, revision, patch_operations)
+            continue
+
+        next_id = _unique_graph_id(original_id, existing_node_ids)
+        id_map[original_id] = next_id
+        existing_node_ids.add(next_id)
+        node["id"] = next_id
+        if node.get("parent_id") in id_map:
+            node["parent_id"] = id_map[node["parent_id"]]
+        accepted_nodes.append(node)
+        patch_operations.append(
+            {
+                "op": "add_node",
+                "node_id": node["id"],
+                "value": deepcopy(node),
+                "metadata": {
+                    "draft_node_id": original_id,
+                    "session_id": session.get("session_id", ""),
+                    "revision_id": revision.get("revision_id", ""),
+                },
+            }
+        )
+
+    accepted_edges = _accepted_revision_edges(
+        graph,
+        selected_edges,
+        id_map=id_map,
+        session=session,
+        revision=revision,
+        patch_operations=patch_operations,
+    )
+    return accepted_nodes, accepted_edges, [], patch_operations
+
+
+def _remove_scope_branch_for_replace(
+    graph: dict[str, Any],
+    session: dict[str, Any],
+    patch_operations: list[dict[str, Any]],
+) -> None:
+    scope = session.get("scope", {}) if isinstance(session, dict) else {}
+    root_id = scope.get("node_id")
+    if not root_id:
+        return
+
+    children_by_parent: dict[str, list[str]] = {}
+    for edge in graph.get("edges", []):
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("source_node_id")
+        target = edge.get("target_node_id")
+        if source and target:
+            children_by_parent.setdefault(str(source), []).append(str(target))
+
+    to_remove: set[str] = set()
+    stack = list(children_by_parent.get(str(root_id), []))
+    while stack:
+        node_id = stack.pop()
+        if node_id in to_remove:
+            continue
+        to_remove.add(node_id)
+        stack.extend(children_by_parent.get(node_id, []))
+
+    if not to_remove:
+        return
+
+    graph["nodes"] = [
+        node for node in graph.get("nodes", [])
+        if not isinstance(node, dict) or node.get("id") not in to_remove
+    ]
+    next_edges = []
+    for edge in graph.get("edges", []):
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("source_node_id")
+        target = edge.get("target_node_id")
+        if source in to_remove or target in to_remove:
+            patch_operations.append(
+                {
+                    "op": "remove_edge",
+                    "edge_id": edge.get("id", ""),
+                    "source_node_id": source or "",
+                    "target_node_id": target or "",
+                    "value": deepcopy(edge),
+                    "metadata": {"mode": "replace"},
+                }
+            )
+            continue
+        next_edges.append(edge)
+    graph["edges"] = next_edges
+
+    for node_id in sorted(to_remove):
+        patch_operations.append(
+            {
+                "op": "remove_node",
+                "node_id": node_id,
+                "metadata": {
+                    "mode": "replace",
+                    "scope_node_id": root_id,
+                },
+            }
+        )
+
+
+def _existing_nodes_by_title(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        _title_key(node.get("title")): node
+        for node in graph.get("nodes", [])
+        if isinstance(node, dict) and _title_key(node.get("title"))
+    }
+
+
+def _existing_nodes_by_id(graph: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(node.get("id")): node
+        for node in graph.get("nodes", [])
+        if isinstance(node, dict) and node.get("id") is not None
+    }
+
+
+def _merge_target_for_node(
+    node: dict[str, Any],
+    existing_by_id: dict[str, dict[str, Any]],
+    existing_by_title: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    node_id = str(node.get("id", ""))
+    if node_id in existing_by_id:
+        return existing_by_id[node_id]
+    return existing_by_title.get(_title_key(node.get("title")))
+
+
+def _merge_draft_node_into_existing(
+    target: dict[str, Any],
+    draft_node: dict[str, Any],
+    session: dict[str, Any],
+    revision: dict[str, Any],
+    patch_operations: list[dict[str, Any]],
+) -> None:
+    before = deepcopy(target)
+    if draft_node.get("summary"):
+        target["summary"] = draft_node.get("summary", "")
+    if draft_node.get("source_refs"):
+        target["source_refs"] = _merge_source_refs(target.get("source_refs", []), draft_node.get("source_refs", []))
+    if draft_node.get("external_refs") and isinstance(draft_node.get("external_refs"), dict):
+        target["external_refs"] = {
+            **(target.get("external_refs", {}) if isinstance(target.get("external_refs"), dict) else {}),
+            **draft_node.get("external_refs", {}),
+        }
+    metadata = target.get("metadata") if isinstance(target.get("metadata"), dict) else {}
+    metadata.update(
+        {
+            "ai_draft_merged_from": draft_node.get("id", ""),
+            "ai_draft_session_id": session.get("session_id", ""),
+            "ai_draft_revision_id": revision.get("revision_id", ""),
+        }
+    )
+    target["metadata"] = metadata
+    patch_operations.append(
+        {
+            "op": "update_node",
+            "node_id": str(target.get("id", "")),
+            "value": {"before": before, "after": deepcopy(target)},
+            "metadata": {
+                "draft_node_id": draft_node.get("id", ""),
+                "session_id": session.get("session_id", ""),
+                "revision_id": revision.get("revision_id", ""),
+            },
+        }
+    )
+
+
+def _accepted_revision_node(
+    draft_node: dict[str, Any],
+    *,
+    session: dict[str, Any],
+    revision: dict[str, Any],
+    accepted_by: str,
+) -> dict[str, Any]:
+    node = deepcopy(draft_node)
+    node["id"] = str(node.get("id") or f"draft_node_{_utc_token()}")
+    node["title"] = str(node.get("title") or node["id"])
+    node["summary"] = str(node.get("summary") or "")
+    node["node_type"] = str(node.get("node_type") or "concept")
+    node["status"] = str(node.get("status") or "ai_generated")
+    node["source_refs"] = deepcopy(node.get("source_refs", [])) if isinstance(node.get("source_refs"), list) else []
+    node["external_refs"] = deepcopy(node.get("external_refs", {})) if isinstance(node.get("external_refs"), dict) else {}
+    node["metadata"] = deepcopy(node.get("metadata", {})) if isinstance(node.get("metadata"), dict) else {}
+    if node.get("node_type") != "reference" and not node.get("source_refs"):
+        node["status"] = "needs_review"
+    node["metadata"].update(
+        {
+            "source": "ai_draft_session",
+            "ai_draft_session_id": session.get("session_id", ""),
+            "ai_draft_revision_id": revision.get("revision_id", ""),
+            "ai_draft_intent": session.get("intent", ""),
+            "ai_draft_role": session.get("role", ""),
+            "accepted_by": accepted_by or "user",
+        }
+    )
+    return node
+
+
+def _accepted_revision_edges(
+    graph: dict[str, Any],
+    selected_edges: list[dict[str, Any]],
+    *,
+    id_map: dict[str, str],
+    session: dict[str, Any],
+    revision: dict[str, Any],
+    patch_operations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    graph_node_ids = {node.get("id") for node in graph.get("nodes", []) if isinstance(node, dict)}
+    graph_node_ids.update(id_map.values())
+    existing_edge_keys = {
+        (edge.get("source_node_id"), edge.get("target_node_id"))
+        for edge in graph.get("edges", [])
+        if isinstance(edge, dict)
+    }
+    accepted_edges: list[dict[str, Any]] = []
+    used_edge_ids = {edge.get("id") for edge in graph.get("edges", []) if isinstance(edge, dict)}
+    for draft_edge in selected_edges:
+        edge = deepcopy(draft_edge)
+        source = id_map.get(edge.get("source_node_id"), edge.get("source_node_id"))
+        target = id_map.get(edge.get("target_node_id"), edge.get("target_node_id"))
+        if source not in graph_node_ids or target not in graph_node_ids or source == target:
+            continue
+        key = (source, target)
+        if key in existing_edge_keys:
+            continue
+        edge["source_node_id"] = source
+        edge["target_node_id"] = target
+        edge["id"] = _unique_graph_id(str(edge.get("id") or f"edge_{source}_{target}"), used_edge_ids)
+        used_edge_ids.add(edge["id"])
+        edge["relationship_type"] = str(edge.get("relationship_type") or "contains")
+        edge["metadata"] = deepcopy(edge.get("metadata", {})) if isinstance(edge.get("metadata"), dict) else {}
+        edge["metadata"].update(
+            {
+                "source": "ai_draft_session",
+                "ai_draft_session_id": session.get("session_id", ""),
+                "ai_draft_revision_id": revision.get("revision_id", ""),
+            }
+        )
+        accepted_edges.append(edge)
+        existing_edge_keys.add(key)
+        patch_operations.append(
+            {
+                "op": "add_edge",
+                "edge_id": edge["id"],
+                "source_node_id": source,
+                "target_node_id": target,
+                "value": deepcopy(edge),
+                "metadata": {
+                    "draft_edge_id": draft_edge.get("id", ""),
+                    "session_id": session.get("session_id", ""),
+                    "revision_id": revision.get("revision_id", ""),
+                },
+            }
+        )
+    return accepted_edges
+
+
+def _attach_ai_draft_revision_notes(
+    graph: dict[str, Any],
+    session: dict[str, Any],
+    revision: dict[str, Any],
+    *,
+    review_outputs: list[dict[str, Any]],
+    accepted_by: str,
+    patch_operations: list[dict[str, Any]],
+) -> None:
+    scope = session.get("scope", {}) if isinstance(session, dict) else {}
+    node_id = scope.get("node_id")
+    if not node_id and graph.get("nodes"):
+        node_id = graph["nodes"][0].get("id")
+    for node in graph.get("nodes", []):
+        if not isinstance(node, dict) or node.get("id") != node_id:
+            continue
+        metadata = node.get("metadata") if isinstance(node.get("metadata"), dict) else {}
+        output = {
+            "session_id": session.get("session_id", ""),
+            "revision_id": revision.get("revision_id", ""),
+            "outputs": deepcopy(review_outputs),
+            "accepted_by": accepted_by or "user",
+        }
+        metadata.setdefault("ai_draft_outputs", []).append(output)
+        node["metadata"] = metadata
+        patch_operations.append(
+            {
+                "op": "attach_note",
+                "node_id": str(node_id or ""),
+                "value": output,
+                "metadata": {
+                    "session_id": session.get("session_id", ""),
+                    "revision_id": revision.get("revision_id", ""),
+                },
+            }
+        )
+        return
+
+
+def _title_key(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _unique_graph_id(preferred_id: str, existing_ids: set[str]) -> str:
+    if preferred_id not in existing_ids:
+        return preferred_id
+    suffix = 2
+    while f"{preferred_id}-{suffix}" in existing_ids:
+        suffix += 1
+    return f"{preferred_id}-{suffix}"
 
 
 def validate_ai_action_drafts_for_accept(
@@ -2085,6 +3111,842 @@ def _annotation_body(action: str, source_title: str, role: str, custom_prompt: s
     if "table" in action:
         return f"{role} should review table-derived claims and mark inferred conclusions for review."
     return f"{role} generated a preview note for {source_title}."
+
+
+def normalize_ai_draft_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(scope, dict):
+        return {"type": "workspace"}
+    scope_type = scope.get("type") or "workspace"
+    if scope_type not in AIDRAFT_SCOPE_TYPES:
+        return {"type": "workspace"}
+    normalized = {"type": scope_type}
+    for key in ("node_id", "source_id"):
+        value = scope.get(key)
+        if isinstance(value, str) and value.strip():
+            normalized[key] = value.strip()
+    node_ids = scope.get("node_ids")
+    if isinstance(node_ids, list):
+        normalized["node_ids"] = [str(node_id) for node_id in node_ids if str(node_id).strip()]
+    return normalized
+
+
+def _validate_ai_draft_scope(scope: dict[str, Any], errors: list[str]) -> None:
+    scope_type = scope.get("type")
+    if scope_type not in AIDRAFT_SCOPE_TYPES:
+        errors.append(
+            f"ai_draft_session.scope.type: must be one of {', '.join(sorted(AIDRAFT_SCOPE_TYPES))}"
+        )
+        return
+    if scope_type in {"branch", "node"} and not _has_text(scope.get("node_id")):
+        errors.append(f"ai_draft_session.scope.node_id: required for {scope_type} scope")
+    if scope_type == "source" and not _has_text(scope.get("source_id")):
+        errors.append("ai_draft_session.scope.source_id: required for source scope")
+    if scope_type == "nodes" and not scope.get("node_ids"):
+        errors.append("ai_draft_session.scope.node_ids: required for nodes scope")
+
+
+def _validate_ai_draft_item(item: Any, index: int, errors: list[str]) -> None:
+    path = f"ai_draft_revision.draft_items.{index}"
+    if not isinstance(item, dict):
+        errors.append(f"{path}: must be an object")
+        return
+    for key in ("id", "item_type", "title", "status"):
+        _require_string(item, key, path, errors)
+    if not isinstance(item.get("source_refs", []), list):
+        errors.append(f"{path}.source_refs: must be a list")
+    if not isinstance(item.get("assumptions", []), list):
+        errors.append(f"{path}.assumptions: must be a list")
+    if not isinstance(item.get("metadata", {}), dict):
+        errors.append(f"{path}.metadata: must be an object")
+
+
+def _validate_ai_draft_node(node: Any, index: int, errors: list[str]) -> None:
+    path = f"ai_draft_revision.draft_nodes.{index}"
+    if not isinstance(node, dict):
+        errors.append(f"{path}: must be an object")
+        return
+    for key in ("id", "title", "node_type", "status"):
+        _require_string(node, key, path, errors)
+    _validate_source_ref_list(node.get("source_refs", []), f"{path}.source_refs", errors)
+    if not isinstance(node.get("metadata", {}), dict):
+        errors.append(f"{path}.metadata: must be an object")
+
+
+def _validate_ai_draft_edge(edge: Any, index: int, errors: list[str]) -> None:
+    path = f"ai_draft_revision.draft_edges.{index}"
+    if not isinstance(edge, dict):
+        errors.append(f"{path}: must be an object")
+        return
+    for key in ("id", "source_node_id", "target_node_id"):
+        _require_string(edge, key, path, errors)
+    if not isinstance(edge.get("metadata", {}), dict):
+        errors.append(f"{path}.metadata: must be an object")
+
+
+def _normalize_draft_items(
+    draft_items: list[dict[str, Any]] | None,
+    draft_nodes: list[dict[str, Any]],
+    draft_annotations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if isinstance(draft_items, list) and draft_items:
+        return [_normalize_draft_item(item) for item in draft_items if isinstance(item, dict)]
+    items = []
+    for node in draft_nodes:
+        normalized = _normalize_draft_node(node)
+        items.append(
+            {
+                "id": normalized["id"],
+                "item_type": "node",
+                "title": normalized["title"],
+                "content": normalized.get("summary", ""),
+                "source_refs": deepcopy(normalized.get("source_refs", [])),
+                "assumptions": [] if normalized.get("source_refs") else ["Generated node has no source citation."],
+                "status": "draft",
+                "selected": True,
+                "metadata": {"draft_node_id": normalized["id"]},
+            }
+        )
+    for annotation in draft_annotations:
+        if not isinstance(annotation, dict):
+            continue
+        items.append(
+            {
+                "id": str(annotation.get("id") or f"draft_annotation_{len(items) + 1}"),
+                "item_type": "annotation",
+                "title": str(annotation.get("title") or annotation.get("type") or "Review annotation"),
+                "content": str(annotation.get("body") or annotation.get("content") or ""),
+                "source_refs": deepcopy(annotation.get("source_refs", [])) if isinstance(annotation.get("source_refs"), list) else [],
+                "assumptions": deepcopy(annotation.get("assumptions", [])) if isinstance(annotation.get("assumptions"), list) else [],
+                "status": "draft",
+                "selected": True,
+                "metadata": {"draft_annotation_id": annotation.get("id", "")},
+            }
+        )
+    return items
+
+
+def _normalize_draft_item(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(item.get("id") or f"draft_item_{_utc_token()}"),
+        "item_type": str(item.get("item_type") or item.get("type") or "node"),
+        "title": str(item.get("title") or item.get("id") or "Draft item"),
+        "content": str(item.get("content") or item.get("body") or item.get("summary") or ""),
+        "source_refs": deepcopy(item.get("source_refs", [])) if isinstance(item.get("source_refs"), list) else [],
+        "assumptions": deepcopy(item.get("assumptions", [])) if isinstance(item.get("assumptions"), list) else [],
+        "status": str(item.get("status") or "draft"),
+        "selected": bool(item.get("selected", True)),
+        "metadata": deepcopy(item.get("metadata", {})) if isinstance(item.get("metadata"), dict) else {},
+    }
+
+
+def _normalize_draft_node(node: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(node)
+    normalized["id"] = str(normalized.get("id") or f"draft_node_{_utc_token()}")
+    normalized["title"] = str(normalized.get("title") or normalized["id"])
+    normalized["summary"] = str(normalized.get("summary") or normalized.get("content") or "")
+    normalized["node_type"] = str(normalized.get("node_type") or "concept")
+    normalized["status"] = str(normalized.get("status") or "ai_generated")
+    normalized["source_refs"] = deepcopy(normalized.get("source_refs", [])) if isinstance(normalized.get("source_refs"), list) else []
+    normalized["external_refs"] = deepcopy(normalized.get("external_refs", {})) if isinstance(normalized.get("external_refs"), dict) else {}
+    normalized["metadata"] = deepcopy(normalized.get("metadata", {})) if isinstance(normalized.get("metadata"), dict) else {}
+    return normalized
+
+
+def _normalize_draft_edge(edge: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(edge)
+    normalized["id"] = str(normalized.get("id") or f"draft_edge_{_utc_token()}")
+    normalized["source_node_id"] = str(normalized.get("source_node_id") or normalized.get("source") or "")
+    normalized["target_node_id"] = str(normalized.get("target_node_id") or normalized.get("target") or "")
+    normalized["relationship_type"] = str(normalized.get("relationship_type") or "contains")
+    normalized["metadata"] = deepcopy(normalized.get("metadata", {})) if isinstance(normalized.get("metadata"), dict) else {}
+    return normalized
+
+
+def _latest_revision(session: dict[str, Any]) -> dict[str, Any]:
+    revisions = session.get("revisions", [])
+    if not revisions:
+        raise GraphSchemaError(["ai_draft_session.revisions: at least one revision is required"])
+    return revisions[-1]
+
+
+def _select_draft_nodes(
+    revision: dict[str, Any],
+    *,
+    mode: str,
+    selected_item_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    nodes = [_normalize_draft_node(node) for node in revision.get("draft_nodes", []) if isinstance(node, dict)]
+    if mode == "cited_only":
+        nodes = [node for node in nodes if node.get("source_refs")]
+    if mode == "selected" and selected_item_ids is not None:
+        selected = set(selected_item_ids)
+        item_to_node = {
+            item.get("id"): item.get("metadata", {}).get("draft_node_id")
+            for item in revision.get("draft_items", [])
+            if isinstance(item, dict) and isinstance(item.get("metadata"), dict)
+        }
+        selected_node_ids = selected | {node_id for item_id, node_id in item_to_node.items() if item_id in selected}
+        nodes = [node for node in nodes if node["id"] in selected_node_ids]
+    return nodes
+
+
+def _preview_diff_summary(
+    *,
+    added_nodes: int,
+    added_edges: int,
+    updated_nodes: int,
+    needs_review_repairs: int,
+) -> str:
+    return (
+        f"+ {added_nodes} nodes, + {added_edges} edges, ~ {updated_nodes} updates, "
+        f"! {needs_review_repairs} needs_review repairs"
+    )
+
+
+def _source_refs_from_revision(revision: dict[str, Any]) -> list[dict[str, Any]]:
+    return _source_refs_from_draft_parts(
+        revision.get("draft_nodes", []),
+        revision.get("draft_annotations", []),
+    )
+
+
+def _source_refs_from_draft_parts(
+    nodes: list[dict[str, Any]],
+    annotations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    refs = []
+    for part in list(nodes) + list(annotations):
+        if isinstance(part, dict) and isinstance(part.get("source_refs"), list):
+            refs = _merge_source_refs(refs, part["source_refs"])
+    return refs
+
+
+def _merge_source_refs(
+    left: list[dict[str, Any]] | None,
+    right: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for source_ref in list(left or []) + list(right or []):
+        if not isinstance(source_ref, dict) or not source_ref.get("document_id"):
+            continue
+        key = json.dumps(source_ref, sort_keys=True)
+        if key in seen:
+            continue
+        refs.append(deepcopy(source_ref))
+        seen.add(key)
+    return refs
+
+
+def _apply_ai_draft_nodes(
+    graph: dict[str, Any],
+    nodes: list[dict[str, Any]],
+    *,
+    session: dict[str, Any],
+    revision: dict[str, Any],
+    mode: str,
+) -> None:
+    existing_by_id = {node.get("id"): node for node in graph.get("nodes", []) if isinstance(node, dict)}
+    for draft_node in nodes:
+        node = _normalize_draft_node(draft_node)
+        if node.get("node_type") != "reference" and not node.get("source_refs"):
+            node["status"] = "needs_review"
+        node["metadata"].update(
+            {
+                "source": "ai_draft_session",
+                "ai_draft_session_id": session["session_id"],
+                "ai_draft_revision_id": revision["revision_id"],
+                "accept_mode": mode,
+            }
+        )
+        if mode == "merge" and node["id"] in existing_by_id:
+            existing_by_id[node["id"]].update(node)
+        elif node["id"] not in existing_by_id:
+            graph["nodes"].append(node)
+            existing_by_id[node["id"]] = node
+
+
+def _apply_ai_draft_edges(graph: dict[str, Any], edges: list[dict[str, Any]]) -> None:
+    existing_ids = {edge.get("id") for edge in graph.get("edges", []) if isinstance(edge, dict)}
+    node_ids = {node.get("id") for node in graph.get("nodes", []) if isinstance(node, dict)}
+    for draft_edge in edges:
+        edge = _normalize_draft_edge(draft_edge)
+        if edge["id"] in existing_ids:
+            continue
+        if edge["source_node_id"] not in node_ids or edge["target_node_id"] not in node_ids:
+            continue
+        graph["edges"].append(edge)
+        existing_ids.add(edge["id"])
+
+
+def _attach_ai_draft_notes(
+    graph: dict[str, Any],
+    session: dict[str, Any],
+    revision: dict[str, Any],
+    *,
+    accepted_at: str,
+    mode: str,
+) -> None:
+    workspace = graph.setdefault("workspace", {})
+    notes = workspace.setdefault("ai_review_notes", [])
+    for annotation in revision.get("draft_annotations", []):
+        if not isinstance(annotation, dict):
+            continue
+        note = deepcopy(annotation)
+        note.setdefault("id", f"ai_draft_note_{_utc_token()}_{len(notes) + 1}")
+        note["accepted_at"] = accepted_at
+        note["accept_mode"] = mode
+        note["session_id"] = session["session_id"]
+        note["revision_id"] = revision["revision_id"]
+        notes.append(note)
+
+
+def classify_ai_draft_intent(prompt: str, *, scope: dict[str, Any] | None = None) -> dict[str, Any]:
+    text = str(prompt or "").lower()
+    normalized_scope = normalize_ai_draft_scope(scope)
+    output_shape = "graph_draft"
+    capability = "create_graph_draft"
+    risk = "medium"
+    model_policy = "balanced"
+
+    if any(term in text for term in ("diff", "patch", "change", "replace", "merge")):
+        output_shape = "patch_diff"
+        capability = "propose_graph_patch"
+        risk = "high"
+        model_policy = "deep_review"
+    elif any(term in text for term in ("source", "citation", "cited", "coverage")):
+        output_shape = "source_coverage"
+        capability = "review_source_coverage"
+        risk = "high"
+        model_policy = "deep_review"
+    elif any(term in text for term in ("task", "checklist", "todo", "to-do")):
+        output_shape = "tasks_checklist"
+        capability = "draft_tasks_checklist"
+    elif "outline" in text:
+        output_shape = "outline"
+        capability = "draft_outline"
+    elif any(term in text for term in ("table", "matrix", "spreadsheet")):
+        output_shape = "table"
+        capability = "draft_table_projection"
+    elif "kanban" in text:
+        output_shape = "kanban"
+        capability = "draft_kanban_projection"
+    elif any(term in text for term in ("presentation", "slides", "deck")):
+        output_shape = "presentation_sections"
+        capability = "draft_presentation_sections"
+    elif any(term in text for term in ("review", "annotate", "annotation", "questions", "gaps")):
+        output_shape = "review_annotations"
+        capability = "draft_review_annotations"
+        model_policy = "deep_review"
+
+    if any(term in text for term in ("quick", "simple", "rough", "brainstorm")) and risk != "high":
+        model_policy = "speed"
+        risk = "low"
+
+    return {
+        "intent": _action_id(capability),
+        "capability": capability,
+        "output_shape": output_shape,
+        "risk": risk,
+        "model_policy": model_policy,
+        "scope_type": normalized_scope["type"],
+    }
+
+
+def generate_ai_draft_session_with_provider(
+    graph: dict[str, Any],
+    *,
+    workspace_id: str | None = None,
+    prompt: str,
+    scope: dict[str, Any] | None = None,
+    role: str = "Ask AI",
+    model_policy: str | None = None,
+    model: str | None = None,
+    source_chunks: list[dict[str, Any]] | None = None,
+    provider: DocMapAIProvider | None = None,
+) -> dict[str, Any]:
+    normalized_scope = normalize_ai_draft_scope(scope)
+    scoped_graph = _scope_graph_for_ai_draft(graph, normalized_scope)
+    classification = classify_ai_draft_intent(prompt, scope=normalized_scope)
+    policy = normalize_model_policy(model_policy or classification["model_policy"], requested_model=model)
+    source_refs = _merge_source_refs(_collect_source_refs(scoped_graph), _source_refs_from_chunks(source_chunks or []))
+    decision = choose_openai_model(
+        requested_model=model,
+        model_policy=policy,
+        task=f"{classification['capability']} {classification['output_shape']}",
+        content=f"{prompt}\n{json.dumps(scoped_graph)[:6000]}",
+        source_chunks=source_chunks,
+        requires_source_grounding=bool(source_refs) or classification["output_shape"] == "source_coverage",
+    )
+    result = _generate_ai_draft_revision_payload(
+        prompt=prompt,
+        graph=scoped_graph,
+        scope=normalized_scope,
+        role=role,
+        classification=classification,
+        decision=decision,
+        source_refs=source_refs,
+        source_chunks=source_chunks or [],
+        provider=provider,
+    )
+    metadata = _draft_generation_metadata(result, classification, decision, policy)
+    return build_ai_draft_session(
+        workspace_id=workspace_id or _workspace_id(graph),
+        prompt=prompt,
+        scope=normalized_scope,
+        role=role,
+        intent=classification["intent"],
+        draft_nodes=result["draft_nodes"],
+        draft_edges=result["draft_edges"],
+        draft_items=result.get("draft_items"),
+        draft_annotations=result["draft_annotations"],
+        model_policy={"policy": policy},
+        selected_model=metadata["actual_model"],
+        model_reason=decision.reason,
+        source_refs=result.get("source_refs", []),
+        metadata=metadata,
+    )
+
+
+def revise_ai_draft_session_with_provider(
+    session: dict[str, Any],
+    graph: dict[str, Any],
+    *,
+    prompt: str,
+    model_policy: str | None = None,
+    model: str | None = None,
+    source_chunks: list[dict[str, Any]] | None = None,
+    provider: DocMapAIProvider | None = None,
+) -> dict[str, Any]:
+    normalized_session = validate_ai_draft_session(session)
+    normalized_scope = normalized_session["scope"]
+    scoped_graph = _scope_graph_for_ai_draft(graph, normalized_scope)
+    classification = classify_ai_draft_intent(f"{normalized_session.get('intent', '')} {prompt}", scope=normalized_scope)
+    current_policy = normalized_session.get("model_policy", {})
+    current_policy_name = current_policy.get("policy") if isinstance(current_policy, dict) else current_policy
+    policy = normalize_model_policy(model_policy or current_policy_name or classification["model_policy"], requested_model=model)
+    source_refs = _merge_source_refs(
+        normalized_session.get("source_refs", []),
+        _merge_source_refs(_collect_source_refs(scoped_graph), _source_refs_from_chunks(source_chunks or [])),
+    )
+    decision = choose_openai_model(
+        requested_model=model,
+        model_policy=policy,
+        task=f"revise {classification['capability']} {classification['output_shape']}",
+        content=f"{prompt}\n{json.dumps(normalized_session.get('prompt_history', []))[:3000]}",
+        source_chunks=source_chunks,
+        requires_source_grounding=bool(source_refs) or classification["output_shape"] == "source_coverage",
+    )
+    result = _generate_ai_draft_revision_payload(
+        prompt=prompt,
+        graph=scoped_graph,
+        scope=normalized_scope,
+        role=normalized_session.get("role") or "Ask AI",
+        classification=classification,
+        decision=decision,
+        source_refs=source_refs,
+        source_chunks=source_chunks or [],
+        provider=provider,
+        prior_session=normalized_session,
+    )
+    metadata = _draft_generation_metadata(result, classification, decision, policy)
+    revision = build_ai_draft_revision(
+        session=normalized_session,
+        prompt=prompt,
+        draft_nodes=result["draft_nodes"],
+        draft_edges=result["draft_edges"],
+        draft_items=result.get("draft_items"),
+        draft_annotations=result["draft_annotations"],
+        model=metadata["actual_model"],
+    )
+    revised = append_ai_draft_revision(normalized_session, revision, prompt=prompt)
+    revised["selected_model"] = metadata["actual_model"]
+    revised["model_reason"] = decision.reason
+    revised["model_policy"] = {"policy": policy}
+    revised["metadata"].update(metadata)
+    return validate_ai_draft_session(revised)
+
+
+def build_ai_draft_generation_request(
+    *,
+    prompt: str,
+    graph: dict[str, Any],
+    scope: dict[str, Any],
+    role: str,
+    classification: dict[str, Any],
+    model: str,
+    source_refs: list[dict[str, Any]],
+    source_chunks: list[dict[str, Any]],
+    prior_session: dict[str, Any] | None = None,
+) -> DocMapGenerationRequest:
+    return DocMapGenerationRequest(
+        model=model,
+        instructions=_ai_draft_system_prompt(role),
+        input=[
+            {
+                "role": "user",
+                "content": _ai_draft_user_prompt(
+                    prompt=prompt,
+                    graph=graph,
+                    scope=scope,
+                    classification=classification,
+                    source_refs=source_refs,
+                    source_chunks=source_chunks,
+                    prior_session=prior_session,
+                ),
+            }
+        ],
+        response_schema=AI_DRAFT_REVISION_OUTPUT_SCHEMA,
+        schema_name="docmap_ai_draft_revision",
+        metadata={
+            "feature": "ai_draft_session",
+            "intent": classification["intent"][:64],
+            "output_shape": classification["output_shape"],
+            "scope_type": scope.get("type", "workspace"),
+        },
+        store=False,
+    )
+
+
+def parse_ai_draft_revision_response(
+    raw_response: str | dict[str, Any],
+    *,
+    prompt: str,
+    scope: dict[str, Any],
+    source_refs: list[dict[str, Any]] | None = None,
+    classification: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if isinstance(raw_response, dict):
+        parsed = deepcopy(raw_response)
+    elif isinstance(raw_response, str):
+        try:
+            parsed = json.loads(_strip_json_fence(raw_response))
+        except json.JSONDecodeError as exc:
+            raise GraphSchemaError([f"ai_draft_revision: invalid JSON at character {exc.pos}"]) from exc
+    else:
+        raise GraphSchemaError(["ai_draft_revision: response must be a JSON object or string"])
+
+    if not isinstance(parsed, dict):
+        raise GraphSchemaError(["ai_draft_revision: response must be a JSON object"])
+
+    shape = str(parsed.get("output_shape") or (classification or {}).get("output_shape") or "graph_draft")
+    if shape not in AI_DRAFT_OUTPUT_SHAPES:
+        shape = "graph_draft"
+    allowed_source_refs = source_refs or []
+    draft_nodes = [
+        _normalize_model_draft_node(node, allowed_source_refs=allowed_source_refs)
+        for node in parsed.get("draft_nodes", [])
+        if isinstance(node, dict)
+    ]
+    draft_edges = [
+        _normalize_model_draft_edge(edge)
+        for edge in parsed.get("draft_edges", [])
+        if isinstance(edge, dict)
+    ]
+    draft_annotations = [
+        _normalize_model_annotation(annotation, allowed_source_refs=allowed_source_refs)
+        for annotation in (
+            list(parsed.get("draft_annotations", []))
+            + list(parsed.get("review_annotations", []))
+            + _projection_annotations(parsed, shape)
+        )
+        if isinstance(annotation, dict)
+    ]
+    draft_items = parsed.get("draft_items")
+    if not isinstance(draft_items, list) or not draft_items:
+        draft_items = _items_from_model_output(parsed, draft_nodes, draft_annotations, shape)
+    response_source_refs = _filter_allowed_source_refs(parsed.get("source_refs", []), allowed_source_refs)
+    if not response_source_refs:
+        response_source_refs = _source_refs_from_draft_parts(draft_nodes, draft_annotations)
+    return {
+        "intent": str(parsed.get("intent") or (classification or {}).get("intent") or "custom_prompt"),
+        "output_shape": shape,
+        "summary": str(parsed.get("summary") or prompt or ""),
+        "draft_nodes": draft_nodes,
+        "draft_edges": draft_edges,
+        "draft_annotations": draft_annotations,
+        "draft_items": draft_items,
+        "source_refs": response_source_refs,
+        "assumptions": [
+            str(assumption)
+            for assumption in parsed.get("assumptions", [])
+            if isinstance(assumption, str) and assumption.strip()
+        ],
+    }
+
+
+def _generate_ai_draft_revision_payload(
+    *,
+    prompt: str,
+    graph: dict[str, Any],
+    scope: dict[str, Any],
+    role: str,
+    classification: dict[str, Any],
+    decision: Any,
+    source_refs: list[dict[str, Any]],
+    source_chunks: list[dict[str, Any]],
+    provider: DocMapAIProvider | None,
+    prior_session: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if provider is None:
+        api_key = get_setting("openai_api_key")
+        if not api_key:
+            raise MissingConfigurationError("Missing required environment variable(s): openai_api_key.")
+        provider = OpenAIResponsesDocMapProvider(api_key=api_key)
+    request = build_ai_draft_generation_request(
+        prompt=prompt,
+        graph=graph,
+        scope=scope,
+        role=role,
+        classification=classification,
+        model=decision.model,
+        source_refs=source_refs,
+        source_chunks=source_chunks,
+        prior_session=prior_session,
+    )
+    generated = provider.generate_json(request)
+    parsed = parse_ai_draft_revision_response(
+        generated.text,
+        prompt=prompt,
+        scope=scope,
+        source_refs=source_refs,
+        classification=classification,
+    )
+    parsed["provider"] = generated.provider
+    parsed["actual_model"] = generated.model or _model_from_raw_response(generated.raw_response) or request.model
+    return parsed
+
+
+def _ai_draft_system_prompt(role: str) -> str:
+    return (
+        f"You are DocMap's {role or 'Ask AI'} drafting agent. Return only strict JSON "
+        "matching the provided schema. Draft sessions are preview-only and non-canonical. "
+        "Do not claim source support unless a source_ref appears in the provided source_refs. "
+        "Unsourced generated graph nodes must keep source_refs empty and include an assumption."
+    )
+
+
+def _ai_draft_user_prompt(
+    *,
+    prompt: str,
+    graph: dict[str, Any],
+    scope: dict[str, Any],
+    classification: dict[str, Any],
+    source_refs: list[dict[str, Any]],
+    source_chunks: list[dict[str, Any]],
+    prior_session: dict[str, Any] | None,
+) -> str:
+    prior = ""
+    if prior_session:
+        prior = f"\nPrior draft session:\n{json.dumps(prior_session, indent=2)[:6000]}\n"
+    return f"""
+User request:
+{prompt}
+
+Intent classification:
+{json.dumps(classification, indent=2)}
+
+Scope:
+{json.dumps(scope, indent=2)}
+
+Canonical graph context. Do not mutate it directly:
+{json.dumps(graph, indent=2)[:12000]}
+
+Allowed source_refs. Use only these exact source refs; otherwise return []:
+{json.dumps(source_refs, indent=2)[:6000]}
+
+Source chunks:
+{json.dumps(source_chunks, indent=2)[:6000]}
+{prior}
+Output requirements:
+- Populate the projection matching output_shape and, when graph changes are useful, draft_nodes and draft_edges.
+- Use stable draft IDs prefixed with draft_.
+- Use source_refs only by copying from Allowed source_refs.
+- For unsourced generated nodes, set source_refs: [] and add an assumption.
+- Include source_coverage, tasks, checklist, outline, table, kanban, presentation_sections, and review_annotations as arrays even when empty.
+""".strip()
+
+
+def _scope_graph_for_ai_draft(graph: dict[str, Any], scope: dict[str, Any]) -> dict[str, Any]:
+    scope_type = scope.get("type")
+    if scope_type == "branch" and scope.get("node_id"):
+        return _scope_graph(graph, {"type": "branch", "node_id": scope["node_id"]})
+    if scope_type == "node" and scope.get("node_id"):
+        return _scope_node_graph(graph, scope["node_id"])
+    if scope_type == "nodes":
+        node_ids = set(scope.get("node_ids", []))
+        scoped = deepcopy(graph)
+        scoped["nodes"] = [node for node in graph.get("nodes", []) if isinstance(node, dict) and node.get("id") in node_ids]
+        scoped["edges"] = [
+            edge
+            for edge in graph.get("edges", [])
+            if isinstance(edge, dict)
+            and edge.get("source_node_id") in node_ids
+            and edge.get("target_node_id") in node_ids
+        ]
+        return scoped
+    return deepcopy(graph)
+
+
+def _normalize_model_draft_node(
+    node: dict[str, Any],
+    *,
+    allowed_source_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    normalized = _normalize_draft_node(node)
+    normalized["source_refs"] = _filter_allowed_source_refs(
+        normalized.get("source_refs", []),
+        allowed_source_refs,
+    )
+    normalized["metadata"].setdefault("source", "responses_ai_draft")
+    if not normalized["source_refs"] and normalized.get("node_type") != "reference":
+        normalized.setdefault("assumptions", [])
+    return normalized
+
+
+def _normalize_model_draft_edge(edge: dict[str, Any]) -> dict[str, Any]:
+    normalized = _normalize_draft_edge(edge)
+    normalized["metadata"].setdefault("source", "responses_ai_draft")
+    return normalized
+
+
+def _normalize_model_annotation(
+    annotation: dict[str, Any],
+    *,
+    allowed_source_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    normalized = deepcopy(annotation)
+    normalized["id"] = str(normalized.get("id") or f"draft_annotation_{_utc_token()}")
+    normalized["type"] = str(normalized.get("type") or "ai_note")
+    normalized["title"] = str(normalized.get("title") or normalized["type"])
+    normalized["body"] = str(normalized.get("body") or normalized.get("content") or "")
+    normalized["source_refs"] = _filter_allowed_source_refs(
+        normalized.get("source_refs", []),
+        allowed_source_refs,
+    )
+    normalized["assumptions"] = normalized.get("assumptions", []) if isinstance(normalized.get("assumptions"), list) else []
+    normalized["metadata"] = normalized.get("metadata", {}) if isinstance(normalized.get("metadata"), dict) else {}
+    normalized["metadata"].setdefault("source", "responses_ai_draft")
+    return normalized
+
+
+def _projection_annotations(parsed: dict[str, Any], shape: str) -> list[dict[str, Any]]:
+    projections = {
+        "source_coverage": "source_coverage",
+        "tasks_checklist": "tasks",
+        "outline": "outline",
+        "table": "table",
+        "kanban": "kanban",
+        "presentation_sections": "presentation_sections",
+    }
+    key = projections.get(shape)
+    values = parsed.get(key, []) if key else []
+    if not isinstance(values, list):
+        return []
+    annotations = []
+    for index, value in enumerate(values, start=1):
+        if isinstance(value, dict):
+            annotations.append(
+                {
+                    "id": str(value.get("id") or f"draft_projection_{shape}_{index}"),
+                    "type": shape,
+                    "title": str(value.get("title") or value.get("label") or shape),
+                    "body": str(value.get("body") or value.get("summary") or value.get("description") or ""),
+                    "source_refs": value.get("source_refs", []),
+                    "metadata": {"projection": shape, "projection_item": value},
+                }
+            )
+    return annotations
+
+
+def _items_from_model_output(
+    parsed: dict[str, Any],
+    draft_nodes: list[dict[str, Any]],
+    draft_annotations: list[dict[str, Any]],
+    shape: str,
+) -> list[dict[str, Any]]:
+    items = _normalize_draft_items(None, draft_nodes, draft_annotations)
+    for assumption in parsed.get("assumptions", []):
+        if isinstance(assumption, str) and assumption.strip():
+            items.append(
+                {
+                    "id": f"draft_assumption_{len(items) + 1}",
+                    "item_type": "assumption",
+                    "title": "Assumption",
+                    "content": assumption,
+                    "source_refs": [],
+                    "assumptions": [assumption],
+                    "status": "draft",
+                    "selected": True,
+                    "metadata": {"output_shape": shape},
+                }
+            )
+    return items
+
+
+def _filter_allowed_source_refs(
+    source_refs: Any,
+    allowed_source_refs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not isinstance(source_refs, list):
+        return []
+    allowed_by_key = {json.dumps(ref, sort_keys=True): ref for ref in allowed_source_refs if isinstance(ref, dict)}
+    filtered = []
+    for source_ref in source_refs:
+        if not isinstance(source_ref, dict) or not source_ref.get("document_id"):
+            continue
+        key = json.dumps(source_ref, sort_keys=True)
+        if key in allowed_by_key:
+            filtered.append(deepcopy(allowed_by_key[key]))
+    return _merge_source_refs([], filtered)
+
+
+def _source_refs_from_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    refs = []
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            continue
+        if isinstance(chunk.get("source_ref"), dict):
+            refs = _merge_source_refs(refs, [chunk["source_ref"]])
+        if isinstance(chunk.get("source_refs"), list):
+            refs = _merge_source_refs(refs, chunk["source_refs"])
+    return refs
+
+
+def _draft_generation_metadata(
+    result: dict[str, Any],
+    classification: dict[str, Any],
+    decision: Any,
+    policy: str,
+) -> dict[str, Any]:
+    return {
+        "ai_draft_session_contract_version": AI_DRAFT_SESSION_CONTRACT_VERSION,
+        "canonical": False,
+        "preview_mode": "responses_structured_draft",
+        "provider": result.get("provider", "unknown"),
+        "actual_model": result.get("actual_model") or decision.model,
+        "model": result.get("actual_model") or decision.model,
+        "model_tier": decision.tier,
+        "model_policy": policy,
+        "model_reason": decision.reason,
+        "intent": classification["intent"],
+        "capability": classification["capability"],
+        "output_shape": result.get("output_shape") or classification["output_shape"],
+        "risk": classification["risk"],
+    }
+
+
+def _model_from_raw_response(raw_response: Any) -> str:
+    if isinstance(raw_response, dict):
+        value = raw_response.get("model")
+        return str(value) if value else ""
+    value = getattr(raw_response, "model", "")
+    return str(value) if value else ""
+
+
+def _workspace_id(graph: dict[str, Any]) -> str:
+    workspace = graph.get("workspace", {}) if isinstance(graph, dict) else {}
+    return str(workspace.get("id") or graph.get("workspace_id") or "")
 
 
 def _profile_id(role: str) -> str:

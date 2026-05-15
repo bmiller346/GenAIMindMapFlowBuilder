@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
+import AiDraftSessionPanel from './AiDraftSessionPanel';
 import {
     acceptAIActionPreview,
     createAIActionRun,
@@ -180,6 +181,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
         edges: state.edges,
         setNodes: state.setNodes,
         setEdges: state.setEdges,
+        activeAIDraftSession: state.activeAIDraftSession,
         activeAIActionPreview: state.activeAIActionPreview,
         clearActiveAIActionPreview: state.clearActiveAIActionPreview,
         recordAIActionRun: state.recordAIActionRun
@@ -189,6 +191,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
         edges,
         setNodes,
         setEdges,
+        activeAIDraftSession,
         activeAIActionPreview,
         clearActiveAIActionPreview,
         recordAIActionRun
@@ -222,6 +225,14 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
             activeAIActionPreview.scope?.node_id === selectedNodeId ||
             activeAIActionPreview.scope === 'workspace' ||
             activeAIActionPreview.scope?.type === 'workspace');
+    const aiDraftSessionAppliesHere =
+        activeAIDraftSession &&
+        (activeAIDraftSession.scope?.type === 'workspace' ||
+            activeAIDraftSession.scope?.node_id === selectedNodeId ||
+            activeAIDraftSession.scope?.source_node_id === selectedNodeId ||
+            (activeAIDraftSession.scope?.type === 'nodes' &&
+                Array.isArray(activeAIDraftSession.scope?.node_ids) &&
+                activeAIDraftSession.scope.node_ids.includes(selectedNodeId)));
 
     useEffect(() => {
         if (!selectedNode) {
@@ -614,7 +625,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
         ) : null;
 
     if (!selectedNode) {
-        if (!aiPreviewAppliesHere) {
+        if (!aiPreviewAppliesHere && !aiDraftSessionAppliesHere) {
             return null;
         }
 
@@ -635,6 +646,12 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                     </button>
                 </div>
                 <div className="node-inspector-body">
+                    {aiDraftSessionAppliesHere ? (
+                        <AiDraftSessionPanel
+                            session={activeAIDraftSession}
+                            onClose={onClose}
+                        />
+                    ) : null}
                     {renderAIActionPreview()}
                 </div>
             </aside>
@@ -667,6 +684,12 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
             </div>
 
             <div className="node-inspector-body">
+                {aiDraftSessionAppliesHere ? (
+                    <AiDraftSessionPanel
+                        session={activeAIDraftSession}
+                        onClose={onClose}
+                    />
+                ) : null}
                 <label>
                     Title
                     <input

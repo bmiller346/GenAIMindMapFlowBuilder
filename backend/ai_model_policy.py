@@ -7,8 +7,21 @@ from typing import Any
 
 
 DEFAULT_FAST_MODEL = os.getenv("openai_fast_model", "gpt-5.4")
+DEFAULT_BALANCED_MODEL = os.getenv("openai_balanced_model", DEFAULT_FAST_MODEL)
 DEFAULT_DEEP_MODEL = os.getenv("openai_default_model", "gpt-5.5")
-SUPPORTED_MODELS = frozenset({DEFAULT_FAST_MODEL, DEFAULT_DEEP_MODEL})
+SUPPORTED_MODELS = frozenset({DEFAULT_FAST_MODEL, DEFAULT_BALANCED_MODEL, DEFAULT_DEEP_MODEL})
+MODEL_POLICY_ALIASES = {
+    "speed": "speed",
+    "fast": "speed",
+    "balanced": "balanced",
+    "auto": "balanced",
+    "deep": "deep_review",
+    "deep_review": "deep_review",
+    "deep review": "deep_review",
+    "explicit": "explicit_model",
+    "explicit_model": "explicit_model",
+    "explicit model": "explicit_model",
+}
 
 DEEP_INTENT_TERMS = frozenset(
     {
@@ -50,6 +63,7 @@ class ModelDecision:
     tier: str
     reason: str
     tool_policy: str = "none"
+    policy: str = "balanced"
 
 
 def normalize_model_name(model: str | None) -> str:
@@ -62,9 +76,17 @@ def normalize_model_name(model: str | None) -> str:
     return requested
 
 
+def normalize_model_policy(policy: str | None, *, requested_model: str | None = None) -> str:
+    if requested_model:
+        return "explicit_model"
+    normalized = str(policy or "balanced").strip().lower().replace("-", "_")
+    return MODEL_POLICY_ALIASES.get(normalized, "balanced")
+
+
 def choose_openai_model(
     *,
     requested_model: str | None = None,
+    model_policy: str | None = None,
     task: str = "",
     content: str = "",
     source_chunks: list[dict[str, Any]] | None = None,
@@ -78,6 +100,25 @@ def choose_openai_model(
             tier="explicit",
             reason="User or workflow selected the model explicitly.",
             tool_policy="responses_tools" if requires_tools else "none",
+            policy="explicit_model",
+        )
+
+    policy = normalize_model_policy(model_policy)
+    if policy == "speed":
+        return ModelDecision(
+            model=DEFAULT_FAST_MODEL,
+            tier="speed",
+            reason="Speed policy selected the fast draft model.",
+            tool_policy="responses_tools" if requires_tools else "none",
+            policy=policy,
+        )
+    if policy == "deep_review":
+        return ModelDecision(
+            model=DEFAULT_DEEP_MODEL,
+            tier="deep",
+            reason="Deep Review policy selected the strongest review model.",
+            tool_policy="responses_tools" if requires_tools else "none",
+            policy=policy,
         )
 
     tokens = _terms(f"{task}\n{content}")
@@ -92,6 +133,7 @@ def choose_openai_model(
             tier="deep",
             reason="Tool-using workflows need stronger planning and error recovery.",
             tool_policy="responses_tools",
+            policy=policy,
         )
 
     if requires_source_grounding or len(chunks) > 2 or chunk_text_chars > 7000 or has_deep_terms:
@@ -99,6 +141,7 @@ def choose_openai_model(
             model=DEFAULT_DEEP_MODEL,
             tier="deep",
             reason="Source-grounded, multi-chunk, validation, or architecture work gets the deep model.",
+            policy=policy,
         )
 
     if has_fast_terms or len(content) < 1200:
@@ -106,12 +149,14 @@ def choose_openai_model(
             model=DEFAULT_FAST_MODEL,
             tier="fast",
             reason="Small/simple transform can use the fast model.",
+            policy=policy,
         )
 
     return ModelDecision(
-        model=DEFAULT_FAST_MODEL,
-        tier="fast",
-        reason="Defaulting to fast model for low-risk generation.",
+        model=DEFAULT_BALANCED_MODEL,
+        tier="balanced",
+        reason="Balanced policy selected the default draft model for low-risk generation.",
+        policy=policy,
     )
 
 

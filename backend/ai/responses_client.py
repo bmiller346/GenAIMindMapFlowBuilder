@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from openai import OpenAI
-
 from ai.schemas import json_schema_response_format
 from ai.providers import DocMapGenerationRequest, DocMapGenerationResult
 
@@ -49,8 +47,17 @@ def response_output_text(response: Any) -> str:
 class OpenAIResponsesDocMapProvider:
     provider = "openai_responses"
 
-    def __init__(self, client: OpenAI | None = None, api_key: str | None = None):
-        self.client = client or OpenAI(api_key=api_key)
+    def __init__(self, client: Any | None = None, api_key: str | None = None):
+        if client is not None:
+            self.client = client
+            return
+        try:
+            from openai import OpenAI
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "The openai package is required for live Responses generation."
+            ) from exc
+        self.client = OpenAI(api_key=api_key)
 
     def generate_json(self, request: DocMapGenerationRequest) -> DocMapGenerationResult:
         response = self.client.responses.create(
@@ -60,4 +67,5 @@ class OpenAIResponsesDocMapProvider:
             text=response_output_text(response),
             provider=self.provider,
             raw_response=response,
+            model=getattr(response, "model", request.model),
         )

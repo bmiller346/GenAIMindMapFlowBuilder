@@ -240,6 +240,7 @@ const useStore = create((set, get) => ({
     pendingSourceDraft: undefined,
     generatedHelperPreviews: {},
     activeAIActionPreview: undefined,
+    activeAIDraftSession: undefined,
     aiActionRuns: [],
     onNodesChange: (change) => {
         console.log("Test");
@@ -328,6 +329,20 @@ const useStore = create((set, get) => ({
     },
     clearActiveAIActionPreview: () => {
         set({ activeAIActionPreview: undefined });
+    },
+    setActiveAIDraftSession: (session) => {
+        set({
+            activeAIDraftSession: session || undefined,
+            activeAIActionPreview: undefined
+        });
+    },
+    updateActiveAIDraftSession: (updater) => {
+        const current = get().activeAIDraftSession;
+        const next = typeof updater === 'function' ? updater(current) : updater;
+        set({ activeAIDraftSession: next || undefined });
+    },
+    clearActiveAIDraftSession: () => {
+        set({ activeAIDraftSession: undefined });
     },
     setAIActionRuns: (runs = []) => {
         set({ aiActionRuns: normalizeAIActionRuns(runs) });

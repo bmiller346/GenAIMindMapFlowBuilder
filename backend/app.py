@@ -155,9 +155,17 @@ from ai.roles import (
     resolve_source_intake_role_label,
 )
 from ai_helpers import (
+    accept_ai_draft_revision,
+    append_ai_draft_revision,
+    build_ai_draft_revision,
+    build_ai_draft_session,
+    build_ai_action_run,
+    discard_ai_draft_session,
     generate_ai_action_preview,
     generate_helper_preview,
     generate_source_librarian_preview,
+    normalize_ai_draft_scope,
+    validate_ai_draft_session,
     list_prompt_profiles,
 )
 from graph.ai_contract import (
@@ -503,13 +511,21 @@ db = client["MindMap"]
 flow_collection = db["flows"]
 component_collection = db["components"]
 node_collection = db["nodes"]
+ai_draft_session_collection = db["ai_draft_sessions"]
 LOCAL_FLOW_STORE_PATH = Path(
     os.getenv("DOCMAP_LOCAL_FLOW_STORE", "docmap_flows.json")
+)
+LOCAL_AI_DRAFT_SESSION_STORE_PATH = Path(
+    os.getenv("DOCMAP_LOCAL_AI_DRAFT_SESSION_STORE", "docmap_ai_draft_sessions.json")
 )
 
 
 def local_flow_store_path() -> Path:
     return Path(__file__).resolve().parent / LOCAL_FLOW_STORE_PATH
+
+
+def local_ai_draft_session_store_path() -> Path:
+    return Path(__file__).resolve().parent / LOCAL_AI_DRAFT_SESSION_STORE_PATH
 
 
 def load_local_flows() -> list[dict]:
@@ -522,9 +538,24 @@ def load_local_flows() -> list[dict]:
         return []
 
 
+def load_local_ai_draft_sessions() -> list[dict]:
+    path = local_ai_draft_session_store_path()
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
 def save_local_flows(flows: list[dict]) -> None:
     path = local_flow_store_path()
     path.write_text(json.dumps(flows, indent=2, default=str), encoding="utf-8")
+
+
+def save_local_ai_draft_sessions(sessions: list[dict]) -> None:
+    path = local_ai_draft_session_store_path()
+    path.write_text(json.dumps(sessions, indent=2, default=str), encoding="utf-8")
 
 
 def normalize_flow_record(flow: dict) -> dict:
@@ -578,6 +609,30 @@ def local_delete_flow(flow_id: str) -> bool:
         return False
     save_local_flows(next_flows)
     return True
+
+
+def local_save_ai_draft_session(session: dict) -> dict:
+    sessions = load_local_ai_draft_sessions()
+    saved = False
+    for index, existing in enumerate(sessions):
+        if existing.get("session_id") == session.get("session_id"):
+            sessions[index] = session
+            saved = True
+            break
+    if not saved:
+        sessions.append(session)
+    save_local_ai_draft_sessions(sessions)
+    return session
+
+
+def local_find_ai_draft_session(flow_id: str, session_id: str) -> dict | None:
+    for session in load_local_ai_draft_sessions():
+        if (
+            str(session.get("workspace_id")) == flow_id
+            and session.get("session_id") == session_id
+        ):
+            return session
+    return None
 
 
 def promote_local_flow_to_mongo(flow_id: str) -> dict | None:
@@ -2303,6 +2358,326 @@ def export_branch_json(flow_id: str, node_id: str):
 @app.get("/api/ai/prompt-profiles")
 def get_ai_prompt_profiles():
     return {"profiles": list_prompt_profiles()}
+
+
+def save_ai_draft_session(session: dict) -> dict:
+    normalized = validate_ai_draft_session(session)
+    try:
+        ai_draft_session_collection.update_one(
+            {
+                "workspace_id": normalized["workspace_id"],
+                "session_id": normalized["session_id"],
+            },
+            {"$set": normalized},
+            upsert=True,
+        )
+    except PyMongoError:
+        local_save_ai_draft_session(normalized)
+    return normalized
+
+
+def get_ai_draft_session_or_404(flow_id: str, session_id: str) -> dict:
+    session = None
+    try:
+        session = ai_draft_session_collection.find_one(
+            {"workspace_id": flow_id, "session_id": session_id},
+            {"_id": 0},
+        )
+    except PyMongoError:
+        session = None
+    if not session:
+        session = local_find_ai_draft_session(flow_id, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="AI draft session not found.")
+    try:
+        return validate_ai_draft_session(session)
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "AI draft session failed schema validation.",
+                "errors": exc.errors,
+            },
+        ) from exc
+
+
+def _flow_snapshot(flow: dict) -> dict:
+    try:
+        snapshot = json.loads(flow.get("flow_json") or "{}")
+    except json.JSONDecodeError:
+        snapshot = {}
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    snapshot.setdefault("nodes", [])
+    snapshot.setdefault("edges", [])
+    snapshot.setdefault("viewport", {})
+    return snapshot
+
+
+def _persist_flow_snapshot(flow_id: str, snapshot: dict) -> None:
+    updates = {"flow_json": json.dumps(snapshot)}
+    updated = False
+    if ObjectId.is_valid(flow_id):
+        try:
+            result = flow_collection.update_one(
+                {"_id": ObjectId(flow_id)},
+                {"$set": updates},
+            )
+            updated = result.matched_count > 0
+        except PyMongoError:
+            updated = False
+    if not updated:
+        updated = local_update_flow(flow_id, updates)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+
+
+def _react_node_from_graph_node(node: dict, index: int) -> dict:
+    node_type = node.get("node_type") or "concept"
+    return {
+        "id": node.get("id", ""),
+        "type": "question" if node_type == "question" else "custom",
+        "position": node.get("metadata", {}).get("position") or {"x": 120 + (index % 4) * 260, "y": 160 + index * 120},
+        "data": {
+            "title": node.get("title", ""),
+            "summ": node.get("summary", ""),
+            "node_type": node_type,
+            "status": node.get("status", ""),
+            "priority": node.get("priority", ""),
+            "owner_id": node.get("owner_id", ""),
+            "due_date": node.get("due_date", ""),
+            "confidence": node.get("confidence"),
+            "source_refs": node.get("source_refs", []),
+            "external_refs": node.get("external_refs", {}),
+            "metadata": node.get("metadata", {}),
+        },
+    }
+
+
+def _react_edge_from_graph_edge(edge: dict) -> dict:
+    return {
+        "id": edge.get("id", ""),
+        "source": edge.get("source_node_id", ""),
+        "target": edge.get("target_node_id", ""),
+        "type": edge.get("metadata", {}).get("react_flow_type", ""),
+        "animated": edge.get("metadata", {}).get("animated", False),
+        "relationship_type": edge.get("relationship_type", "contains"),
+    }
+
+
+def _append_accepted_graph_to_flow_snapshot(
+    flow: dict,
+    accept_result: dict,
+    accepted_graph: dict,
+) -> dict:
+    snapshot = _flow_snapshot(flow)
+    node_lookup = {
+        node.get("id"): node
+        for node in accepted_graph.get("nodes", [])
+        if isinstance(node, dict)
+    }
+    edge_lookup = {
+        edge.get("id"): edge
+        for edge in accepted_graph.get("edges", [])
+        if isinstance(edge, dict)
+    }
+    existing_node_ids = {
+        node.get("id")
+        for node in snapshot.get("nodes", [])
+        if isinstance(node, dict)
+    }
+    existing_edge_ids = {
+        edge.get("id")
+        for edge in snapshot.get("edges", [])
+        if isinstance(edge, dict)
+    }
+    for index, node_id in enumerate(accept_result.get("accepted_node_ids", []), start=1):
+        if node_id in existing_node_ids:
+            continue
+        node = node_lookup.get(node_id)
+        if node:
+            snapshot["nodes"].append(_react_node_from_graph_node(node, index))
+            existing_node_ids.add(node_id)
+    for edge_id in accept_result.get("accepted_edge_ids", []):
+        if edge_id in existing_edge_ids:
+            continue
+        edge = edge_lookup.get(edge_id)
+        if edge:
+            snapshot["edges"].append(_react_edge_from_graph_edge(edge))
+            existing_edge_ids.add(edge_id)
+    return snapshot
+
+
+def _draft_revision_from_request(
+    session: dict,
+    graph: dict,
+    request: dict[str, Any],
+) -> dict:
+    if isinstance(request.get("draft_nodes"), list) or isinstance(request.get("draft_items"), list):
+        return build_ai_draft_revision(
+            session=session,
+            prompt=request.get("prompt") or request.get("custom_prompt") or "",
+            draft_nodes=request.get("draft_nodes") or [],
+            draft_edges=request.get("draft_edges") or [],
+            draft_annotations=request.get("draft_annotations") or [],
+            draft_items=request.get("draft_items"),
+            model=request.get("model") or session.get("selected_model", ""),
+            metadata=request.get("metadata") if isinstance(request.get("metadata"), dict) else {},
+        )
+
+    preview = generate_ai_action_preview(
+        graph,
+        workspace_id=session["workspace_id"],
+        role=request.get("role") or session.get("role") or "Custom",
+        action=request.get("action") or "custom_prompt",
+        scope=session.get("scope") or {"type": "workspace"},
+        custom_prompt=request.get("prompt") or request.get("custom_prompt") or "",
+        created_by=request.get("created_by") or "user",
+        model=request.get("model"),
+    )
+    return build_ai_draft_revision(
+        session=session,
+        prompt=request.get("prompt") or request.get("custom_prompt") or "",
+        draft_nodes=preview.get("draft_nodes", []),
+        draft_edges=preview.get("draft_edges", []),
+        draft_annotations=preview.get("draft_annotations", []),
+        model=preview.get("metadata", {}).get("model", ""),
+        validation_report=preview.get("validation_report"),
+        metadata={
+            "ai_action_id": preview.get("ai_action_id", ""),
+            "model_reason": preview.get("metadata", {}).get("model_reason", ""),
+            "preview_mode": preview.get("metadata", {}).get("preview_mode", ""),
+        },
+    )
+
+
+@app.post("/api/workspaces/{flow_id}/ai/draft-sessions")
+def create_ai_draft_session(
+    flow_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    graph = get_workspace_graph_or_404(flow_id)
+    scope = normalize_ai_draft_scope(request.get("scope") if isinstance(request.get("scope"), dict) else {"type": "workspace"})
+    action_run = build_ai_action_run(
+        workspace_id=flow_id,
+        scope=scope if scope.get("type") in {"workspace", "branch", "node"} else {"type": "workspace"},
+        role=request.get("role") or "Custom",
+        action=request.get("action") or "custom_prompt",
+        custom_prompt=request.get("prompt") or request.get("custom_prompt"),
+        input_source_refs=graph.get("source_refs") or [],
+        created_by=request.get("created_by") or "user",
+    )
+    session = build_ai_draft_session(
+        workspace_id=flow_id,
+        prompt=request.get("prompt") or request.get("custom_prompt") or "",
+        scope=scope,
+        role=request.get("role") or "Custom",
+        intent=request.get("intent") or request.get("action") or "custom_prompt",
+        model_policy=request.get("model_policy") if isinstance(request.get("model_policy"), dict) else {},
+        selected_model=request.get("model") or "",
+        model_reason=request.get("model_reason") or "",
+        source_refs=graph.get("source_refs") or [],
+        ai_action_run=action_run,
+        created_by=request.get("created_by") or "user",
+        metadata=request.get("metadata") if isinstance(request.get("metadata"), dict) else {},
+    )
+    revision = _draft_revision_from_request(session, graph, request)
+    session = append_ai_draft_revision(
+        session,
+        revision,
+        prompt=request.get("prompt") or request.get("custom_prompt") or "",
+        created_by=request.get("created_by") or "user",
+    )
+    if revision.get("model"):
+        session["selected_model"] = revision["model"]
+    if revision.get("metadata", {}).get("model_reason"):
+        session["model_reason"] = revision["metadata"]["model_reason"]
+    return save_ai_draft_session(session)
+
+
+@app.get("/api/workspaces/{flow_id}/ai/draft-sessions/{session_id}")
+def get_ai_draft_session(flow_id: str, session_id: str):
+    return get_ai_draft_session_or_404(flow_id, session_id)
+
+
+@app.post("/api/workspaces/{flow_id}/ai/draft-sessions/{session_id}/revisions")
+def create_ai_draft_revision(
+    flow_id: str,
+    session_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    session = get_ai_draft_session_or_404(flow_id, session_id)
+    if session.get("status") != "drafting":
+        raise HTTPException(status_code=409, detail="Only active draft sessions can be revised.")
+    graph = get_workspace_graph_or_404(flow_id)
+    revision = _draft_revision_from_request(session, graph, request)
+    session = append_ai_draft_revision(
+        session,
+        revision,
+        prompt=request.get("prompt") or request.get("custom_prompt") or "",
+        created_by=request.get("created_by") or "user",
+    )
+    if revision.get("model"):
+        session["selected_model"] = revision["model"]
+    if revision.get("metadata", {}).get("model_reason"):
+        session["model_reason"] = revision["metadata"]["model_reason"]
+    return save_ai_draft_session(session)
+
+
+@app.post("/api/workspaces/{flow_id}/ai/draft-sessions/{session_id}/discard")
+def discard_ai_draft_session_endpoint(
+    flow_id: str,
+    session_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    session = get_ai_draft_session_or_404(flow_id, session_id)
+    session = discard_ai_draft_session(
+        session,
+        discarded_by=request.get("discarded_by") or request.get("created_by") or "user",
+    )
+    return save_ai_draft_session(session)
+
+
+@app.post("/api/workspaces/{flow_id}/ai/draft-sessions/{session_id}/accept")
+def accept_ai_draft_session_endpoint(
+    flow_id: str,
+    session_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    session = get_ai_draft_session_or_404(flow_id, session_id)
+    if session.get("status") != "drafting":
+        raise HTTPException(status_code=409, detail="Only active draft sessions can be accepted.")
+    flow = get_workspace_flow_or_404(flow_id)
+    graph = build_workspace_graph(flow, source_components=get_source_components(flow_id))
+    previous_flow_json = flow.get("flow_json", "")
+    try:
+        accepted_graph, session, accept_result = accept_ai_draft_revision(
+            graph,
+            session,
+            revision_id=request.get("revision_id"),
+            accept_mode=request.get("mode") or request.get("accept_mode") or "append",
+            selected_item_ids=request.get("selected_item_ids") if isinstance(request.get("selected_item_ids"), list) else [],
+            accepted_by=request.get("accepted_by") or request.get("created_by") or "user",
+        )
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "AI draft accept failed schema validation.",
+                "errors": exc.errors,
+            },
+        ) from exc
+    accept_result.setdefault("metadata", {})["undo_snapshot"] = previous_flow_json
+    if session.get("accept_history"):
+        session["accept_history"][-1].setdefault("metadata", {})["undo_snapshot"] = previous_flow_json
+    snapshot = _append_accepted_graph_to_flow_snapshot(flow, accept_result, accepted_graph)
+    _persist_flow_snapshot(flow_id, snapshot)
+    save_ai_draft_session(session)
+    return accept_result
 
 
 @app.post("/api/workspaces/{flow_id}/ai/actions/preview")

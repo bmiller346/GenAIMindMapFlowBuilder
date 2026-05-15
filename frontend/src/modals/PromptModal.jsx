@@ -18,6 +18,7 @@ import {
     legacyPersonaNames
 } from "../prompts/promptsModel";
 import { getWorkspaceNodeData } from "../utils/manualNodes";
+import { createAIDraftSession } from "../utils/aiDraftSessions";
 
 const viewForAction = (actionId) => {
     if (actionId.includes('question')) {
@@ -56,15 +57,8 @@ const actionsThatDraftNodes = new Set([
 
 const modelOptions = ['auto', ...supportedOpenAIModels];
 
-const previewEndpoint = ({ flowId, scope, nodeId }) => {
-    if (scope === 'workspace') {
-        return `http://localhost:8000/api/workspaces/${flowId}/ai/actions/workspace/preview`;
-    }
-    if (scope === 'branch') {
-        return `http://localhost:8000/api/workspaces/${flowId}/ai/actions/branch/${nodeId}/preview`;
-    }
-    return `http://localhost:8000/api/workspaces/${flowId}/ai/actions/node/${nodeId}/preview`;
-};
+const draftSessionEndpoint = ({ flowId }) =>
+    `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions`;
 
 const PromptModal = ({
     scope,
@@ -84,6 +78,7 @@ const PromptModal = ({
         setSelectedBranchId: state.setSelectedBranchId,
         setGeneratedHelperPreview: state.setGeneratedHelperPreview,
         setActiveAIActionPreview: state.setActiveAIActionPreview,
+        setActiveAIDraftSession: state.setActiveAIDraftSession,
         setInspectorNodeId: state.setInspectorNodeId
     });
     const {
@@ -93,6 +88,7 @@ const PromptModal = ({
         setSelectedBranchId,
         setGeneratedHelperPreview,
         setActiveAIActionPreview,
+        setActiveAIDraftSession,
         setInspectorNodeId
     } = useStore(useShallow(storeSelector));
     const recordActivity = useActivityStore((state) => state.recordActivity);
@@ -167,11 +163,73 @@ const PromptModal = ({
         const sourceRefs = targetData.sourceRefs || [];
         const shouldDraftNode = actionsThatDraftNodes.has(selectedAction.id);
         const draftNodeId = `draft-${Date.now()}`;
-        const fallbackPreview = {
-            preview_id: `ui-preview-${Date.now()}`,
-            ai_action_id: `ui-action-${Date.now()}`,
+        const normalizedScope =
+            scope === 'workspace'
+                ? { type: 'workspace' }
+                : { type: scope || 'node', node_id: targetNodeId };
+        const draftNodes = shouldDraftNode
+            ? [
+                  {
+                      id: draftNodeId,
+                      parent_id: targetNodeId,
+                      title: `${selectedAction.label}: ${targetLabel}`,
+                      summary:
+                          customPrompt.trim() ||
+                          suggestions[0] ||
+                          `${role.label} draft for ${targetLabel}.`,
+                      node_type: selectedAction.id.includes('checklist')
+                          ? 'task'
+                          : selectedAction.id.includes('question')
+                            ? 'question'
+                            : 'concept',
+                      status: sourceRefs.length ? 'ai_generated' : 'needs_review',
+                      source_refs: sourceRefs
+                  }
+              ]
+            : [];
+        const draftEdges =
+            shouldDraftNode && targetNodeId
+                ? [
+                      {
+                          id: `draft-edge-${targetNodeId}-${draftNodeId}`,
+                          source_node_id: targetNodeId,
+                          target_node_id: draftNodeId
+                      }
+                  ]
+                : [];
+        const draftAnnotations = suggestions.map((suggestion, index) => ({
+            id: `suggestion-${index + 1}`,
+            type: 'follow_up_suggestion',
+            title: suggestion,
+            body: suggestion
+        }));
+        const fallbackSession = createAIDraftSession({
+            workspaceId: flowId || '',
+            scope: normalizedScope,
+            role: role.label,
+            intent: selectedAction.id,
+            prompt: customPrompt.trim() || selectedAction.label,
+            draftNodes,
+            draftEdges,
+            draftAnnotations,
+            modelPolicy: selectedModel === 'auto' ? 'balanced' : 'explicit',
+            selectedModel: selectedModel === 'auto' ? 'auto' : selectedModel,
+            modelReason:
+                selectedModel === 'auto'
+                    ? 'Backend unavailable; model would be selected by intent.'
+                    : 'User selected the model explicitly.',
+            metadata: {
+                role_id: role.id,
+                action_label: selectedAction.label,
+                preview_mode: 'local_fallback',
+                source_node_id: scope === 'workspace' ? null : targetNodeId
+            }
+        });
+        const legacyPreview = {
+            preview_id: fallbackSession.session_id,
+            ai_action_id: fallbackSession.session_id,
             workspace_id: flowId || '',
-            scope: scope || 'node',
+            scope: normalizedScope,
             source_node_id: scope === 'workspace' ? null : targetNodeId,
             role: role.label,
             role_id: role.id,
@@ -184,41 +242,9 @@ const PromptModal = ({
                     : targetNodeId
                       ? [targetNodeId]
                       : [],
-            draft_nodes: shouldDraftNode
-                ? [
-                      {
-                          id: draftNodeId,
-                          parent_id: targetNodeId,
-                          title: `${selectedAction.label}: ${targetLabel}`,
-                          body:
-                              customPrompt.trim() ||
-                              suggestions[0] ||
-                              `${role.label} draft for ${targetLabel}.`,
-                          node_type: selectedAction.id.includes('checklist')
-                              ? 'task'
-                              : selectedAction.id.includes('question')
-                                ? 'question'
-                                : 'concept',
-                          status: sourceRefs.length ? 'ai_generated' : 'needs_review',
-                          source_refs: sourceRefs
-                      }
-                  ]
-                : [],
-            draft_edges:
-                shouldDraftNode && targetNodeId
-                    ? [
-                          {
-                              id: `draft-edge-${targetNodeId}-${draftNodeId}`,
-                              source: targetNodeId,
-                              target: draftNodeId
-                          }
-                      ]
-                    : [],
-            draft_annotations: suggestions.map((suggestion, index) => ({
-                id: `suggestion-${index + 1}`,
-                type: 'follow_up_suggestion',
-                text: suggestion
-            })),
+            draft_nodes: draftNodes,
+            draft_edges: draftEdges,
+            draft_annotations: draftAnnotations,
             validation_report: {
                 status: 'not_run',
                 message: 'Waiting for Agent A/C preview contract integration.'
@@ -238,9 +264,17 @@ const PromptModal = ({
             }
         };
 
-        const activatePreview = (preview) => {
-            setGeneratedHelperPreview('nodeAiActionRequest', preview);
-            setActiveAIActionPreview(preview);
+        const activateSession = (session) => {
+            const nextSession = session?.session_id
+                ? session
+                : session?.draft_session?.session_id
+                  ? session.draft_session
+                  : session?.session?.session_id
+                    ? session.session
+                    : fallbackSession;
+            setGeneratedHelperPreview('nodeAiActionRequest', legacyPreview);
+            setActiveAIActionPreview(undefined);
+            setActiveAIDraftSession(nextSession);
             if (scope === 'branch' || scope === 'node') {
                 setSelectedBranchId(targetNodeId);
                 setInspectorNodeId(targetNodeId);
@@ -261,46 +295,47 @@ const PromptModal = ({
                     model: selectedModel
                 }
             });
-            setStageMessage('Preview generated. Review it in the node inspector before accepting.');
+            setStageMessage('Draft session generated. Refine it in the drafting table before accepting.');
             window.setTimeout(() => popNode(), 150);
         };
 
         try {
-            const endpoint = flowId
-                ? previewEndpoint({
-                      flowId,
-                      scope: scope || 'node',
-                      nodeId: targetNodeId
-                  })
-                : '';
+            const endpoint = flowId ? draftSessionEndpoint({ flowId }) : '';
             const response = endpoint
                 ? await axios.post(endpoint, {
                       role: role.id,
                       role_id: role.id,
                       action: selectedAction.id,
-                      scope: {
-                          type: scope || 'node',
-                          ...(scope === 'workspace' ? {} : { node_id: targetNodeId })
-                      },
+                      intent: selectedAction.id,
+                      scope: normalizedScope,
                       custom_prompt: customPrompt.trim() || null,
+                      prompt: customPrompt.trim() || selectedAction.label,
                       created_by: 'user',
+                      model_policy: selectedModel === 'auto' ? 'balanced' : 'explicit',
                       model: selectedModel === 'auto' ? null : selectedModel
                   })
                 : null;
-            activatePreview(response?.data || fallbackPreview);
+            activateSession(response?.data || fallbackSession);
         } catch (error) {
             const detail =
                 error.response?.data?.detail?.message ||
                 error.response?.data?.detail ||
                 error.message ||
                 'Unable to generate preview.';
-            activatePreview({
-                ...fallbackPreview,
+            activateSession({
+                ...fallbackSession,
                 warnings: [String(detail)],
-                validation_report: {
-                    ...fallbackPreview.validation_report,
-                    status: 'fallback',
-                    message: 'Backend preview was unavailable; staged a local preview.'
+                revisions: fallbackSession.revisions.map((revision) => ({
+                    ...revision,
+                    validation_report: {
+                        ...revision.validation_report,
+                        status: 'fallback',
+                        message: 'Backend draft session was unavailable; staged a local draft.'
+                    }
+                })),
+                metadata: {
+                    ...fallbackSession.metadata,
+                    backend_warning: String(detail)
                 }
             });
         } finally {

@@ -128,12 +128,28 @@ Recommended first-class output types:
 - Source coverage report
 - Source repair plan
 - Handoff package
+- Implementation handoff package
 
 These should have explicit states:
 
 ```text
 requested -> generated preview -> reviewed -> accepted -> applied/exported
 ```
+
+### 4. Nudges
+
+Nudges are lightweight recommendations based on the current graph and settings.
+
+They should suggest next actions without forcing the user into them.
+
+Examples:
+
+- "5 claims need source support."
+- "This branch can become a checklist."
+- "3 task-like nodes are missing owners."
+- "2 nodes are outside the current viewport."
+- "This source is uploaded but not cited."
+- "Your brief asks for SME questions, but none exist yet."
 
 ## Projection Vs Generation Rule
 
@@ -168,20 +184,211 @@ Examples:
 Do not make filters feel seamless by hiding uncertainty. Make the uncertainty
 visible and actionable.
 
-### 4. Nudges
+## Additional Guardrails
 
-Nudges are lightweight recommendations based on the current graph and settings.
+These guardrails keep the think space flexible without turning it into a vague
+anything-machine.
 
-They should suggest next actions without forcing the user into them.
+### Artifact Registry
 
-Examples:
+Every AI output type should be registered before agents wire UI or backend
+generation around it. This prevents each lane from inventing slightly different
+names or schemas for the same idea.
 
-- "5 claims need source support."
-- "This branch can become a checklist."
-- "3 task-like nodes are missing owners."
-- "2 nodes are outside the current viewport."
-- "This source is uploaded but not cited."
-- "Your brief asks for SME questions, but none exist yet."
+Each registered artifact type must define:
+
+- `artifact_type`
+- required input data
+- optional input data
+- generated schema
+- projection requirements
+- supported views
+- preview component
+- accept behavior
+- export behavior
+- validation rules
+
+Example:
+
+```json
+{
+  "artifact_type": "knowledge_graph",
+  "requires": ["nodes"],
+  "optional": [
+    "source_refs",
+    "entities",
+    "tags",
+    "explicit_edges",
+    "semantic_similarity"
+  ],
+  "outputs": ["relationship_edges", "clusters", "rationales"],
+  "preview_component": "KnowledgeGraphPreview",
+  "accept_behavior": "append_edges_and_metadata",
+  "validation": ["edge_has_source_signal_or_needs_review"]
+}
+```
+
+### Relationship Contract
+
+Knowledge Graph / Connections edges must be typed. Untyped relationship edges
+will quickly become a visually interesting but unauditable hairball.
+
+Each relationship edge should include:
+
+```json
+{
+  "source_node_id": "node-1",
+  "target_node_id": "node-2",
+  "relationship_type": "depends_on",
+  "source_signal": "explicit_text",
+  "confidence": 0.78,
+  "rationale": "Both nodes reference the same approval workflow.",
+  "source_refs": [],
+  "assumptions": [],
+  "review_state": "needs_review"
+}
+```
+
+Allowed starter relationship types:
+
+- `contains`
+- `references`
+- `depends_on`
+- `duplicates`
+- `conflicts_with`
+- `similar_to`
+- `derived_from`
+- `supports`
+- `contradicts`
+- `implements`
+- `owned_by`
+- `requires_review_by`
+- `related_to`
+
+Allowed starter source signals:
+
+- `explicit_text`
+- `shared_source`
+- `semantic_similarity`
+- `user_created`
+- `ai_inferred`
+- `external_ref`
+
+### Visual Artifact Provenance
+
+Visual artifacts may be projections or render blocks, but they must reference
+canonical nodes, edges, source chunks, or accepted artifact data.
+
+They should not become isolated visual-only state unless explicitly marked as
+`draft` or `export_only`.
+
+Every generated artifact should record:
+
+- `generated_by`
+- prompt profile / AI role
+- input scope
+- input source refs
+- generated timestamp
+- model/provider
+- confidence summary
+- assumptions
+- validation status
+
+This matters most for charts and knowledge graphs because they can imply more
+precision than the source supports.
+
+### Scope Selector
+
+Every AI output generation action must declare a scope.
+
+Supported initial scopes:
+
+- whole workspace
+- selected branch
+- selected nodes
+- selected source document
+- current filtered view
+
+The scope should be visible before generation and preserved in Activity,
+artifact metadata, and preview/accept history.
+
+### Preview Diff
+
+Any AI output that mutates the canonical workspace must show a preview diff
+before acceptance.
+
+The diff should summarize:
+
+- new nodes
+- updated nodes
+- new edges
+- new relationship edges
+- new artifact records
+- review-state changes
+- assumptions and unsourced items
+
+Example:
+
+```text
++ 8 new nodes
++ 12 relationship edges
++ 1 checklist artifact
+~ 4 nodes updated with owner/status fields
+! 5 unsourced items marked needs_review
+```
+
+### Chart Safety
+
+Rendered charts require structured or extractable data. If only prose is
+available, the app must generate an extracted-data preview first.
+
+Charts must expose the source data table or source refs used to render them.
+
+Starter chart types:
+
+- bar
+- line
+- pie/donut
+- timeline
+- matrix
+- scatter
+- stacked bar
+
+Likely high-value chart artifacts:
+
+- timeline
+- status matrix
+- category counts
+- source coverage chart
+- task readiness chart
+
+### Implementation Handoff Package
+
+Add `implementation_handoff_package` as a first-class artifact type. This is the
+"send this to people so they can implement it" output.
+
+Recommended contents:
+
+- summary
+- scope
+- accepted nodes
+- tasks/checklist
+- source refs
+- assumptions
+- open SME questions
+- risks
+- recommended next actions
+- monday export candidates
+- Miro export candidates
+
+### Automation Rule
+
+Automation is downstream of accepted structure.
+
+Do not add background automation until previews, validation, and handoff
+packages are reliable. Prefer explicit user-invoked actions such as "Find
+connections," "Create flow chart," "Extract chart data," or "Create
+implementation handoff package" before adding automation layers.
 
 ## Settings Principle
 
@@ -251,6 +458,8 @@ Deliverables:
 - Define an `output_type` contract for generated artifacts.
 - Define an `artifact_type` or compatible render-block extension when the
   output is a visual block rather than only graph nodes.
+- Define the Artifact Registry location and seed it with starter artifact
+  definitions.
 - Define relationship metadata for knowledge graph projections:
   - relationship type
   - source signal
@@ -275,6 +484,8 @@ Back-check questions:
   edges instead of only hierarchy?
 - Can a brief request `chart` and receive a renderable chart spec plus source
   data or table rows?
+- Does every generated artifact record scope, provenance, validation status,
+  and preview diff metadata?
 - Can generated outputs still be represented in the canonical graph?
 - Are unsupported or inferred outputs marked `needs_review`?
 - Does the model still produce valid React Flow graph data where needed?
@@ -316,6 +527,7 @@ Deliverables:
 - Add a Knowledge Graph / Connections view that shows non-hierarchical
   relationships, clusters, weak ties, and source/semantic links when available.
 - Make AI-generated outputs visibly preview-first.
+- Add preview diff summaries before accepting generated output mutations.
 - Make empty states action-aware:
   - "Create knowledge graph"
   - "Find connections"
@@ -337,6 +549,7 @@ Back-check questions:
 - Does "Create knowledge graph" clarify whether the app is projecting existing
   links or asking AI to infer/enrich relationships?
 - Can the user see what has already been accepted?
+- Can the user see exactly what will change before accepting generated output?
 - Are generated outputs scoped to whole graph vs selected branch?
 - Are labels consistent with Activity and AI Helpers?
 
@@ -531,11 +744,13 @@ You are Agent A for UX_NUDGES_AND_OUTPUTS_ROADMAP.md. Own backend output
 contracts and generation semantics. Make AI generation treat mind_map, outline,
 knowledge_graph, flow_chart, table, chart, tasks, checklist, sme_questions,
 missing_info_report, source_coverage, source_repair, and handoff_package as
-first-class output or artifact types. Preserve the canonical think space and
-preview-first mutation rules. Add backend tests proving non-mind-map outputs
-and visual artifacts are structurally generated and marked needs_review when
-unsupported. Do not build nudge UI or settings UI. Update the roadmap with
-checkboxes/status notes when complete.
+first-class output or artifact types. Add an Artifact Registry with required
+inputs, generated schema, validation rules, accept behavior, and export behavior
+per artifact type. Preserve the canonical think space and preview-first
+mutation rules. Add backend tests proving non-mind-map outputs and visual
+artifacts are structurally generated and marked needs_review when unsupported.
+Do not build nudge UI or settings UI. Update the roadmap with checkboxes/status
+notes when complete.
 ```
 
 ### Agent B Job
@@ -547,7 +762,8 @@ clearly tell Views, Filters, AI Outputs, Review, and Handoff apart. Empty states
 should offer concrete generation actions such as Create knowledge graph, Find
 connections, Create flow chart, Extract chart data, Generate task preview, or
 Draft SME questions. Show whether an output is locally projected, AI-generated,
-accepted, or applied. Do not change backend generation or settings persistence.
+accepted, or applied. Add preview diff summaries before accepting generated
+output mutations. Do not change backend generation or settings persistence.
 Update the roadmap with checkboxes/status notes when complete.
 ```
 
@@ -592,6 +808,9 @@ Update the roadmap with pass/fail notes.
 ### Phase 1: Output Contract
 
 - [ ] Agent A: Define output type enum/contract.
+- [ ] Agent A: Add Artifact Registry with required inputs, optional inputs,
+  schema, projection requirements, preview component, accept behavior, export
+  behavior, and validation rules.
 - [ ] Agent A: Define artifact/render-block contract for flow charts and
   rendered charts.
 - [ ] Agent A: Define knowledge graph relationship contract for non-hierarchical
@@ -607,6 +826,9 @@ Update the roadmap with pass/fail notes.
 - [ ] Agent B: Group current Local Views into clear product sections.
 - [ ] Agent B: Add Knowledge Graph / Connections as a distinct view or output
   surface from hierarchical Map.
+- [ ] Agent B: Add scope selector affordance for workspace, branch, selected
+  nodes, selected source document, and current filtered view.
+- [ ] Agent B: Add preview diff summaries before generated output acceptance.
 - [ ] Agent B: Rename action labels to distinguish "view" from "generate."
 - [ ] Agent B: Add accepted/applied state to output views.
 - [ ] Agent B: Add output empty states with concrete AI actions.
@@ -656,6 +878,63 @@ Update the roadmap with pass/fail notes.
 - [ ] Agent E: Verify source/SME/task/checklist flows from empty states.
 - [ ] Agent E: Record pass/fail notes in this roadmap.
 
+## Evaluation Fixtures
+
+AI creating more than mind maps must be testable with representative inputs,
+not judged by whether a demo "looks good."
+
+Use or create fixtures for:
+
+- Autodesk standards-style DOCX.
+- Procedure/SOP PDF.
+- Meeting notes TXT/MD.
+- Software inventory CSV or table-style source.
+- Mixed ambiguous source with weak or implicit connections.
+
+Expected artifact checks:
+
+### Autodesk Standards-Style DOCX
+
+- mind map
+- knowledge graph
+- checklist
+- SME questions
+- source coverage report
+
+### Procedure/SOP PDF
+
+- flow chart
+- checklist
+- tasks
+- implementation handoff package
+
+### Meeting Notes TXT/MD
+
+- knowledge graph
+- open questions
+- task candidates
+- implementation handoff package
+
+### Software Inventory CSV/Table
+
+- table
+- rendered charts:
+  - category counts
+  - status matrix
+  - task readiness chart
+- source coverage or data provenance summary
+
+### Mixed Ambiguous Source
+
+- weak-connection knowledge graph
+- missing information report
+- SME questions
+- assumptions clearly marked `needs_review`
+
+Agents should add fixture-specific assertions where practical. At minimum, each
+fixture should define expected artifact types, required metadata, and known
+review/uncertainty behavior.
+
 ## Acceptance Criteria
 
 This roadmap is complete when:
@@ -670,6 +949,18 @@ This roadmap is complete when:
   generated artifacts.
 - When filters or views lack required fields, the app offers enrichment or
   reprompting instead of silently showing misleading empty states.
+- Artifact types are registered with required inputs, schemas, preview
+  components, accept behavior, export behavior, and validation rules.
+- Knowledge graph relationships are typed, confidence-scored, and source- or
+  assumption-backed.
+- Visual artifacts reference canonical nodes, edges, source chunks, or accepted
+  artifact data.
+- Charts require structured or extracted data and expose the data/provenance
+  used to render them.
+- AI output acceptance shows a preview diff before mutating the canonical
+  workspace.
+- Generation scope is explicit and persisted for every generated artifact.
+- Implementation handoff packages can be generated from accepted structure.
 - AI outputs have preview/review/accept/applied states.
 - Map, Outline, Table, and Tasks are clearly views over the graph.
 - Filters are visible, composable, and resettable.
@@ -692,11 +983,20 @@ This roadmap is complete when:
 
 - Do not let "filters" mutate graph data.
 - Do not let "view" labels imply generation.
+- Do not let unregistered artifact types appear in backend prompts or frontend
+  preview code.
+- Do not accept untyped knowledge graph edges.
+- Do not let visual artifacts become detached from canonical workspace data
+  unless marked `draft` or `export_only`.
+- Do not render charts from prose without an extracted-data preview.
+- Do not accept generated output without a preview diff.
 - Do not pretend every filter works on every artifact. If required metadata is
   missing, show the gap and offer enrichment.
 - Do not make automation the primary answer to unclear structure. Prefer
   explicit user-invoked actions such as "Find connections" or "Create flow
   chart" before any automation layer.
+- Do not introduce background automation until previews, validation, and
+  implementation handoff packages are reliable.
 - Do not collapse knowledge graph, mind map, and flow chart into one generic
   graph view. They answer different user questions.
 - Do not let generated checklist/tasks drift outside canonical node metadata.

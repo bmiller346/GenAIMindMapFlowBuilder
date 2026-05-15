@@ -3,7 +3,13 @@ from __future__ import annotations
 import os
 from contextvars import ContextVar
 
-from fastapi import HTTPException, status
+try:
+    from fastapi import HTTPException, status
+except ModuleNotFoundError:
+    HTTPException = None
+
+    class status:
+        HTTP_503_SERVICE_UNAVAILABLE = 503
 
 
 class MissingConfigurationError(RuntimeError):
@@ -37,6 +43,8 @@ def require_settings(*names: str) -> None:
 
 
 def configuration_http_error(error: MissingConfigurationError) -> HTTPException:
+    if HTTPException is None:
+        raise error
     return HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail=str(error),

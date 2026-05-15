@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ai_model_policy import choose_openai_model, normalize_model_name
+from ai_model_policy import choose_openai_model, normalize_model_name, normalize_model_policy
 
 
 def test_simple_low_risk_prompt_uses_fast_model():
@@ -35,6 +35,20 @@ def test_explicit_model_selection_wins():
 
     assert decision.model == "gpt-5.4"
     assert decision.tier == "explicit"
+    assert decision.policy == "explicit_model"
+
+
+def test_named_draft_model_policies_choose_expected_tiers():
+    speed = choose_openai_model(model_policy="speed", task="create a quick outline")
+    deep = choose_openai_model(model_policy="deep_review", task="create a quick outline")
+    balanced = choose_openai_model(model_policy="balanced", task="create a longer draft", content="x" * 2000)
+
+    assert speed.tier == "speed"
+    assert speed.policy == "speed"
+    assert deep.model == "gpt-5.5"
+    assert deep.policy == "deep_review"
+    assert balanced.tier == "balanced"
+    assert normalize_model_policy("Deep Review") == "deep_review"
 
 
 def test_rejects_models_outside_docmap_policy():

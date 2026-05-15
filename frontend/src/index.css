@@ -3613,7 +3613,7 @@ img:hover {
 }
 
 .node-inspector {
-  width: min(22rem, calc(100vw - 2rem));
+  width: min(30rem, calc(100vw - 2rem));
   max-height: calc(100vh - 9rem);
   margin-top: 4rem;
   overflow: hidden;
@@ -3970,6 +3970,259 @@ img:hover {
   border-color: transparent;
   background-color: var(--add-button-bg-color);
   color: var(--contrast-font);
+}
+
+.ai-draft-session-panel {
+  display: grid;
+  gap: 0.8rem;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 0.65rem;
+  background-color: rgba(96, 165, 250, 0.08);
+  padding: 0.75rem;
+}
+
+.ai-draft-session-toolbar,
+.ai-draft-accept {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.ai-draft-session-toolbar {
+  justify-content: space-between;
+}
+
+.ai-draft-session-toolbar > div {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+}
+
+.ai-draft-session-toolbar p,
+.ai-draft-meta-grid span,
+.ai-draft-history span,
+.ai-draft-item label span,
+.ai-draft-table span,
+.ai-draft-kanban strong {
+  color: var(--input-color);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ai-draft-session-toolbar strong {
+  overflow: hidden;
+  color: var(--font-color);
+  font-size: 0.92rem;
+  line-height: 1.16rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-draft-session-toolbar > div > span,
+.ai-draft-meta-grid small,
+.ai-draft-message,
+.ai-draft-empty {
+  color: var(--font-color);
+  font-size: 0.74rem;
+  line-height: 1.08rem;
+  opacity: 0.72;
+}
+
+.ai-draft-session-toolbar button,
+.ai-draft-tabs button,
+.ai-draft-accept button,
+.ai-draft-conversation button {
+  border: 1px solid var(--question-border);
+  border-radius: 0.5rem;
+  background-color: var(--input-bar-color);
+  color: var(--font-color);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 800;
+  min-height: 2.15rem;
+  padding: 0 0.65rem;
+}
+
+.ai-draft-session-toolbar button {
+  width: 2rem;
+  min-width: 2rem;
+  border-radius: 50%;
+  padding: 0;
+}
+
+.ai-draft-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.ai-draft-meta-grid > div,
+.ai-draft-history,
+.ai-draft-item,
+.ai-draft-table,
+.ai-draft-kanban section {
+  display: grid;
+  gap: 0.28rem;
+  border: 1px solid var(--question-border);
+  border-radius: 0.5rem;
+  background-color: var(--input-bar-color);
+  padding: 0.58rem;
+}
+
+.ai-draft-meta-grid strong {
+  color: var(--font-color);
+  font-size: 0.8rem;
+  line-height: 1.08rem;
+  overflow-wrap: anywhere;
+}
+
+.ai-draft-conversation {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.ai-draft-history {
+  max-height: 6.5rem;
+  overflow: auto;
+}
+
+.ai-draft-history p {
+  display: grid;
+  gap: 0.15rem;
+  color: var(--font-color);
+  font-size: 0.78rem;
+  line-height: 1.15rem;
+  opacity: 0.84;
+}
+
+.ai-draft-conversation textarea {
+  min-height: 4.6rem;
+}
+
+.ai-draft-conversation button {
+  justify-self: end;
+  background-color: #66c2a5;
+  color: #111;
+}
+
+.ai-draft-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.ai-draft-tabs button {
+  min-width: 0;
+  padding: 0 0.35rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-draft-tabs button.active {
+  border-color: rgba(102, 194, 165, 0.7);
+  background-color: rgba(102, 194, 165, 0.16);
+}
+
+.ai-draft-projection {
+  display: grid;
+  gap: 0.48rem;
+  max-height: 18rem;
+  overflow: auto;
+}
+
+.ai-draft-item label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ai-draft-item input {
+  width: auto;
+}
+
+.ai-draft-item strong {
+  color: var(--font-color);
+  font-size: 0.84rem;
+  line-height: 1.16rem;
+}
+
+.ai-draft-item p,
+.ai-draft-item small {
+  color: var(--font-color);
+  font-size: 0.75rem;
+  line-height: 1.12rem;
+  opacity: 0.72;
+}
+
+.ai-draft-table {
+  overflow: auto;
+}
+
+.ai-draft-table > div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1.4fr) minmax(5.5rem, 0.8fr) minmax(5rem, 0.6fr);
+  gap: 0.5rem;
+  align-items: center;
+  min-width: 20rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--question-border);
+}
+
+.ai-draft-table > div:last-child {
+  border-bottom: 0;
+}
+
+.ai-draft-table strong {
+  color: var(--font-color);
+  font-size: 0.78rem;
+  line-height: 1.08rem;
+}
+
+.ai-draft-kanban {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.ai-draft-kanban span {
+  border: 1px solid var(--question-border);
+  border-radius: 0.4rem;
+  color: var(--font-color);
+  font-size: 0.72rem;
+  line-height: 1.05rem;
+  padding: 0.35rem;
+}
+
+.ai-draft-accept {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  border-top: 1px solid var(--question-border);
+  padding-top: 0.7rem;
+}
+
+.ai-draft-accept label {
+  flex: 1 1 9rem;
+  min-width: 9rem;
+}
+
+.ai-draft-accept button:not(.secondary) {
+  border-color: transparent;
+  background-color: var(--add-button-bg-color);
+  color: var(--contrast-font);
+}
+
+.ai-draft-accept button.secondary {
+  background-color: transparent;
+}
+
+.ai-draft-accept button:disabled,
+.ai-draft-conversation button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .node-inspector-actions {
