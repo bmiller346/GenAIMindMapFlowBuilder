@@ -2,6 +2,7 @@ import {
     normalizeWorkspaceEdges,
     normalizeWorkspaceNodes
 } from './manualNodes.js';
+import { normalizeAIActionRuns } from './aiActionRuns.js';
 
 export const EMPTY_FLOW_SNAPSHOT = {
     nodes: [],
@@ -10,6 +11,7 @@ export const EMPTY_FLOW_SNAPSHOT = {
     workspace_brief: {},
     source_library: [],
     activity_events: [],
+    ai_action_runs: [],
     automations: []
 };
 
@@ -37,6 +39,7 @@ export const parseFlowSnapshot = (flowJson) => {
             activity_events: Array.isArray(parsed.activity_events)
                 ? parsed.activity_events
                 : [],
+            ai_action_runs: normalizeAIActionRuns(parsed.ai_action_runs),
             automations: Array.isArray(parsed.automations) ? parsed.automations : []
         };
     } catch (error) {
@@ -53,6 +56,7 @@ export const createFlowSnapshot = ({
     workspaceBrief = {},
     sourceLibrary = [],
     activityEvents = [],
+    aiActionRuns = [],
     automations = []
 }) => {
     const normalizedNodes = normalizeWorkspaceNodes(nodes);
@@ -69,6 +73,7 @@ export const createFlowSnapshot = ({
         workspace_brief: workspaceBrief || {},
         source_library: Array.isArray(sourceLibrary) ? sourceLibrary : [],
         activity_events: Array.isArray(activityEvents) ? activityEvents : [],
+        ai_action_runs: normalizeAIActionRuns(aiActionRuns),
         automations: Array.isArray(automations) ? automations : []
     };
 };
@@ -82,6 +87,7 @@ export const stringifyFlowSnapshot = (snapshot) =>
                       undo: undefined
                   }))
                 : [];
+            const aiActionRuns = normalizeAIActionRuns(snapshot?.ai_action_runs);
             const automations = Array.isArray(snapshot?.automations)
                 ? snapshot.automations.map((automation) => ({
                       ...automation,
@@ -96,6 +102,7 @@ export const stringifyFlowSnapshot = (snapshot) =>
                     ...EMPTY_FLOW_SNAPSHOT,
                     ...(snapshot || {}),
                     activity_events: activityEvents,
+                    ai_action_runs: aiActionRuns,
                     automations
                 },
                 nodes: snapshot?.nodes || [],
@@ -104,6 +111,7 @@ export const stringifyFlowSnapshot = (snapshot) =>
                 workspaceBrief: snapshot?.workspace_brief || {},
                 sourceLibrary: snapshot?.source_library || [],
                 activityEvents,
+                aiActionRuns,
                 automations
             });
         })()

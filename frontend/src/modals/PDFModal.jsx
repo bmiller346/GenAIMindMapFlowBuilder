@@ -24,6 +24,10 @@ import {
     createOperationSnapshot,
     restoreOperationSnapshot
 } from '../utils/operationSnapshots';
+import {
+    createFlowSnapshot,
+    stringifyFlowSnapshot
+} from '../utils/flowSnapshots';
 
 const PDFModal = () => {
     const flowId = flowStore((s) => s.flow_id);
@@ -37,6 +41,10 @@ const PDFModal = () => {
     const setFlowId = flowStore((s) => s.setFlow);
     const flow_id = flowStore((s) => s.flow_id);
     const setFlowName = flowStore((s) => s.setFlowName);
+    const flowName = flowStore((s) => s.flow_name);
+    const flowType = flowStore((s) => s.flow_type);
+    const setFlowType = flowStore((s) => s.setFlowType);
+    const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
     const { fitView, setViewport } = useReactFlow();
     const selector = (state) => ({
         trigger: state.trigger,
@@ -65,7 +73,66 @@ const PDFModal = () => {
     } = useStore(useShallow(selector));
     const pdfAccept = '.pdf,application/pdf';
     const [processingType, setProcessingType] = useState('gpt');
-    const addDataSource = (e) => {
+
+    const ensureWorkspace = async () => {
+        const currentFlow = flowStore.getState();
+        if (currentFlow.flow_id && currentFlow.flow_id !== 'undefined') {
+            return currentFlow.flow_id;
+        }
+
+        const snapshot = createFlowSnapshot({
+            nodes,
+            edges,
+            viewport,
+            workspaceBrief
+        });
+        const nextFlowName = currentFlow.flow_name || flowName || 'Untitled workspace';
+        const nextFlowType = currentFlow.flow_type || flowType || 'manual';
+        const response = await axios.post(
+            'http://localhost:8000/create-flow',
+            {
+                flow_name: nextFlowName,
+                summary: 'Workspace created for source upload',
+                flow_json: stringifyFlowSnapshot(snapshot),
+                flow_type: nextFlowType
+            },
+            {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+
+        setFlowId(response.data.flow_id);
+        setFlowName(response.data.flow_name || nextFlowName);
+        setFlowType(response.data.flow_type || nextFlowType);
+        setSavedSnapshot(
+            snapshot,
+            stringifyFlowSnapshot(snapshot),
+            response.data.flow_name || nextFlowName,
+            response.data.flow_type || nextFlowType
+        );
+
+        return response.data.flow_id;
+    };
+
+    const addDataSource = async (e) => {
+        if (!file) {
+            showError(400, 'Choose a PDF file before uploading.');
+            return;
+        }
+
+        let currentFlowId;
+        try {
+            currentFlowId = await ensureWorkspace();
+        } catch (err) {
+            showError(
+                err.response?.status || err.status || 500,
+                requestErrorMessage(err)
+            );
+            return;
+        }
+
         const operationId = nanoid();
         const data = {
             file: file,
@@ -113,7 +180,7 @@ const PDFModal = () => {
                 undo: undefined
             });
         };
-        const [url, body, headerConfig] = setRequestData('pdf', flowId, data);
+        const [url, body, headerConfig] = setRequestData('pdf', currentFlowId, data);
         axios
             .post(`http://localhost:8000/${url}`, body, {
                 headers: {
@@ -217,6 +284,12 @@ const PDFModal = () => {
         pushNode(ErrorModal);
     };
 
+    function showError(statusCode, message) {
+        setStatus(statusCode);
+        setMsg(message);
+        pushNode(ErrorModal);
+    }
+
     const manageNodes = (data) => {
         const node = {
             id: data.component_id,
@@ -225,7 +298,7 @@ const PDFModal = () => {
             data: {
                 name: data.type,
                 content: file.name,
-                flow_id: flowId,
+                flow_id: flowStore.getState().flow_id || flowId,
                 prompt: 'Research Assistant',
                 file: file,
                 processing_type: processingType

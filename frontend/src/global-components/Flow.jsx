@@ -9,6 +9,7 @@ import { useReactFlow } from '@xyflow/react';
 import { parseFlowSnapshot, stringifyFlowSnapshot } from '../utils/flowSnapshots';
 import useActivityStore from '../stores/activityStore';
 import useAutomationStore from '../stores/automationStore';
+import { forgetWorkspace } from '../utils/workspaceSession';
 
 const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
     const pushNode = modalStore((s) => s.pushNode);
@@ -140,6 +141,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
         axios
             .delete(`http://localhost:8000/delete-flow/${data.flow_id}`)
             .then((res) => {
+                forgetWorkspace(data.flow_id);
                 setFlowList(updatedFlowss);
                 setIsDrawer(true);
             })

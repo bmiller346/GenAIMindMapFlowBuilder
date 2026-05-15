@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { rememberWorkspace } from "../utils/workspaceSession";
 const flowStore = create((set, get) => ({
 	flow_id: undefined,
 	theme: false,
@@ -9,6 +10,7 @@ const flowStore = create((set, get) => ({
 	},
 	setFlow: (id) => {
 		console.log("DEBUGGGGGGGGGGGGGGG", id)
+		rememberWorkspace(id)
 		set({
 			flow_id: id,
 			lastSavedSnapshot: undefined,

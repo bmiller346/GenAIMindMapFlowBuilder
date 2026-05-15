@@ -8,15 +8,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ai_helpers import (
     AI_HELPER_PREVIEW_CONTRACT_VERSION,
+    AI_ACTION_PREVIEW_CONTRACT_VERSION,
+    build_ai_action_run,
     build_helper_preview,
     build_openai_helper_preview_payload,
+    generate_ai_action_preview,
     generate_integration_operator_preview,
     generate_helper_preview,
     generate_project_planner_preview,
     generate_reviewer_preview,
     generate_source_librarian_preview,
+    get_prompt_profile,
+    list_prompt_profiles,
     normalize_helper_scope,
     parse_ai_helper_preview_response,
+    validate_ai_action_drafts_for_accept,
+    validate_ai_action_request,
+    validate_ai_action_run,
     validate_helper_action,
     validate_ai_helper_preview,
 )
@@ -463,3 +471,105 @@ def test_validate_ai_helper_preview_rejects_invalid_item_shape():
         "ai_helper_preview.preview_items.0.assumptions: must be a list of strings",
         "ai_helper_preview.preview_items.0.proposed_mutation: must be an object",
     ]
+
+
+def test_prompt_profile_registry_includes_docmap_and_legacy_roles():
+    profiles = list_prompt_profiles()
+    labels = {profile["label"] for profile in profiles}
+    groups = {profile["label"]: profile["group"] for profile in profiles}
+
+    assert "Standards Extractor" in labels
+    assert "SME Question Generator" in labels
+    assert "Strategic Advisor" in labels
+    assert "Research Assistant" in labels
+    assert "Productivity Coach" in labels
+    assert "Data Interpreter" in labels
+    assert groups["Strategic Advisor"] == "General"
+    assert get_prompt_profile("Task Planner")["role_id"] == "task_planner"
+
+
+def test_validate_ai_action_request_rejects_unsupported_combinations():
+    with pytest.raises(GraphSchemaError) as exc:
+        validate_ai_action_request(
+            role="Task Planner",
+            action="find_unsupported_assumptions",
+            scope={"type": "workspace"},
+        )
+
+    assert exc.value.errors == [
+        "ai_action.action: unsupported action 'find_unsupported_assumptions' for role 'Task Planner'",
+        "ai_action.scope: unsupported scope 'workspace' for role 'Task Planner'",
+    ]
+
+
+def test_build_and_validate_ai_action_run_shape():
+    action_run = build_ai_action_run(
+        workspace_id="workspace-1",
+        scope={"type": "node", "node_id": "root"},
+        role="SME Question Generator",
+        action="create_sme_questions",
+        input_source_refs=[{"document_id": "doc-1"}],
+        generated_node_ids=["draft-1"],
+    )
+
+    assert action_run["workspace_id"] == "workspace-1"
+    assert action_run["source_node_id"] == "root"
+    assert action_run["scope"] == "node"
+    assert action_run["status"] == "previewed"
+    assert validate_ai_action_run(action_run)["generated_node_ids"] == ["draft-1"]
+
+
+def test_generate_ai_action_preview_returns_contract_shape_for_node_scope():
+    preview = generate_ai_action_preview(
+        sample_graph(),
+        workspace_id="workspace-1",
+        role="Task Planner",
+        action="generate_tasks",
+        scope={"type": "node", "node_id": "child"},
+    )
+
+    assert preview["scope"] == "node"
+    assert preview["role"] == "Task Planner"
+    assert preview["action"] == "generate_tasks"
+    assert preview["ai_action_run"]["source_node_id"] == "child"
+    assert preview["metadata"]["ai_action_preview_contract_version"] == (
+        AI_ACTION_PREVIEW_CONTRACT_VERSION
+    )
+    assert preview["draft_nodes"][0]["parent_id"] == "child"
+    assert preview["draft_nodes"][0]["status"] == "needs_review"
+    assert preview["validation_report"]["issues"][0]["code"] == "missing_source_ref"
+
+
+def test_generate_ai_action_preview_preserves_source_refs_for_branch_scope():
+    preview = generate_ai_action_preview(
+        sample_graph(),
+        workspace_id="workspace-1",
+        role="Task Planner",
+        action="generate_tasks",
+        scope={"type": "branch", "node_id": "root"},
+    )
+
+    assert preview["scope"] == "branch"
+    assert preview["source_refs"][0]["document_id"] == "doc-1"
+    assert preview["draft_nodes"][0]["source_refs"][0]["document_id"] == "doc-1"
+    assert preview["validation_report"]["issues"] == []
+
+
+def test_validate_ai_action_drafts_marks_unsourced_nodes_needs_review():
+    draft_nodes = [
+        {
+            "id": "draft-1",
+            "title": "Draft",
+            "node_type": "concept",
+            "status": "ai_generated",
+            "source_refs": [],
+        }
+    ]
+
+    report = validate_ai_action_drafts_for_accept(draft_nodes, [])
+
+    assert draft_nodes[0]["status"] == "needs_review"
+    assert report["repaired"] is True
+    assert report["issues"][0]["message"] == (
+        "AI action draft node is missing a source reference and was marked needs_review."
+    )

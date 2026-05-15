@@ -7,6 +7,7 @@ import {
     FiCopy,
     FiFileText,
     FiGitBranch,
+    FiMessageSquare,
     FiMoreHorizontal,
     FiPlus,
     FiScissors,
@@ -17,7 +18,9 @@ import SQLSvg from '../assets/sql.svg';
 import STARSvg from '../assets/star.svg';
 import NodeMetadataBadges from './NodeMetadataBadges';
 import ManualTableEditor from '../global-components/ManualTableEditor';
+import PromptModal from '../modals/PromptModal';
 import useStore from '../stores/store';
+import modalStore from '../stores/modalStore';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
 import {
@@ -47,6 +50,7 @@ const ResponseNode = ({ id, data }) => {
     const setInspectorNodeId = useStore((state) => state.setInspectorNodeId);
     const setActiveView = useStore((state) => state.setActiveView);
     const setSelectedBranchId = useStore((state) => state.setSelectedBranchId);
+    const pushModal = modalStore((state) => state.pushNode);
     const setSaveStatus = flowStore((state) => state.setSaveStatus);
     const recordActivity = useActivityStore((state) => state.recordActivity);
     const workspaceData = useMemo(
@@ -603,6 +607,24 @@ const ResponseNode = ({ id, data }) => {
         setIsMenuOpen(false);
     };
 
+    const openAskAi = (scope = 'node') => {
+        setSelectedBranchId(id);
+        pushModal(PromptModal, { scope, nodeId: id });
+        recordActivity({
+            type: 'ai_action_picker_opened',
+            title: scope === 'branch' ? 'Branch Ask AI opened' : 'Node Ask AI opened',
+            summary: `Opened preview-first AI actions for ${displayTitle || summary || id}.`,
+            node_ids: [id],
+            metadata: {
+                scope
+            }
+        });
+        setIsMenuOpen(false);
+        setIsSlashOpen(false);
+        setSlashQuery('');
+        setActiveSlashIndex(0);
+    };
+
     const deleteNode = () => {
         const descendantIds = getDescendantIds(id);
 
@@ -672,9 +694,25 @@ const ResponseNode = ({ id, data }) => {
             action: (baseNodes) => addChild({ title: 'New note', nodeType: 'reference' }, baseNodes)
         },
         {
+            id: 'ask-ai',
+            group: 'AI',
+            label: 'Ask AI',
+            description: 'Choose a role and preview action',
+            previewOnly: true,
+            action: () => openAskAi('node')
+        },
+        {
+            id: 'branch-ai',
+            group: 'AI',
+            label: 'Ask AI about branch',
+            description: 'Choose a role for this branch',
+            previewOnly: true,
+            action: () => openAskAi('branch')
+        },
+        {
             id: 'assistant',
             group: 'AI',
-            label: 'AI assistant',
+            label: 'AI helpers',
             description: 'Open review helpers for this branch',
             previewOnly: true,
             action: (baseNodes) =>
@@ -997,6 +1035,17 @@ const ResponseNode = ({ id, data }) => {
                             <button type="button" onClick={duplicateNode}>
                                 <FiCopy />
                                 Duplicate
+                            </button>
+                        </div>
+                        <div className="node-action-group">
+                            <p>AI</p>
+                            <button type="button" onClick={() => openAskAi('node')}>
+                                <FiMessageSquare />
+                                Ask AI about node
+                            </button>
+                            <button type="button" onClick={() => openAskAi('branch')}>
+                                <FiGitBranch />
+                                Ask AI about branch
                             </button>
                         </div>
                         <div className="node-action-group">

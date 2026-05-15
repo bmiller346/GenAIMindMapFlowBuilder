@@ -128,6 +128,11 @@ Open notes:
   are now covered.
 - Copy-link and last-edited menu affordances are deferred until durable app links
   and node edit timestamps exist.
+- Node-level AI actions and prompt profiles are intentionally out of this
+  roadmap's completed manual-authoring scope. They are split into
+  `NODE_AI_ACTIONS_ROADMAP.md`; future agents should reuse the completed
+  node-local menus and slash-command affordances while preserving preview/accept
+  graph mutation rules.
 
 ## Design Principles
 

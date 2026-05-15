@@ -1,9 +1,16 @@
 /* eslint-disable react/prop-types */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
+import {
+    acceptAIActionPreview,
+    createAIActionRun,
+    previewDraftEdges,
+    previewDraftNodes,
+    previewNonNodeOutputs
+} from '../utils/aiActionRuns';
 
 const NODE_TYPES = [
     'category',
@@ -120,9 +127,22 @@ const externalRefSummary = (provider, ref) => {
 const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
     const selector = (state) => ({
         nodes: state.nodes,
-        setNodes: state.setNodes
+        edges: state.edges,
+        setNodes: state.setNodes,
+        setEdges: state.setEdges,
+        activeAIActionPreview: state.activeAIActionPreview,
+        clearActiveAIActionPreview: state.clearActiveAIActionPreview,
+        recordAIActionRun: state.recordAIActionRun
     });
-    const { nodes, setNodes } = useStore(useShallow(selector));
+    const {
+        nodes,
+        edges,
+        setNodes,
+        setEdges,
+        activeAIActionPreview,
+        clearActiveAIActionPreview,
+        recordAIActionRun
+    } = useStore(useShallow(selector));
     const flowId = flowStore((state) => state.flow_id);
     const setSaveStatus = flowStore((state) => state.setSaveStatus);
     const recordActivity = useActivityStore((state) => state.recordActivity);
@@ -132,6 +152,26 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
     );
     const [draft, setDraft] = useState({});
     const [applyMessage, setApplyMessage] = useState('');
+    const recordedPreviewIds = useRef(new Set());
+    const aiDraftNodes = useMemo(
+        () => previewDraftNodes(activeAIActionPreview),
+        [activeAIActionPreview]
+    );
+    const aiDraftEdges = useMemo(
+        () => previewDraftEdges(activeAIActionPreview),
+        [activeAIActionPreview]
+    );
+    const aiNonNodeOutputs = useMemo(
+        () => previewNonNodeOutputs(activeAIActionPreview),
+        [activeAIActionPreview]
+    );
+    const aiPreviewAppliesHere =
+        activeAIActionPreview &&
+        (activeAIActionPreview.source_node_id === selectedNodeId ||
+            activeAIActionPreview.node_id === selectedNodeId ||
+            activeAIActionPreview.scope?.node_id === selectedNodeId ||
+            activeAIActionPreview.scope === 'workspace' ||
+            activeAIActionPreview.scope?.type === 'workspace');
 
     useEffect(() => {
         if (!selectedNode) {
@@ -162,6 +202,41 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
             monday_item_id: externalRefs.monday?.item_id || ''
         });
     }, [selectedNode]);
+
+    useEffect(() => {
+        if (!activeAIActionPreview || !aiPreviewAppliesHere) {
+            return;
+        }
+
+        const previewKey =
+            activeAIActionPreview.preview_id ||
+            activeAIActionPreview.ai_action_id ||
+            `${activeAIActionPreview.role}-${activeAIActionPreview.action}`;
+        if (recordedPreviewIds.current.has(previewKey)) {
+            return;
+        }
+
+        recordedPreviewIds.current.add(previewKey);
+        const run = createAIActionRun({
+            preview: activeAIActionPreview,
+            status: 'previewed'
+        });
+        recordActivity({
+            type: 'ai_action_previewed',
+            title: 'Previewed AI action',
+            summary: `${run.role}: ${run.action || 'generated preview'}.`,
+            node_ids: [run.source_node_id].filter(Boolean),
+            source_ids: run.input_source_refs
+                .map((ref) => ref.document_id || ref.source_id)
+                .filter(Boolean),
+            metadata: {
+                ai_action_id: run.ai_action_id,
+                preview_id: activeAIActionPreview.preview_id,
+                scope: run.scope
+            },
+            status: 'completed'
+        });
+    }, [activeAIActionPreview, aiPreviewAppliesHere, recordActivity]);
 
     if (!selectedNode) {
         return null;
@@ -274,6 +349,72 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                 ? 'Applied locally. Save or autosave will persist this workspace.'
                 : 'Applied locally. Create or open a workspace to persist it.'
         );
+    };
+
+    const acceptAIAction = () => {
+        const result = acceptAIActionPreview({
+            preview: activeAIActionPreview,
+            nodes,
+            edges
+        });
+
+        setNodes(result.nodes);
+        setEdges(result.edges);
+        recordAIActionRun(result.run);
+        clearActiveAIActionPreview();
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        recordActivity({
+            type: 'ai_action_accepted',
+            title: 'Accepted AI action preview',
+            summary: `Accepted ${result.run.generated_node_ids.length} generated node${
+                result.run.generated_node_ids.length === 1 ? '' : 's'
+            }.`,
+            node_ids: [
+                activeAIActionPreview.source_node_id ||
+                    activeAIActionPreview.node_id ||
+                    activeAIActionPreview.scope?.node_id,
+                ...result.run.generated_node_ids
+            ].filter(Boolean),
+            source_ids: result.run.input_source_refs
+                .map((ref) => ref.document_id || ref.source_id)
+                .filter(Boolean),
+            metadata: {
+                ai_action_id: result.run.ai_action_id,
+                preview_id: activeAIActionPreview.preview_id,
+                role: result.run.role,
+                action: result.run.action,
+                scope: result.run.scope
+            },
+            status: 'completed'
+        });
+    };
+
+    const rejectAIAction = () => {
+        const run = createAIActionRun({
+            preview: activeAIActionPreview,
+            status: 'rejected'
+        });
+
+        recordAIActionRun(run);
+        clearActiveAIActionPreview();
+        recordActivity({
+            type: 'ai_action_rejected',
+            title: 'Rejected AI action preview',
+            summary: `Rejected ${aiDraftNodes.length} draft node${
+                aiDraftNodes.length === 1 ? '' : 's'
+            } without changing the graph.`,
+            node_ids: [run.source_node_id].filter(Boolean),
+            metadata: {
+                ai_action_id: run.ai_action_id,
+                preview_id: activeAIActionPreview.preview_id,
+                role: run.role,
+                action: run.action,
+                scope: run.scope
+            },
+            status: 'completed'
+        });
     };
 
     const isSourceBacked = hasCitation(draft);
@@ -505,6 +646,93 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                         />
                     </label>
                 </div>
+
+                {aiPreviewAppliesHere ? (
+                    <div className="node-inspector-section ai-action-preview-card">
+                        <p>AI action preview</p>
+                        <div className="ai-action-preview-summary">
+                            <span>
+                                {activeAIActionPreview.role ||
+                                    activeAIActionPreview.helper_id ||
+                                    'AI action'}
+                            </span>
+                            <strong>
+                                {activeAIActionPreview.action || 'Generated preview'}
+                            </strong>
+                            <small>
+                                {[
+                                    `${aiDraftNodes.length} draft nodes`,
+                                    `${aiDraftEdges.length} draft edges`,
+                                    `${aiNonNodeOutputs.length} review outputs`
+                                ].join(' | ')}
+                            </small>
+                        </div>
+                        {aiDraftNodes.length > 0 ? (
+                            <div className="ai-action-preview-list">
+                                {aiDraftNodes.map((item, index) => {
+                                    const sourceRefs = Array.isArray(item.source_refs)
+                                        ? item.source_refs
+                                        : [];
+                                    return (
+                                        <article
+                                            key={item.id || item.node_id || index}
+                                            className="ai-action-preview-item"
+                                        >
+                                            <span>
+                                                {item.node_type || item.type || 'node'}
+                                                {sourceRefs.length === 0
+                                                    ? ' | needs review'
+                                                    : ' | source cited'}
+                                            </span>
+                                            <strong>
+                                                {item.title ||
+                                                    item.label ||
+                                                    item.question ||
+                                                    'AI draft'}
+                                            </strong>
+                                            {item.body || item.summary || item.rationale ? (
+                                                <p>
+                                                    {item.body ||
+                                                        item.summary ||
+                                                        item.rationale}
+                                                </p>
+                                            ) : null}
+                                        </article>
+                                    );
+                                })}
+                            </div>
+                        ) : null}
+                        {aiNonNodeOutputs.length > 0 ? (
+                            <div className="ai-action-preview-list">
+                                {aiNonNodeOutputs.map(({ type, item }, index) => (
+                                    <article
+                                        key={`${type}-${item.id || index}`}
+                                        className="ai-action-preview-item"
+                                    >
+                                        <span>{type.replaceAll('_', ' ')}</span>
+                                        <strong>
+                                            {item.title ||
+                                                item.question ||
+                                                item.label ||
+                                                String(item)}
+                                        </strong>
+                                        {item.reason || item.note || item.summary ? (
+                                            <p>{item.reason || item.note || item.summary}</p>
+                                        ) : null}
+                                    </article>
+                                ))}
+                            </div>
+                        ) : null}
+                        <div className="ai-action-preview-actions">
+                            <button type="button" onClick={rejectAIAction}>
+                                Reject
+                            </button>
+                            <button type="button" onClick={acceptAIAction}>
+                                Accept
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
 
                 <div className="node-inspector-section">
                     <p>External refs</p>

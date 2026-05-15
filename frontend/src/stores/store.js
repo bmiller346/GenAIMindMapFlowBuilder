@@ -7,6 +7,11 @@ import {
     createWorkspaceNode,
     updateWorkspaceNode
 } from '../utils/manualNodes';
+import {
+    createAIActionRun,
+    mergeAIActionRun,
+    normalizeAIActionRuns
+} from '../utils/aiActionRuns';
 
 // Sample
 const data = {
@@ -233,6 +238,8 @@ const useStore = create((set, get) => ({
     viewport: {},
     sourceLibrary: [],
     generatedHelperPreviews: {},
+    activeAIActionPreview: undefined,
+    aiActionRuns: [],
     onNodesChange: (change) => {
         console.log("Test");
         set({
@@ -300,6 +307,26 @@ const useStore = create((set, get) => ({
         const next = { ...get().generatedHelperPreviews };
         delete next[key];
         set({ generatedHelperPreviews: next });
+    },
+    setActiveAIActionPreview: (preview) => {
+        set({
+            activeAIActionPreview: preview || undefined,
+            aiActionRuns: preview
+                ? mergeAIActionRun(
+                      get().aiActionRuns,
+                      createAIActionRun({ preview, status: 'previewed' })
+                  )
+                : get().aiActionRuns
+        });
+    },
+    clearActiveAIActionPreview: () => {
+        set({ activeAIActionPreview: undefined });
+    },
+    setAIActionRuns: (runs = []) => {
+        set({ aiActionRuns: normalizeAIActionRuns(runs) });
+    },
+    recordAIActionRun: (run) => {
+        set({ aiActionRuns: mergeAIActionRun(get().aiActionRuns, run) });
     },
     uploadFile: (id, file) => {
         set({

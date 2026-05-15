@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const { app, BrowserWindow, Menu, dialog, ipcMain, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, ipcMain, safeStorage, session, shell } = require('electron');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -85,6 +85,78 @@ function resolveDesktopIcon(fileName = 'docmap.png') {
   return isDev
     ? path.resolve(__dirname, 'assets', fileName)
     : path.join(process.resourcesPath, 'electron', 'assets', fileName);
+}
+
+function rendererContentSecurityPolicy() {
+  const backendOrigins = [
+    `http://127.0.0.1:${BACKEND_PORT}`,
+    `http://localhost:${BACKEND_PORT}`
+  ];
+  const scriptSources = ["'self'"];
+  const styleSources = ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'];
+  const fontSources = ["'self'", 'data:', 'https://fonts.gstatic.com'];
+  const devOrigins = isDev
+    ? [
+        FRONTEND_DEV_URL,
+        'http://localhost:5173',
+        'ws://127.0.0.1:5173',
+        'ws://localhost:5173'
+      ]
+    : [];
+
+  if (isDev) {
+    scriptSources.push("'unsafe-inline'");
+  }
+
+  return [
+    "default-src 'self'",
+    `script-src ${scriptSources.join(' ')}`,
+    `style-src ${styleSources.join(' ')}`,
+    "img-src 'self' data: blob:",
+    `font-src ${fontSources.join(' ')}`,
+    "media-src 'self' data: blob:",
+    `connect-src 'self' ${backendOrigins.concat(devOrigins).join(' ')}`,
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-src 'none'"
+  ].join('; ');
+}
+
+function shouldApplyRendererCsp(url) {
+  if (url.startsWith('file://')) {
+    return true;
+  }
+
+  if (!isDev) {
+    return false;
+  }
+
+  try {
+    const requestUrl = new URL(url);
+    const devUrl = new URL(FRONTEND_DEV_URL);
+    return requestUrl.origin === devUrl.origin;
+  } catch {
+    return false;
+  }
+}
+
+function installContentSecurityPolicy() {
+  const csp = rendererContentSecurityPolicy();
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    if (!shouldApplyRendererCsp(details.url)) {
+      callback({ responseHeaders: details.responseHeaders });
+      return;
+    }
+
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp]
+      }
+    });
+  });
 }
 
 function resolveCredentialSettingsPath() {
@@ -556,6 +628,7 @@ function stopBackend() {
 
 app.whenReady().then(async () => {
   app.setName('DocMap');
+  installContentSecurityPolicy();
   installCredentialSettingsIpc();
   installMenu();
   startBackend();

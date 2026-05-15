@@ -14,6 +14,7 @@ from graph.schemas import GraphSchemaError
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
 AI_HELPER_PREVIEW_CONTRACT_VERSION = "1"
+AI_ACTION_PREVIEW_CONTRACT_VERSION = "1"
 HELPER_ACTIONS: dict[str, set[str]] = {
     "source_librarian": {"source_repair", "source_coverage"},
     "reviewer": {"missing_information", "sme_questions", "contradictions"},
@@ -21,6 +22,253 @@ HELPER_ACTIONS: dict[str, set[str]] = {
     "integration_operator": {"handoff_readiness", "sync_issue_review"},
 }
 SCOPE_TYPES = {"workspace", "branch", "node", "source"}
+AI_ACTION_SCOPES = {"workspace", "branch", "node"}
+AI_ACTION_RUN_STATUSES = {"previewed", "accepted", "rejected"}
+NODE_AI_ACTIONS = {
+    "expand_this_node",
+    "ask_follow_up",
+    "generate_child_nodes",
+    "convert_to_checklist",
+    "create_sme_questions",
+    "find_missing_source_support",
+    "interpret_table_data",
+    "generate_tasks",
+    "custom_prompt",
+}
+BRANCH_AI_ACTIONS = {
+    "summarize_branch",
+    "reorganize_branch",
+    "split_branch_into_categories",
+    "generate_tasks",
+    "generate_checklist",
+    "find_gaps",
+    "create_sme_questions",
+    "custom_prompt",
+}
+WORKSPACE_AI_ACTIONS = {
+    "suggest_follow_up_questions",
+    "find_unsupported_assumptions",
+    "find_duplicate_overlapping_nodes",
+    "generate_training_outline",
+    "export_branch_as_sop_draft",
+}
+AI_ACTIONS_BY_SCOPE = {
+    "node": NODE_AI_ACTIONS,
+    "branch": BRANCH_AI_ACTIONS,
+    "workspace": WORKSPACE_AI_ACTIONS,
+}
+PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
+    "standards_extractor": {
+        "role_id": "standards_extractor",
+        "label": "Standards Extractor",
+        "group": "DocMap",
+        "description": "Extracts requirements, controls, and compliance-ready statements from source-backed workspace context.",
+        "supported_scopes": ["node", "branch", "workspace"],
+        "supported_actions": [
+            "expand_this_node",
+            "generate_child_nodes",
+            "find_missing_source_support",
+            "summarize_branch",
+            "find_gaps",
+            "find_unsupported_assumptions",
+            "custom_prompt",
+        ],
+        "system_instructions": "Produce precise DocMap draft nodes and review annotations. Preserve source refs; do not invent citations.",
+        "default_output_shape": "draft_nodes",
+        "source_strictness": "strict",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "workflow_mapper": {
+        "role_id": "workflow_mapper",
+        "label": "Workflow Mapper",
+        "group": "DocMap",
+        "description": "Turns process context into workflow steps, branches, handoffs, and gaps.",
+        "supported_scopes": ["node", "branch", "workspace"],
+        "supported_actions": [
+            "expand_this_node",
+            "generate_child_nodes",
+            "reorganize_branch",
+            "split_branch_into_categories",
+            "find_gaps",
+            "custom_prompt",
+        ],
+        "system_instructions": "Represent workflow changes as preview-only draft graph changes with clear parentage.",
+        "default_output_shape": "draft_nodes",
+        "source_strictness": "prefer_source_refs",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "training_guide_builder": {
+        "role_id": "training_guide_builder",
+        "label": "Training Guide Builder",
+        "group": "DocMap",
+        "description": "Builds training outlines, checklists, and learner-facing guide structure from DocMap graph context.",
+        "supported_scopes": ["node", "branch", "workspace"],
+        "supported_actions": [
+            "convert_to_checklist",
+            "generate_checklist",
+            "generate_training_outline",
+            "export_branch_as_sop_draft",
+            "custom_prompt",
+        ],
+        "system_instructions": "Draft instructional structure without mutating the canonical graph before accept.",
+        "default_output_shape": "draft_nodes",
+        "source_strictness": "prefer_source_refs",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "sme_question_generator": {
+        "role_id": "sme_question_generator",
+        "label": "SME Question Generator",
+        "group": "DocMap",
+        "description": "Creates targeted reviewer and subject-matter-expert questions for unresolved graph context.",
+        "supported_scopes": ["node", "branch", "workspace"],
+        "supported_actions": [
+            "ask_follow_up",
+            "create_sme_questions",
+            "find_gaps",
+            "suggest_follow_up_questions",
+            "custom_prompt",
+        ],
+        "system_instructions": "Prefer concise questions tied to the selected context and source gaps.",
+        "default_output_shape": "draft_annotations",
+        "source_strictness": "allow_assumptions",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "task_planner": {
+        "role_id": "task_planner",
+        "label": "Task Planner",
+        "group": "DocMap",
+        "description": "Turns selected context into tasks, priorities, checklist items, and execution follow-up.",
+        "supported_scopes": ["node", "branch"],
+        "supported_actions": [
+            "generate_tasks",
+            "convert_to_checklist",
+            "generate_checklist",
+            "custom_prompt",
+        ],
+        "system_instructions": "Draft execution-ready task nodes and checklist annotations with review state explicit.",
+        "default_output_shape": "draft_nodes",
+        "source_strictness": "prefer_source_refs",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "data_table_interpreter": {
+        "role_id": "data_table_interpreter",
+        "label": "Data/Table Interpreter",
+        "group": "DocMap",
+        "description": "Interprets table-like or data-source context into conclusions, caveats, and follow-up tasks.",
+        "supported_scopes": ["node", "branch"],
+        "supported_actions": ["interpret_table_data", "generate_tasks", "custom_prompt"],
+        "system_instructions": "State data caveats and keep inferred conclusions marked for review unless cited.",
+        "default_output_shape": "draft_annotations",
+        "source_strictness": "prefer_source_refs",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "gap_analyst": {
+        "role_id": "gap_analyst",
+        "label": "Gap Analyst",
+        "group": "DocMap",
+        "description": "Finds missing details, unsupported assumptions, duplication, and overlapping nodes.",
+        "supported_scopes": ["node", "branch", "workspace"],
+        "supported_actions": [
+            "find_missing_source_support",
+            "find_gaps",
+            "find_unsupported_assumptions",
+            "find_duplicate_overlapping_nodes",
+            "custom_prompt",
+        ],
+        "system_instructions": "Create preview findings with clear rationale and no direct graph mutation.",
+        "default_output_shape": "draft_annotations",
+        "source_strictness": "strict",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "source_ref_repair": {
+        "role_id": "source_ref_repair",
+        "label": "Source Ref Repair",
+        "group": "DocMap",
+        "description": "Inspects source coverage and proposes source-reference repair work.",
+        "supported_scopes": ["node", "branch", "workspace"],
+        "supported_actions": [
+            "find_missing_source_support",
+            "find_unsupported_assumptions",
+            "custom_prompt",
+        ],
+        "system_instructions": "Only propose grounded source refs when context contains evidence; otherwise mark assumptions.",
+        "default_output_shape": "draft_annotations",
+        "source_strictness": "strict",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "integration_readiness_reviewer": {
+        "role_id": "integration_readiness_reviewer",
+        "label": "Integration Readiness Reviewer",
+        "group": "DocMap",
+        "description": "Reviews nodes and branches for handoff readiness before Miro, monday, or later integrations.",
+        "supported_scopes": ["node", "branch", "workspace"],
+        "supported_actions": ["generate_tasks", "find_gaps", "find_unsupported_assumptions", "custom_prompt"],
+        "system_instructions": "Focus on durable handoff metadata and reviewable missing integration details.",
+        "default_output_shape": "draft_annotations",
+        "source_strictness": "prefer_source_refs",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "custom": {
+        "role_id": "custom",
+        "label": "Custom",
+        "group": "DocMap",
+        "description": "Uses a user-provided instruction while preserving DocMap preview and validation rules.",
+        "supported_scopes": ["node", "branch", "workspace"],
+        "supported_actions": ["custom_prompt"],
+        "system_instructions": "Follow the custom instruction, but return preview-only DocMap draft changes.",
+        "default_output_shape": "draft_nodes",
+        "source_strictness": "prefer_source_refs",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "strategic_advisor": {
+        "role_id": "strategic_advisor",
+        "label": "Strategic Advisor",
+        "group": "General",
+        "description": "Legacy persona for strategic framing and decision support.",
+        "supported_scopes": ["node", "branch", "workspace"],
+        "supported_actions": ["ask_follow_up", "summarize_branch", "suggest_follow_up_questions", "custom_prompt"],
+        "system_instructions": "Provide strategic guidance as reviewable DocMap preview output.",
+        "default_output_shape": "draft_annotations",
+        "source_strictness": "allow_assumptions",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "research_assistant": {
+        "role_id": "research_assistant",
+        "label": "Research Assistant",
+        "group": "General",
+        "description": "Legacy persona for research questions, synthesis, and next-step discovery.",
+        "supported_scopes": ["node", "branch", "workspace"],
+        "supported_actions": ["ask_follow_up", "create_sme_questions", "find_gaps", "suggest_follow_up_questions", "custom_prompt"],
+        "system_instructions": "Summarize research gaps and questions without fabricating source refs.",
+        "default_output_shape": "draft_annotations",
+        "source_strictness": "allow_assumptions",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "productivity_coach": {
+        "role_id": "productivity_coach",
+        "label": "Productivity Coach",
+        "group": "General",
+        "description": "Legacy persona for tasks, prioritization, and productivity-oriented suggestions.",
+        "supported_scopes": ["node", "branch"],
+        "supported_actions": ["generate_tasks", "convert_to_checklist", "generate_checklist", "custom_prompt"],
+        "system_instructions": "Draft productivity suggestions as tasks or checklist previews.",
+        "default_output_shape": "draft_nodes",
+        "source_strictness": "allow_assumptions",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "data_interpreter": {
+        "role_id": "data_interpreter",
+        "label": "Data Interpreter",
+        "group": "General",
+        "description": "Legacy persona for interpreting data-source content.",
+        "supported_scopes": ["node", "branch"],
+        "supported_actions": ["interpret_table_data", "ask_follow_up", "custom_prompt"],
+        "system_instructions": "Explain data interpretations and caveats as preview-only annotations.",
+        "default_output_shape": "draft_annotations",
+        "source_strictness": "allow_assumptions",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+}
 AI_HELPER_PREVIEW_CONTRACT = f"""
 Canonical AI helper preview contract:
 - Return exactly one JSON object. Do not wrap it in prose or markdown.
@@ -261,6 +509,267 @@ def generate_helper_preview(
         warnings=warnings,
         metadata={"node_count": len(graph.get("nodes", [])) if isinstance(graph, dict) else 0},
     )
+
+
+def list_prompt_profiles() -> list[dict[str, Any]]:
+    return [deepcopy(profile) for profile in PROMPT_PROFILE_REGISTRY.values()]
+
+
+def get_prompt_profile(role: str) -> dict[str, Any]:
+    role_id = _profile_id(role)
+    profile = PROMPT_PROFILE_REGISTRY.get(role_id)
+    if not profile:
+        raise GraphSchemaError([f"ai_action.role: unsupported role '{role}'"])
+    return deepcopy(profile)
+
+
+def validate_ai_action_request(
+    *,
+    role: str,
+    action: str,
+    scope: dict[str, Any] | None,
+    custom_prompt: str | None = None,
+) -> dict[str, Any]:
+    normalized_scope = normalize_ai_action_scope(scope)
+    scope_type = normalized_scope["type"]
+    action_id = _action_id(action)
+    profile = get_prompt_profile(role)
+    errors = []
+
+    if action_id not in AI_ACTIONS_BY_SCOPE[scope_type]:
+        errors.append(
+            f"ai_action.action: unsupported action '{action}' for {scope_type} scope"
+        )
+    if action_id not in profile["supported_actions"]:
+        errors.append(
+            f"ai_action.action: unsupported action '{action}' for role '{profile['label']}'"
+        )
+    if scope_type not in profile["supported_scopes"]:
+        errors.append(
+            f"ai_action.scope: unsupported scope '{scope_type}' for role '{profile['label']}'"
+        )
+    if action_id == "custom_prompt" and not _has_text(custom_prompt):
+        errors.append("ai_action.custom_prompt: required for custom_prompt action")
+
+    if errors:
+        raise GraphSchemaError(errors)
+
+    return {
+        "role_id": profile["role_id"],
+        "role_label": profile["label"],
+        "action": action_id,
+        "scope": normalized_scope,
+        "custom_prompt": custom_prompt.strip() if isinstance(custom_prompt, str) and custom_prompt.strip() else None,
+        "profile": profile,
+    }
+
+
+def normalize_ai_action_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
+    normalized = normalize_helper_scope(scope)
+    if normalized["type"] not in AI_ACTION_SCOPES:
+        normalized = {"type": "workspace"}
+    return normalized
+
+
+def build_ai_action_run(
+    *,
+    workspace_id: str,
+    scope: dict[str, Any],
+    role: str,
+    action: str,
+    custom_prompt: str | None = None,
+    input_source_refs: list[dict[str, Any]] | None = None,
+    status: str = "previewed",
+    generated_node_ids: list[str] | None = None,
+    ai_action_id: str | None = None,
+    created_at: str | None = None,
+    created_by: str = "user",
+) -> dict[str, Any]:
+    normalized_scope = normalize_ai_action_scope(scope)
+    action_run = {
+        "ai_action_id": ai_action_id or f"ai_action_{_utc_token()}",
+        "workspace_id": str(workspace_id or ""),
+        "source_node_id": normalized_scope.get("node_id"),
+        "scope": normalized_scope["type"],
+        "role": str(role or ""),
+        "action": _action_id(action),
+        "custom_prompt": custom_prompt if isinstance(custom_prompt, str) else None,
+        "input_source_refs": input_source_refs or [],
+        "created_at": created_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "created_by": created_by or "user",
+        "status": status,
+        "generated_node_ids": generated_node_ids or [],
+    }
+    return validate_ai_action_run(action_run)
+
+
+def validate_ai_action_run(payload: dict[str, Any]) -> dict[str, Any]:
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        raise GraphSchemaError(["ai_action_run: must be an object"])
+
+    normalized = deepcopy(payload)
+    for key in ("ai_action_id", "workspace_id", "scope", "role", "action", "created_at", "created_by", "status"):
+        _require_string(normalized, key, "ai_action_run", errors)
+
+    if normalized.get("scope") not in AI_ACTION_SCOPES:
+        errors.append("ai_action_run.scope: must be node, branch, or workspace")
+    if normalized.get("status") not in AI_ACTION_RUN_STATUSES:
+        errors.append("ai_action_run.status: must be previewed, accepted, or rejected")
+    if normalized.get("scope") in {"node", "branch"} and not _has_text(normalized.get("source_node_id")):
+        errors.append("ai_action_run.source_node_id: required for node and branch scopes")
+    if normalized.get("custom_prompt") is not None and not isinstance(normalized.get("custom_prompt"), str):
+        errors.append("ai_action_run.custom_prompt: must be a string or null")
+    _validate_source_ref_list(normalized.get("input_source_refs", []), "ai_action_run.input_source_refs", errors)
+    generated_node_ids = normalized.get("generated_node_ids", [])
+    if not isinstance(generated_node_ids, list) or not all(isinstance(node_id, str) for node_id in generated_node_ids):
+        errors.append("ai_action_run.generated_node_ids: must be a list of strings")
+
+    if errors:
+        raise GraphSchemaError(errors)
+
+    normalized["input_source_refs"] = normalized.get("input_source_refs", [])
+    normalized["generated_node_ids"] = generated_node_ids
+    return normalized
+
+
+def generate_ai_action_preview(
+    graph: dict[str, Any],
+    *,
+    workspace_id: str | None = None,
+    role: str,
+    action: str,
+    scope: dict[str, Any] | None = None,
+    custom_prompt: str | None = None,
+    created_by: str = "user",
+) -> dict[str, Any]:
+    request = validate_ai_action_request(
+        role=role,
+        action=action,
+        scope=scope,
+        custom_prompt=custom_prompt,
+    )
+    normalized_scope = request["scope"]
+    scoped_graph = _scope_graph(graph, normalized_scope) if normalized_scope["type"] == "branch" else graph
+    if normalized_scope["type"] == "node":
+        scoped_graph = _scope_node_graph(graph, normalized_scope["node_id"])
+
+    input_source_refs = _collect_source_refs(scoped_graph)
+    workspace = graph.get("workspace", {}) if isinstance(graph, dict) else {}
+    action_run = build_ai_action_run(
+        workspace_id=workspace_id or workspace.get("id") or "",
+        scope=normalized_scope,
+        role=request["role_label"],
+        action=request["action"],
+        custom_prompt=request["custom_prompt"],
+        input_source_refs=input_source_refs,
+        created_by=created_by,
+    )
+    draft_nodes, draft_edges, draft_annotations, source_refs, assumptions = _deterministic_ai_action_drafts(
+        scoped_graph,
+        action_run=action_run,
+        profile=request["profile"],
+    )
+    validation_report = validate_ai_action_drafts_for_accept(draft_nodes, draft_edges)
+    action_run["generated_node_ids"] = [node["id"] for node in draft_nodes]
+
+    preview = {
+        "preview_id": f"preview_{action_run['ai_action_id']}",
+        "ai_action_id": action_run["ai_action_id"],
+        "scope": normalized_scope["type"],
+        "role": request["role_label"],
+        "role_id": request["role_id"],
+        "action": request["action"],
+        "custom_prompt": request["custom_prompt"],
+        "draft_nodes": draft_nodes,
+        "draft_edges": draft_edges,
+        "draft_annotations": draft_annotations,
+        "validation_report": validation_report,
+        "source_refs": source_refs,
+        "assumptions": assumptions,
+        "ai_action_run": action_run,
+        "metadata": {
+            "ai_action_preview_contract_version": AI_ACTION_PREVIEW_CONTRACT_VERSION,
+            "prompt_profile": request["profile"],
+        },
+    }
+    return validate_ai_action_preview(preview)
+
+
+def validate_ai_action_drafts_for_accept(
+    draft_nodes: list[dict[str, Any]],
+    draft_edges: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    issues = []
+    node_ids = {node.get("id") for node in draft_nodes if isinstance(node, dict)}
+    for node in draft_nodes:
+        if not isinstance(node, dict):
+            continue
+        node.setdefault("source_refs", [])
+        node.setdefault("metadata", {})
+        node.setdefault("external_refs", {})
+        if node.get("node_type") != "reference" and not node.get("source_refs"):
+            node["status"] = "needs_review"
+            issues.append(
+                {
+                    "code": "missing_source_ref",
+                    "severity": "warning",
+                    "message": "AI action draft node is missing a source reference and was marked needs_review.",
+                    "node_id": str(node.get("id", "")),
+                    "repaired": True,
+                }
+            )
+
+    for edge in draft_edges or []:
+        if not isinstance(edge, dict):
+            continue
+        source = edge.get("source_node_id")
+        target = edge.get("target_node_id")
+        if target not in node_ids:
+            issues.append(
+                {
+                    "code": "draft_edge_target_missing",
+                    "severity": "error",
+                    "message": "AI action draft edge target does not reference a draft node.",
+                    "edge_id": str(edge.get("id", "")),
+                    "repaired": False,
+                }
+            )
+
+    return {
+        "is_valid": not any(issue["severity"] == "error" for issue in issues),
+        "repaired": any(issue["repaired"] for issue in issues),
+        "issues": issues,
+    }
+
+
+def validate_ai_action_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        raise GraphSchemaError(["ai_action_preview: must be an object"])
+
+    normalized = deepcopy(payload)
+    for key in ("preview_id", "ai_action_id", "scope", "role", "role_id", "action"):
+        _require_string(normalized, key, "ai_action_preview", errors)
+    if normalized.get("scope") not in AI_ACTION_SCOPES:
+        errors.append("ai_action_preview.scope: must be node, branch, or workspace")
+    for key in ("draft_nodes", "draft_edges", "draft_annotations", "source_refs", "assumptions"):
+        if not isinstance(normalized.get(key), list):
+            errors.append(f"ai_action_preview.{key}: must be a list")
+    if not isinstance(normalized.get("validation_report"), dict):
+        errors.append("ai_action_preview.validation_report: must be an object")
+    if not isinstance(normalized.get("metadata"), dict):
+        errors.append("ai_action_preview.metadata: must be an object")
+    try:
+        validate_ai_action_run(normalized.get("ai_action_run", {}))
+    except GraphSchemaError as exc:
+        errors.extend(exc.errors)
+
+    if errors:
+        raise GraphSchemaError(errors)
+
+    normalized["metadata"]["ai_action_preview_contract_version"] = AI_ACTION_PREVIEW_CONTRACT_VERSION
+    return normalized
 
 
 def build_helper_preview(
@@ -1509,6 +2018,232 @@ def _source_suggestion(
         "source_ref": source_ref,
         "relationship": relationship,
     }
+
+
+def _scope_node_graph(graph: dict[str, Any], node_id: str) -> dict[str, Any]:
+    scoped = deepcopy(graph)
+    scoped["nodes"] = [
+        node
+        for node in graph.get("nodes", [])
+        if isinstance(node, dict) and node.get("id") == node_id
+    ]
+    scoped["edges"] = []
+    scoped["tasks"] = [
+        task
+        for task in graph.get("tasks", [])
+        if isinstance(task, dict) and task.get("node_id") == node_id
+    ]
+    return scoped
+
+
+def _collect_source_refs(graph: dict[str, Any]) -> list[dict[str, Any]]:
+    refs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for node in graph.get("nodes", []) if isinstance(graph, dict) else []:
+        if not isinstance(node, dict):
+            continue
+        for ref in _source_refs_for_preview(node):
+            if not isinstance(ref, dict):
+                continue
+            key = json.dumps(ref, sort_keys=True)
+            if key in seen:
+                continue
+            refs.append(deepcopy(ref))
+            seen.add(key)
+    return refs
+
+
+def _deterministic_ai_action_drafts(
+    graph: dict[str, Any],
+    *,
+    action_run: dict[str, Any],
+    profile: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
+    source_node = _source_node_for_action(graph, action_run.get("source_node_id"))
+    source_node_id = source_node.get("id") if source_node else action_run.get("source_node_id")
+    source_title = source_node.get("title") if source_node else "workspace"
+    source_refs = _collect_source_refs(graph)
+    action = action_run["action"]
+    role = action_run["role"]
+    draft_nodes: list[dict[str, Any]] = []
+    draft_edges: list[dict[str, Any]] = []
+    draft_annotations: list[dict[str, Any]] = []
+    assumptions = [] if source_refs else ["Generated action preview is not source-backed and requires review."]
+
+    if action in {
+        "expand_this_node",
+        "generate_child_nodes",
+        "generate_tasks",
+        "convert_to_checklist",
+        "generate_checklist",
+        "generate_training_outline",
+        "export_branch_as_sop_draft",
+        "custom_prompt",
+    }:
+        node_type = "task" if action == "generate_tasks" else "checklist" if action in {"convert_to_checklist", "generate_checklist"} else "concept"
+        title = _draft_title(action, source_title, action_run.get("custom_prompt"))
+        draft_node = _draft_node(
+            action_run=action_run,
+            order=1,
+            title=title,
+            parent_id=source_node_id,
+            node_type=node_type,
+            source_refs=source_refs[:1],
+            profile=profile,
+        )
+        draft_nodes.append(draft_node)
+        if source_node_id:
+            draft_edges.append(
+                {
+                    "id": f"draft_edge_{action_run['ai_action_id']}_1",
+                    "source_node_id": source_node_id,
+                    "target_node_id": draft_node["id"],
+                    "relationship_type": "contains",
+                    "metadata": {"source": "ai_action_preview", "ai_action_id": action_run["ai_action_id"]},
+                }
+            )
+
+    if action in {
+        "ask_follow_up",
+        "create_sme_questions",
+        "suggest_follow_up_questions",
+        "find_missing_source_support",
+        "find_gaps",
+        "find_unsupported_assumptions",
+        "find_duplicate_overlapping_nodes",
+        "interpret_table_data",
+        "summarize_branch",
+        "reorganize_branch",
+        "split_branch_into_categories",
+    }:
+        draft_annotations.append(
+            {
+                "id": f"draft_annotation_{action_run['ai_action_id']}_1",
+                "type": _annotation_type(action),
+                "node_id": source_node_id,
+                "title": _annotation_title(action, source_title),
+                "body": _annotation_body(action, source_title, role, action_run.get("custom_prompt")),
+                "source_refs": source_refs[:1],
+                "assumptions": assumptions,
+                "metadata": {"source": "ai_action_preview", "ai_action_id": action_run["ai_action_id"]},
+            }
+        )
+
+    return draft_nodes, draft_edges, draft_annotations, source_refs, assumptions
+
+
+def _source_node_for_action(graph: dict[str, Any], node_id: str | None) -> dict[str, Any] | None:
+    nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict)]
+    if node_id:
+        for node in nodes:
+            if node.get("id") == node_id:
+                return node
+    return nodes[0] if nodes else None
+
+
+def _draft_node(
+    *,
+    action_run: dict[str, Any],
+    order: int,
+    title: str,
+    parent_id: str | None,
+    node_type: str,
+    source_refs: list[dict[str, Any]],
+    profile: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "id": f"draft_node_{action_run['ai_action_id']}_{order}",
+        "title": title,
+        "parent_id": parent_id,
+        "summary": f"Preview draft from {action_run['role']} for {action_run['action']}.",
+        "node_type": node_type,
+        "status": "ai_generated",
+        "priority": "medium" if node_type == "task" else "",
+        "owner_id": "",
+        "due_date": "",
+        "confidence": source_refs[0].get("confidence") if source_refs else None,
+        "source_refs": deepcopy(source_refs),
+        "external_refs": {},
+        "metadata": {
+            "source": "ai_action_preview",
+            "ai_action_id": action_run["ai_action_id"],
+            "prompt_profile_id": profile["role_id"],
+        },
+    }
+
+
+def _draft_title(action: str, source_title: str, custom_prompt: str | None) -> str:
+    if action == "custom_prompt" and custom_prompt:
+        return custom_prompt.strip()[:80]
+    labels = {
+        "expand_this_node": "Expanded detail",
+        "generate_child_nodes": "Generated child node",
+        "generate_tasks": "Follow-up task",
+        "convert_to_checklist": "Checklist item",
+        "generate_checklist": "Checklist item",
+        "generate_training_outline": "Training outline section",
+        "export_branch_as_sop_draft": "SOP draft section",
+    }
+    return f"{labels.get(action, 'AI draft')} for {source_title}"
+
+
+def _annotation_type(action: str) -> str:
+    if "question" in action or action == "ask_follow_up":
+        return "sme_question"
+    if "source" in action or "unsupported" in action:
+        return "source_gap"
+    if "duplicate" in action:
+        return "overlap_review"
+    if "table" in action:
+        return "table_interpretation"
+    return "ai_note"
+
+
+def _annotation_title(action: str, source_title: str) -> str:
+    labels = {
+        "ask_follow_up": "Follow-up question",
+        "create_sme_questions": "SME question",
+        "suggest_follow_up_questions": "Suggested follow-up",
+        "find_missing_source_support": "Missing source support",
+        "find_gaps": "Gap finding",
+        "find_unsupported_assumptions": "Unsupported assumption",
+        "find_duplicate_overlapping_nodes": "Potential overlap",
+        "interpret_table_data": "Table interpretation",
+        "summarize_branch": "Branch summary",
+        "reorganize_branch": "Branch reorganization note",
+        "split_branch_into_categories": "Branch category split",
+    }
+    return f"{labels.get(action, 'AI note')} for {source_title}"
+
+
+def _annotation_body(action: str, source_title: str, role: str, custom_prompt: str | None) -> str:
+    if action == "custom_prompt" and custom_prompt:
+        return custom_prompt.strip()
+    if "question" in action or action == "ask_follow_up":
+        return f"What decision or source evidence is needed to finalize {source_title}?"
+    if "source" in action or "unsupported" in action:
+        return f"{role} should verify source support before accepting generated content for {source_title}."
+    if "duplicate" in action:
+        return f"{role} should compare nearby nodes for overlapping meaning before merging or accepting changes."
+    if "table" in action:
+        return f"{role} should review table-derived claims and mark inferred conclusions for review."
+    return f"{role} generated a preview note for {source_title}."
+
+
+def _profile_id(role: str) -> str:
+    return _token(str(role or "").lower()).replace("-", "_")
+
+
+def _action_id(action: str) -> str:
+    return _token(str(action or "").lower()).replace("-", "_")
+
+
+def _validate_source_ref_list(value: Any, path: str, errors: list[str]) -> None:
+    if not isinstance(value, list):
+        errors.append(f"{path}: must be a list")
+        return
+    for index, source_ref in enumerate(value):
+        _validate_source_ref(source_ref, f"{path}.{index}", errors)
 
 
 def _validate_preview_item(item: Any, index: int, errors: list[str]) -> None:

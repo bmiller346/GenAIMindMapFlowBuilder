@@ -71,7 +71,9 @@ const Header = ({
         setSourceLibrary: s.setSourceLibrary,
         viewport: s.viewport,
         workspaceBrief: s.workspaceBrief,
-        sourceLibrary: s.sourceLibrary
+        sourceLibrary: s.sourceLibrary,
+        aiActionRuns: s.aiActionRuns,
+        setAIActionRuns: s.setAIActionRuns
     });
     const setTheme = flowStore((s) => s.setTheme);
     const {
@@ -87,7 +89,9 @@ const Header = ({
         setSourceLibrary,
         viewport,
         workspaceBrief,
-        sourceLibrary
+        sourceLibrary,
+        aiActionRuns,
+        setAIActionRuns
     } = useStore(useShallow(selector));
     const { getNodes, setViewport } = useReactFlow();
     const exportFormats = [
@@ -120,6 +124,7 @@ const Header = ({
                 sourceLibrary
             }),
             activityEvents: useActivityStore.getState().activities,
+            aiActionRuns: useStore.getState().aiActionRuns,
             automations: useAutomationStore.getState().automations
         });
     }, [
@@ -129,6 +134,7 @@ const Header = ({
         nodes,
         rfInstance,
         sourceLibrary,
+        aiActionRuns,
         viewport,
         workspaceBrief
     ]);
@@ -166,6 +172,7 @@ const Header = ({
                 sourceLibrary: latestState.sourceLibrary
             }),
             activityEvents: useActivityStore.getState().activities,
+            aiActionRuns: latestState.aiActionRuns,
             automations: useAutomationStore.getState().automations
         });
     }, [rfInstance]);
@@ -959,6 +966,7 @@ const Header = ({
         setEdges(snapshot.edges || []);
         setWorkspaceBrief(snapshot.workspace_brief || {});
         setSourceLibrary(snapshot.source_library || []);
+        setAIActionRuns(snapshot.ai_action_runs || []);
         setActivityEvents(snapshot.activity_events || [], flow_id);
         setAutomations(snapshot.automations || []);
         const nextViewport = snapshot.viewport || {};

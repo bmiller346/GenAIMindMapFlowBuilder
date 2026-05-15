@@ -147,7 +147,12 @@ from documents.ingestion import (
     validate_upload_bytes,
 )
 from documents.source_refs import attach_source_refs_to_mindmap
-from ai_helpers import generate_helper_preview, generate_source_librarian_preview
+from ai_helpers import (
+    generate_ai_action_preview,
+    generate_helper_preview,
+    generate_source_librarian_preview,
+    list_prompt_profiles,
+)
 from graph.ai_contract import (
     append_ai_graph_prompt_contract,
     parse_ai_mindmap_response,
@@ -290,7 +295,12 @@ csvBot = LazyVannaBot(CSVBot, "./CSVVectorStore", "csv_data.db")
 
 app = FastAPI()
 
-origins = ["*"]
+origins = [
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+    "http://127.0.0.1:4173",
+    "http://localhost:4173",
+]
 
 app.add_middleware(
     CORSMiddleware,
@@ -424,6 +434,33 @@ def local_delete_flow(flow_id: str) -> bool:
         return False
     save_local_flows(next_flows)
     return True
+
+
+def promote_local_flow_to_mongo(flow_id: str) -> dict | None:
+    if not ObjectId.is_valid(flow_id):
+        return None
+
+    local_flow = local_find_flow(flow_id)
+    if not local_flow:
+        return None
+
+    flow_data = {
+        "_id": ObjectId(flow_id),
+        "flow_name": local_flow.get("flow_name") or "Untitled workspace",
+        "flow_json": local_flow.get("flow_json") or "",
+        "summary": local_flow.get("summary") or "",
+        "flow_type": local_flow.get("flow_type") or "manual",
+    }
+
+    try:
+        flow_collection.insert_one(flow_data)
+    except PyMongoError:
+        try:
+            return flow_collection.find_one({"_id": ObjectId(flow_id)})
+        except PyMongoError:
+            return None
+
+    return flow_data
 
 # AWS S3 setup
 s3_client = boto3.client(
@@ -1598,7 +1635,11 @@ def create_flow(flow: dict):
             flow_id = flow_collection.insert_one(flow_data).inserted_id
         except PyMongoError:
             flow_id = local_create_flow(flow_data)["_id"]
-        return {"flow_id": str(flow_id), "flow_type": flow_type}
+        return {
+            "flow_id": str(flow_id),
+            "flow_name": flow_data["flow_name"],
+            "flow_type": flow_type,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error creating flow: {str(e)}")
 
@@ -1673,6 +1714,18 @@ def update_flow(update_data: Flow):
         print(result)
 
         if result is None or result.matched_count == 0:
+            promoted_flow = promote_local_flow_to_mongo(update_data.flow_id)
+            if promoted_flow:
+                result = flow_collection.update_one(
+                    {"_id": ObjectId(update_data.flow_id)},
+                    {"$set": updates},
+                )
+                if result.matched_count:
+                    local_update_flow(update_data.flow_id, updates)
+                    return {
+                        "flow_id": str(update_data.flow_id),
+                        "message": "Flow updated successfully",
+                    }
             if local_update_flow(update_data.flow_id, updates):
                 return {
                     "flow_id": str(update_data.flow_id),
@@ -1729,7 +1782,7 @@ def get_workspace_flow_or_404(flow_id: str) -> dict:
             flow = None
 
     if not flow:
-        flow = local_find_flow(flow_id)
+        flow = promote_local_flow_to_mongo(flow_id) or local_find_flow(flow_id)
 
     if not flow:
         raise HTTPException(status_code=404, detail="Workspace not found.")
@@ -1759,6 +1812,9 @@ def get_upload_flow_or_400(flow_id: str) -> dict:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="MongoDB is unavailable. Start MongoDB, then try the source upload again.",
         ) from exc
+
+    if not flow and local_find_flow(flow_id):
+        flow = promote_local_flow_to_mongo(flow_id)
 
     if not flow:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
@@ -1842,6 +1898,78 @@ def export_workspace_mermaid(flow_id: str):
 @app.get("/api/workspaces/{flow_id}/branches/{node_id}/exports/json")
 def export_branch_json(flow_id: str, node_id: str):
     return get_workspace_branch_or_404(flow_id, node_id)
+
+
+@app.get("/api/ai/prompt-profiles")
+def get_ai_prompt_profiles():
+    return {"profiles": list_prompt_profiles()}
+
+
+@app.post("/api/workspaces/{flow_id}/ai/actions/preview")
+def preview_ai_action(
+    flow_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    scope = request.get("scope") if isinstance(request.get("scope"), dict) else {}
+    if request.get("node_id") and not scope:
+        scope = {"type": "node", "node_id": request["node_id"]}
+    if request.get("branch_node_id") and not scope:
+        scope = {"type": "branch", "node_id": request["branch_node_id"]}
+    if not scope:
+        scope = {"type": "workspace"}
+
+    graph = get_workspace_graph_or_404(flow_id)
+    try:
+        return generate_ai_action_preview(
+            graph,
+            workspace_id=flow_id,
+            role=request.get("role") or request.get("role_id") or "",
+            action=request.get("action") or "",
+            scope=scope,
+            custom_prompt=request.get("custom_prompt"),
+            created_by=request.get("created_by") or "user",
+        )
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "AI action preview failed schema validation.",
+                "errors": exc.errors,
+            },
+        ) from exc
+
+
+@app.post("/api/workspaces/{flow_id}/ai/actions/node/{node_id}/preview")
+def preview_node_ai_action(
+    flow_id: str,
+    node_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    request["scope"] = {"type": "node", "node_id": node_id}
+    return preview_ai_action(flow_id, request)
+
+
+@app.post("/api/workspaces/{flow_id}/ai/actions/branch/{node_id}/preview")
+def preview_branch_ai_action(
+    flow_id: str,
+    node_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    request["scope"] = {"type": "branch", "node_id": node_id}
+    return preview_ai_action(flow_id, request)
+
+
+@app.post("/api/workspaces/{flow_id}/ai/actions/workspace/preview")
+def preview_workspace_ai_action(
+    flow_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    request["scope"] = {"type": "workspace"}
+    return preview_ai_action(flow_id, request)
 
 
 @app.post("/api/workspaces/{flow_id}/ai/helpers/{helper_id}/preview")
@@ -4112,8 +4240,8 @@ def create_docx_component(
         detail=file.filename or "",
         progress=12,
     )
-    flow = get_upload_flow_or_400(flow_id)
     try:
+        flow = get_upload_flow_or_400(flow_id)
         upload = validate_upload_bytes(file.filename, read_upload_bytes(file))
     except DocumentIngestionError as exc:
         update_operation_progress(
@@ -4125,10 +4253,20 @@ def create_docx_component(
             status_value="failed",
         )
         raise ingestion_http_error(exc) from exc
+    except HTTPException as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="DOCX upload could not start",
+            detail=str(exc.detail),
+            progress=100,
+            status_value="failed",
+        )
+        raise
 
     if upload["extension"] == "docx":
-        check_page_length = is_within_gpt4o_token_limit(file)
         try:
+            check_page_length = is_within_gpt4o_token_limit(file)
             if check_page_length and flow["flow_type"] == 'manual':
                 return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
             elif check_page_length and flow["flow_type"] == 'automatic':
@@ -4143,9 +4281,22 @@ def create_docx_component(
                     progress=100,
                     status_value="failed",
                 )
-                raise HTTPException(status_code=404, detail="Exceeded Page limit for GPT.")
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="DOCX is too large for OpenAI processing. Split it into smaller source files and try again.",
+                )
         except HTTPException:
             raise
+        except MissingConfigurationError as exc:
+            update_operation_progress(
+                operation_id,
+                phase="failed",
+                message="Missing AI settings",
+                detail=str(exc),
+                progress=100,
+                status_value="failed",
+            )
+            raise configuration_http_error(exc) from exc
         except Exception as exc:
             traceback.print_exc()
             update_operation_progress(

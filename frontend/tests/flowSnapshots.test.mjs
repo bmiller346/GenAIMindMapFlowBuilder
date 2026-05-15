@@ -71,3 +71,31 @@ test('stringifyFlowSnapshot removes activity undo payloads at the snapshot bound
 
     assert.equal(Object.hasOwn(parsed.activity_events[0], 'undo'), false);
 });
+
+test('flow snapshots preserve AI action run history', () => {
+    const serialized = stringifyFlowSnapshot({
+        nodes: [createWorkspaceNode({ id: 'node-1' })],
+        edges: [],
+        ai_action_runs: [
+            {
+                ai_action_id: 'action-1',
+                workspace_id: 'workspace-1',
+                source_node_id: 'node-1',
+                scope: 'node',
+                role: 'Task Planner',
+                action: 'generate_tasks',
+                custom_prompt: null,
+                input_source_refs: [{ document_id: 'doc-1' }],
+                created_at: '2026-05-14T00:00:00.000Z',
+                created_by: 'user',
+                status: 'accepted',
+                generated_node_ids: ['node-2']
+            }
+        ]
+    });
+    const snapshot = parseFlowSnapshot(serialized);
+
+    assert.equal(snapshot.ai_action_runs.length, 1);
+    assert.equal(snapshot.ai_action_runs[0].ai_action_id, 'action-1');
+    assert.deepEqual(snapshot.ai_action_runs[0].generated_node_ids, ['node-2']);
+});

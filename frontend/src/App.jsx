@@ -6,6 +6,7 @@ import {
     useReactFlow
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import axios from 'axios';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { nodeTypes } from './nodes/nodeTypes.js';
 import { useShallow } from 'zustand/shallow';
@@ -30,6 +31,10 @@ import AutomationsPanel from './global-components/AutomationsPanel.jsx';
 import ManualNodeControls from './global-components/ManualNodeControls.jsx';
 import AiHelpersPanel from './global-components/AiHelpersPanel.jsx';
 import { getLocalSetting, setLocalSetting, SETTINGS_KEYS } from './config/localSettings';
+import { parseFlowSnapshot, stringifyFlowSnapshot } from './utils/flowSnapshots';
+import { rememberWorkspace, selectStartupWorkspace } from './utils/workspaceSession';
+import useActivityStore from './stores/activityStore';
+import useAutomationStore from './stores/automationStore';
 const App = () => {
     const nodeType = useMemo(() => nodeTypes, []);
     const selector = (state) => ({
@@ -44,7 +49,10 @@ const App = () => {
         setSelectedBranchId: state.setSelectedBranchId,
         inspectorNodeId: state.inspectorNodeId,
         setInspectorNodeId: state.setInspectorNodeId,
-        setViewPort: state.setViewPort
+        setViewPort: state.setViewPort,
+        setWorkspaceBrief: state.setWorkspaceBrief,
+        setSourceLibrary: state.setSourceLibrary,
+        setAIActionRuns: state.setAIActionRuns
     });
     const {
         trigger,
@@ -58,12 +66,22 @@ const App = () => {
         setSelectedBranchId,
         inspectorNodeId,
         setInspectorNodeId,
-        setViewPort
+        setViewPort,
+        setWorkspaceBrief,
+        setSourceLibrary,
+        setAIActionRuns
     } = useStore(useShallow(selector));
     const areNodesIntialised = useNodesInitialized();
     const [askMultipleClass, setAskMultipleClass] = useState();
     const [isDrawer, setIsDrawer] = useState(false);
     const setRfInstance = flowStore((s) => s.setRfInstance);
+    const setFlow = flowStore((s) => s.setFlow);
+    const setFlowName = flowStore((s) => s.setFlowName);
+    const setFlowType = flowStore((s) => s.setFlowType);
+    const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
+    const setActivityEvents = useActivityStore((s) => s.setActivityEvents);
+    const setAutomations = useAutomationStore((s) => s.setAutomations);
     const [selectedNodes, setSelectedNodes] = useState();
     const [validationReport, setValidationReport] = useState();
     const reactFlow = useReactFlow();
@@ -212,6 +230,75 @@ const App = () => {
     useEffect(() => {
         setLocalSetting(SETTINGS_KEYS.theme, lightMode ? 'light' : 'dark');
     }, [lightMode]);
+
+    useEffect(() => {
+        if (flow_id) {
+            return;
+        }
+
+        let isCanceled = false;
+
+        const loadStartupWorkspace = async () => {
+            try {
+                const response = await axios.get('http://localhost:8000/flows');
+                if (isCanceled) {
+                    return;
+                }
+
+                const flows = Array.isArray(response.data) ? response.data : [];
+                setFlowList(flows);
+                const workspace = selectStartupWorkspace(flows);
+
+                if (!workspace) {
+                    return;
+                }
+
+                const snapshot = parseFlowSnapshot(workspace.flow_json);
+                setFlow(workspace.flow_id);
+                rememberWorkspace(workspace.flow_id);
+                setFlowName(workspace.flow_name);
+                setFlowType(workspace.flow_type || 'manual');
+                setNodes(snapshot.nodes || []);
+                setEdges(snapshot.edges || []);
+                setWorkspaceBrief(snapshot.workspace_brief || {});
+                setSourceLibrary(snapshot.source_library || []);
+                setAIActionRuns(snapshot.ai_action_runs || []);
+                setActivityEvents(snapshot.activity_events || [], workspace.flow_id);
+                setAutomations(snapshot.automations || []);
+                setViewPort(snapshot.viewport || {});
+                setSavedSnapshot(
+                    snapshot,
+                    stringifyFlowSnapshot(snapshot),
+                    workspace.flow_name,
+                    workspace.flow_type || 'manual'
+                );
+                setSaveStatus('saved');
+            } catch (error) {
+                console.warn('Could not restore the last workspace', error);
+            }
+        };
+
+        loadStartupWorkspace();
+
+        return () => {
+            isCanceled = true;
+        };
+    }, [
+        flow_id,
+        setActivityEvents,
+        setAutomations,
+        setEdges,
+        setFlow,
+        setFlowName,
+        setFlowType,
+        setNodes,
+        setSavedSnapshot,
+        setSaveStatus,
+        setAIActionRuns,
+        setSourceLibrary,
+        setViewPort,
+        setWorkspaceBrief
+    ]);
 
     return (
         <div className={lightMode ? 'app light' : 'app dark'}>

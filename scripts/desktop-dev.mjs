@@ -9,6 +9,7 @@ const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '..');
 const frontendHost = '127.0.0.1';
 const frontendPort = 5173;
+const backendPort = 8000;
 const execFileAsync = promisify(execFile);
 
 const electronBin = process.platform === 'win32'
@@ -51,7 +52,13 @@ async function stopPortOwners(port) {
 
   for (const pid of pids) {
     try {
-      process.kill(pid);
+      if (process.platform === 'win32') {
+        await execFileAsync('taskkill.exe', ['/pid', String(pid), '/T', '/F'], {
+          windowsHide: true
+        });
+      } else {
+        process.kill(pid);
+      }
     } catch {
       // The process may have exited after we inspected the port.
     }
@@ -86,6 +93,33 @@ async function waitForPort(port, host, expectedFree, timeoutMs = 5000) {
   return false;
 }
 
+async function canReachUrl(url, timeoutMs = 3000) {
+  const timeout = AbortSignal.timeout(timeoutMs);
+
+  try {
+    const response = await fetch(url, { signal: timeout });
+    return response.ok || response.status < 500;
+  } catch {
+    return false;
+  }
+}
+
+function terminateChild(child) {
+  if (child.killed || child.exitCode !== null) {
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    spawn('taskkill.exe', ['/pid', String(child.pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true
+    });
+    return;
+  }
+
+  child.kill();
+}
+
 function spawnChecked(label, command, args, options = {}) {
   const child = spawn(command, args, {
     cwd: repoRoot,
@@ -112,9 +146,7 @@ function spawnChecked(label, command, args, options = {}) {
 
 function shutdown() {
   for (const child of children) {
-    if (!child.killed) {
-      child.kill();
-    }
+    terminateChild(child);
   }
 }
 
@@ -130,12 +162,26 @@ process.on('SIGTERM', () => {
 
 async function main() {
   await stopPortOwners(frontendPort);
+  await stopPortOwners(backendPort);
 
   const portReady = await waitForPort(frontendPort, frontendHost, true);
+  const backendReady = await waitForPort(backendPort, frontendHost, true);
 
   if (!portReady) {
     console.error(`[dev] port ${frontendPort} is still in use after cleanup; refusing to start on the wrong app.`);
     process.exit(1);
+  }
+
+  const reuseExistingBackend =
+    !backendReady && await canReachUrl(`http://${frontendHost}:${backendPort}/flows`);
+
+  if (!backendReady && !reuseExistingBackend) {
+    console.error(`[dev] port ${backendPort} is still in use after cleanup and does not look like a DocMap backend.`);
+    process.exit(1);
+  }
+
+  if (reuseExistingBackend) {
+    console.log(`[dev] port ${backendPort} is already serving DocMap; reusing that backend for this Electron session.`);
   }
 
   spawnChecked(
@@ -156,7 +202,8 @@ async function main() {
     env: {
       ...process.env,
       DOCMAP_ELECTRON_DEV: '1',
-      DOCMAP_FRONTEND_URL: `http://${frontendHost}:${frontendPort}`
+      DOCMAP_FRONTEND_URL: `http://${frontendHost}:${frontendPort}`,
+      ...(reuseExistingBackend ? { DOCMAP_SKIP_BACKEND: '1' } : {})
     }
   });
 }

@@ -55,6 +55,10 @@ Known verification gap:
 9. Push to external tools before considering import/reconciliation.
 10. Do not add broad collaboration or full bidirectional sync until the
     document-to-graph loop is reliable.
+11. Node-level AI actions must generate preview changes before mutating the
+    canonical graph.
+12. Custom prompts may create drafts, but only accepted and validated drafts
+    become graph nodes.
 
 ## Implemented
 
@@ -105,6 +109,12 @@ Known verification gap:
   missing information, SME questions, and source-reference repair.
 - [x] Accepted local preview metadata is standardized in
   `local_preview_acceptances`.
+- [x] Original repo-style persona prompts are preserved in the codebase:
+  `Strategic Advisor`, `Research Assistant`, `Productivity Coach`,
+  `Data Interpreter`, and `Custom Prompts` still exist behind the legacy
+  data-source prompt selector.
+- [ ] Original persona prompts are not yet modernized into DocMap's
+  preview/accept graph mutation model.
 
 ### Workspace Brief
 
@@ -213,6 +223,9 @@ These are the features required to call the core MVP functional.
 - [x] Dedicated no-source derivation contract in the frontend creates
   reviewable assumption nodes without fabricated source refs.
 - [ ] `WorkspaceBrief` backend schema validation.
+- [ ] `AIActionRun` schema for node/branch/workspace AI action history,
+  previews, accept/reject status, source scope, prompt profile, and generated
+  node IDs.
 
 ## Still Needed For Fully Functional MVP
 
@@ -223,6 +236,12 @@ These are the features required to call the core MVP functional.
    returned external refs persist after save/reopen.
 
 ## Post-MVP Backlog
+
+### Node AI Actions And Prompt Profiles
+
+See `NODE_AI_ACTIONS_ROADMAP.md` for the implementation source of truth,
+agent lanes, copy/paste agent prompts, ownership boundaries, and phase
+checklists.
 
 ### Advanced AI Reconfiguration
 

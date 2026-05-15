@@ -1,6 +1,229 @@
 export const supportedOpenAIModels = ['gpt-5.4', 'gpt-5.5'];
 export const defaultOpenAIModel = 'gpt-5.5';
 
+export const AI_ACTION_SCOPES = {
+    node: 'node',
+    branch: 'branch',
+    workspace: 'workspace'
+};
+
+export const nodeAiActions = [
+    { id: 'expand_node', label: 'Expand this node' },
+    { id: 'ask_follow_up', label: 'Ask follow-up' },
+    { id: 'generate_child_nodes', label: 'Generate child nodes' },
+    { id: 'convert_to_checklist', label: 'Convert to checklist' },
+    { id: 'create_sme_questions', label: 'Create SME questions' },
+    { id: 'find_missing_source_support', label: 'Find missing source support' },
+    { id: 'interpret_table_data', label: 'Interpret table/data' },
+    { id: 'generate_tasks', label: 'Generate tasks' },
+    { id: 'custom_prompt', label: 'Custom prompt' }
+];
+
+export const branchAiActions = [
+    { id: 'summarize_branch', label: 'Summarize branch' },
+    { id: 'reorganize_branch', label: 'Reorganize branch' },
+    { id: 'split_branch_categories', label: 'Split branch into categories' },
+    { id: 'generate_tasks', label: 'Generate tasks' },
+    { id: 'generate_checklist', label: 'Generate checklist' },
+    { id: 'find_gaps', label: 'Find gaps' },
+    { id: 'create_sme_questions', label: 'Create SME questions' },
+    { id: 'custom_prompt', label: 'Custom prompt' }
+];
+
+export const workspaceAiActions = [
+    { id: 'suggest_follow_up_questions', label: 'Suggest follow-up questions' },
+    { id: 'find_unsupported_assumptions', label: 'Find unsupported assumptions' },
+    { id: 'find_duplicate_nodes', label: 'Find duplicate or overlapping nodes' },
+    { id: 'generate_training_outline', label: 'Generate training outline' },
+    { id: 'export_sop_draft', label: 'Export branch as SOP draft' }
+];
+
+export const docMapPromptProfiles = [
+    {
+        id: 'standards-extractor',
+        label: 'Standards Extractor',
+        group: 'DocMap',
+        description: 'Extract requirements, definitions, controls, and cited standard language.',
+        scopes: ['node', 'branch', 'workspace'],
+        preferredActions: ['expand_node', 'generate_child_nodes', 'find_missing_source_support']
+    },
+    {
+        id: 'workflow-mapper',
+        label: 'Workflow Mapper',
+        group: 'DocMap',
+        description: 'Turn procedures and branches into workflow steps and dependencies.',
+        scopes: ['node', 'branch', 'workspace'],
+        preferredActions: ['generate_child_nodes', 'reorganize_branch', 'split_branch_categories']
+    },
+    {
+        id: 'training-guide-builder',
+        label: 'Training Guide Builder',
+        group: 'DocMap',
+        description: 'Draft learning outlines, checklists, and training-friendly branch structure.',
+        scopes: ['branch', 'workspace'],
+        preferredActions: ['generate_checklist', 'generate_training_outline', 'export_sop_draft']
+    },
+    {
+        id: 'sme-question-generator',
+        label: 'SME Question Generator',
+        group: 'DocMap',
+        description: 'Create review questions where source support or expert judgment is needed.',
+        scopes: ['node', 'branch', 'workspace'],
+        preferredActions: ['create_sme_questions', 'ask_follow_up', 'suggest_follow_up_questions']
+    },
+    {
+        id: 'task-planner',
+        label: 'Task Planner',
+        group: 'DocMap',
+        description: 'Convert map structure into accountable tasks and checklists.',
+        scopes: ['node', 'branch'],
+        preferredActions: ['generate_tasks', 'convert_to_checklist', 'generate_checklist']
+    },
+    {
+        id: 'data-table-interpreter',
+        label: 'Data/Table Interpreter',
+        group: 'DocMap',
+        description: 'Explain table-like node data and surface useful rows, fields, or anomalies.',
+        scopes: ['node', 'branch'],
+        preferredActions: ['interpret_table_data', 'generate_child_nodes']
+    },
+    {
+        id: 'gap-analyst',
+        label: 'Gap Analyst',
+        group: 'DocMap',
+        description: 'Find missing, duplicate, unsupported, or contradictory graph content.',
+        scopes: ['node', 'branch', 'workspace'],
+        preferredActions: ['find_gaps', 'find_unsupported_assumptions', 'find_duplicate_nodes']
+    },
+    {
+        id: 'source-ref-repair',
+        label: 'Source Ref Repair',
+        group: 'DocMap',
+        description: 'Suggest source-reference fixes while keeping node claims intact.',
+        scopes: ['node', 'branch', 'workspace'],
+        preferredActions: ['find_missing_source_support', 'find_unsupported_assumptions']
+    },
+    {
+        id: 'integration-readiness-reviewer',
+        label: 'Integration Readiness Reviewer',
+        group: 'DocMap',
+        description: 'Review whether branch nodes are ready for downstream handoff.',
+        scopes: ['branch', 'workspace'],
+        preferredActions: ['generate_tasks', 'find_gaps', 'export_sop_draft']
+    },
+    {
+        id: 'custom',
+        label: 'Custom',
+        group: 'DocMap',
+        description: 'Use your own instruction while preserving preview-first graph changes.',
+        scopes: ['node', 'branch', 'workspace'],
+        preferredActions: ['custom_prompt']
+    }
+];
+
+export const legacyPromptProfiles = [
+    {
+        id: 'strategic-advisor',
+        label: 'Strategic Advisor',
+        group: 'General',
+        description: 'Legacy general-purpose planning and strategy persona.',
+        scopes: ['node', 'branch'],
+        legacy: true
+    },
+    {
+        id: 'research-assistant',
+        label: 'Research Assistant',
+        group: 'General',
+        description: 'Legacy research, learning, writing, and organization persona.',
+        scopes: ['node', 'branch'],
+        legacy: true
+    },
+    {
+        id: 'productivity-coach',
+        label: 'Productivity Coach',
+        group: 'General',
+        description: 'Legacy productivity, focus, and prioritization persona.',
+        scopes: ['node', 'branch'],
+        legacy: true
+    },
+    {
+        id: 'data-interpreter',
+        label: 'Data Interpreter',
+        group: 'General',
+        description: 'Legacy general data interpretation persona.',
+        scopes: ['node', 'branch'],
+        legacy: true
+    },
+    {
+        id: 'custom-prompts',
+        label: 'Custom Prompts',
+        group: 'General',
+        description: 'Legacy free-form prompt entry.',
+        scopes: ['node', 'branch'],
+        legacy: true
+    }
+];
+
+export const legacyPersonaNames = legacyPromptProfiles.map((profile) => profile.label);
+
+export const aiActionProfiles = [...docMapPromptProfiles, ...legacyPromptProfiles];
+
+export const getPromptProfilesForScope = (scope) =>
+    aiActionProfiles.filter((profile) => profile.scopes.includes(scope));
+
+export const getActionsForScope = (scope) => {
+    if (scope === AI_ACTION_SCOPES.branch) {
+        return branchAiActions;
+    }
+    if (scope === AI_ACTION_SCOPES.workspace) {
+        return workspaceAiActions;
+    }
+    return nodeAiActions;
+};
+
+export const getDefaultActionForProfile = (profile, scope) => {
+    const actions = getActionsForScope(scope);
+    const preferred = profile?.preferredActions?.find((actionId) =>
+        actions.some((action) => action.id === actionId)
+    );
+    return preferred || actions[0]?.id || '';
+};
+
+export const getFollowUpSuggestions = (profile, action, contextLabel, scope) => {
+    const target = contextLabel || (scope === 'workspace' ? 'this workspace' : `this ${scope}`);
+    const label = action?.label?.toLowerCase() || 'review';
+
+    if (profile?.id === 'custom') {
+        return [
+            `Focus only on ${target} and list assumptions separately.`,
+            `Create a concise preview with source-backed items first.`,
+            `Flag anything that should become needs_review instead of accepted content.`
+        ];
+    }
+
+    if (action?.id === 'create_sme_questions' || profile?.id === 'sme-question-generator') {
+        return [
+            `Draft SME questions for ${target} grouped by missing evidence.`,
+            `Identify who should answer each follow-up for ${target}.`,
+            `Separate factual gaps from decision questions for ${target}.`
+        ];
+    }
+
+    if (action?.id?.includes('source') || profile?.id === 'source-ref-repair') {
+        return [
+            `Find claims in ${target} that need stronger source refs.`,
+            `Suggest citation repair targets without rewriting claims.`,
+            `Prioritize unsupported assumptions in ${target}.`
+        ];
+    }
+
+    return [
+        `Preview ${label} for ${target} without changing the graph.`,
+        `Keep generated items short and ready for accept/reject review.`,
+        `Preserve source refs and mark unsupported output for review.`
+    ];
+};
+
 const resolveModelName = (selectedModel) =>
     supportedOpenAIModels.includes(selectedModel)
         ? selectedModel

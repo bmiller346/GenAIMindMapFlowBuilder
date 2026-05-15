@@ -74,11 +74,12 @@ const LoadingModal = ({
             }
         };
 
-        loadProgress();
+        const initialTimeout = window.setTimeout(loadProgress, 600);
         const interval = window.setInterval(loadProgress, 900);
 
         return () => {
             canceled = true;
+            window.clearTimeout(initialTimeout);
             window.clearInterval(interval);
         };
     }, [operationId]);
