@@ -369,6 +369,84 @@ const setupMockBackend = async (page) => {
     );
 
     await page.route(
+        `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions/draft-session-usage-1`,
+        async (route) => {
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    session_id: 'draft-session-usage-1',
+                    workspace_id: flowId,
+                    scope: { type: 'workspace' },
+                    role: 'workflow_mapper',
+                    intent: 'usage_review',
+                    prompt_history: [
+                        {
+                            role: 'user',
+                            content: 'Review token usage draft',
+                            created_at: '2026-05-15T12:10:00.000Z',
+                            revision_id: 'revision-usage-1'
+                        }
+                    ],
+                    model_policy: 'balanced',
+                    selected_model: 'gpt-5.4',
+                    model_reason: 'Mocked usage review session.',
+                    revisions: [
+                        {
+                            revision_id: 'revision-usage-1',
+                            session_id: 'draft-session-usage-1',
+                            prompt: 'Review token usage draft',
+                            draft_items: [],
+                            draft_nodes: [
+                                {
+                                    id: 'draft-usage-review',
+                                    parent_id: '',
+                                    title: 'Usage reviewed draft',
+                                    summary: 'A draft opened directly from the workspace AI usage details.',
+                                    node_type: 'note',
+                                    status: 'needs_review',
+                                    confidence: 0.8,
+                                    source_refs: []
+                                }
+                            ],
+                            draft_edges: [],
+                            draft_annotations: [],
+                            preview_diff: {
+                                mode: 'append',
+                                added_nodes: 1,
+                                added_edges: 0,
+                                updated_nodes: 0,
+                                review_outputs: 1,
+                                needs_review_repairs: 1,
+                                accepted_item_ids: ['draft-usage-review'],
+                                summary: '+1 nodes, !1 marked needs_review'
+                            },
+                            validation_report: {
+                                is_valid: true,
+                                repaired: false,
+                                issues: []
+                            },
+                            created_at: '2026-05-15T12:10:00.000Z',
+                            model: 'gpt-5.4',
+                            metadata: {
+                                usage: {
+                                    total_tokens: 1400,
+                                    estimated_cost_usd: '$0.0032'
+                                }
+                            }
+                        }
+                    ],
+                    source_refs: [],
+                    validation_reports: [],
+                    accept_history: [],
+                    status: 'drafting',
+                    metadata: {}
+                })
+            });
+        }
+    );
+
+    await page.route(
         `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions/**/accept`,
         async (route) => {
             const requestBody = route.request().postDataJSON();
@@ -534,6 +612,10 @@ test('uploaded business plan reconciles with generated graph and opens scoped AE
     await expect(page.locator('.workspace-ai-usage')).toContainText('$0.0032 est.');
     await page.locator('.workspace-ai-usage').getByText('Details').click();
     await expect(page.locator('.workspace-ai-usage')).toContainText('gpt-5.4');
+    await page.locator('.workspace-ai-usage').getByRole('button', { name: 'Review' }).click();
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('Usage reviewed draft');
+    await expect(page.locator('.workspace-ai-usage')).toContainText('Draft session opened for review.');
+    await page.getByRole('button', { name: 'Close workspace AI preview' }).click();
 
     await page.getByRole('button', { name: /TraceSpace Map/ }).click();
     const targetNode = page.locator('.node-response').filter({ hasText: 'Target market and positioning' });

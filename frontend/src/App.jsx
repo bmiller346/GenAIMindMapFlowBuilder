@@ -458,6 +458,7 @@ const App = () => {
         setInspectorNodeId: state.setInspectorNodeId,
         inspectorEdgeId: state.inspectorEdgeId,
         setInspectorEdgeId: state.setInspectorEdgeId,
+        setActiveAIDraftSession: state.setActiveAIDraftSession,
         setViewPort: state.setViewPort,
         setWorkspaceBrief: state.setWorkspaceBrief,
         setSourceLibrary: state.setSourceLibrary,
@@ -480,6 +481,7 @@ const App = () => {
         setInspectorNodeId,
         inspectorEdgeId,
         setInspectorEdgeId,
+        setActiveAIDraftSession,
         setViewPort,
         setWorkspaceBrief,
         setSourceLibrary,
@@ -503,6 +505,7 @@ const App = () => {
     const [workspaceDockTab, setWorkspaceDockTab] = useState('sources');
     const [aiUsage, setAIUsage] = useState();
     const [aiUsageStatus, setAIUsageStatus] = useState('');
+    const [aiUsageReviewStatus, setAIUsageReviewStatus] = useState('');
     const [nextStepsOpenToken, setNextStepsOpenToken] = useState(0);
     const reactFlow = useReactFlow();
     const { fitView } = useReactFlow();
@@ -537,6 +540,27 @@ const App = () => {
             refreshAIUsage();
         }
     }, [refreshAIUsage, workspaceDockTab]);
+
+    const openUsageDraftSession = useCallback(
+        async (session) => {
+            if (!flow_id || !session?.session_id) {
+                return;
+            }
+            setAIUsageReviewStatus('Opening draft session...');
+            try {
+                const response = await axios.get(
+                    `http://localhost:8000/api/workspaces/${encodeURIComponent(flow_id)}/ai/draft-sessions/${encodeURIComponent(session.session_id)}`
+                );
+                setInspectorNodeId(undefined);
+                setInspectorEdgeId(undefined);
+                setActiveAIDraftSession(response.data || session);
+                setAIUsageReviewStatus('Draft session opened for review.');
+            } catch (error) {
+                setAIUsageReviewStatus('Draft session unavailable');
+            }
+        },
+        [flow_id, setActiveAIDraftSession, setInspectorEdgeId, setInspectorNodeId]
+    );
 
     const selectedNodeIssues = useMemo(() => {
         if (!inspectorNodeId || !validationReport?.issues) {
@@ -1110,13 +1134,23 @@ const App = () => {
                                             {aiUsageStatus ||
                                                 `${formatUsageNumber(aiUsage?.session_count)} draft sessions tracked`}
                                         </span>
+                                        {aiUsageReviewStatus ? <small>{aiUsageReviewStatus}</small> : null}
                                         {Array.isArray(aiUsage?.sessions) && aiUsage.sessions.length ? (
                                             <details>
                                                 <summary>Details</summary>
-                                                <div>
+                                                <div className="workspace-ai-usage-sessions">
                                                     {aiUsage.sessions.slice(0, 5).map((session) => (
                                                         <article key={session.session_id || session.created_at}>
-                                                            <strong>{session.selected_model || 'auto'}</strong>
+                                                            <div>
+                                                                <strong>{session.selected_model || 'auto'}</strong>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => openUsageDraftSession(session)}
+                                                                    disabled={!session.session_id}
+                                                                >
+                                                                    Review
+                                                                </button>
+                                                            </div>
                                                             <span>
                                                                 {formatUsageNumber(session.total_tokens)} tokens
                                                                 {session.estimated_cost_usd

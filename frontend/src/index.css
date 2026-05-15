@@ -891,6 +891,43 @@ h5 {
   line-height: 1rem;
 }
 
+.workspace-ai-usage small {
+  color: var(--input-color);
+  font-size: 0.68rem;
+  line-height: 0.95rem;
+}
+
+.workspace-ai-usage details {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.workspace-ai-usage summary {
+  color: var(--font-color);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.workspace-ai-usage-sessions {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.workspace-ai-usage-sessions article {
+  display: grid;
+  gap: 0.2rem;
+  border-top: 1px solid var(--question-border);
+  padding-top: 0.45rem;
+}
+
+.workspace-ai-usage-sessions article > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
 .manual-node-controls {
   display: flex;
   gap: 0.5rem;
