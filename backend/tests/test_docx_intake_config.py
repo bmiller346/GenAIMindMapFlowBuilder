@@ -50,6 +50,28 @@ def test_legacy_assistants_model_resolver_no_longer_downshifts_to_gpt_4_1():
     assert app.resolve_assistants_model("gpt-5.4") == "gpt-5.4"
 
 
+def test_legacy_assistants_fallback_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("DOCMAP_ALLOW_LEGACY_ASSISTANTS", "false")
+
+    with pytest.raises(HTTPException) as exc_info:
+        app.require_legacy_assistants_fallback("docx", purpose="graph generation")
+
+    assert exc_info.value.status_code == 503
+    assert "DOCMAP_ALLOW_LEGACY_ASSISTANTS=true" in exc_info.value.detail
+
+
+def test_legacy_assistants_fallback_defaults_to_disabled(monkeypatch):
+    monkeypatch.delenv("DOCMAP_ALLOW_LEGACY_ASSISTANTS", raising=False)
+
+    assert app.legacy_assistants_fallback_enabled() is False
+
+
+def test_legacy_assistants_fallback_can_be_enabled(monkeypatch):
+    monkeypatch.setenv("DOCMAP_ALLOW_LEGACY_ASSISTANTS", "true")
+
+    assert app.legacy_assistants_fallback_enabled() is True
+
+
 def test_docx_intake_brief_is_sanitized_and_limited():
     brief = app.clean_source_intake_value("  one\n\n two\tthree  ", max_length=9)
 

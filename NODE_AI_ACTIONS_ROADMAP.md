@@ -58,6 +58,9 @@ Known notes:
 - Prompt profile roles include DocMap/domain roles and legacy General personas,
   but the UI should continue to prioritize DocMap roles and treat General
   personas as secondary/advanced options.
+- Ask AI is the single authoring entry point. Source Librarian, SME/reviewer,
+  planner, data/table interpreter, and General personas are routed role/action
+  profiles behind that entry point rather than separate graph-writing flows.
 
 ## Product Rules
 

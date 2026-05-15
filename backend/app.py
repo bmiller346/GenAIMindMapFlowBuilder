@@ -194,11 +194,7 @@ OPENAI_REASONING_MODEL = os.getenv("openai_reasoning_model", "gpt-5.4")
 OPENAI_EMBEDDING_MODEL = os.getenv(
     "openai_embedding_model", "text-embedding-3-large"
 )
-ALLOW_LEGACY_ASSISTANTS = os.getenv("DOCMAP_ALLOW_LEGACY_ASSISTANTS", "").lower() in {
-    "1",
-    "true",
-    "yes",
-}
+LEGACY_ASSISTANTS_FALLBACK_ENV = "DOCMAP_ALLOW_LEGACY_ASSISTANTS"
 
 
 def clean_source_intake_value(value: str | None, max_length: int = 2000) -> str:
@@ -210,6 +206,24 @@ def resolve_assistants_model(model_name: str | None = None) -> str:
     if not requested_model:
         return OPENAI_DEFAULT_MODEL
     return requested_model
+
+
+def legacy_assistants_fallback_enabled() -> bool:
+    value = os.getenv(LEGACY_ASSISTANTS_FALLBACK_ENV, "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def require_legacy_assistants_fallback(source_type: str, *, purpose: str) -> None:
+    if legacy_assistants_fallback_enabled():
+        return
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=(
+            f"Responses-based {purpose} could not run for {source_type} because local source chunks "
+            f"were unavailable. Set {LEGACY_ASSISTANTS_FALLBACK_ENV}=true to allow the temporary "
+            "Assistants file-search fallback."
+        ),
+    )
 
 
 def resolve_source_intake_role(intake_role: str | None = None) -> str:
@@ -236,7 +250,7 @@ def build_source_intake_instruction(
 
 
 def require_legacy_assistants_enabled(feature: str) -> None:
-    if ALLOW_LEGACY_ASSISTANTS:
+    if legacy_assistants_fallback_enabled():
         return
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
@@ -2892,7 +2906,7 @@ def get_summary_from_openai(
         )
         return {"component_id": str(component_id), "type": file_extension, flow_type: flow_type}
 
-    require_legacy_assistants_enabled(f"{file_extension.upper()} source summary")
+    require_legacy_assistants_fallback(file_extension, purpose="source summary")
     assistant_model = resolve_assistants_model(intake_model)
     intake_instruction = build_source_intake_instruction(intake_role, intake_prompt)
 
@@ -3139,7 +3153,7 @@ def openai_mindmap_generator(
             "flow_type": flow_type,
         }
 
-    require_legacy_assistants_enabled(f"{file_extension.upper()} source graph generation")
+    require_legacy_assistants_fallback(file_extension, purpose="graph generation")
     assistant_model = resolve_assistants_model(intake_model)
     intake_role_label = resolve_source_intake_role(intake_role)
     intake_prompt_text = clean_source_intake_value(intake_prompt)

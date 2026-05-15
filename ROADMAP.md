@@ -115,6 +115,14 @@ paths are temporary legacy paths, not the product architecture.
 - [ ] Remove remaining legacy Assistants source/persona paths after each has a
   Responses equivalent; no workflow should silently downshift to a legacy model.
 
+Current discrepancy:
+
+- Legacy Assistants calls still exist for older chat/follow-up and dead web
+  crawler fallback code paths in `backend/app.py`. The active document source
+  intake path is Responses-first, marks fallback metadata as
+  `legacy_assistants`, and can disable fallback with
+  `DOCMAP_ALLOW_LEGACY_ASSISTANTS=false`.
+
 ### Workspace Graph And Local Views
 
 - [x] React Flow renders the editable mind map.
@@ -138,6 +146,9 @@ paths are temporary legacy paths, not the product architecture.
 - [x] Node, branch, and workspace Ask AI actions expose the original personas
   under a General profile group and use DocMap's preview/accept graph mutation
   model.
+- [x] Ask AI is the unified entry point for helper roles; Source Librarian,
+  SME/reviewer, planner, and data interpreter behavior is routed through role
+  profiles and action intent instead of separate competing UI surfaces.
 - [x] The legacy data-source `PromptModal`/`Prompts` execution path is gated so
   it remains discoverable but cannot directly append graph changes outside
   preview/accept.
