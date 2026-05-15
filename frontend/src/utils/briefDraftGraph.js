@@ -69,7 +69,7 @@ export const createBriefDraftGraph = ({
         title: 'Workspace Goal',
         summary: compactText(
             brief.goal,
-            'Draft a DocMap from the workspace brief. Add source documents or refine the brief to strengthen grounding.'
+            'Draft a TraceSpace workspace from the workspace brief. Add source documents or refine the brief to strengthen grounding.'
         ),
         nodeType: 'workspace_goal',
         position: origin,

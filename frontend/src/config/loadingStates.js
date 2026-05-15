@@ -1,9 +1,9 @@
 export const sourceUploadLoading = (sourceType, fileName) => ({
     title: `Adding ${sourceType} source`,
     detail: fileName
-        ? `${fileName} is being uploaded, parsed, and prepared for DocMap.`
-        : 'The source is being uploaded, parsed, and prepared for DocMap.',
-    context: 'DocMap is extracting source text and preserving references before it updates the workspace.',
+        ? `${fileName} is being uploaded, parsed, and prepared for TraceSpace.`
+        : 'The source is being uploaded, parsed, and prepared for TraceSpace.',
+    context: 'TraceSpace is extracting source text and preserving references before it updates the workspace.',
     aiContext: 'AI phase: reading the source, applying the workspace brief, and deriving reviewable structure.',
     steps: [
         'Uploading source file',
@@ -16,9 +16,9 @@ export const sourceUploadLoading = (sourceType, fileName) => ({
 export const structuredSourceLoading = (sourceType, label) => ({
     title: `Connecting ${sourceType} source`,
     detail: label
-        ? `${label} is being validated and prepared for DocMap.`
-        : 'The data source is being validated and prepared for DocMap.',
-    context: 'DocMap is reading the source shape and preparing it for questions and derived nodes.',
+        ? `${label} is being validated and prepared for TraceSpace.`
+        : 'The data source is being validated and prepared for TraceSpace.',
+    context: 'TraceSpace is reading the source shape and preparing it for questions and derived nodes.',
     aiContext: 'AI phase: learning the available fields, relationships, and query surface.',
     steps: [
         'Validating source',
@@ -45,7 +45,7 @@ export const questionAnswerLoading = (brief) => ({
 
 export const briefDraftLoading = (brief) => ({
     title: 'Deriving brief draft',
-    detail: 'DocMap is turning the workspace setup into reviewable starter nodes.',
+    detail: 'TraceSpace is turning the workspace setup into reviewable starter nodes.',
     context: brief?.goal
         ? `Workspace goal: ${brief.goal}`
         : 'No source document is attached, so this draft will be marked for review.',

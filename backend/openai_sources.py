@@ -83,7 +83,7 @@ def generate_document_mindmap(
     context = _chunk_context(chunks)
     decision = choose_openai_model(
         requested_model=model,
-        task=f"generate source-grounded DocMap graph from {source_type}",
+        task=f"generate source-grounded TraceSpace graph from {source_type}",
         content=context,
         source_chunks=chunks,
         requires_source_grounding=True,
@@ -121,7 +121,7 @@ def generate_component_answer(
         "Return only JSON with keys `summ`, `df`, and `graph`. Use an empty list "
         "for `df` and an empty string for `graph` when table or chart data is not useful. "
         "Do not invent facts beyond the component context.\n\n"
-        f"Persona: {persona or 'DocMap reviewer'}\n"
+        f"Persona: {persona or 'TraceSpace reviewer'}\n"
         f"Instructions: {instructions or 'Use source-grounded, concise answers.'}\n"
         f"Workspace brief: {json.dumps(workspace_brief or {}, ensure_ascii=False)}\n\n"
         f"Question:\n{question}\n\n"
@@ -167,7 +167,7 @@ def generate_component_follow_up_questions(
         "Generate up to three useful follow-up questions for this component. "
         "Return only JSON with a `questions` array of strings. If the context is "
         "insufficient, return an empty array.\n\n"
-        f"Persona: {persona or 'DocMap reviewer'}\n"
+        f"Persona: {persona or 'TraceSpace reviewer'}\n"
         f"Instructions: {instructions or 'Ask source-grounded review questions.'}\n\n"
         f"Component context:\n{context}"
     )

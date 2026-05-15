@@ -18,7 +18,7 @@ settings overrides.
 
 ## Product Intent
 
-DocMap should feel like a structured think space, not a "generate a mind map"
+TraceSpace should feel like a structured think space, not a "generate a mind map"
 tool with extra tabs.
 
 The canonical workspace remains the durable source of truth, but the user

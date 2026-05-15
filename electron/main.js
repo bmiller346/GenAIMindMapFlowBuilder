@@ -81,7 +81,7 @@ function resolveFrontendIndex() {
   return resolveAppPath('frontend', 'dist', 'index.html');
 }
 
-function resolveDesktopIcon(fileName = 'docmap.png') {
+function resolveDesktopIcon(fileName = 'tracespace.png') {
   return isDev
     ? path.resolve(__dirname, 'assets', fileName)
     : path.join(process.resourcesPath, 'electron', 'assets', fileName);
@@ -517,8 +517,8 @@ async function createWindow() {
     height: 950,
     minWidth: 1100,
     minHeight: 720,
-    title: 'DocMap',
-    icon: resolveDesktopIcon(process.platform === 'win32' ? 'docmap.ico' : 'docmap.png'),
+    title: 'TraceSpace',
+    icon: resolveDesktopIcon(process.platform === 'win32' ? 'tracespace.ico' : 'tracespace.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -547,7 +547,7 @@ async function createWindow() {
   if (!backendReady) {
     await dialog.showMessageBox(mainWindow, {
       type: 'warning',
-      title: 'DocMap backend did not start',
+      title: 'TraceSpace backend did not start',
       message: 'The local FastAPI backend did not respond in time.',
       detail: 'Check that Poetry is installed and backend dependencies have been installed with `cd backend && poetry install`.'
     });
@@ -557,7 +557,7 @@ async function createWindow() {
     await dialog.showMessageBox(mainWindow, {
       type: 'warning',
       title: 'MongoDB is not running',
-      message: 'DocMap can open workspaces, but document source uploads need MongoDB.',
+      message: 'TraceSpace can open workspaces, but document source uploads need MongoDB.',
       detail: 'Start Docker Desktop, then run `npm run infra:mongo:up` from the repo root. Restart the desktop app after MongoDB is listening on 127.0.0.1:27017.'
     });
   }
@@ -577,7 +577,7 @@ async function createWindow() {
 
   await mainWindow.loadURL(
     `data:text/html;charset=utf-8,${encodeURIComponent(`
-      <h1>DocMap frontend build not found</h1>
+      <h1>TraceSpace frontend build not found</h1>
       <p>Expected: ${indexPath}</p>
       <p>Run <code>npm run desktop:build:frontend</code> before starting the packaged desktop shell.</p>
     `)}`
@@ -627,7 +627,7 @@ function stopBackend() {
 }
 
 app.whenReady().then(async () => {
-  app.setName('DocMap');
+  app.setName('TraceSpace');
   installContentSecurityPolicy();
   installCredentialSettingsIpc();
   installMenu();

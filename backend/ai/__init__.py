@@ -1,1 +1,1 @@
-"""Provider-neutral AI generation primitives for DocMap."""
+"""Provider-neutral AI generation primitives for TraceSpace."""

@@ -1,6 +1,6 @@
-# DocMap MVP Roadmap
+# TraceSpace MVP Roadmap
 
-This is the current implementation and MVP completion tracker for DocMap.
+This is the current implementation and MVP completion tracker for TraceSpace.
 Keep it focused on what exists, what is still incomplete, and what must be
 verified before calling the MVP shippable.
 
@@ -16,7 +16,7 @@ PDF/DOCX/MD/TXT upload
 -> optional post-review handoff actions to Miro and monday.com
 ```
 
-The DocMap graph is canonical. Miro and monday.com are handoff destinations,
+The TraceSpace graph is canonical. Miro and monday.com are handoff destinations,
 not replacements for the internal graph.
 
 ## Current Status
@@ -34,12 +34,16 @@ Recently verified:
 - Source draft review frontend contract tests pass with
   `node --test frontend/tests/sourceDraftReview.test.mjs`.
 - Browser-level Ask AI regression paths pass for selected node, selected
-  branch discard, selected source, whole workspace accept, and legacy profile
-  discoverability: 5 Playwright tests passed.
+  branch discard, selected source, multi-selected nodes, whole workspace
+  accept, and legacy profile discoverability: 6 Playwright tests passed.
 - Backend Ask AI draft-session smoke paths pass for workspace, selected node,
   selected branch, and source-scoped requests. The selected-source UI now opens
   Ask AI from the Sources panel and sends source scope plus selected source
   chunks to the draft-session endpoint.
+- Backend draft sessions can already carry prior draft state and source
+  context. The server also exposes a source-reconciliation endpoint for adding
+  source chunks to an active draft; the remaining gap is wiring that capability
+  into a polished multi-source frontend workflow.
 - Real-file backend upload smoke passed for `examples/gpt4all.pdf` and
   `examples/Project-Management-Plan-1.docx` using the real upload, extraction,
   chunking, source metadata, source draft review, save/reopen, JSON export, and
@@ -54,6 +58,9 @@ Known verification gap:
 - The complete desktop/browser MVP loop still needs a live browser smoke with
   real OpenAI configuration: upload, generate, review source draft, edit, save,
   reopen, export JSON/Markdown, and confirm source/review indicators in the UI.
+- The live OpenAI smoke script is available at `backend/tests/live_openai_smoke.py`,
+  but could not run in this environment because neither `openai_api_key` nor
+  `OPENAI_API_KEY` is configured.
 - Live Miro and monday.com pushes are not verified and remain incomplete.
 
 ## Product Rules
@@ -111,18 +118,18 @@ Known verification gap:
 - [x] Validation reports are available to the UI.
 - [x] Document intake treats role/brief guidance as optional, validates allowed
   intake roles, sanitizes prompt text, and routes PDF/DOCX/Markdown/TXT graph
-  generation through Responses with DocMap model policy.
+  generation through Responses with TraceSpace model policy.
 - [x] Automatic document intake stages generated graph output in a source draft
   review panel before adopting it into the canonical workspace graph.
 
 ### AI Provider Refactor
 
-Goal: remove the Assistants API dependency from DocMap generation paths.
+Goal: remove the Assistants API dependency from TraceSpace generation paths.
 OpenAI lists Assistants API removal for 2026-08-26, so remaining Assistants
 paths are temporary legacy paths, not the product architecture.
 
 - [x] Add `backend/ai/responses_client.py`.
-- [x] Add a provider-neutral DocMap AI adapter interface.
+- [x] Add a provider-neutral TraceSpace AI adapter interface.
 - [x] Move role/persona prompts into backend AI role modules.
 - [x] Move JSON output schemas into backend AI schema modules.
 - [x] Refactor PDF/DOCX/Markdown/TXT draft generation from Assistants API to
@@ -173,7 +180,7 @@ Current discrepancy:
   `Data Interpreter`, and `Custom Prompts` still exist behind the legacy
   data-source prompt selector.
 - [x] Node, branch, and workspace Ask AI actions expose the original personas
-  under a General profile group and use DocMap's preview/accept graph mutation
+  under a General profile group and use TraceSpace's preview/accept graph mutation
   model.
 - [x] Ask AI is the unified entry point for helper roles; Source Librarian,
   SME/reviewer, planner, and data interpreter behavior is routed through role
@@ -186,7 +193,7 @@ Current discrepancy:
 
 - [x] Workspace Brief schema fields are represented in frontend state and
   persisted in workspace JSON.
-- [x] Build DocMap modal supports presets, desired outputs, source strictness,
+- [x] Build TraceSpace modal supports presets, desired outputs, source strictness,
   node taxonomy, review policy, and output style controls.
 - [x] Workspace Brief context is included in relevant backend request prompts.
 - [x] Workspace Brief appears in the primary workflow.
@@ -260,7 +267,7 @@ Current discrepancy:
 - [ ] monday status can be pulled back into node review status without changing
   canonical graph structure in tests, but live status pull is not verified.
 - [x] monday group-creation decision is made for MVP: exports require an
-  existing board and group; automatic group creation from DocMap categories is
+  existing board and group; automatic group creation from TraceSpace categories is
   deferred.
 - [ ] Full bidirectional monday sync/conflict handling is intentionally not
   complete.
@@ -359,14 +366,15 @@ Core product rules:
   checklist items, outline sections, table rows, kanban cards, charts, flow
   charts, presentation sections, handoff packages, SME questions, and
   source-repair suggestions.
-- [ ] Draft sessions can be scoped to workspace, selected source document,
+- [x] Draft sessions can be scoped to workspace, selected source document,
   selected branch, selected node, or multi-selected nodes.
 - [ ] Users can refine a draft with follow-up prompts such as "add this
   manufacturer", "split by product line", "make this a checklist", "append only
   cited items", or "compare this to the new document".
 - [ ] Users can add sources mid-session; the draft session can re-run coverage,
   citation repair, contradiction checks, and append proposals against the new
-  context.
+  context. Backend helper, endpoint, and tests exist for this; frontend
+  selection/reconcile UI is still incomplete.
 - [x] Accepting a draft supports explicit modes: append to selected scope,
   replace selected branch, merge into matching nodes, accept selected items,
   accept cited-only, or store as review notes.
@@ -385,7 +393,7 @@ Backend architecture:
   revisions, source refs, validation reports, and accept/reject history.
 - [x] Add `AIDraftRevision` records for each model turn so users can compare,
   restore, or branch from earlier drafts.
-- [x] Route draft generation and revision through Responses API via the DocMap
+- [x] Route draft generation and revision through Responses API via the TraceSpace
   AI provider adapter, not legacy Assistants paths.
 - [x] Define strict JSON schemas for draft session responses: graph draft,
   patch/diff proposal, source coverage report, task/checklist projection,
@@ -396,12 +404,19 @@ Backend architecture:
 - [x] Add model policy levels: Speed, Balanced, Deep Review, and Explicit
   Model. The UI may show friendly labels while metadata records the actual
   selected model and reason.
-- [ ] Add source-context builder support for selected node, branch, workspace,
+- [x] Add source-context builder support for selected node, branch, workspace,
   uploaded source chunks, source library gaps, and current draft session state.
   Backend/provider draft generation now includes workspace/node/branch/
-  multi-node scoping, uploaded source chunks, and prior draft session state;
-  source-library gap retrieval and add-source reconciliation still need
-  integration.
+  multi-node/source scoping, uploaded source chunks, source-library gaps, and
+  prior draft session state.
+- [x] Add backend add-source reconciliation for active draft sessions. The
+  `/api/workspaces/{flow_id}/ai/draft-sessions/{session_id}/sources` endpoint
+  can accept explicit chunks or resolve chunks from a `source_id`, then rerun
+  draft reconciliation through the provider path.
+- [ ] Add source retrieval/ranking and token-budget policy for workspace,
+  branch, and multi-source drafting. Current backend context can include
+  library chunks broadly; production behavior should select the most relevant
+  chunks, record what was included/excluded, and expose the reason in metadata.
 - [x] Add graph-diff generation that emits patch operations instead of only
   whole replacement graphs.
 - [x] Add preview-diff summaries for accept decisions, including counts like
@@ -437,8 +452,13 @@ Frontend UX:
 - [x] Support conversational refinement against the current draft without
   closing the panel.
 - [ ] Support "add another source" from inside the draft session and re-run
-  coverage against the new source. The UI hook opens the existing source picker;
-  source-aware re-run still needs backend/provider integration.
+  coverage against the new source. Backend/provider integration exists; the UI
+  hook currently opens the existing source picker but still needs to pass the
+  selected source/chunks to the draft-session `/sources` endpoint and refresh
+  the active draft revision.
+- [ ] Support explicit multi-source Ask AI selection in the UI. Users should be
+  able to choose multiple loaded documents/sources, ask one prompt against that
+  bounded source set, and see which sources/chunks were used in the draft.
 - [ ] Preserve keyboard-friendly controls and predictable focus behavior for
   repeated drafting.
 - [ ] Keep the current source draft review panel as the specialized source
@@ -446,10 +466,10 @@ Frontend UX:
 
 Acceptance criteria:
 
-- [ ] User can create an AI draft from selected node, selected branch, selected
+- [x] User can create an AI draft from selected node, selected branch, selected
   source, selected nodes, or whole workspace. Backend smoke verifies
   workspace/node/branch/source scopes; browser smoke verifies workspace/node/
-  branch/source; multi-selected node UI coverage is still incomplete.
+  branch/source/multi-selected-node scoping.
 - [x] Prompt "create a mind map for cereals by manufacturer" creates a draft
   session with manufacturer branches and proposed child nodes, without mutating
   the graph. Covered by offline Responses fixture provider tests.
@@ -460,7 +480,8 @@ Acceptance criteria:
 - [x] User can accept only selected manufacturers into the graph.
 - [x] User can accept all, accept selected, append, replace, or merge.
 - [ ] User can add a source document mid-session and ask the system to reconcile
-  the draft against it.
+  the draft against it. Backend endpoint/helper coverage exists; browser UI
+  flow and save/reload verification remain open.
 - [x] Accepted changes run through canonical graph validation before persistence.
 - [x] Source-backed accepted nodes retain citations after save/reload/export.
 - [x] Unsourced accepted nodes are persisted as `needs_review`.
@@ -474,11 +495,12 @@ Acceptance criteria:
   policy elsewhere. Backend/provider tests verify explicit model selection wins;
   browser/end-to-end verification remains part of the broader drafting-table
   test.
-- [ ] Browser-level test covers draft creation, follow-up revision, selected
+- [x] Browser-level test covers draft creation, follow-up revision, selected
   accept, save/reload, and source/review indicators. Existing browser coverage
   verifies node selected-accept save/reopen with review/source badges, branch
-  discard, workspace accept, and selected-source request scoping; full
-  real-file browser/OpenAI coverage remains missing.
+  discard, workspace accept, selected-source request scoping, and
+  multi-selected-node request scoping; full real-file browser/OpenAI coverage
+  remains missing.
 - [x] Backend tests cover intent classification, Responses request construction,
   schema parsing, graph diff validation, accept modes, and provenance
   persistence.

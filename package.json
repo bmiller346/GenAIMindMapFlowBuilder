@@ -1,9 +1,9 @@
 {
-  "name": "docmap-desktop",
+  "name": "tracespace-desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Electron desktop launcher for the DocMap FastAPI and React app.",
-  "author": "DocMap",
+  "description": "Electron desktop launcher for the TraceSpace FastAPI and React app.",
+  "author": "TraceSpace",
   "main": "electron/main.js",
   "type": "module",
   "scripts": {
@@ -28,8 +28,8 @@
     "wait-on": "^7.2.0"
   },
   "build": {
-    "appId": "com.docmap.desktop",
-    "productName": "DocMap",
+    "appId": "com.tracespace.desktop",
+    "productName": "TraceSpace",
     "npmRebuild": false,
     "electronLanguages": [
       "en-US"
@@ -72,7 +72,7 @@
       }
     ],
     "win": {
-      "icon": "electron/assets/docmap.ico",
+      "icon": "electron/assets/tracespace.ico",
       "target": [
         "nsis",
         "portable"
@@ -85,7 +85,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "DocMap"
+      "shortcutName": "TraceSpace"
     },
     "portable": {
       "requestExecutionLevel": "user"

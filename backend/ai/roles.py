@@ -21,7 +21,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "standards_extractor": {
         "role_id": "standards_extractor",
         "label": "Standards Extractor",
-        "group": "DocMap",
+        "group": "TraceSpace",
         "description": "Extracts requirements, controls, and compliance-ready statements from source-backed workspace context.",
         "supported_scopes": ["node", "branch", "workspace"],
         "supported_actions": [
@@ -33,7 +33,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
             "find_unsupported_assumptions",
             "custom_prompt",
         ],
-        "system_instructions": "Produce precise DocMap draft nodes and review annotations. Preserve source refs; do not invent citations.",
+        "system_instructions": "Produce precise TraceSpace draft nodes and review annotations. Preserve source refs; do not invent citations.",
         "default_output_shape": "draft_nodes",
         "source_strictness": "strict",
         "default_review_status": "needs_review_when_unsourced",
@@ -41,7 +41,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "workflow_mapper": {
         "role_id": "workflow_mapper",
         "label": "Workflow Mapper",
-        "group": "DocMap",
+        "group": "TraceSpace",
         "description": "Turns process context into workflow steps, branches, handoffs, and gaps.",
         "supported_scopes": ["node", "branch", "workspace"],
         "supported_actions": [
@@ -60,8 +60,8 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "training_guide_builder": {
         "role_id": "training_guide_builder",
         "label": "Training Guide Builder",
-        "group": "DocMap",
-        "description": "Builds training outlines, checklists, and learner-facing guide structure from DocMap graph context.",
+        "group": "TraceSpace",
+        "description": "Builds training outlines, checklists, and learner-facing guide structure from TraceSpace graph context.",
         "supported_scopes": ["node", "branch", "workspace"],
         "supported_actions": [
             "convert_to_checklist",
@@ -78,7 +78,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "sme_question_generator": {
         "role_id": "sme_question_generator",
         "label": "SME Question Generator",
-        "group": "DocMap",
+        "group": "TraceSpace",
         "description": "Creates targeted reviewer and subject-matter-expert questions for unresolved graph context.",
         "supported_scopes": ["node", "branch", "workspace"],
         "supported_actions": [
@@ -96,7 +96,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "task_planner": {
         "role_id": "task_planner",
         "label": "Task Planner",
-        "group": "DocMap",
+        "group": "TraceSpace",
         "description": "Turns selected context into tasks, priorities, checklist items, and execution follow-up.",
         "supported_scopes": ["node", "branch"],
         "supported_actions": [
@@ -113,7 +113,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "data_table_interpreter": {
         "role_id": "data_table_interpreter",
         "label": "Data/Table Interpreter",
-        "group": "DocMap",
+        "group": "TraceSpace",
         "description": "Interprets table-like or data-source context into conclusions, caveats, and follow-up tasks.",
         "supported_scopes": ["node", "branch"],
         "supported_actions": ["interpret_table_data", "generate_tasks", "custom_prompt"],
@@ -125,7 +125,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "gap_analyst": {
         "role_id": "gap_analyst",
         "label": "Gap Analyst",
-        "group": "DocMap",
+        "group": "TraceSpace",
         "description": "Finds missing details, unsupported assumptions, duplication, and overlapping nodes.",
         "supported_scopes": ["node", "branch", "workspace"],
         "supported_actions": [
@@ -143,7 +143,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "source_ref_repair": {
         "role_id": "source_ref_repair",
         "label": "Source Ref Repair",
-        "group": "DocMap",
+        "group": "TraceSpace",
         "description": "Inspects source coverage and proposes source-reference repair work.",
         "supported_scopes": ["node", "branch", "workspace"],
         "supported_actions": [
@@ -159,7 +159,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "integration_readiness_reviewer": {
         "role_id": "integration_readiness_reviewer",
         "label": "Integration Readiness Reviewer",
-        "group": "DocMap",
+        "group": "TraceSpace",
         "description": "Reviews nodes and branches for handoff readiness before Miro, monday, or later integrations.",
         "supported_scopes": ["node", "branch", "workspace"],
         "supported_actions": ["generate_tasks", "find_gaps", "find_unsupported_assumptions", "custom_prompt"],
@@ -171,11 +171,11 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
     "custom": {
         "role_id": "custom",
         "label": "Custom",
-        "group": "DocMap",
-        "description": "Uses a user-provided instruction while preserving DocMap preview and validation rules.",
+        "group": "TraceSpace",
+        "description": "Uses a user-provided instruction while preserving TraceSpace preview and validation rules.",
         "supported_scopes": ["node", "branch", "workspace"],
         "supported_actions": ["custom_prompt"],
-        "system_instructions": "Follow the custom instruction, but return preview-only DocMap draft changes.",
+        "system_instructions": "Follow the custom instruction, but return preview-only TraceSpace draft changes.",
         "default_output_shape": "draft_nodes",
         "source_strictness": "prefer_source_refs",
         "default_review_status": "needs_review_when_unsourced",
@@ -187,7 +187,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
         "description": "Legacy persona for strategic framing and decision support.",
         "supported_scopes": ["node", "branch", "workspace"],
         "supported_actions": ["ask_follow_up", "summarize_branch", "suggest_follow_up_questions", "custom_prompt"],
-        "system_instructions": "Provide strategic guidance as reviewable DocMap preview output.",
+        "system_instructions": "Provide strategic guidance as reviewable TraceSpace preview output.",
         "default_output_shape": "draft_annotations",
         "source_strictness": "allow_assumptions",
         "default_review_status": "needs_review_when_unsourced",

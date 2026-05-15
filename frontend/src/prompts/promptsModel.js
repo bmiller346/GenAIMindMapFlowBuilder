@@ -52,11 +52,11 @@ export const sourceAiActions = [
     { id: 'custom_prompt', label: 'Custom prompt' }
 ];
 
-export const docMapPromptProfiles = [
+export const TraceSpacePromptProfiles = [
     {
         id: 'standards-extractor',
         label: 'Standards Extractor',
-        group: 'DocMap',
+        group: 'TraceSpace',
         description: 'Extract requirements, definitions, controls, and cited standard language.',
         scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
@@ -73,7 +73,7 @@ export const docMapPromptProfiles = [
     {
         id: 'workflow-mapper',
         label: 'Workflow Mapper',
-        group: 'DocMap',
+        group: 'TraceSpace',
         description: 'Turn procedures and branches into workflow steps and dependencies.',
         scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
@@ -89,7 +89,7 @@ export const docMapPromptProfiles = [
     {
         id: 'training-guide-builder',
         label: 'Training Guide Builder',
-        group: 'DocMap',
+        group: 'TraceSpace',
         description: 'Draft learning outlines, checklists, and training-friendly branch structure.',
         scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
@@ -104,7 +104,7 @@ export const docMapPromptProfiles = [
     {
         id: 'sme-question-generator',
         label: 'SME Question Generator',
-        group: 'DocMap',
+        group: 'TraceSpace',
         description: 'Create review questions where source support or expert judgment is needed.',
         scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
@@ -119,7 +119,7 @@ export const docMapPromptProfiles = [
     {
         id: 'task-planner',
         label: 'Task Planner',
-        group: 'DocMap',
+        group: 'TraceSpace',
         description: 'Convert map structure into accountable tasks and checklists.',
         scopes: ['node', 'branch', 'workspace'],
         supportedActions: [
@@ -133,7 +133,7 @@ export const docMapPromptProfiles = [
     {
         id: 'data-table-interpreter',
         label: 'Data/Table Interpreter',
-        group: 'DocMap',
+        group: 'TraceSpace',
         description: 'Explain table-like node data and surface useful rows, fields, or anomalies.',
         scopes: ['node', 'branch', 'workspace'],
         supportedActions: ['interpret_table_data', 'generate_tasks', 'custom_prompt'],
@@ -142,7 +142,7 @@ export const docMapPromptProfiles = [
     {
         id: 'gap-analyst',
         label: 'Gap Analyst',
-        group: 'DocMap',
+        group: 'TraceSpace',
         description: 'Find missing, duplicate, unsupported, or contradictory graph content.',
         scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
@@ -157,7 +157,7 @@ export const docMapPromptProfiles = [
     {
         id: 'source-ref-repair',
         label: 'Source Ref Repair',
-        group: 'DocMap',
+        group: 'TraceSpace',
         description: 'Suggest source-reference fixes while keeping node claims intact.',
         scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
@@ -170,7 +170,7 @@ export const docMapPromptProfiles = [
     {
         id: 'integration-readiness-reviewer',
         label: 'Integration Readiness Reviewer',
-        group: 'DocMap',
+        group: 'TraceSpace',
         description: 'Review whether branch nodes are ready for downstream handoff.',
         scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
@@ -184,7 +184,7 @@ export const docMapPromptProfiles = [
     {
         id: 'custom',
         label: 'Custom',
-        group: 'DocMap',
+        group: 'TraceSpace',
         description: 'Use your own instruction while preserving preview-first graph changes.',
         scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: ['custom_prompt'],
@@ -242,7 +242,7 @@ export const legacyPromptProfiles = [
 
 export const legacyPersonaNames = legacyPromptProfiles.map((profile) => profile.label);
 
-export const aiActionProfiles = [...docMapPromptProfiles, ...legacyPromptProfiles];
+export const aiActionProfiles = [...TraceSpacePromptProfiles, ...legacyPromptProfiles];
 
 export const getPromptProfilesForScope = (scope) =>
     aiActionProfiles.filter((profile) =>

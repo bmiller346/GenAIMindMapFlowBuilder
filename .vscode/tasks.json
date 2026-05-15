@@ -2,10 +2,10 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "DocMap: Dev App",
+      "label": "TraceSpace: Dev App",
       "dependsOn": [
-        "DocMap: Backend API",
-        "DocMap: Frontend UI"
+        "TraceSpace: Backend API",
+        "TraceSpace: Frontend UI"
       ],
       "dependsOrder": "parallel",
       "problemMatcher": [],
@@ -20,7 +20,7 @@
       }
     },
     {
-      "label": "DocMap: Backend API",
+      "label": "TraceSpace: Backend API",
       "type": "shell",
       "command": "python -m poetry run uvicorn app:app --reload --host 127.0.0.1 --port 8000",
       "options": {
@@ -36,7 +36,7 @@
       "group": "build"
     },
     {
-      "label": "DocMap: Frontend UI",
+      "label": "TraceSpace: Frontend UI",
       "type": "shell",
       "command": "npm run dev -- --host 127.0.0.1 --port 5173",
       "options": {
@@ -52,7 +52,7 @@
       "group": "build"
     },
     {
-      "label": "DocMap: Install Backend",
+      "label": "TraceSpace: Install Backend",
       "type": "shell",
       "command": "python -m poetry install",
       "options": {
@@ -67,7 +67,7 @@
       "group": "build"
     },
     {
-      "label": "DocMap: Install Frontend",
+      "label": "TraceSpace: Install Frontend",
       "type": "shell",
       "command": "npm install",
       "options": {
@@ -82,7 +82,7 @@
       "group": "build"
     },
     {
-      "label": "DocMap: Build Frontend",
+      "label": "TraceSpace: Build Frontend",
       "type": "shell",
       "command": "npm run build",
       "options": {
@@ -97,7 +97,7 @@
       "group": "build"
     },
     {
-      "label": "DocMap: Lint Frontend",
+      "label": "TraceSpace: Lint Frontend",
       "type": "shell",
       "command": "npm run lint",
       "options": {
@@ -112,7 +112,7 @@
       "group": "test"
     },
     {
-      "label": "DocMap: Test Backend",
+      "label": "TraceSpace: Test Backend",
       "type": "shell",
       "command": "python -m poetry run pytest",
       "options": {
@@ -127,7 +127,7 @@
       "group": "test"
     },
     {
-      "label": "DocMap: Desktop Dev",
+      "label": "TraceSpace: Desktop Dev",
       "type": "shell",
       "command": "npm run desktop:dev",
       "options": {
@@ -143,7 +143,7 @@
       "group": "build"
     },
     {
-      "label": "DocMap: Build Desktop Self-Contained",
+      "label": "TraceSpace: Build Desktop Self-Contained",
       "type": "shell",
       "command": "npm run desktop:build:self-contained",
       "options": {

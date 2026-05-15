@@ -176,12 +176,12 @@ async function main() {
     !backendReady && await canReachUrl(`http://${frontendHost}:${backendPort}/flows`);
 
   if (!backendReady && !reuseExistingBackend) {
-    console.error(`[dev] port ${backendPort} is still in use after cleanup and does not look like a DocMap backend.`);
+    console.error(`[dev] port ${backendPort} is still in use after cleanup and does not look like a TraceSpace backend.`);
     process.exit(1);
   }
 
   if (reuseExistingBackend) {
-    console.log(`[dev] port ${backendPort} is already serving DocMap; reusing that backend for this Electron session.`);
+    console.log(`[dev] port ${backendPort} is already serving TraceSpace; reusing that backend for this Electron session.`);
   }
 
   spawnChecked(

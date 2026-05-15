@@ -49,7 +49,7 @@ export const Landing = () => {
                         src={logo}
                         id="landing-logo"
                     />
-                    <p>GNOSIS</p>
+                    <p>TraceSpace</p>
                 </div>
                 <div className="hero">
                     <h1>AI Mind Map Summarizer</h1>
@@ -176,14 +176,14 @@ export const Landing = () => {
             </div>
             <div className="landing-section-2">
                 <h1>
-                    <center>User Love Gnosis</center>
+                    <center>Users Love TraceSpace</center>
                 </h1>
                 <div className="testimonial-section">
                     <TestimonialCards
                         bgColor={'rgba(255, 106, 60, 0.08)'}
                         heading={'Power study'}
                         content={
-                            'Upload your materials, and Gnosis will create a polished presentation outline with key points and evidence.'
+                            'Upload your materials, and TraceSpace will create a polished presentation outline with key points and evidence.'
                         }
                     />
                     <TestimonialCards
@@ -197,7 +197,7 @@ export const Landing = () => {
                         bgColor={'rgba(229, 156, 255, 0.08)'}
                         heading={'Spark New Ideas'}
                         content={
-                            'Upload brainstorming ideas or market research to let Gnosis identify trends, suggest new products, and reveal hidden opportunities.'
+                            'Upload brainstorming ideas or market research to let TraceSpace identify trends, suggest new products, and reveal hidden opportunities.'
                         }
                     />
                 </div>
@@ -208,7 +208,7 @@ export const Landing = () => {
                         src={logo}
                         id="landing-logo"
                     />
-                    <p>GNOSIS</p>
+                    <p>TraceSpace</p>
                 </div>
                 <span id="contact">Need help ? nextgenailabs99@gmail.com</span>
             </div>

@@ -2000,7 +2000,7 @@ def _generate_openai_source_librarian_preview(
         graph=graph,
         scope=scope,
         system_prompt=(
-            "You are DocMap's Source Librarian. Produce reviewable source "
+            "You are TraceSpace's Source Librarian. Produce reviewable source "
             "repair and coverage previews only. Never mutate the graph directly."
         ),
         task_prompt=_source_librarian_prompt(graph, scope, action),
@@ -2021,7 +2021,7 @@ def _generate_openai_reviewer_preview(
         graph=graph,
         scope=scope,
         system_prompt=(
-            "You are DocMap's Reviewer. Produce reviewable gaps, "
+            "You are TraceSpace's Reviewer. Produce reviewable gaps, "
             "contradictions, and SME question previews only. Cite source "
             "references or mark explicit assumptions."
         ),
@@ -2043,7 +2043,7 @@ def _generate_openai_project_planner_preview(
         graph=graph,
         scope=scope,
         system_prompt=(
-            "You are DocMap's Project Planner. Produce reviewable task and "
+            "You are TraceSpace's Project Planner. Produce reviewable task and "
             "checklist previews only. Never mutate the graph directly."
         ),
         task_prompt=_project_planner_prompt(graph, action, scope),
@@ -2064,7 +2064,7 @@ def _generate_openai_integration_operator_preview(
         graph=graph,
         scope=scope,
         system_prompt=(
-            "You are DocMap's Integration Operator. Produce reviewable handoff "
+            "You are TraceSpace's Integration Operator. Produce reviewable handoff "
             "readiness and sync issue previews only. Never push to external systems "
             "and never mutate the graph directly."
         ),
@@ -2167,7 +2167,7 @@ def _source_librarian_prompt(
         "a coverage item is tied to a document; otherwise include explicit assumptions."
     )
     return f"""
-Inspect this DocMap workspace graph and produce Source Librarian preview items.
+Inspect this TraceSpace workspace graph and produce Source Librarian preview items.
 
 Action: {action}
 Scope: {json.dumps(scope, indent=2)}
@@ -2200,7 +2200,7 @@ def _reviewer_prompt(
         ),
     }[action]
     return f"""
-Inspect this DocMap workspace graph and produce Reviewer preview items.
+Inspect this TraceSpace workspace graph and produce Reviewer preview items.
 
 Action: {action}
 Scope: {json.dumps(scope, indent=2)}
@@ -2221,7 +2221,7 @@ def _project_planner_prompt(
     scope: dict[str, Any],
 ) -> str:
     return f"""
-Inspect this DocMap workspace graph and produce Project Planner preview items.
+Inspect this TraceSpace workspace graph and produce Project Planner preview items.
 
 Action: {action}
 Scope: {json.dumps(scope, indent=2)}
@@ -2262,7 +2262,7 @@ def _integration_operator_prompt(
         "push timestamps, staged-but-unpushed items, or stale/conflicting status clues."
     )
     return f"""
-Inspect this DocMap workspace graph and produce Integration Operator preview items.
+Inspect this TraceSpace workspace graph and produce Integration Operator preview items.
 
 Action: {action}
 Scope: {json.dumps(scope, indent=2)}
@@ -4146,9 +4146,9 @@ def _generate_ai_draft_revision_payload(
 
 def _ai_draft_system_prompt(role: str) -> str:
     return (
-        f"You are DocMap's {role or 'Ask AI'} drafting agent. Return only strict JSON "
+        f"You are TraceSpace's {role or 'Ask AI'} drafting agent. Return only strict JSON "
         "matching the provided schema. Draft sessions are preview-only and non-canonical. "
-        "DocMap is a source-grounded think space; mind_map is only one possible artifact. "
+        "TraceSpace is a source-grounded think space; mind_map is only one possible artifact. "
         "Do not claim source support unless a source_ref appears in the provided source_refs. "
         "Unsourced generated graph nodes and inferred artifact items must keep source_refs empty, "
         "include an assumption, and be marked needs_review."

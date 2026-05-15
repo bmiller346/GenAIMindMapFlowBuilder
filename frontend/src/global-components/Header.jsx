@@ -351,7 +351,7 @@ const Header = ({
             err.response?.data?.detail ||
             err.response?.statusText ||
             (isNetworkError
-                ? 'Local backend is not running yet. Start the DocMap backend or launch the Electron app so it can start it for you.'
+                ? 'Local backend is not running yet. Start the TraceSpace backend or launch the Electron app so it can start it for you.'
                 : err.message || 'Request failed')
         );
         popNode();

@@ -2,7 +2,7 @@
 
 ## Current Status
 
-DocMap is a forked document-to-structured-workspace app. The core architecture is still React + Vite frontend, FastAPI backend, MongoDB-backed document/source persistence, and a thin Electron shell for local desktop launch.
+TraceSpace is a forked document-to-structured-workspace app. The core architecture is still React + Vite frontend, FastAPI backend, MongoDB-backed document/source persistence, and a thin Electron shell for local desktop launch.
 
 Canonical product rule:
 

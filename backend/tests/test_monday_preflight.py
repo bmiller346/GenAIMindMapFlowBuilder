@@ -46,7 +46,7 @@ def test_monday_existing_group_preflight_assesses_board_group_and_columns():
                     "groups": [{"id": "group-1", "title": "Tasks"}],
                     "columns": [
                         _column("review_status", "Review status", "status"),
-                        _column("docmap_review_state", "DocMap state", "status"),
+                        _column("docmap_review_state", "TraceSpace state", "status"),
                         _column("target_date", "Target date", "date"),
                         _column("priority", "Priority", "text"),
                         _column("owner", "Owner", "text"),
@@ -57,7 +57,7 @@ def test_monday_existing_group_preflight_assesses_board_group_and_columns():
                         _column("source_page", "Source page", "text"),
                         _column("source_section", "Source section", "text"),
                         _column("source_evidence", "Evidence", "text"),
-                        _column("docmap_link", "DocMap link", "text"),
+                        _column("docmap_link", "TraceSpace link", "text"),
                         _column("export_batch_id", "Export batch", "text"),
                         _column("accepted_preview_flows", "Accepted flows", "text"),
                         _column("selection_reason", "Selection reason", "text"),

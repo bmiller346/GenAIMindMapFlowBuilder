@@ -25,7 +25,7 @@ class DocMapGenerationResult:
 
 class DocMapAIProvider(Protocol):
     def generate_json(self, request: DocMapGenerationRequest) -> DocMapGenerationResult:
-        """Generate a JSON string for a DocMap request."""
+        """Generate a JSON string for a TraceSpace request."""
 
 
 class FixtureDocMapAIProvider:

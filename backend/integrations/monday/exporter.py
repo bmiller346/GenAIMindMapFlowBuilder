@@ -10,7 +10,7 @@ MONDAY_GROUP_CREATION_POLICY = {
     "will_create_groups": False,
     "decision": (
         "MVP exports require the user to choose an existing monday board and group. "
-        "Automatic group creation from DocMap categories is deferred until conflict "
+        "Automatic group creation from TraceSpace categories is deferred until conflict "
         "handling and target-template governance exist."
     ),
 }

@@ -4,8 +4,8 @@ AUTODESK_BUILDING_BLOCK_REVIEW_TEMPLATE_ID = "autodesk_building_block_review"
 
 DOCMAP_DEFAULT_TEMPLATE = {
     "id": DEFAULT_TEMPLATE_ID,
-    "name": "DocMap default",
-    "description": "Neutral DocMap task fields using stable column keys.",
+    "name": "TraceSpace default",
+    "description": "Neutral TraceSpace task fields using stable column keys.",
     "item_name_field": "name",
     "column_value_types": {
         "status": "status",
@@ -35,7 +35,7 @@ AUTODESK_BUILDING_BLOCK_REVIEW_TEMPLATE = {
     "id": AUTODESK_BUILDING_BLOCK_REVIEW_TEMPLATE_ID,
     "name": "Autodesk Building Block Review",
     "description": (
-        "Existing-board mapping for review tasks created from accepted DocMap "
+        "Existing-board mapping for review tasks created from accepted TraceSpace "
         "building-block metadata."
     ),
     "item_name_field": "name",

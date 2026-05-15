@@ -1,4 +1,4 @@
-# DocMap Agent Guide
+# TraceSpace Agent Guide
 
 ## Mission
 Turn this fork into a document-to-structured-workspace product:

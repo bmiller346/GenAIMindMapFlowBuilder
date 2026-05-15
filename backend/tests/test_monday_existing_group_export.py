@@ -58,7 +58,7 @@ def test_monday_existing_group_payload_and_dry_run_operations_snapshot():
             "will_create_groups": False,
             "decision": (
                 "MVP exports require the user to choose an existing monday board and group. "
-                "Automatic group creation from DocMap categories is deferred until conflict "
+                "Automatic group creation from TraceSpace categories is deferred until conflict "
                 "handling and target-template governance exist."
             ),
         },

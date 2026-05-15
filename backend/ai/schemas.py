@@ -422,7 +422,7 @@ Canonical Ask AI draft-session contract:
 
 
 ARTIFACT_REGISTRY_CONTRACT = f"""
-Canonical DocMap Artifact Registry contract:
+Canonical TraceSpace Artifact Registry contract:
 - Registered artifact types are: {", ".join(sorted(REGISTERED_ARTIFACT_TYPES))}.
 - Do not emit unregistered artifact_type values.
 - Every artifact type declares required inputs, optional inputs, generated schema, projection requirements, supported views, preview component, accept behavior, export behavior, and validation rules.

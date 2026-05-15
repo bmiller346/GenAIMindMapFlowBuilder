@@ -89,7 +89,7 @@ const WorkspaceBriefPanel = () => {
         <section className="workspace-brief-panel">
             <div className="workspace-brief-panel-header">
                 <div>
-                    <p>DocMap setup</p>
+                    <p>TraceSpace setup</p>
                     <span>
                         {isBriefSet
                             ? `${PRESET_LABELS[workspaceBrief.preset] || 'Custom'} | ${sourceMode}`

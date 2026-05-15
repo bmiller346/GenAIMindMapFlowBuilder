@@ -1,6 +1,6 @@
-# DocMap Workspace
+# TraceSpace Workspace
 
-DocMap is a local document-to-structured-workspace app. It ingests technical documents, generates a reviewable graph, preserves source references, and projects the same canonical graph into mind maps, outlines, task lists, exports, and future Miro/monday.com workflows.
+TraceSpace is a local document-to-structured-workspace app. It ingests technical documents, generates a reviewable graph, preserves source references, and projects the same canonical graph into mind maps, outlines, task lists, exports, and future Miro/monday.com workflows.
 
 The architectural rule is:
 
@@ -8,7 +8,7 @@ The architectural rule is:
 one persistent graph -> many views -> controlled exports
 ```
 
-Miro and monday.com are bridge/projection endpoints. DocMap remains the canonical structure and traceability engine; external IDs, push timestamps, and pulled statuses are stored as integration metadata, not as replacement graph state.
+Miro and monday.com are bridge/projection endpoints. TraceSpace remains the canonical structure and traceability engine; external IDs, push timestamps, and pulled statuses are stored as integration metadata, not as replacement graph state.
 
 ## Current Product Focus
 
@@ -25,6 +25,13 @@ The MVP lane is intentionally narrow, but source intake can include more than of
 - Preview or push selected graph projections to Miro and monday.com when configured.
 
 The source picker is organized by intake mode rather than by old/new status: workspace brief, documents, web, media, and data. PDF, DOCX, Markdown, and TXT are the strict source-traceable MVP document paths today; image, audio, video, and web now use OpenAI-backed default paths instead of Gemini, AWS upload, or crawler-first execution. Local video samples frames and extracts/transcribes local audio with the bundled desktop `ffmpeg` binary, `DOCMAP_FFMPEG_PATH`, or a PATH-provided `ffmpeg` before graph generation. YouTube, PPTX, HTML, CSV, and SQL remain useful AI intake paths whose provenance contracts should be hardened as they graduate into the same traceability model.
+
+Ask AI uses draft sessions for graph-changing work: model output is staged as a
+reviewable draft, can be revised conversationally, and only mutates the
+canonical graph after explicit acceptance. Source-scoped Ask AI can send the
+selected source chunks to the backend today. The backend also supports
+reconciling an active draft session with added source chunks, but the polished
+multi-source and add-source-mid-session frontend flow is still roadmap work.
 
 ## Repository Layout
 
@@ -122,7 +129,7 @@ aws_secret_access_key=
 bucket_name=
 ```
 
-Gemini, GCP, and AWS variables are only for legacy or explicitly selected compatibility paths. The default DocMap source flow should rely on the OpenAI key plus local extraction where possible.
+Gemini, GCP, and AWS variables are only for legacy or explicitly selected compatibility paths. The default TraceSpace source flow should rely on the OpenAI key plus local extraction where possible.
 
 Optional legacy UI flags:
 
@@ -130,7 +137,7 @@ Optional legacy UI flags:
 localStorage.setItem('docmap:showLegacyLanding', 'true');
 ```
 
-That flag preserves the forked demo landing page for comparison and reintegration checks without putting it on the default DocMap MVP path.
+That flag preserves the forked demo landing page for comparison and reintegration checks without putting it on the default TraceSpace MVP path.
 
 OpenAI-backed endpoints return `503` with the missing setting name when no key is available. Upload validation restricts extensions, sanitizes filenames, hashes file bytes, and defaults to a 25 MB upload limit when `DOCMAP_MAX_UPLOAD_BYTES` is omitted.
 
@@ -261,14 +268,14 @@ python -m poetry run pytest tests/test_source_trace_pipeline.py tests/test_expor
 
 The repo includes tasks in `.vscode/tasks.json`.
 
-- `DocMap: Dev App` starts backend and frontend together.
-- `DocMap: Backend API` runs FastAPI on `127.0.0.1:8000`.
-- `DocMap: Frontend UI` runs Vite on `127.0.0.1:5173`.
-- `DocMap: Build Frontend` runs the Vite production build.
-- `DocMap: Lint Frontend` runs ESLint.
-- `DocMap: Test Backend` runs pytest.
-- `DocMap: Desktop Dev` launches the Electron development shell.
-- `DocMap: Build Desktop Self-Contained` packages a bundled desktop build.
+- `TraceSpace: Dev App` starts backend and frontend together.
+- `TraceSpace: Backend API` runs FastAPI on `127.0.0.1:8000`.
+- `TraceSpace: Frontend UI` runs Vite on `127.0.0.1:5173`.
+- `TraceSpace: Build Frontend` runs the Vite production build.
+- `TraceSpace: Lint Frontend` runs ESLint.
+- `TraceSpace: Test Backend` runs pytest.
+- `TraceSpace: Desktop Dev` launches the Electron development shell.
+- `TraceSpace: Build Desktop Self-Contained` packages a bundled desktop build.
 
 Use `Terminal > Run Build Task...` or `Ctrl+Shift+B` to launch the default dev task.
 
@@ -295,7 +302,7 @@ POST /api/workspaces/{id}/export/monday
 POST /api/workspaces/{id}/branches/{node_id}/export/monday
 ```
 
-These endpoints normalize saved React Flow data into the DocMap graph shape before exporting. Prefer dry-run/preview flows before pushing to external tools. Pullbacks from monday.com are stored as `external_status_projections.monday` plus `external_refs.monday` metadata, leaving canonical node status unchanged until a separate user-reviewed graph mutation accepts it.
+These endpoints normalize saved React Flow data into the TraceSpace graph shape before exporting. Prefer dry-run/preview flows before pushing to external tools. Pullbacks from monday.com are stored as `external_status_projections.monday` plus `external_refs.monday` metadata, leaving canonical node status unchanged until a separate user-reviewed graph mutation accepts it.
 
 ## Development Rules
 
@@ -352,7 +359,7 @@ npm run desktop:start
 
 ### Legacy Demo Assets
 
-The old landing/demo page is lazy-loaded and hidden behind `docmap:showLegacyLanding`. Its video assets may still be emitted as separate build assets, but they are not part of the default DocMap route unless that legacy flag is enabled.
+The old landing/demo page is lazy-loaded and hidden behind `docmap:showLegacyLanding`. Its video assets may still be emitted as separate build assets, but they are not part of the default TraceSpace route unless that legacy flag is enabled.
 
 ## Roadmap
 

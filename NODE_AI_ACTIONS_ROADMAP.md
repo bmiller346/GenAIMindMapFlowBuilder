@@ -2,7 +2,7 @@
 
 This roadmap restores the original repo's exploratory "pick an agent/persona,
 ask or expand from this node, and create a follow-up subtree" behavior while
-preserving DocMap's canonical graph, validation, source-citation, and
+preserving TraceSpace's canonical graph, validation, source-citation, and
 preview/accept rules.
 
 Use this alongside `ROADMAP.md`, `NODE_AUTHORING_UX_ROADMAP.md`, and
@@ -13,7 +13,7 @@ completed manual node-authoring UX.
 
 ## Product Intent
 
-DocMap should support exploratory AI work from any useful graph scope:
+TraceSpace should support exploratory AI work from any useful graph scope:
 
 ```text
 selected node / selected branch / workspace
@@ -26,7 +26,7 @@ selected node / selected branch / workspace
 ```
 
 The original repo's generic personas should remain available under a General
-group, but DocMap's primary choices should be domain/workflow roles.
+group, but TraceSpace's primary choices should be domain/workflow roles.
 
 ## Current Status
 
@@ -55,8 +55,8 @@ Known notes:
 - Legacy `Prompts.jsx` remains in the codebase for compatibility, but direct
   generation is disabled there so it cannot append graph changes outside
   preview/accept.
-- Prompt profile roles include DocMap/domain roles and legacy General personas,
-  but the UI should continue to prioritize DocMap roles and treat General
+- Prompt profile roles include TraceSpace/domain roles and legacy General personas,
+  but the UI should continue to prioritize TraceSpace roles and treat General
   personas as secondary/advanced options.
 - Ask AI is the single authoring entry point. Source Librarian, SME/reviewer,
   planner, data/table interpreter, and General personas are routed role/action
@@ -72,14 +72,14 @@ Known notes:
 4. Accepted AI nodes must preserve source refs when the input scope has source
    support.
 5. Every accepted action must create an `AIActionRun` history record.
-6. Legacy generic personas may remain, but domain-specific DocMap roles are the
+6. Legacy generic personas may remain, but domain-specific TraceSpace roles are the
    primary role set.
 7. Do not remove the legacy Choose Agent affordance until its behavior is
    available through the new preview system.
 
 ## Target Prompt Profiles
 
-Primary DocMap roles:
+Primary TraceSpace roles:
 
 - Standards Extractor
 - Workflow Mapper
@@ -215,7 +215,7 @@ Do not own:
 Deliverables:
 
 - `AIActionRun` schema or backend-compatible serialized shape.
-- Prompt profile registry with primary DocMap roles and legacy General roles.
+- Prompt profile registry with primary TraceSpace roles and legacy General roles.
 - Preview endpoint for node, branch, and workspace action requests.
 - Backend validation handoff that marks unsourced accepted drafts
   `needs_review`.
@@ -345,7 +345,7 @@ Use these as copy/paste prompts when dispatching work.
 ```text
 You are Agent A for NODE_AI_ACTIONS_ROADMAP.md. Own backend AI action contracts
 only. Add an AIActionRun-compatible schema/serialized shape, a prompt profile
-registry with DocMap roles plus legacy General personas, and preview endpoints
+registry with TraceSpace roles plus legacy General personas, and preview endpoints
 for node, branch, and workspace AI actions. Do not edit React node menus or
 inspector UI. Ensure previews validate draft graph changes, mark unsourced
 accepted drafts needs_review through the validation handoff, add focused backend
@@ -396,7 +396,7 @@ roadmap.
 
 - [x] Agent A: Define `AIActionRun` shape.
 - [x] Agent A: Define AI action preview request/response shape.
-- [x] Agent A: Add prompt profile registry with DocMap roles.
+- [x] Agent A: Add prompt profile registry with TraceSpace roles.
 - [x] Agent A: Preserve legacy generic personas under General.
 - [x] Agent A: Add backend validation for unsupported role/action/scope
   combinations.

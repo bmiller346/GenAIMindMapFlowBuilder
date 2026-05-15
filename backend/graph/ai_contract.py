@@ -35,7 +35,7 @@ AI_GRAPH_PROMPT_CONTRACT = f"""
 Canonical AI graph contract:
 - Return exactly one JSON object. Do not wrap it in prose or markdown.
 - The top-level object must include nodes, edges, and viewport when artifact_type is mind_map.
-- Mind map is one supported artifact type, not the only DocMap output. Use registered artifact_type/output_shape instructions when a user requests another artifact.
+- Mind map is one supported artifact type, not the only TraceSpace output. Use registered artifact_type/output_shape instructions when a user requests another artifact.
 - nodes must be an array of objects with non-empty string id, type, data, and position.
 - Valid node types are dataSource, question, response, and followUp.
 - response nodes must include title, question, summ, or summary text.
@@ -43,7 +43,7 @@ Canonical AI graph contract:
 - Do not create duplicate node IDs, duplicate edge IDs, self-loop edges, or edges to missing nodes.
 - source_refs, when present, must be an array. Each source ref needs a non-empty document_id.
 - If a generated node has no grounded source reference, set source_refs to [] and status to needs_review.
-- knowledge_graph relationship_edges must follow the DocMap relationship contract: source_node_id, target_node_id, relationship_type, source_signal, confidence, rationale, source_refs or assumptions, and review_state.
+- knowledge_graph relationship_edges must follow the TraceSpace relationship contract: source_node_id, target_node_id, relationship_type, source_signal, confidence, rationale, source_refs or assumptions, and review_state.
 - Include metadata.ai_graph_contract_version as "{AI_GRAPH_CONTRACT_VERSION}" when possible.
 """
 

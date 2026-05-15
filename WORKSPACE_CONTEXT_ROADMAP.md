@@ -1,13 +1,13 @@
 # Workspace Context Roadmap
 
-This roadmap describes the next product layer for DocMap: workspace-native
+This roadmap describes the next product layer for TraceSpace: workspace-native
 context around the canonical graph. The graph remains the source of truth.
 Activity, media, integrations, automations, and agents explain, enrich, or
 operate on that graph.
 
 ## Product North Star
 
-DocMap should feel like a structured workspace, not a file upload demo and not
+TraceSpace should feel like a structured workspace, not a file upload demo and not
 a generic chat shell.
 
 ```text

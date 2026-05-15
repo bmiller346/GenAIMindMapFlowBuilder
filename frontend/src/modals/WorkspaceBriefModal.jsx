@@ -181,7 +181,7 @@ const PRESETS = [
     {
         id: 'custom',
         label: 'Custom',
-        description: 'Start light and let DocMap suggest the rest.',
+        description: 'Start light and let TraceSpace suggest the rest.',
         goal: '',
         audience: '',
         desired_outputs: ['mind_map'],
@@ -329,7 +329,7 @@ const WorkspaceBriefModal = () => {
         updateDraft(
             'goal',
             preset.goal ||
-                `Generate a source-cited DocMap${sourceSummary} that identifies key topics, decisions, review items, and next actions.`
+                `Generate a source-cited TraceSpace workspace${sourceSummary} that identifies key topics, decisions, review items, and next actions.`
         );
     };
 
@@ -387,7 +387,7 @@ const WorkspaceBriefModal = () => {
         recordActivity({
             type: 'brief_saved',
             title: 'Saved workspace brief',
-            summary: normalizeBrief().goal || 'Updated DocMap setup.',
+            summary: normalizeBrief().goal || 'Updated TraceSpace setup.',
             metadata: {
                 preset: normalizeBrief().preset,
                 source_mode: normalizeBrief().source_mode
@@ -497,16 +497,16 @@ const WorkspaceBriefModal = () => {
         <div className="modal-container workspace-brief-modal">
             <div className="title">
                 <div>
-                    <p>Build DocMap</p>
+                    <p>Build TraceSpace</p>
                 </div>
                 <img
                     src={CROSSSvg}
-                    alt="Close DocMap setup"
+                    alt="Close TraceSpace setup"
                     onClick={() => popNode()}
                 />
             </div>
             <p className="workspace-brief-note">
-                Upload documents and tell DocMap what kind of workspace to generate.
+                Upload documents and tell TraceSpace what kind of workspace to generate.
                 Uploaded sources remain the source of truth. Any generated node without
                 a source reference will be marked Needs Review unless assumptions are
                 explicitly allowed.
@@ -743,7 +743,7 @@ const WorkspaceBriefModal = () => {
 
             {saved ? (
                 <p className="workspace-brief-saved">
-                    DocMap setup saved. Autosave will persist it with this workspace.
+                    TraceSpace setup saved. Autosave will persist it with this workspace.
                 </p>
             ) : null}
             <div className="buttons">

@@ -58,7 +58,7 @@ const setDataSourceModal = (name, pushNode) => {
             pushNode(VideoModal);
             break;
         default:
-            console.warn(`Unsupported DocMap source type: ${name}`);
+            console.warn(`Unsupported TraceSpace source type: ${name}`);
     }
 };
 

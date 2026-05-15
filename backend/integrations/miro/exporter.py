@@ -93,7 +93,7 @@ def export_sme_review_board_payload(
         "strategy": "sme_review_grid",
         "frame": {
             **payload["layout"]["frame"],
-            "title": f"{graph.get('workspace', {}).get('title', 'DocMap')} SME Review",
+            "title": f"{graph.get('workspace', {}).get('title', 'TraceSpace')} SME Review",
         },
     }
     payload["review"] = {
@@ -158,7 +158,7 @@ def _build_dry_run_layout(nodes: list[dict], edges: list[dict]) -> dict[str, dic
 def _frame_for_layout(layout: dict[str, dict], workspace: dict | None) -> dict:
     if not layout:
         return {
-            "title": (workspace or {}).get("title", "DocMap export preview"),
+            "title": (workspace or {}).get("title", "TraceSpace export preview"),
             "x": 0,
             "y": 0,
             "width": 480,
@@ -169,7 +169,7 @@ def _frame_for_layout(layout: dict[str, dict], workspace: dict | None) -> dict:
     ys = [position["y"] for position in layout.values()]
     padding = 180
     return {
-        "title": (workspace or {}).get("title", "DocMap export preview"),
+        "title": (workspace or {}).get("title", "TraceSpace export preview"),
         "x": min(xs) - padding,
         "y": min(ys) - padding,
         "width": max(xs) - min(xs) + padding * 2 + 320,

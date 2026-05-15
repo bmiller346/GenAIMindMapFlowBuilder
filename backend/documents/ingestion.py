@@ -16,7 +16,7 @@ MIN_CHUNK_CHARS = 400
 
 
 class DocumentIngestionError(ValueError):
-    """Raised when an uploaded source document cannot enter the DocMap pipeline."""
+    """Raised when an uploaded source document cannot enter the TraceSpace pipeline."""
 
 
 @dataclass(slots=True)

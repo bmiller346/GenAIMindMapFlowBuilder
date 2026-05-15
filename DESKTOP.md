@@ -1,4 +1,4 @@
-# DocMap Desktop Launcher
+# TraceSpace Desktop Launcher
 
 This is a thin Electron shell around the existing app:
 

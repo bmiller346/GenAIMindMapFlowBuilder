@@ -1084,7 +1084,7 @@ def answer_component_with_responses(
     answer = generate_component_answer(
         question=request.query,
         context=query_with_workspace_brief(context, request.workspace_brief),
-        persona=record.get("persona_name") or "DocMap reviewer",
+        persona=record.get("persona_name") or "TraceSpace reviewer",
         instructions=record.get("instructions") or "",
         model=getattr(request, "model_name", None),
         workspace_brief=request.workspace_brief,
@@ -3845,7 +3845,7 @@ def openai_mindmap_generator(
             operation_id,
             phase="ai_deriving",
             message="AI is deriving workspace nodes",
-            detail="The model is generating a source-grounded DocMap draft from local chunks.",
+            detail="The model is generating a source-grounded TraceSpace draft from local chunks.",
             progress=64,
         )
         response_json, ai_metadata = generate_document_mindmap(
@@ -4220,7 +4220,7 @@ def create_pdf_component(
                 operation_id,
                 phase="extracting",
                 message="Extracting PDF tables and text",
-                detail="DocMap is parsing pages and tables before saving the source.",
+                detail="TraceSpace is parsing pages and tables before saving the source.",
                 progress=35,
             )
             result = camelot_pdf_processing(flow_id, file, 'manual')
@@ -4258,7 +4258,7 @@ def create_pdf_component(
                 operation_id,
                 phase="extracting",
                 message="Extracting PDF tables and text",
-                detail="DocMap is parsing pages and tables before deriving nodes.",
+                detail="TraceSpace is parsing pages and tables before deriving nodes.",
                 progress=35,
             )
             result = camelot_pdf_processing(flow_id, file, 'automatic')
@@ -4347,7 +4347,7 @@ async def create_img_component(
                 "base64_image": image_base64,
                 "processing_type": "openai",
                 "instructions": "",
-                "persona_name": "DocMap reviewer",
+                "persona_name": "TraceSpace reviewer",
                 **source_metadata_fields(source_context),
             }
 
@@ -4391,7 +4391,7 @@ async def create_img_component(
             "type": "image",
             "processing_type": "openai",
             "instructions": "",
-            "persona_name": "DocMap reviewer",
+            "persona_name": "TraceSpace reviewer",
             "mindmap_json": response_json,
             **source_metadata_fields(source_context),
         }
@@ -4494,7 +4494,7 @@ async def create_audio_component(
                 "base64_audio": audio_base64,
                 "processing_type": "openai",
                 "instructions": "",
-                "persona_name": "DocMap reviewer",
+                "persona_name": "TraceSpace reviewer",
                 **source_metadata_fields(source_context),
             }
 
@@ -4548,7 +4548,7 @@ async def create_audio_component(
             "type": "audio",
             "processing_type": "openai",
             "instructions": "",
-            "persona_name": "DocMap reviewer",
+            "persona_name": "TraceSpace reviewer",
             "transcript": transcript,
             "mindmap_json": response_json,
             **source_metadata_fields(source_context),
@@ -4626,7 +4626,7 @@ def create_youtube_component(
                 "type": "youtube",
                 "processing_type": "gemini",
                 "instructions": "",
-                "persona_name": "DocMap reviewer",
+                "persona_name": "TraceSpace reviewer",
                 **source_metadata_fields(source_context),
             }
 
@@ -4759,7 +4759,7 @@ def create_youtube_component(
             "type": "youtube",
             "processing_type": "gemini",
             "instructions": "",
-            "persona_name": "DocMap reviewer",
+            "persona_name": "TraceSpace reviewer",
             "mindmap_json": response_json,
             **source_metadata_fields(source_context),
         }
@@ -4867,7 +4867,7 @@ async def create_video_component(
                 "base64_video": video_base64,
                 "processing_type": "openai_local_frames",
                 "instructions": "",
-                "persona_name": "DocMap reviewer",
+                "persona_name": "TraceSpace reviewer",
                 **source_metadata_fields(source_context),
             }
 
@@ -4911,7 +4911,7 @@ async def create_video_component(
             "type": "video",
             "processing_type": "openai_local_video",
             "instructions": "",
-            "persona_name": "DocMap reviewer",
+            "persona_name": "TraceSpace reviewer",
             "audio_status": response_json.get("metadata", {})
             .get("video_audio", {})
             .get("status", ""),
@@ -5736,7 +5736,7 @@ def IMG_QA(request: ImgNodeQueryRequest):
         )
 
         instructions = record.get("instructions", "")
-        persona_name = record.get("persona_name", "DocMap reviewer")
+        persona_name = record.get("persona_name", "TraceSpace reviewer")
         base64_image = record["base64_image"]
         mime_type = record["mime_type"]
         image_bytes = base64.b64decode(base64_image)
@@ -5870,7 +5870,7 @@ def AUDIO_QA(request: AudioNodeQueryRequest):
         )
 
         instructions = record.get("instructions", "")
-        persona_name = record.get("persona_name", "DocMap reviewer")
+        persona_name = record.get("persona_name", "TraceSpace reviewer")
 
         base64_audio = record["base64_audio"]
         mime_type = record["mime_type"]
@@ -6002,7 +6002,7 @@ def YOUTUBE_QA(request: YoutubeNodeQueryRequest):
         )
 
         instructions = record.get("instructions", "")
-        persona_name = record.get("persona_name", "DocMap reviewer")
+        persona_name = record.get("persona_name", "TraceSpace reviewer")
 
         youtube_url = record["youtube_url"]
         mime_type = "video/*"
@@ -6134,7 +6134,7 @@ def VIDEO_QA(request: VideoNodeQueryRequest):
         )
 
         instructions = record.get("instructions", "")
-        persona_name = record.get("persona_name", "DocMap reviewer")
+        persona_name = record.get("persona_name", "TraceSpace reviewer")
 
         video_url = record.get("video_url")
         mime_type = record.get("mime_type", "video/*")

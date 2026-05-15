@@ -164,8 +164,8 @@ const SettingsModal = () => {
             </div>
             <p className="settings-note">
                 {credentialStorageMode === 'desktop'
-                    ? 'Keys are saved as Electron app data for your selected retention window and sent only to the DocMap backend. They are not written to the project `.env` file.'
-                    : 'For browser testing, keys use your selected retention window and are sent only to the configured DocMap backend. Hosted production should use server-side credentials or an authenticated vault.'}
+                    ? 'Keys are saved as Electron app data for your selected retention window and sent only to the TraceSpace backend. They are not written to the project `.env` file.'
+                    : 'For browser testing, keys use your selected retention window and are sent only to the configured TraceSpace backend. Hosted production should use server-side credentials or an authenticated vault.'}
             </p>
             {credentialStorageMode === 'desktop' && !storageInfo.encrypted ? (
                 <p className="settings-warning">

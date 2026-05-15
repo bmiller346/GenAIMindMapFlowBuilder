@@ -147,7 +147,7 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
                         onClick={createAutomaticFlow}
                     >
                         <strong>Auto-generate from document</strong>
-                        <span>Next you will choose a PDF, DOCX, Markdown, TXT, or brief so DocMap can draft the first map.</span>
+                        <span>Next you will choose a PDF, DOCX, Markdown, TXT, or brief so TraceSpace can draft the first map.</span>
                     </button>
                     <button
                         className="flow-choice-card flow-choice-primary"

@@ -17,7 +17,7 @@ class MiroClient:
                 "url": self._url(board_id, "frames"),
                 "client_key": "frame",
                 "body": {
-                    "data": {"title": frame.get("title", "DocMap export preview")},
+                    "data": {"title": frame.get("title", "TraceSpace export preview")},
                     "position": {
                         "x": frame.get("x", 0),
                         "y": frame.get("y", 0),
