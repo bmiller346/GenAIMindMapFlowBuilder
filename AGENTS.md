@@ -7,6 +7,9 @@ Read [`AGENT.md`](./AGENT.md) first.
 - Prefer `gpt-5.5` for primary generation and `gpt-5.4` for leaner reasoning tasks unless the code path already requires a user-selected model.
 - Keep prompts, plans, and summaries compact.
 - Do not expand the upstream broad multimodal surface area unless the task explicitly requires it.
+- Use the Fast Context Intake section in `AGENT.md` before opening broad files
+  or specialized roadmap docs.
+- Prefer `rg` for the owning files/tests, then read narrow file ranges.
 
 ## Product Guardrails
 1. Treat the normalized graph as the product core.

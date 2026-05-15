@@ -1,14 +1,20 @@
 # TraceSpace Workspace
 
-TraceSpace is a local document-to-structured-workspace app. It ingests technical documents, generates a reviewable graph, preserves source references, and projects the same canonical graph into mind maps, outlines, task lists, exports, and future Miro/monday.com workflows.
+TraceSpace is a local source-grounded analysis and structuring workspace. It turns messy source material into maps, graphs, reviews, roadmaps, checklists, and handoff packages that teams can understand and act on. It ingests documents and mixed source sets, generates reviewable structure, preserves source references, reconciles new material against accepted work, and projects the same canonical graph into useful outputs.
 
 The architectural rule is:
 
 ```text
-one persistent graph -> many views -> controlled exports
+source material -> structured understanding -> reviewable outputs
 ```
 
-Miro and monday.com are bridge/projection endpoints. TraceSpace remains the canonical structure and traceability engine; external IDs, push timestamps, and pulled statuses are stored as integration metadata, not as replacement graph state.
+The implementation rule underneath that product frame is:
+
+```text
+one persistent graph -> many intent-driven views -> controlled exports
+```
+
+Miro and monday.com are bridge/projection endpoints. TraceSpace remains the canonical structure, reconciliation, and traceability engine; external IDs, push timestamps, and pulled statuses are stored as integration metadata, not as replacement graph state.
 
 ## Current Product Focus
 
@@ -20,9 +26,17 @@ The MVP lane is intentionally narrow, but source intake can include more than of
 - Chunk documents deterministically.
 - Generate schema-valid graph JSON.
 - Flag generated nodes without source references as `needs_review`.
+- Reconcile selected sources with the current workspace graph, suggesting citation repairs and identifying source-only sections that need graph placement.
+- Specialize useful but generic branches for a domain or audience while preserving source-backed content and marking new assumptions for review.
 - Edit and save the workspace.
 - Export reviewable JSON, Markdown, CSV, OPML, Mermaid, MMD JSON, PNG, and SVG.
 - Preview or push selected graph projections to Miro and monday.com when configured.
+
+TraceSpace should stay intent-driven rather than domain-locked. Business
+operating graphs are one useful pack; the same plumbing should also support
+folder completeness review, Revit/BIM standards audits, complex-issue roadmaps,
+source coverage reviews, SOP/process extraction, training outlines, research
+synthesis, and implementation handoffs.
 
 The source picker is organized by intake mode rather than by old/new status: workspace brief, documents, web, media, and data. PDF, DOCX, Markdown, and TXT are the strict source-traceable MVP document paths today; image, audio, video, and web now use OpenAI-backed default paths instead of Gemini, AWS upload, or crawler-first execution. Local video samples frames and extracts/transcribes local audio with the bundled desktop `ffmpeg` binary, `DOCMAP_FFMPEG_PATH`, or a PATH-provided `ffmpeg` before graph generation. YouTube, PPTX, HTML, CSV, and SQL remain useful AI intake paths whose provenance contracts should be hardened as they graduate into the same traceability model.
 
@@ -32,6 +46,19 @@ canonical graph after explicit acceptance. Source-scoped Ask AI can send one
 selected source, multiple selected sources, or an added source's chunks to the
 backend draft-session path. Added sources reconcile into the active draft
 before the user accepts anything into the canonical graph.
+
+Source reconciliation is also available as a deterministic source-library
+preview: selected source chunks are compared with accepted graph nodes, proposed
+source refs are returned as preview items, and unmatched source sections are
+flagged as source-only coverage gaps. This is intentionally narrower and more
+auditable than a generic "summarize this document" workflow.
+
+Source-set review is represented as a first-class contract over the currently
+loaded sources. It can inventory files, classify document types, summarize topic
+coverage, flag stale or duplicate material, and list missing expected artifacts
+for folder-review style work. Native filesystem folder upload is not part of the
+current MVP; users add files through existing intake paths and TraceSpace treats
+that loaded collection as the reviewable source set.
 
 ## Repository Layout
 
@@ -291,6 +318,7 @@ GET  /api/workspaces/{id}/exports/opml
 GET  /api/workspaces/{id}/exports/mmd-json
 GET  /api/workspaces/{id}/exports/mermaid
 GET  /api/workspaces/{id}/branches/{node_id}/exports/json
+POST /api/workspaces/{id}/sources/{source_id}/reconcile/preview
 ```
 
 Miro and monday.com projection endpoints:

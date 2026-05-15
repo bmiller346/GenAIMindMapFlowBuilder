@@ -1,11 +1,13 @@
 # TraceSpace Agent Guide
 
 ## Mission
-Turn this fork into a document-to-structured-workspace product:
+Build TraceSpace as a local source-grounded analysis and structuring workspace:
 
-`PDF/DOCX/MD/TXT -> extracted structure -> normalized graph -> multiple editable views`
+`source material -> structured understanding -> reviewable outputs`
 
-The product is not "an AI chat with attachments." The product is a persistent workspace graph that can be rendered as a mind map, outline, task list, table, and later board/calendar/org chart views.
+The product is not "an AI chat with attachments." The product is a persistent
+workspace graph that can be rendered as a mind map, outline, task list, table,
+review package, roadmap, source coverage report, and controlled handoff output.
 
 ## Product Rules
 1. The normalized workspace graph is the source of truth.
@@ -20,17 +22,20 @@ The product is not "an AI chat with attachments." The product is a persistent wo
 ## Current Build Focus
 ### In scope
 - Upload `pdf`, `docx`, `md`, and `txt`
+- Add web, image, audio, video, and data sources where their provenance path is explicit
 - Extract and chunk document content
-- Generate a structured hierarchy
-- Render and edit a graph-based mind map
-- Toggle the same data into outline/task/table views
-- Export JSON, Markdown, and PNG
+- Generate schema-valid graph/draft output through Responses-backed providers
+- Stage source drafts and Ask AI drafts before canonical graph mutation
+- Render and edit a graph-based workspace
+- Toggle the same data into mind map, outline, task, table, review, and report views
+- Export JSON, Markdown, CSV, OPML, Mermaid, MMD JSON, PNG, and SVG
+- Preview Miro and monday.com handoff payloads before external writes
 
 ### Out of scope for now
 - Full collaboration workflows
 - Enterprise admin/policy layers
-- Broad multimodal parity with the upstream demo
 - Large prompt stacks that hide brittle architecture
+- Default UX aimed at developers or code repositories
 
 ### Integration stance
 - Export to Miro for collaborative review and board-level visualization
@@ -46,11 +51,51 @@ The product is not "an AI chat with attachments." The product is a persistent wo
 ## Context Discipline
 When working as an agent in this repo:
 
-1. Read only the files needed for the task.
-2. Summarize before widening scope.
-3. Do not paste giant prompts or long generated JSON into planning docs.
-4. Keep `ROADMAP.md` current when phase status or integration priorities change.
-5. Record only durable decisions, active constraints, and next milestones.
+1. Start with this file, `AGENTS.md`, and only the relevant slice of
+   `ROADMAP.md`; do not ingest every roadmap file by default.
+2. Use `rg` to find the owning files and tests before opening code.
+3. Read narrow file ranges or focused files first; summarize what you learned
+   before widening scope.
+4. Do not paste giant prompts, generated JSON, test output, or full diffs into
+   planning docs.
+5. Keep `ROADMAP.md` current when phase status, product direction, or integration
+   priorities change.
+6. Record only durable decisions, active constraints, and next milestones.
+7. Prefer adding a small targeted test over running broad suites while still
+   exploring.
+
+## Fast Context Intake
+Use this routing map to keep context use low:
+
+- Product/current status: read `README.md` first 80 lines, then the relevant
+  `ROADMAP.md` section found by `rg -n`.
+- Source intake and chunking: `backend/documents/ingestion.py`,
+  `backend/documents/source_refs.py`, `backend/openai_sources.py`.
+- Canonical graph contracts: `backend/graph/schemas.py`,
+  `backend/graph/validation.py`, `backend/graph/ai_contract.py`.
+- Ask AI draft sessions and artifact contracts: `backend/ai/schemas.py`,
+  `backend/ai/roles.py`, `backend/ai_helpers.py`,
+  `frontend/src/utils/aiDraftSessions.js`.
+- Frontend workspace shell and projections: `frontend/src/App.jsx`,
+  `frontend/src/views/graphProjection.js`,
+  `frontend/src/views/LocalViewsPanel.jsx`.
+- Source library and source review UI:
+  `frontend/src/global-components/SourcesPanel.jsx`,
+  `frontend/src/global-components/SourceDraftReviewPanel.jsx`,
+  `backend/export/source_library.py`.
+- Exports and handoffs: `backend/export/`,
+  `backend/integrations/miro/`, `backend/integrations/monday/`.
+- Desktop/dev shell: `electron/`, `scripts/`, `DESKTOP.md`.
+- Hidden code intelligence: `backend/code_intelligence/`. Keep it backend-first
+  and gated; do not surface it in default user flows.
+
+When a task names one of the specialized roadmap files, read only that file and
+its explicitly referenced owners/tests:
+
+- `NODE_AI_ACTIONS_ROADMAP.md`
+- `WORKSPACE_CONTEXT_ROADMAP.md`
+- `UX_NUDGES_AND_OUTPUTS_ROADMAP.md`
+- `NODE_AUTHORING_UX_ROADMAP.md`
 
 ## Architecture North Star
 ### Source-of-truth model
@@ -88,25 +133,40 @@ Agents should treat these contracts as coordination rules across ingestion, grap
 ## Roadmap Source Of Truth
 Use `ROADMAP.md` as the living project tracker.
 
-Current phase: Phase 4 Integration Readiness / ExportBatch Hardening.
+Current status: core MVP implementation is mostly in place. The remaining MVP
+release gates are live browser/OpenAI full-loop verification and live Miro /
+monday.com credential smoke tests.
 
 Next best work:
-1. Verify MVP Required acceptance with fixture uploads, save/reopen, and JSON/Markdown export.
-2. Stabilize `WorkspaceBrief` as a durable schema and wire a dedicated derive-from-brief generation action.
-3. Exercise monday export to a real existing board/group and verify status pullback does not overwrite canonical graph structure.
-4. Harden standalone Electron settings so user-owned API keys are stored outside renderer `localStorage`.
-5. Verify the quarantined legacy landing path stays hidden by default while remaining available behind an explicit browser flag for compatibility checks.
+1. Run live browser/OpenAI end-to-end smoke with real PDF and DOCX uploads:
+   upload, generate, review/accept source draft, edit, save, reopen, export JSON
+   and Markdown.
+2. Verify live Miro and monday.com pushes against real credentials and confirm
+   returned external refs persist after save/reopen.
+3. Continue Intent-Driven Readiness only as preview-first, source-cited packs.
+4. Keep GitHub/code intelligence hidden from default UX; local-first and
+   read-only until explicitly gated.
 
-## Parallel Work Lanes
-Use the detailed ownership map in `ROADMAP.md`.
+## Verification Shortcuts
+Pick the smallest useful verification set for your change:
 
-- Agent A: document reliability, source metadata, chunking, upload safety.
-- Agent B: graph contracts, schema validation, graph repair/report data.
-- Agent C: review UI, node inspector citations, validation panel.
-- Agent D: local graph projections, outline/task/table views, branch preview.
-- Agent E: neutral exports, Miro/monday bridge payloads, export confirmation.
+- Backend source/graph/export changes:
+  `python -m pytest backend\tests\test_source_trace_pipeline.py backend\tests\test_export_snapshots.py -q`
+- Ask AI draft/session changes:
+  `python -m pytest backend\tests\test_ai_draft_sessions.py backend\tests\test_ai_draft_responses.py -q`
+- Artifact registry/output contract changes:
+  `python -m pytest backend\tests\test_ai_artifact_outputs.py -q`
+- Code intelligence changes:
+  `python -m pytest backend\tests\test_code_intelligence_local_repo.py -q`
+- Frontend projection/session logic:
+  `node --test frontend/tests/graphProjection.test.mjs frontend/tests/aiDraftSessions.test.mjs`
+- Frontend production sanity:
+  `npm run build`
+- Desktop shell changes:
+  `npm run desktop:check`
 
-Before editing, each agent should state its lane and avoid another lane's owned files unless coordination is explicit.
+For broader handoff confidence, use the README testing section rather than
+copying commands into new roadmap notes.
 
 ## Definition of Better
 - Smaller prompts

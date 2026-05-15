@@ -49,6 +49,12 @@ The product should support multiple visual reasoning modes:
 The goal is to make obscure or early-stage ideas usable and sendable to other
 people for implementation without boxing the workspace into one diagram type.
 
+Canvas-native follow-up actions should extend this intent: when a user selects
+something, the UI should say what can be improved, compared, supplemented, or
+turned into work before AI runs. Keep user-facing copy about actions and
+outcomes; reserve internal terms like projection, contract, and canonical graph
+for implementation notes.
+
 ## Current Product Shape
 
 Already present:

@@ -324,6 +324,10 @@ These are the features required to call the core MVP functional.
   node IDs.
 - [x] `AIDraftSession`, `AIDraftRevision`, draft item, preview diff, accept
   mode, and accept result contracts for Ask AI draft-first graph mutation.
+- [x] `SourceSetReview` projection contract for loaded-source inventory,
+  document classification, topic coverage, stale signals, duplicate groups, and
+  missing expected artifacts. This supports folder-review language without
+  implementing native filesystem folder upload.
 
 ## Still Needed For Fully Functional MVP
 
@@ -507,6 +511,46 @@ Acceptance criteria:
   notes-only accept behavior, orphan-edge prevention, duplicate-ID-safe merge,
   unsourced `needs_review`, and undo snapshot creation.
 
+### Canvas-Native Follow-Up Actions And Reviewable Diffs
+
+Goal: make AI follow-up actions feel like part of the workspace instead of a
+detached prompt box. When a user selects a node, branch, source, or confidence
+issue, TraceSpace should show what AI can do, what context will be used, what
+kind of proposal will come back, and how the user can accept it safely.
+
+Target experience:
+
+```text
+select node / branch / source / confidence issue
+-> choose action: update, supplement, compare, find gaps, create tasks
+-> see context and expected output before running
+-> AI returns a reviewable diff
+-> user chooses keep existing / replace / merge / add alternate
+-> canonical graph mutates only after acceptance
+```
+
+Priority work:
+
+- [ ] Add a follow-up action panel for selected node, branch, source, and
+  confidence repair queues.
+- [ ] Provide clear action cards for `Update this`, `Supplement with source`,
+  `Compare against source`, `Find gaps`, and `Create tasks`.
+- [ ] Show context-before-run: selected scope, included sources/chunks, prior
+  draft/session, inferred intent, and expected output shape.
+- [ ] Add an AI diff preview for node/branch updates with explicit choices:
+  keep existing, replace, merge, add as alternate, or accept selected changes.
+- [ ] Turn graph confidence into a repair queue: missing sources, review flags,
+  weak connections, sparse branches, and source-only sections.
+- [ ] Add source-first actions when users upload before mapping: create mind
+  map, create table, find entities, create tasks, summarize source, and compare
+  to current workspace when one exists.
+- [ ] Make connection review first-class: typed relationship candidates,
+  confidence, rationale, source/assumption basis, accept/reject, and explain.
+- [ ] Preserve the existing preview-first rule for all follow-up mutations.
+- [ ] Cover the milestone with browser tests for: selected node update,
+  source supplement, source compare, confidence repair action, and source-first
+  action routing.
+
 ### Node AI Actions And Prompt Profiles
 
 See `NODE_AI_ACTIONS_ROADMAP.md` for the implementation source of truth,
@@ -534,7 +578,124 @@ All graph mutations in this area must remain preview/confirm operations.
 - [ ] Add full monday conflict handling before any broad bidirectional sync.
 - [ ] Import/reconcile from monday.com.
 
-### Enterprise Readiness
+### Intent-Driven Readiness
+
+Goal: turn TraceSpace from a source-cited workspace mapper into an
+intent-driven analysis system. Enterprise operating-graph work is one strong
+intent pack, not the whole product identity. The same canonical graph,
+source-ref, draft/accept, scoring, and export plumbing must also support
+technical standards reviews, team roadmaps, compliance checks, training
+packages, project recovery, research synthesis, and other source-backed use
+cases.
+
+The product should ask, explicitly or implicitly:
+
+```text
+What is the user trying to accomplish with these sources?
+```
+
+Then it should choose the right ontology, analysis pack, output shape, scoring
+dimensions, and review rules for that intent.
+
+Miro and monday.com live verification is blocked until usable API credentials
+are available. Keep their payload tests and preview/confirmation flows healthy,
+but do not gate enterprise graph work on live integration execution.
+
+#### Intent Packs
+
+- [ ] Treat enterprise operating graph as one registered intent pack, alongside
+  standards completeness review, complex-issue-to-roadmap, SOP/checklist,
+  training outline, source coverage, compliance/audit review, software
+  rationalization, project recovery, and custom analysis.
+- [ ] Add intent selection/routing that maps plain language prompts and
+  Workspace Brief outputs to the right role, action, artifact type, scoring
+  dimensions, and review policy.
+- [ ] Keep every intent pack preview-first: generated findings, nodes, tasks,
+  reports, and roadmaps must remain draft state until accepted.
+- [ ] Let domain-specific packs add vocabulary without making the whole app
+  business-only.
+
+#### Standards And Technical Review
+
+- [x] Add source-set/folder-review contracts for grouped files:
+  file inventory, document classification, topic coverage, stale guidance,
+  duplicate materials, and missing expected artifacts are now projected from
+  the loaded source set.
+- [ ] Add a standards-completeness intent for source folders and grouped files:
+  identify required sections, missing standards, stale guidance, contradictions,
+  weak source coverage, unclear ownership, and SME review questions.
+- [ ] Add starter guidance for Revit/BIM standards review, while keeping the
+  pattern reusable for other technical standards libraries.
+- [ ] Add source coverage and completeness scoring for standards packs:
+  documented, partially documented, missing, conflicting, outdated, and
+  needs_review.
+
+#### Team Roadmap From Complex Sources
+
+- [ ] Add a complex-issue-to-team-roadmap intent that turns dense source
+  material into a team-facing roadmap with context, decisions, workstreams,
+  dependencies, risks, milestones, owners to assign, and source-backed appendix.
+- [ ] Support roadmap outputs as outline, tasks, presentation sections, and
+  executive/team summary views.
+- [ ] Preserve assumptions separately from source-backed facts.
+
+#### Enterprise Operating Graph
+
+- [ ] Add a business ontology registry for enterprise node/entity types:
+  business_unit, capability, process, system, application, role, team, owner,
+  KPI, risk, control, project, decision, dependency, cost, and
+  customer_segment.
+- [ ] Add enterprise relationship types: owns, supports, depends_on,
+  duplicates, conflicts_with, implements, measures, blocks, creates_risk_for,
+  requires_approval_from, used_by, and funded_by.
+- [ ] Preserve generic mind-map compatibility while allowing enterprise nodes
+  and cross-links to be projected as an operating graph.
+- [ ] Validate enterprise relationship edges with source refs or explicit
+  assumptions, and mark inferred/unsupported relationships as needs_review.
+- [ ] Add source-backed entity extraction guidance for business documents,
+  inventories, org charts, process docs, standards, risks, controls, and project
+  records.
+
+#### Enterprise Scoring
+
+- [ ] Add scoring dimensions for confidence, business impact, implementation
+  effort, risk severity, source coverage, and owner clarity.
+- [ ] Surface workspace-level enterprise readiness, including source coverage,
+  owner coverage, review burden, cross-link density, unresolved decisions, and
+  high-risk unsupported claims.
+- [ ] Score analysis findings and recommended actions so executive outputs can
+  be sorted by impact, risk, and effort.
+- [ ] Keep scores explainable: each score must expose the fields, evidence, or
+  assumptions that drove it.
+
+#### Guided Analysis Packs
+
+- [ ] Add guided enterprise prompts for:
+  find process bottlenecks, find duplicate tools, find ownership gaps, find
+  unsupported business-critical systems, create a 30/60/90 day improvement
+  plan, and create a stakeholder review package.
+- [ ] Add analysis pack output contracts for operating model visibility,
+  technology rationalization, process improvement, project recovery, M&A
+  integration planning, and compliance/audit readiness.
+- [ ] Route analysis packs through draft-session preview/accept so no
+  enterprise finding mutates the canonical graph without review.
+- [ ] Include source coverage, assumptions, confidence, owner, impact, risk,
+  and recommended next action on each finding where available.
+
+#### Executive Outputs
+
+- [ ] Add executive output mode with summary, key findings, recommended actions,
+  risks, required decisions, and source-backed appendix.
+- [ ] Add enterprise artifact types for operating_model_map, capability_map,
+  process_improvement_report, software_rationalization_report,
+  risk_opportunity_report, implementation_handoff_package, and
+  decision_dependency_map.
+- [ ] Export executive packages as Markdown/JSON first, with Miro/monday handoff
+  candidates generated only after user confirmation and credential availability.
+- [ ] Add review-ready appendix sections that show source refs, unsupported
+  assumptions, low-confidence findings, and open SME questions.
+
+#### Enterprise Governance
 
 - [ ] Version history for source documents and graph revisions.
 - [ ] Comments and review assignments.
@@ -547,6 +708,150 @@ All graph mutations in this area must remain preview/confirm operations.
 - [ ] Microsoft Planner export only if monday.com is not enough.
 - [ ] Batch import.
 - [ ] Template library.
+
+### GitHub Code Intelligence
+
+Goal: connect a GitHub repo or folder and turn source code, docs, issues, and
+PRs into a source-cited code knowledge graph that helps developers find weak
+spots, missing tests, documentation gaps, dependency risks, and refactor
+opportunities. This is a codebase understanding and handoff layer, not a
+replacement for coding agents.
+
+Target experience:
+
+```text
+Connect GitHub
+-> select repo / branch / folder
+-> choose analysis mode
+-> build code knowledge graph
+-> review source-backed findings
+-> generate task candidates / roadmap / PR plan
+```
+
+Positioning:
+
+- [ ] Treat GitHub integration as repo intelligence and engineering audit, not
+  IDE autocomplete, autonomous coding, or another PR-writing agent.
+- [ ] Use TraceSpace to explain, audit, map, prioritize, and hand off codebase
+  understanding; let developers or coding agents execute accepted tasks.
+- [ ] Keep every finding source-cited with file/line evidence where possible,
+  or mark it `needs_review`.
+
+#### GitHub Source Model
+
+- [ ] Add `github_repo` as a source type.
+- [ ] Add child source types for `github_file`, `github_directory`,
+  `github_issue`, `github_pull_request`, `github_commit`,
+  `github_workflow_run`, `github_code_search_result`, and
+  `github_dependency_manifest`.
+- [ ] Store GitHub source refs with repo, branch, path, sha, language,
+  source URL, and line ranges.
+- [ ] Support line-level citations for files, functions, routes, components,
+  findings, and generated roadmap items.
+- [ ] Preserve repo/source metadata through exports and draft-session
+  provenance.
+
+#### Read-Only GitHub Ingestion
+
+- [ ] Add read-only GitHub auth/token configuration.
+- [ ] Select repo, branch, and folder scope.
+- [ ] Fetch file tree with ignore patterns.
+- [ ] Ingest supported first-pass file types: `.py`, `.js`, `.jsx`, `.ts`,
+  `.tsx`, `.md`, `.json`, `.yaml`, `.yml`, and `.toml`.
+- [ ] Exclude generated/build folders by default: `node_modules`, `dist`,
+  `build`, `.venv`, `__pycache__`, and `coverage`.
+- [ ] Never ingest `.env`, private keys, or known secret files; warn on
+  suspected secrets without exposing values.
+- [ ] Add file size, repo scope, and token budget limits.
+
+#### Local-First Code Intelligence Foundation
+
+- [x] Add hidden backend-only `backend/code_intelligence` package.
+- [x] Scan a local repo/folder without GitHub auth.
+- [x] Ignore generated/build folders and known secret files by default.
+- [x] Emit source-cited file and symbol nodes with path, sha, line ranges, and
+  quote snippets.
+- [x] Emit code `source_documents` and symbol-level `document_chunks` compatible
+  with the existing source/ref mental model.
+- [x] Emit deterministic `contains`, local `imports`, external
+  `uses_dependency`, conservative Python `calls`, file/symbol `tested_by`, and
+  `missing_test_for` relationships.
+- [x] Emit conservative `entrypoint_for` relationships from package scripts,
+  frontend root files, and Python main patterns.
+- [x] Emit gap nodes and source-backed findings for missing tests and missing
+  public symbol documentation.
+- [x] Include developer-only capability visibility metadata so later UI work can
+  keep code intelligence hidden by default.
+
+#### Deterministic Code Graph
+
+- [x] Build deterministic code structure before AI interpretation.
+- [x] Extract local starter code node types: repo, file, function, class,
+  component, test, dependency, and gap.
+- [ ] Add api_route, issue, risk, and PR/CI-backed nodes after the local file
+  graph is stable.
+- [x] Extract starter code relationships: contains, imports, calls, tested_by,
+  missing_test_for, uses_dependency, and entrypoint_for.
+- [ ] Add depends_on, documents, missing_docs_for, modified_by,
+  referenced_by_issue, affected_by_pr, high_churn, and low_coverage.
+- [x] Parse ASTs where practical, then use regex and path heuristics as
+  documented fallbacks.
+- [x] Parse package/dependency manifests for dependency nodes and package script
+  entrypoints.
+- [x] Link tests to source files and symbols using naming, path, import, and
+  call heuristics.
+
+#### AI Code Analysis Artifacts
+
+- [ ] Add artifact types for repo_architecture_map, code_knowledge_graph,
+  weak_spot_report, test_gap_report, dependency_risk_report, pr_impact_report,
+  refactor_roadmap, developer_onboarding_map, and github_issue_candidates.
+- [ ] Generate architecture maps that distinguish frontend, backend,
+  integrations, routes, components, provider layers, and tests.
+- [ ] Generate weak spot reports for large files, duplicate logic, schema drift,
+  high-churn areas, missing validation, unreliable integration paths, and
+  ownership gaps.
+- [ ] Generate missing test reports for routes, schema changes, prompts,
+  critical paths, high-churn files, and integration seams.
+- [ ] Generate documentation gap reports for public APIs, complex modules,
+  schemas, prompts, setup flows, and implemented-but-undocumented features.
+- [ ] Generate dependency risk reports using manifests, lockfiles where
+  appropriate, and security finding inputs.
+- [ ] Generate refactor roadmaps and onboarding maps as reviewable draft
+  artifacts before graph mutation or external handoff.
+
+#### Developer Handoff
+
+- [ ] Create GitHub issue candidates with preview and explicit confirmation.
+- [ ] Export Markdown engineering reports.
+- [ ] Export accepted task candidates to monday.com.
+- [ ] Export architecture and impact maps to Miro.
+- [ ] Add PR impact analysis for selected changed files: changed files,
+  affected functions, affected routes/components, related tests, missing tests,
+  related issues, and risk score.
+
+#### GitHub Guardrails
+
+- [ ] Read-only by default.
+- [ ] Require repo allowlists and branch selection.
+- [ ] Do not perform GitHub writes without explicit preview and confirmation.
+- [ ] Keep deterministic parsing upstream of AI ranking/explanation.
+- [ ] Mark uncited or inferred findings as `needs_review`.
+- [ ] Support local-only scan mode for sensitive repos.
+
+#### Audience And Capability Visibility
+
+- [ ] Keep code intelligence hidden from the default TraceSpace experience.
+- [ ] Do not add GitHub/code analysis to default navigation, source picker,
+  Workspace Brief presets, nudges, or standard Ask AI profiles.
+- [ ] Expose code intelligence only through an explicit developer capability
+  gate such as `docmap:developerMode` or a server-provided entitlement.
+- [ ] With the capability disabled, non-developer users should see no copy,
+  controls, examples, or onboarding paths that suggest TraceSpace is for code
+  repositories.
+- [ ] Treat frontend hiding as UX only; backend endpoints must still enforce
+  read-only scope, repo allowlists, and capability checks before scanning or
+  connecting repositories.
 
 ## Test Strategy
 
