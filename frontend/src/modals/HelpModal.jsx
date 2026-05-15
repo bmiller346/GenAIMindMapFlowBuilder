@@ -7,7 +7,7 @@ const HELP_ARTICLES = [
         title: 'Ask AI',
         summary: 'Ask in plain language. TraceSpace drafts first, then you accept what belongs in the graph.',
         sections: [
-            'Use the question box for normal requests like “make this into tasks” or “how do I cook a grilled cheese.”',
+            'Use the question box for normal requests like “turn this commissioning plan into tasks” or “map the RFI workflow.”',
             'Visual Auto lets AI choose a useful shape such as checklist, table, flowchart, outline, or graph draft.',
             'Accepted drafts are the only things that change the workspace graph.'
         ]

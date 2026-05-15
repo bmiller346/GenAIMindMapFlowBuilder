@@ -1154,6 +1154,40 @@ input:focus {
   white-space: nowrap;
 }
 
+.ai-action-brief-context {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid var(--question-border);
+  border-radius: 0.5rem;
+  background-color: color-mix(in srgb, var(--input-bar-color) 72%, transparent);
+  padding: 0.65rem 0.75rem;
+}
+
+.ai-action-brief-context span {
+  color: var(--input-color);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ai-action-brief-context strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--font-color);
+  font-size: 0.9rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-action-brief-context small {
+  color: var(--input-color);
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.2rem;
+}
+
 .ai-action-source-context {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(10rem, 0.55fr) auto;
