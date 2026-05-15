@@ -212,12 +212,12 @@ const SourceRepairPreview = ({
                 <div>
                     <strong>Source-reference repair</strong>
                     <span>
-                        {generatedPreview ? 'AI-generated source output' : 'Local source projection'} |{' '}
+                        {generatedPreview ? 'AI-generated source artifact' : 'Accepted source coverage'} |{' '}
                         {previewRows.length} nodes need source repair
                     </span>
                 </div>
                 <span className="output-state-pill">
-                    {generatedPreview ? 'AI-generated' : 'Locally projected'}
+                    {generatedPreview ? 'AI-generated' : 'Accepted workspace'}
                 </span>
                 <button type="button" onClick={acceptRepairs}>
                     Accept selected

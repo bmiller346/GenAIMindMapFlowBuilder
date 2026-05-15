@@ -174,12 +174,12 @@ const SmeQuestionsPreview = ({
                 <div>
                     <strong>Draft SME questions</strong>
                     <span>
-                        {generatedPreview ? 'AI-generated review output' : 'Local gap-to-question projection'} |{' '}
+                        {generatedPreview ? 'AI-generated review artifact' : 'Accepted gaps and questions'} |{' '}
                         {previewRows.length} questions
                     </span>
                 </div>
                 <span className="output-state-pill">
-                    {generatedPreview ? 'AI-generated' : 'Locally projected'}
+                    {generatedPreview ? 'AI-generated' : 'Accepted workspace'}
                 </span>
                 <button type="button" onClick={acceptQuestions}>
                     Accept selected

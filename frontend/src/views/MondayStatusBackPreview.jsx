@@ -174,7 +174,7 @@ const MondayStatusBackPreview = ({
             }.`,
             context: generatedPreview
                 ? 'Source: generated Integration Operator preview'
-                : 'Source: local status projection'
+                : 'Source: accepted TraceSpace workspace'
         });
         setActiveView('table');
     };
@@ -198,12 +198,12 @@ const MondayStatusBackPreview = ({
                 <div>
                     <strong>Review handoff status input</strong>
                     <span>
-                        {generatedPreview ? 'AI-generated sync review' : 'Local integration projection'} |{' '}
+                        {generatedPreview ? 'AI-generated sync review' : 'Accepted TraceSpace status'} |{' '}
                         {selectedCount} ready from {statusRows.length} monday-linked candidates
                     </span>
                 </div>
                 <span className="output-state-pill">
-                    {generatedPreview ? 'AI-generated' : 'Locally projected'} {'->'} Applied/exported next
+                    {generatedPreview ? 'AI-generated' : 'Accepted workspace'} {'->'} Applied/exported next
                 </span>
                 <button type="button" onClick={stageStatusBack}>
                     Stage selected

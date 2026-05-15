@@ -9,6 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ai.schemas import ARTIFACT_REGISTRY
 from ai.providers import FixtureDocMapAIProvider
 from ai_helpers import (
+    accept_ai_draft_revision,
+    build_ai_draft_session,
     generate_ai_draft_session_with_provider,
     normalize_requested_artifact_types,
     registered_artifact_types,
@@ -250,6 +252,68 @@ def test_knowledge_graph_relationship_contract_marks_inferred_edges_needs_review
     assert edge["review_state"] == "needs_review"
     assert artifact["status"] == "needs_review"
     assert artifact["provenance"]["validation_status"] == "needs_review"
+
+
+def test_accepting_knowledge_graph_artifact_adds_relationship_edges():
+    graph = _graph(["knowledge_graph"])
+    session = build_ai_draft_session(
+        workspace_id="workspace-artifacts",
+        prompt="Find connection candidates.",
+        scope={"type": "workspace"},
+        role="Gap Analyst",
+        intent="draft_knowledge_graph",
+        draft_nodes=[],
+        draft_edges=[],
+        draft_annotations=[],
+        generated_artifacts=[
+            {
+                "id": "artifact-knowledge-graph",
+                "artifact_type": "knowledge_graph",
+                "title": "Knowledge Graph",
+                "status": "draft",
+                "data": {
+                    "relationship_edges": [
+                        {
+                            "source_node_id": "root",
+                            "target_node_id": "approval",
+                            "relationship_type": "depends_on",
+                            "source_signal": "explicit_text",
+                            "confidence": 0.84,
+                            "rationale": "Deployment depends on approval.",
+                            "source_refs": [SOURCE_REF],
+                            "assumptions": [],
+                            "review_state": "reviewed",
+                        }
+                    ]
+                },
+                "source_refs": [SOURCE_REF],
+                "assumptions": [],
+            }
+        ],
+    )
+
+    accepted_graph, _accepted_session, result = accept_ai_draft_revision(
+        graph,
+        session,
+        accept_mode="append",
+    )
+
+    relationship_edges = [
+        edge
+        for edge in accepted_graph["edges"]
+        if edge["relationship_type"] == "depends_on"
+    ]
+    assert len(relationship_edges) == 1
+    edge = relationship_edges[0]
+    assert edge["source_node_id"] == "root"
+    assert edge["target_node_id"] == "approval"
+    assert edge["metadata"]["artifact_id"] == "artifact-knowledge-graph"
+    assert edge["metadata"]["confidence"] == 0.84
+    assert edge["metadata"]["review_state"] == "reviewed"
+    assert edge["source_refs"] == [SOURCE_REF]
+    assert result["preview_diff"]["added_edges"] == 1
+    assert result["preview_diff"]["relationship_edges"] == 1
+    assert "item_artifact-knowledge-graph" in result["accepted_item_ids"]
 
 
 def test_unregistered_artifact_types_are_rejected_and_dropped_from_desired_outputs():

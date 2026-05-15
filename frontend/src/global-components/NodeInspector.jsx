@@ -41,6 +41,14 @@ const REVIEW_STATES = [
 
 const PRIORITIES = ['', 'low', 'medium', 'high', 'critical'];
 
+const TASK_CAPABLE_TYPES = new Set([
+    'task',
+    'procedure',
+    'workflow',
+    'needs_review',
+    'requirement'
+]);
+
 const getNestedData = (data) => {
     if (data?.data && typeof data.data === 'object') {
         return data.data;
@@ -152,7 +160,7 @@ const previewImpactSummary = ({ draftNodes = [], draftEdges = [], outputs = [] }
         pieces.push(`connect ${draftEdges.length} edge${draftEdges.length === 1 ? '' : 's'}`);
     }
     if (outputs.length) {
-        pieces.push(`store ${outputs.length} review output${outputs.length === 1 ? '' : 's'}`);
+        pieces.push(`store ${outputs.length} review artifact${outputs.length === 1 ? '' : 's'}`);
     }
     return pieces.length ? `Accept will ${pieces.join(', ')}.` : 'Accept stores the reviewed AI output.';
 };
@@ -305,6 +313,19 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
     const updateDraft = (key, value) => {
         setDraft((current) => ({ ...current, [key]: value }));
         setApplyMessage('');
+    };
+
+    const confirmDraftAsTask = () => {
+        setDraft((current) => ({
+            ...current,
+            node_type: 'task',
+            status:
+                current.status === 'approved' || current.status === 'reviewed'
+                    ? current.status
+                    : 'needs_review',
+            priority: current.priority || 'medium'
+        }));
+        setApplyMessage('Ready to apply as a confirmed task.');
     };
 
     const saveMetadata = () => {
@@ -507,7 +528,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
                         {[
                             `${aiDraftNodes.length} draft nodes`,
                             `${aiDraftEdges.length} draft edges`,
-                            `${aiNonNodeOutputs.length} review outputs`
+                            `${aiNonNodeOutputs.length} review artifacts`
                         ].join(' | ')}
                     </small>
                     <div className="ai-action-preview-meta">
@@ -670,6 +691,17 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
     const externalRefEntries = Object.entries(inspectorExternalRefs).filter(
         ([, ref]) => ref && typeof ref === 'object'
     );
+    const taskProjection = selectedNode.data?.task_projection;
+    const checklistProjection = selectedNode.data?.checklist_projection;
+    const isTaskMetadataNode =
+        TASK_CAPABLE_TYPES.has(draft.node_type) ||
+        Boolean(taskProjection?.accepted) ||
+        Boolean(checklistProjection?.accepted);
+    const missingTaskFields = [
+        !draft.priority ? 'priority' : '',
+        !draft.owner_id ? 'owner' : '',
+        !draft.due_date ? 'due date' : ''
+    ].filter(Boolean);
 
     if (aiDraftSessionAppliesHere) {
         return (
@@ -791,6 +823,38 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
                         onChange={(e) => updateDraft('owner_id', e.target.value)}
                     />
                 </label>
+                <div className="node-inspector-section node-task-metadata-card">
+                    <p>Task readiness</p>
+                    <div>
+                        <span>
+                            {isTaskMetadataNode
+                                ? 'Confirmed task metadata'
+                                : 'Task candidate'}
+                        </span>
+                        <strong>
+                            {isTaskMetadataNode
+                                ? missingTaskFields.length
+                                    ? `Missing ${missingTaskFields.join(', ')}.`
+                                    : 'Owner, priority, and due date are set.'
+                                : 'Confirm this node when it becomes accountable work.'}
+                        </strong>
+                    </div>
+                    {taskProjection?.accepted || checklistProjection?.accepted ? (
+                        <small>
+                            {[
+                                taskProjection?.accepted ? 'Accepted task projection' : '',
+                                checklistProjection?.accepted ? 'Accepted checklist item' : ''
+                            ]
+                                .filter(Boolean)
+                                .join(' | ')}
+                        </small>
+                    ) : null}
+                    {!isTaskMetadataNode ? (
+                        <button type="button" onClick={confirmDraftAsTask}>
+                            Confirm as task
+                        </button>
+                    ) : null}
+                </div>
                 <label>
                     Confidence
                     <input

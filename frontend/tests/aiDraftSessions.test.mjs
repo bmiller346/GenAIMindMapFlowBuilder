@@ -15,7 +15,8 @@ import {
 } from '../src/utils/aiDraftSessions.js';
 import {
     getActionsForProfileAndScope,
-    getPromptProfilesForScope
+    getPromptProfilesForScope,
+    starterTransformations
 } from '../src/prompts/promptsModel.js';
 import { createWorkspaceNode } from '../src/utils/manualNodes.js';
 
@@ -325,6 +326,30 @@ test('draft request carries visual routing metadata and desired outputs', () => 
     assert.equal(request.metadata.requested_visual, 'auto');
     assert.equal(request.metadata.output_shape, 'checklist');
     assert.equal(request.action, 'generate_checklist');
+});
+
+test('starter transformation catalog includes operational prompt defaults', () => {
+    const ids = new Set(starterTransformations.map((starter) => starter.id));
+
+    assert.equal(starterTransformations.length, 12);
+    assert.ok(ids.has('sop_to_checklist'));
+    assert.ok(ids.has('pdf_to_training_outline'));
+    assert.ok(ids.has('requirements_to_tasks'));
+    assert.ok(ids.has('source_coverage_report'));
+    assert.ok(ids.has('sme_review_packet'));
+    assert.ok(ids.has('implementation_handoff_package'));
+    assert.ok(
+        starterTransformations.every(
+            (starter) =>
+                starter.label &&
+                starter.prompt &&
+                starter.visual &&
+                starter.roleId &&
+                starter.actionId &&
+                Array.isArray(starter.scopes) &&
+                starter.scopes.length
+        )
+    );
 });
 
 test('multi-source draft payload bounds workspace request to selected chunks', () => {

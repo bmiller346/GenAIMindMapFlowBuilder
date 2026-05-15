@@ -59,14 +59,21 @@ BRANCH_AI_ACTIONS = {
     "split_branch_into_categories",
     "generate_tasks",
     "generate_checklist",
+    "generate_training_outline",
+    "export_branch_as_sop_draft",
     "find_gaps",
     "create_sme_questions",
     "custom_prompt",
 }
 WORKSPACE_AI_ACTIONS = {
     "suggest_follow_up_questions",
+    "find_missing_source_support",
     "find_unsupported_assumptions",
     "find_duplicate_overlapping_nodes",
+    "create_sme_questions",
+    "generate_tasks",
+    "generate_checklist",
+    "interpret_table_data",
     "generate_training_outline",
     "export_branch_as_sop_draft",
     "custom_prompt",
@@ -1181,6 +1188,82 @@ def _selected_draft_edges(
     return edges
 
 
+def _selected_generated_artifacts(
+    revision: dict[str, Any],
+    accept_mode: str,
+    selected_ids: set[str],
+) -> list[dict[str, Any]]:
+    if accept_mode == "notes_only":
+        return []
+    artifacts = [
+        deepcopy(artifact)
+        for artifact in revision.get("generated_artifacts", [])
+        if isinstance(artifact, dict)
+    ]
+    if accept_mode != "selected" or not selected_ids:
+        return artifacts
+
+    artifact_ids = _selected_metadata_ids(revision, selected_ids, "artifact_id")
+    return [
+        artifact
+        for artifact in artifacts
+        if artifact.get("id") in selected_ids or artifact.get("id") in artifact_ids
+    ]
+
+
+def _knowledge_graph_artifact_edges_for_accept(
+    artifacts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        if artifact.get("artifact_type") != "knowledge_graph":
+            continue
+        data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
+        relationship_edges = data.get("relationship_edges", [])
+        if not isinstance(relationship_edges, list):
+            continue
+        artifact_id = str(artifact.get("id") or "knowledge_graph")
+        for index, relationship in enumerate(relationship_edges, start=1):
+            if not isinstance(relationship, dict):
+                continue
+            source = str(relationship.get("source_node_id") or "")
+            target = str(relationship.get("target_node_id") or "")
+            relationship_type = str(relationship.get("relationship_type") or "related_to")
+            if not source or not target:
+                continue
+            safe_type = relationship_type.replace(" ", "_")
+            edge_id = str(
+                relationship.get("id")
+                or relationship.get("edge_id")
+                or f"{artifact_id}_relationship_{index}_{source}_{target}_{safe_type}"
+            )
+            metadata = relationship.get("metadata") if isinstance(relationship.get("metadata"), dict) else {}
+            edges.append(
+                {
+                    "id": edge_id,
+                    "source_node_id": source,
+                    "target_node_id": target,
+                    "relationship_type": relationship_type,
+                    "source_refs": deepcopy(relationship.get("source_refs", []))
+                    if isinstance(relationship.get("source_refs"), list)
+                    else [],
+                    "metadata": {
+                        **deepcopy(metadata),
+                        "source": "knowledge_graph_artifact",
+                        "artifact_id": artifact_id,
+                        "source_signal": relationship.get("source_signal", ""),
+                        "confidence": relationship.get("confidence", ""),
+                        "rationale": relationship.get("rationale", ""),
+                        "assumptions": deepcopy(relationship.get("assumptions", []))
+                        if isinstance(relationship.get("assumptions"), list)
+                        else [],
+                        "review_state": relationship.get("review_state", ""),
+                    },
+                }
+            )
+    return edges
+
+
 def _accepted_item_ids(
     revision: dict[str, Any],
     accepted_nodes: list[dict[str, Any]],
@@ -1193,14 +1276,24 @@ def _accepted_item_ids(
         *[edge.get("id") for edge in accepted_edges if isinstance(edge, dict)],
         *[item.get("id") for item in review_outputs if isinstance(item, dict)],
     }
+    accepted_artifact_ids = {
+        edge.get("metadata", {}).get("artifact_id", "")
+        for edge in accepted_edges
+        if isinstance(edge, dict) and isinstance(edge.get("metadata"), dict)
+    }
     item_ids = []
     for item in revision.get("draft_items", []):
         if not isinstance(item, dict):
             continue
         metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-        raw_id = metadata.get("node_id") or metadata.get("edge_id") or metadata.get("annotation_id")
+        raw_id = (
+            metadata.get("node_id")
+            or metadata.get("edge_id")
+            or metadata.get("annotation_id")
+            or metadata.get("artifact_id")
+        )
         item_id = item.get("id")
-        if item_id in selected_ids or raw_id in accepted_raw_ids:
+        if item_id in selected_ids or raw_id in accepted_raw_ids or raw_id in accepted_artifact_ids:
             item_ids.append(str(item_id))
     return item_ids
 
@@ -1239,6 +1332,11 @@ def _build_ai_draft_graph_patch(
 
     selected_nodes = _selected_draft_nodes(revision, accept_mode, selected_ids)
     selected_edges = _selected_draft_edges(revision, selected_nodes, accept_mode)
+    selected_artifacts = _selected_generated_artifacts(revision, accept_mode, selected_ids)
+    selected_edges = [
+        *selected_edges,
+        *_knowledge_graph_artifact_edges_for_accept(selected_artifacts),
+    ]
     existing_node_ids = {node.get("id") for node in graph.get("nodes", []) if isinstance(node, dict)}
     existing_by_id = _existing_nodes_by_id(graph)
     existing_by_title = _existing_nodes_by_title(graph)
@@ -1470,7 +1568,11 @@ def _accepted_revision_edges(
     graph_node_ids = {node.get("id") for node in graph.get("nodes", []) if isinstance(node, dict)}
     graph_node_ids.update(id_map.values())
     existing_edge_keys = {
-        (edge.get("source_node_id"), edge.get("target_node_id"))
+        (
+            edge.get("source_node_id"),
+            edge.get("target_node_id"),
+            str(edge.get("relationship_type") or "contains"),
+        )
         for edge in graph.get("edges", [])
         if isinstance(edge, dict)
     }
@@ -1482,14 +1584,15 @@ def _accepted_revision_edges(
         target = id_map.get(edge.get("target_node_id"), edge.get("target_node_id"))
         if source not in graph_node_ids or target not in graph_node_ids or source == target:
             continue
-        key = (source, target)
+        relationship_type = str(edge.get("relationship_type") or "contains")
+        key = (source, target, relationship_type)
         if key in existing_edge_keys:
             continue
         edge["source_node_id"] = source
         edge["target_node_id"] = target
         edge["id"] = _unique_graph_id(str(edge.get("id") or f"edge_{source}_{target}"), used_edge_ids)
         used_edge_ids.add(edge["id"])
-        edge["relationship_type"] = str(edge.get("relationship_type") or "contains")
+        edge["relationship_type"] = relationship_type
         edge["metadata"] = deepcopy(edge.get("metadata", {})) if isinstance(edge.get("metadata"), dict) else {}
         edge["metadata"].update(
             {

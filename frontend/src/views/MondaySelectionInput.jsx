@@ -232,7 +232,7 @@ const MondaySelectionInput = ({
             }.`,
             context: generatedPreview
                 ? 'Source: generated Integration Operator preview'
-                : 'Source: local handoff projection'
+                : 'Source: accepted TraceSpace workspace'
         });
         setActiveView('table');
     };
@@ -256,12 +256,12 @@ const MondaySelectionInput = ({
                 <div>
                     <strong>Create implementation handoff package</strong>
                     <span>
-                        {generatedPreview ? 'AI-generated handoff output' : 'Local accepted-data projection'} |{' '}
+                        {generatedPreview ? 'AI-generated handoff package' : 'Accepted TraceSpace workspace'} |{' '}
                         {selectedCount} selected from {selectionRows.length} candidates
                     </span>
                 </div>
                 <span className="output-state-pill">
-                    {generatedPreview ? 'AI-generated' : 'Locally projected'} {'->'} Applied/exported next
+                    {generatedPreview ? 'AI-generated' : 'Accepted workspace'} {'->'} Applied/exported next
                 </span>
                 <button type="button" onClick={stageMondaySelection}>
                     Stage selected

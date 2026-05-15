@@ -8,6 +8,30 @@ const TASK_CAPABLE_TYPES = new Set([
     'requirement'
 ]);
 
+const acceptedProjection = (projection) =>
+    projection && typeof projection === 'object' && projection.accepted
+        ? projection
+        : undefined;
+
+const taskProjectionForNode = (node) => acceptedProjection(node?.task_projection);
+
+const checklistProjectionForNode = (node) => acceptedProjection(node?.checklist_projection);
+
+const projectedTaskValue = (node, key, fallback = '') => {
+    const taskProjection = taskProjectionForNode(node);
+    const checklistProjection = checklistProjectionForNode(node);
+
+    return (
+        node?.[key] ||
+        taskProjection?.[key] ||
+        checklistProjection?.[key] ||
+        fallback
+    );
+};
+
+const isConfirmedTaskNode = (node) =>
+    TASK_CAPABLE_TYPES.has(node?.node_type) || Boolean(taskProjectionForNode(node));
+
 const getNestedData = (node) => {
     const data = node?.data || {};
     return data.data && typeof data.data === 'object' ? data.data : {};
@@ -79,6 +103,43 @@ const relationshipLabel = (value = '') =>
         .replaceAll('_', ' ')
         .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
+const HIERARCHY_RELATIONSHIP_TYPES = new Set([
+    '',
+    'contains',
+    'parent_child',
+    'parent-child',
+    'child',
+    'section',
+    'subtopic',
+    'branch',
+    'smoothstep'
+]);
+
+const isHierarchyRelationship = (relationship = '') =>
+    HIERARCHY_RELATIONSHIP_TYPES.has(
+        String(relationship || '')
+            .trim()
+            .toLowerCase()
+    );
+
+const numericConfidence = (value) => {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    if (typeof value === 'number') {
+        if (!Number.isFinite(value)) {
+            return null;
+        }
+        return value > 1 ? value / 100 : value;
+    }
+    const cleaned = String(value).trim().replace('%', '');
+    const parsed = Number(cleaned);
+    if (!Number.isFinite(parsed)) {
+        return null;
+    }
+    return String(value).includes('%') || parsed > 1 ? parsed / 100 : parsed;
+};
+
 const hasSourceDocument = (sourceRef) => Boolean(sourceRef?.document_id);
 
 const hasCompleteSourceRef = (sourceRef) =>
@@ -146,6 +207,8 @@ export const normalizeGraphNode = (node) => {
         query: workspaceData.query || data.query || nestedData.query || '',
         tags: normalizeDelimitedValues(data.tags || nestedData.tags),
         entities: normalizeDelimitedValues(data.entities || nestedData.entities),
+        task_projection: data.task_projection || nestedData.task_projection,
+        checklist_projection: data.checklist_projection || nestedData.checklist_projection,
         local_preview_acceptances: Array.isArray(data.local_preview_acceptances)
             ? data.local_preview_acceptances
             : [],
@@ -601,10 +664,19 @@ export const getConnectionRows = (projection) =>
                     edge.data?.relationship ||
                     edge.data?.label ||
                     'parent-child',
+                relationship_type: edge.relationship_type || '',
+                connection_kind: isHierarchyRelationship(edge.relationship_type)
+                    ? 'Hierarchy'
+                    : 'Cross-link',
+                confidence: edge.confidence || edge.data?.confidence || '',
+                review_state: edge.review_state || edge.data?.review_state || '',
                 locally_projected: true
             };
         })
         .filter(Boolean);
+
+export const getCrossLinkConnectionRows = (projection) =>
+    getConnectionRows(projection).filter((row) => row.connection_kind === 'Cross-link');
 
 export const getKnowledgeGraphRows = (projection) =>
     projection.nodes.map((node) => ({
@@ -615,29 +687,150 @@ export const getKnowledgeGraphRows = (projection) =>
         locally_projected: true
     }));
 
+export const getGraphConfidenceSummary = (projection) => {
+    const contentNodes = projection.nodes.filter((node) => node.react_flow_type !== 'dataSource');
+    const nodeCount = contentNodes.length;
+    const edgeCount = projection.edges.length;
+    const hierarchyEdges = projection.edges.filter((edge) =>
+        isHierarchyRelationship(edge.relationship_type)
+    ).length;
+    const crossLinkEdges = edgeCount - hierarchyEdges;
+    const sourcedNodes = contentNodes.filter((node) =>
+        node.source_refs?.some((ref) => ref?.document_id)
+    ).length;
+    const nodesWithSummary = contentNodes.filter((node) => node.summary).length;
+    const nodesNeedingReview = contentNodes.filter(
+        (node) => node.status === 'needs_review' || node.node_type === 'needs_review'
+    ).length;
+    const confidenceValues = contentNodes
+        .map((node) => numericConfidence(node.confidence))
+        .filter((value) => value !== null);
+    const lowConfidenceNodes = contentNodes.filter((node) => {
+        const confidence = numericConfidence(node.confidence);
+        return confidence !== null && confidence < 0.6;
+    }).length;
+    const roots = projection.roots.filter((node) => node.react_flow_type !== 'dataSource').length;
+    const averageConfidence =
+        confidenceValues.length > 0
+            ? confidenceValues.reduce((total, value) => total + value, 0) / confidenceValues.length
+            : null;
+
+    const structureScore =
+        nodeCount === 0
+            ? 0
+            : Math.min(1, edgeCount / Math.max(1, nodeCount - roots || 1));
+    const connectionScore =
+        nodeCount < 3 ? 1 : Math.min(1, crossLinkEdges / Math.max(1, Math.ceil(nodeCount / 8)));
+    const sourceScore = nodeCount === 0 ? 0 : sourcedNodes / nodeCount;
+    const summaryScore = nodeCount === 0 ? 0 : nodesWithSummary / nodeCount;
+    const reviewScore = nodeCount === 0 ? 0 : 1 - nodesNeedingReview / nodeCount;
+    const confidenceScore = averageConfidence ?? (lowConfidenceNodes > 0 ? 0.45 : 0.62);
+
+    const score = Math.round(
+        100 *
+            (structureScore * 0.22 +
+                connectionScore * 0.18 +
+                sourceScore * 0.22 +
+                summaryScore * 0.16 +
+                reviewScore * 0.14 +
+                confidenceScore * 0.08)
+    );
+
+    const reasons = [];
+    if (nodeCount === 0) {
+        reasons.push('No graph nodes yet');
+    }
+    if (nodeCount > 2 && crossLinkEdges === 0) {
+        reasons.push('No accepted cross-branch connections');
+    }
+    if (sourceScore < 0.5) {
+        reasons.push(`${nodeCount - sourcedNodes} nodes missing source support`);
+    }
+    if (summaryScore < 0.75) {
+        reasons.push(`${nodeCount - nodesWithSummary} nodes missing summaries`);
+    }
+    if (nodesNeedingReview > 0) {
+        reasons.push(`${nodesNeedingReview} nodes marked needs review`);
+    }
+    if (lowConfidenceNodes > 0) {
+        reasons.push(`${lowConfidenceNodes} low-confidence nodes`);
+    }
+
+    const supplementActions = [];
+    if (nodeCount > 2 && crossLinkEdges === 0) {
+        supplementActions.push('Find cross-branch connections');
+    }
+    if (sourceScore < 0.75) {
+        supplementActions.push('Review source coverage');
+    }
+    if (summaryScore < 0.75 || nodesNeedingReview > 0) {
+        supplementActions.push('Find gaps');
+    }
+    if (edgeCount > 0 && roots > 1) {
+        supplementActions.push('Create mind map from connections');
+    }
+
+    return {
+        score: Math.max(0, Math.min(100, score)),
+        label: score >= 80 ? 'Strong' : score >= 60 ? 'Developing' : 'Needs enrichment',
+        node_count: nodeCount,
+        edge_count: edgeCount,
+        hierarchy_edges: hierarchyEdges,
+        cross_link_edges: crossLinkEdges,
+        sourced_nodes: sourcedNodes,
+        nodes_needing_review: nodesNeedingReview,
+        low_confidence_nodes: lowConfidenceNodes,
+        average_confidence: averageConfidence,
+        reasons,
+        supplement_actions: supplementActions
+    };
+};
+
 export const getTaskRows = (projection) =>
     projection.nodes
-        .filter((node) => TASK_CAPABLE_TYPES.has(node.node_type))
-        .map((node) => ({
-            ...node,
-            source_document: node.source_ref.document_id || '',
-            source_page: node.source_ref.page || '',
-            source_section: node.source_ref.section || '',
-            source_quote: node.source_ref.quote_snippet || ''
-        }));
+        .filter((node) => isConfirmedTaskNode(node))
+        .map((node) => {
+            const taskProjection = taskProjectionForNode(node);
+
+            return {
+                ...node,
+                node_type: taskProjection?.preview_type || node.node_type,
+                status:
+                    (node.status && node.status !== 'ai_generated'
+                        ? node.status
+                        : '') ||
+                    taskProjection?.preview_status ||
+                    node.status ||
+                    'needs_review',
+                priority: projectedTaskValue(node, 'priority'),
+                owner_id: projectedTaskValue(node, 'owner_id'),
+                due_date: projectedTaskValue(node, 'due_date'),
+                source_document: node.source_ref.document_id || '',
+                source_page: node.source_ref.page || '',
+                source_section: node.source_ref.section || '',
+                source_quote: node.source_ref.quote_snippet || ''
+            };
+        });
 
 export const getTaskPreviewRows = (projection) =>
     projection.nodes
         .filter((node) => node.node_type !== 'reference')
         .map((node) => {
-            const isAlreadyTask = TASK_CAPABLE_TYPES.has(node.node_type);
+            const taskProjection = taskProjectionForNode(node);
+            const isAlreadyTask = isConfirmedTaskNode(node);
             return {
                 ...node,
-                preview_type: isAlreadyTask ? node.node_type : 'task',
+                preview_type:
+                    taskProjection?.preview_type ||
+                    (isAlreadyTask ? node.node_type : 'task'),
                 preview_status:
-                    node.status === 'approved' || node.status === 'reviewed'
+                    taskProjection?.preview_status ||
+                    (node.status === 'approved' || node.status === 'reviewed'
                         ? node.status
-                        : 'needs_review',
+                        : 'needs_review'),
+                priority: projectedTaskValue(node, 'priority'),
+                owner_id: projectedTaskValue(node, 'owner_id'),
+                due_date: projectedTaskValue(node, 'due_date'),
                 included: isAlreadyTask || node.node_type !== 'question'
             };
         });
@@ -661,19 +854,25 @@ export const getChecklistPreviewRows = (projection) => {
             const hasChildren = childCountByNode.has(node.id);
             const isReviewItem =
                 node.status === 'needs_review' || node.node_type === 'needs_review';
+            const checklistProjection = checklistProjectionForNode(node);
 
             return {
                 ...node,
-                checklist_order: index + 1,
-                checklist_label: node.title,
+                checklist_order: checklistProjection?.order || index + 1,
+                checklist_label: checklistProjection?.label || node.title,
                 checklist_note:
+                    checklistProjection?.note ||
                     node.summary ||
                     (hasChildren
                         ? 'Parent item with nested follow-up work.'
                         : 'Leaf item ready for checklist review.'),
-                included: !hasChildren || isReviewItem,
+                included: Boolean(checklistProjection) || !hasChildren || isReviewItem,
                 review_required:
-                    isReviewItem || !node.source_ref?.document_id || !node.confidence
+                    checklistProjection?.review_required ??
+                    (isReviewItem || !node.source_ref?.document_id || !node.confidence),
+                priority: projectedTaskValue(node, 'priority'),
+                owner_id: projectedTaskValue(node, 'owner_id'),
+                due_date: projectedTaskValue(node, 'due_date')
             };
         });
 };

@@ -166,12 +166,12 @@ const MissingInfoPreview = ({
                 <div>
                     <strong>Missing-information review</strong>
                     <span>
-                        {generatedPreview ? 'AI-generated review output' : 'Local review projection'} |{' '}
+                        {generatedPreview ? 'AI-generated review artifact' : 'Current workspace review'} |{' '}
                         {previewRows.length} nodes need reviewer input
                     </span>
                 </div>
                 <span className="output-state-pill">
-                    {generatedPreview ? 'AI-generated' : 'Locally projected'}
+                    {generatedPreview ? 'AI-generated' : 'Current workspace'}
                 </span>
                 <button type="button" onClick={acceptMissingInfoReview}>
                     Accept selected

@@ -38,12 +38,18 @@ const SCOPE_OPTIONS = [
 
 const OUTPUT_PROMPT_DEFAULTS = {
     'create-knowledge-graph': {
-        role: 'workflow-mapper',
-        action: 'custom_prompt'
+        role: 'standards-extractor',
+        action: 'custom_prompt',
+        visual: 'knowledge_graph',
+        prompt:
+            'Analyze the current workspace and create a knowledge graph layer. Preserve the existing hierarchy, then propose entities, cross-branch relationship edges, dependencies, conflicts, overlaps, source signals, confidence, rationale, and review state.'
     },
     'find-connections': {
         role: 'gap-analyst',
-        action: 'find_duplicate_overlapping_nodes'
+        action: 'find_duplicate_overlapping_nodes',
+        visual: 'knowledge_graph',
+        prompt:
+            'Find cross-branch connection candidates in the current workspace. Do not rewrite the hierarchy. Propose relationship edges only when there is a clear signal, and include duplicates, overlaps, dependencies, supporting relationships, conflicts, blockers, rationale, confidence, and review state.'
     },
     'create-flow-chart': {
         role: 'workflow-mapper',
@@ -470,7 +476,9 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [], autoOpenToken = 0, summary
                 pushNode(PromptModal, {
                     ...draftScopePayload(),
                     initialRoleId: promptDefaults.role,
-                    initialActionId: promptDefaults.action
+                    initialActionId: promptDefaults.action,
+                    initialPrompt: promptDefaults.prompt || '',
+                    initialVisual: promptDefaults.visual || 'auto'
                 });
                 generatedPreview = undefined;
             } else if (role.id === 'project-planner') {

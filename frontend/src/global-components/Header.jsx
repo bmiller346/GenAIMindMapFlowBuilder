@@ -19,6 +19,8 @@ import DevDebugModal from '../modals/DevDebugModal';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { FiGitBranch } from 'react-icons/fi';
 import {
     createFlowSnapshot,
     parseFlowSnapshot,
@@ -955,7 +957,7 @@ const Header = ({
         const viewport = document.querySelector('.react-flow__viewport');
         if (!viewport) {
             setStatus(400);
-            setMsg('Could not find the current mind map to export.');
+            setMsg('Could not find the current workspace map to export.');
             pushNode(ErrorModal);
             return;
         }
@@ -1235,6 +1237,14 @@ const Header = ({
                     alt="Open workspaces"
                     onClick={() => getFlowList(true)}
                 />
+                <Link
+                    to="/landing"
+                    className="trace-overview-link"
+                    title="About TraceSpace"
+                    aria-label="About TraceSpace"
+                >
+                    <FiGitBranch aria-hidden="true" />
+                </Link>
                 <input
                     type="text"
                     value={flow_name || ''}
@@ -1256,7 +1266,7 @@ const Header = ({
                     </button>
                     {isExportMenuOpen ? (
                         <div className="export-menu">
-                            <p className="export-menu-label">Mind map image</p>
+                            <p className="export-menu-label">Workspace map image</p>
                             {imageExportFormats.map((format) => (
                                 <button
                                     key={format.id}
@@ -1288,13 +1298,6 @@ const Header = ({
                             onClick={openWorkspaceAskAi}
                         >
                             Ask AI
-                        </button>
-                        <button
-                            type="button"
-                            className="header-action header-action-secondary"
-                            onClick={openHelp}
-                        >
-                            Help
                         </button>
                         <button
                             type="button"
@@ -1333,6 +1336,13 @@ const Header = ({
                         {saveStatusMessage}
                     </span>
                 )}
+                <button
+                    type="button"
+                    className="header-action header-action-secondary"
+                    onClick={openHelp}
+                >
+                    Help
+                </button>
                 <button
                     type="button"
                     className="theme-toggle-button"

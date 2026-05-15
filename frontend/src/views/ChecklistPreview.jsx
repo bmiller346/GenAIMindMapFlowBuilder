@@ -117,6 +117,12 @@ const ChecklistPreview = ({
                 const row = rowsById.get(node.id);
                 const mutation = row?.generated_preview_item?.proposed_mutation || {};
                 const checklistProjection = mutation.checklist_projection || {};
+                const nextPriority =
+                    checklistProjection.priority ?? row?.priority ?? node.data?.priority ?? '';
+                const nextOwner =
+                    checklistProjection.owner_id ?? row?.owner_id ?? node.data?.owner_id ?? '';
+                const nextDue =
+                    checklistProjection.due_date ?? row?.due_date ?? node.data?.due_date ?? '';
                 const data = withLocalPreviewAcceptance(node.data, {
                     flow: row?.generated_preview_item
                         ? 'generated_project_planner_checklist'
@@ -135,6 +141,9 @@ const ChecklistPreview = ({
                     data: {
                         ...data,
                         status: mutation.status || data.status,
+                        priority: nextPriority,
+                        owner_id: nextOwner,
+                        due_date: nextDue,
                         checklist_projection: {
                             accepted: true,
                             accepted_at: acceptedAt,
@@ -155,18 +164,9 @@ const ChecklistPreview = ({
                                 checklistProjection.review_required ??
                                     row?.review_required
                             ),
-                            priority:
-                                checklistProjection.priority ??
-                                row?.priority ??
-                                '',
-                            owner_id:
-                                checklistProjection.owner_id ??
-                                row?.owner_id ??
-                                '',
-                            due_date:
-                                checklistProjection.due_date ??
-                                row?.due_date ??
-                                '',
+                            priority: nextPriority,
+                            owner_id: nextOwner,
+                            due_date: nextDue,
                             generated_preview_id: generatedPreview?.preview_id || '',
                             generated_preview_item_id: row?.generated_preview_item?.id || ''
                         }
@@ -195,12 +195,12 @@ const ChecklistPreview = ({
                 <div>
                     <strong>Create checklist from this branch</strong>
                     <span>
-                        {generatedPreview ? 'AI-generated output' : 'Locally projected output'} |{' '}
+                        {generatedPreview ? 'AI-generated checklist preview' : 'Current workspace checklist'} |{' '}
                         {previewRows.length} candidate checklist items
                     </span>
                 </div>
                 <span className="output-state-pill">
-                    {generatedPreview ? 'AI-generated' : 'Locally projected'}
+                    {generatedPreview ? 'AI-generated' : 'Current workspace'}
                 </span>
                 <button type="button" onClick={acceptChecklistPreview}>
                     Accept selected

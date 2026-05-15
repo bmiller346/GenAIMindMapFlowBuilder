@@ -285,6 +285,7 @@ const ResponseNode = ({ id, data }) => {
     const setGeneratedHelperPreview = useStore((state) => state.setGeneratedHelperPreview);
     const setActiveAIActionPreview = useStore((state) => state.setActiveAIActionPreview);
     const setActiveAIDraftSession = useStore((state) => state.setActiveAIDraftSession);
+    const activeAIDraftSession = useStore((state) => state.activeAIDraftSession);
     const pushModal = modalStore((state) => state.pushNode);
     const setSaveStatus = flowStore((state) => state.setSaveStatus);
     const flowId = flowStore((state) => state.flow_id);
@@ -313,6 +314,13 @@ const ResponseNode = ({ id, data }) => {
         () => edges.filter((edge) => edge.source === id).map((edge) => edge.target),
         [edges, id]
     );
+    const hasActiveInlineDraft =
+        activeAIDraftSession?.metadata?.preview_mode === 'inline_node_prompt' &&
+        activeAIDraftSession?.scope?.node_id === id &&
+        !['accepted', 'discarded', 'rejected'].includes(activeAIDraftSession?.status);
+    const displayedInlineAiStatus = hasActiveInlineDraft
+        ? 'Draft ready. Review and accept it in the node panel.'
+        : inlineAiStatus;
     const isBranchCollapsed = Boolean(data.display?.collapsed);
     const tableColumns = useMemo(
         () =>
@@ -1006,7 +1014,7 @@ const ResponseNode = ({ id, data }) => {
                 }
             });
             setInlineAiPrompt('');
-            setInlineAiStatus('Draft ready. Review and accept it in the node panel.');
+            setInlineAiStatus('');
             setIsMenuOpen(false);
             setIsSlashOpen(false);
         };
@@ -1423,7 +1431,7 @@ const ResponseNode = ({ id, data }) => {
                 <form
                     className={`node-inline-ai-composer nodrag${
                         isInlineAiGenerating ? ' generating' : ''
-                    }${inlineAiStatus ? ' has-status' : ''}`}
+                    }${displayedInlineAiStatus ? ' has-status' : ''}`}
                     onSubmit={stageInlineAiDraft}
                 >
                     <FiMessageSquare aria-hidden="true" />
@@ -1461,8 +1469,8 @@ const ResponseNode = ({ id, data }) => {
                     >
                         <FiMaximize2 />
                     </button>
-                    {inlineAiStatus ? (
-                        <span className="node-inline-ai-status">{inlineAiStatus}</span>
+                    {displayedInlineAiStatus ? (
+                        <span className="node-inline-ai-status">{displayedInlineAiStatus}</span>
                     ) : null}
                 </form>
                 {isSlashOpen ? (

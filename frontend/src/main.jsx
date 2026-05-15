@@ -5,14 +5,12 @@ import App from './App.jsx';
 import { ReactFlowProvider } from '@xyflow/react';
 import { HashRouter as Router, Route, Routes } from 'react-router-dom';
 import { configureLocalCredentialHeaders } from './config/localSettings';
-import { isLegacyLandingEnabled } from './config/legacyFeatures';
 
 configureLocalCredentialHeaders();
 
 const Landing = lazy(() =>
     import('./Landing.jsx').then((module) => ({ default: module.Landing }))
 );
-const showLegacyLanding = isLegacyLandingEnabled();
 
 createRoot(document.getElementById('root')).render(
     <StrictMode>
@@ -26,13 +24,9 @@ createRoot(document.getElementById('root')).render(
                     <Route
                         path="/landing"
                         element={
-                            showLegacyLanding ? (
-                                <Suspense fallback={null}>
-                                    <Landing />
-                                </Suspense>
-                            ) : (
-                                <App />
-                            )
+                            <Suspense fallback={null}>
+                                <Landing />
+                            </Suspense>
                         }
                     />
                     {/* <App /> */}

@@ -500,8 +500,29 @@ def test_validate_ai_action_request_rejects_unsupported_combinations():
 
     assert exc.value.errors == [
         "ai_action.action: unsupported action 'find_unsupported_assumptions' for role 'Task Planner'",
-        "ai_action.scope: unsupported scope 'workspace' for role 'Task Planner'",
     ]
+
+
+def test_workspace_action_catalog_supports_starter_transformations():
+    tasks = validate_ai_action_request(
+        role="Task Planner",
+        action="generate_tasks",
+        scope={"type": "workspace"},
+    )
+    sme = validate_ai_action_request(
+        role="SME Question Generator",
+        action="create_sme_questions",
+        scope={"type": "workspace"},
+    )
+    coverage = validate_ai_action_request(
+        role="Source Ref Repair",
+        action="find_missing_source_support",
+        scope={"type": "workspace"},
+    )
+
+    assert tasks["action"] == "generate_tasks"
+    assert sme["action"] == "create_sme_questions"
+    assert coverage["action"] == "find_missing_source_support"
 
 
 def test_build_and_validate_ai_action_run_shape():

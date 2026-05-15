@@ -17,7 +17,7 @@ const OUTPUT_GROUPS = [
     {
         label: 'Visual',
         options: [
-            { id: 'mind_map', label: 'Mind map' },
+            { id: 'mind_map', label: 'TraceSpace map' },
             { id: 'knowledge_graph', label: 'Knowledge graph' },
             { id: 'connections', label: 'Connections' },
             { id: 'flow_chart', label: 'Flow chart' },
@@ -117,7 +117,7 @@ const PRESETS = [
         id: 'autodesk_standards',
         label: 'Autodesk Standards',
         description: 'Source-cited standards, requirements, and SME review map.',
-        goal: 'Generate a source-cited mind map of Autodesk building block documentation for electrical BIM users.',
+        goal: 'Generate a source-cited TraceSpace workspace for Autodesk building block documentation and electrical BIM users.',
         audience: 'Electrical BIM users, BIM managers, and design technology reviewers',
         desired_outputs: ['mind_map', 'outline', 'sme_questions', 'source_coverage_report'],
         source_mode: 'source_only',
@@ -541,8 +541,8 @@ const WorkspaceBriefModal = () => {
                 <div className="workspace-brief-section-title">
                     <span>2</span>
                     <div>
-                        <h3>What should AI create?</h3>
-                        <p>Choose generated outputs. Views are just lenses on accepted data after review.</p>
+                        <h3>What should TraceSpace create?</h3>
+                        <p>Choose reviewable artifacts. Views stay grounded in accepted workspace data.</p>
                     </div>
                 </div>
                 <div className="workspace-brief-output-groups">
@@ -615,7 +615,7 @@ const WorkspaceBriefModal = () => {
                     <textarea
                         id="workspace-brief-goal"
                         rows={3}
-                        placeholder="Example: Generate a source-cited mind map of Autodesk building block documentation for electrical BIM users."
+                        placeholder="Example: Generate a source-cited TraceSpace workspace for Autodesk building block documentation and electrical BIM users."
                         value={draft.goal}
                         onChange={(event) => updateDraft('goal', event.target.value)}
                     />
@@ -650,7 +650,7 @@ const WorkspaceBriefModal = () => {
                 <summary>Advanced context and review controls</summary>
                 <div className="workspace-brief-grid">
                     <div className="input-bar">
-                        <label htmlFor="workspace-brief-style">Output style</label>
+                        <label htmlFor="workspace-brief-style">Workspace style</label>
                         <select
                             id="workspace-brief-style"
                             value={draft.output_style}
@@ -712,7 +712,7 @@ const WorkspaceBriefModal = () => {
                     <div className="workspace-brief-label-row">
                         <h4>Review policy</h4>
                         <button type="button" onClick={recommendOutputs}>
-                            Recommend outputs
+                            Recommend artifacts
                         </button>
                     </div>
                     <div className="workspace-brief-review-grid">

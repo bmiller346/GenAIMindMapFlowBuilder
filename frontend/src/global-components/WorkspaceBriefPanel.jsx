@@ -10,7 +10,7 @@ const SOURCE_MODE_LABELS = {
 };
 
 const OUTPUT_LABELS = {
-    mind_map: 'Mind map',
+    mind_map: 'TraceSpace map',
     knowledge_graph: 'Knowledge graph',
     connections: 'Connections',
     flow_chart: 'Flow chart',

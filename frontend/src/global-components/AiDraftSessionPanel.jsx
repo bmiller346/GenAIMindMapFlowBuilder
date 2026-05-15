@@ -192,7 +192,7 @@ const GRAPH_FILTER_LABELS = {
 };
 
 const CANVAS_LABELS = {
-    mindmap: 'Mind Map',
+    mindmap: 'TraceSpace Map',
     knowledgeGraph: 'Knowledge Graph',
     outline: 'Outline',
     tasks: 'Tasks',
@@ -834,7 +834,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                                 submitRevision();
                             }
                         }}
-                        placeholder="Ask for a sharper structure, a different projection, or more detail."
+                        placeholder="Ask for a sharper structure, a different view, or more detail."
                     />
                 </label>
                 <button type="button" onClick={submitRevision} disabled={isRevising || !prompt.trim()}>

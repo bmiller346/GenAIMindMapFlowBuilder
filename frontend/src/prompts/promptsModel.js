@@ -27,6 +27,8 @@ export const branchAiActions = [
     { id: 'split_branch_into_categories', label: 'Split branch into categories' },
     { id: 'generate_tasks', label: 'Generate tasks' },
     { id: 'generate_checklist', label: 'Generate checklist' },
+    { id: 'generate_training_outline', label: 'Generate training outline' },
+    { id: 'export_branch_as_sop_draft', label: 'Export branch as SOP draft' },
     { id: 'find_gaps', label: 'Find gaps' },
     { id: 'create_sme_questions', label: 'Create SME questions' },
     { id: 'custom_prompt', label: 'Custom prompt' }
@@ -37,6 +39,7 @@ export const workspaceAiActions = [
     { id: 'find_missing_source_support', label: 'Find missing source support' },
     { id: 'find_unsupported_assumptions', label: 'Find unsupported assumptions' },
     { id: 'find_duplicate_overlapping_nodes', label: 'Find duplicate or overlapping nodes' },
+    { id: 'create_sme_questions', label: 'Create SME questions' },
     { id: 'generate_tasks', label: 'Generate tasks' },
     { id: 'generate_checklist', label: 'Generate checklist' },
     { id: 'interpret_table_data', label: 'Interpret table/data' },
@@ -50,6 +53,129 @@ export const sourceAiActions = [
     { id: 'generate_child_nodes', label: 'Draft cited branches' },
     { id: 'create_sme_questions', label: 'Create source review questions' },
     { id: 'custom_prompt', label: 'Custom prompt' }
+];
+
+export const starterTransformations = [
+    {
+        id: 'sop_to_checklist',
+        label: 'SOP to checklist',
+        description: 'Convert procedure language into verification-ready checks.',
+        prompt: 'Turn this SOP or procedure into a source-backed checklist with ordered checks, evidence requirements, exceptions, owners, and closeout criteria.',
+        visual: 'checklist',
+        roleId: 'training-guide-builder',
+        actionId: 'generate_checklist',
+        scopes: ['node', 'branch', 'workspace', 'source']
+    },
+    {
+        id: 'pdf_to_training_outline',
+        label: 'PDF to training outline',
+        description: 'Build modules, objectives, practice, and assessment points.',
+        prompt: 'Create a training outline from the selected PDF or source context with learning goals, module sequence, examples, practice activities, and checks for understanding.',
+        visual: 'outline',
+        roleId: 'training-guide-builder',
+        actionId: 'generate_training_outline',
+        scopes: ['branch', 'workspace', 'source']
+    },
+    {
+        id: 'requirements_to_tasks',
+        label: 'Requirements to tasks',
+        description: 'Turn requirements into accountable implementation work.',
+        prompt: 'Convert these requirements into task-ready work items with owners to assign, acceptance criteria, dependencies, due-date cues, and review flags for unsupported assumptions.',
+        visual: 'tasks',
+        roleId: 'task-planner',
+        actionId: 'generate_tasks',
+        scopes: ['node', 'branch', 'workspace']
+    },
+    {
+        id: 'source_coverage_report',
+        label: 'Source coverage',
+        description: 'Find claims that need citations or stronger evidence.',
+        prompt: 'Create a source coverage report that lists supported claims, unsupported claims, weak citations, missing source references, and recommended repair actions.',
+        visual: 'source_coverage',
+        roleId: 'source-ref-repair',
+        actionId: 'find_missing_source_support',
+        scopes: ['node', 'branch', 'workspace', 'source']
+    },
+    {
+        id: 'sme_review_packet',
+        label: 'SME packet',
+        description: 'Package reviewer questions by evidence gap and decision.',
+        prompt: 'Create an SME review packet with grouped questions, the reason each question matters, suggested reviewers, source gaps, decisions needed, and items that must remain needs_review.',
+        visual: 'sme_questions',
+        roleId: 'sme-question-generator',
+        actionId: 'create_sme_questions',
+        scopes: ['node', 'branch', 'workspace', 'source']
+    },
+    {
+        id: 'implementation_handoff_package',
+        label: 'Handoff package',
+        description: 'Prepare accepted work for implementation or integration.',
+        prompt: 'Create an implementation handoff package with scope summary, ready items, blocked items, owners, dependencies, source references, assumptions, and next actions for monday or Miro handoff.',
+        visual: 'implementation_handoff_package',
+        roleId: 'integration-readiness-reviewer',
+        actionId: 'custom_prompt',
+        scopes: ['branch', 'workspace']
+    },
+    {
+        id: 'process_to_flowchart',
+        label: 'Process to flowchart',
+        description: 'Map steps, decisions, dependencies, and handoffs.',
+        prompt: 'Turn this process into a flowchart with ordered steps, decision points, dependencies, handoffs, exception paths, and source-backed review notes.',
+        visual: 'flow_chart',
+        roleId: 'workflow-mapper',
+        actionId: 'custom_prompt',
+        scopes: ['node', 'branch', 'workspace', 'source']
+    },
+    {
+        id: 'table_to_decision_matrix',
+        label: 'Table to matrix',
+        description: 'Convert structured source data into a usable table view.',
+        prompt: 'Convert this table or structured source into a decision matrix with normalized columns, key rows, caveats, anomalies, and follow-up tasks.',
+        visual: 'table',
+        roleId: 'data-table-interpreter',
+        actionId: 'interpret_table_data',
+        scopes: ['node', 'branch', 'workspace']
+    },
+    {
+        id: 'risk_gap_review',
+        label: 'Risk gap review',
+        description: 'Surface missing, contradictory, or risky content.',
+        prompt: 'Review this context for risks, gaps, contradictions, unsupported assumptions, missing decisions, and source-backed next steps.',
+        visual: 'review_annotations',
+        roleId: 'gap-analyst',
+        actionId: 'find_gaps',
+        scopes: ['node', 'branch', 'workspace', 'source']
+    },
+    {
+        id: 'meeting_notes_to_kanban',
+        label: 'Notes to Kanban',
+        description: 'Organize notes into a delivery board.',
+        prompt: 'Turn these meeting notes into a Kanban-ready plan with backlog, in-progress candidates, blocked items, decisions, owners, and follow-up questions.',
+        visual: 'kanban',
+        roleId: 'task-planner',
+        actionId: 'generate_tasks',
+        scopes: ['branch', 'workspace']
+    },
+    {
+        id: 'branch_to_sop_draft',
+        label: 'Branch to SOP',
+        description: 'Draft SOP purpose, scope, steps, controls, and exceptions.',
+        prompt: 'Export this branch as an SOP draft with purpose, scope, prerequisites, ordered procedure steps, controls, evidence, exceptions, and review notes.',
+        visual: 'outline',
+        roleId: 'training-guide-builder',
+        actionId: 'export_branch_as_sop_draft',
+        scopes: ['branch', 'workspace']
+    },
+    {
+        id: 'document_to_knowledge_graph',
+        label: 'Document to graph',
+        description: 'Extract entities, relationships, dependencies, and refs.',
+        prompt: 'Create a knowledge graph from this document context with key entities, relationships, dependencies, conflicts, source references, and review flags.',
+        visual: 'knowledge_graph',
+        roleId: 'standards-extractor',
+        actionId: 'custom_prompt',
+        scopes: ['branch', 'workspace', 'source']
+    }
 ];
 
 export const TraceSpacePromptProfiles = [

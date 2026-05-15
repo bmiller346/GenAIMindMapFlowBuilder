@@ -27,7 +27,7 @@ const HELP_ARTICLES = [
         title: 'Views And Filters',
         summary: 'Views change the canvas lens. Filters narrow what is visible.',
         sections: [
-            'Mind Map, Tasks, Table, Outline, and Knowledge Graph are lenses over the accepted graph.',
+            'TraceSpace Map, Tasks, Table, Outline, and Connections are views over the accepted workspace.',
             'Node filters like Needs review or Missing source hide nodes on the canvas until cleared.',
             'Create / Review opens draft outputs that still need accept or reject.'
         ]

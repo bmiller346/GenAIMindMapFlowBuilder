@@ -160,7 +160,7 @@ export const getProjectionReadiness = (projection, workspaceBrief = {}, taskMeta
         mind_map: readiness({
             view: 'mind_map',
             ready: nodeCount > 0,
-            generationLabel: 'Create mind map'
+            generationLabel: 'Create TraceSpace map'
         }),
         outline: readiness({
             view: 'outline',
@@ -396,7 +396,7 @@ const taskReadinessNudges = (projection, taskMetadata = {}) => {
             category: NUDGE_CATEGORIES.TASK_READINESS,
             severity: rows.length > 2 ? 'medium' : 'low',
             title: `${plural(rows.length, 'task')} ${needsVerb(rows.length)} execution fields`,
-            detail: 'Owners, due dates, and priorities make task outputs ready for handoff.',
+            detail: 'Owners, due dates, and priorities make tasks ready for handoff.',
             actionLabel: 'Open task preview',
             action: {
                 type: 'open_view',
@@ -457,12 +457,12 @@ const readinessNudges = (readinessByView, workspaceBrief = {}) =>
                 severity: result.partially_ready ? 'low' : 'medium',
                 title: `${result.view.replace(/_/g, ' ')} needs enrichment`,
                 detail: result.partially_ready
-                    ? 'The current graph can show a partial projection, but enrichment would make it useful.'
-                    : 'The current graph is missing the required structure for this output.',
+                    ? 'The current workspace can show a partial view, but enrichment would make it useful.'
+                    : 'The current workspace is missing the required structure for this artifact.',
                 actionLabel:
                     result.suggested_enrichment_action?.label ||
                     result.suggested_generation_action?.label ||
-                    'Generate output',
+                    'Generate artifact',
                 action:
                     result.suggested_enrichment_action ||
                     result.suggested_generation_action || {

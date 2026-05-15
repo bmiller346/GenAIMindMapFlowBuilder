@@ -16,7 +16,8 @@ import {
     getDefaultActionForProfile,
     getFollowUpSuggestions,
     getPromptProfilesForScope,
-    legacyPersonaNames
+    legacyPersonaNames,
+    starterTransformations
 } from "../prompts/promptsModel";
 import { getWorkspaceNodeData } from "../utils/manualNodes";
 import {
@@ -36,6 +37,9 @@ const viewForAction = (actionId) => {
     if (actionId.includes('source') || actionId.includes('unsupported')) {
         return 'sources';
     }
+    if (actionId.includes('sme') || actionId.includes('question')) {
+        return 'sme';
+    }
     if (actionId.includes('checklist')) {
         return 'checklist';
     }
@@ -47,7 +51,7 @@ const viewForAction = (actionId) => {
 
 const VISUAL_OPTIONS = [
     { id: 'auto', label: 'Auto' },
-    { id: 'mind_map', label: 'Mind Map' },
+    { id: 'mind_map', label: 'TraceSpace Map' },
     { id: 'outline', label: 'Outline' },
     { id: 'tasks', label: 'Tasks' },
     { id: 'checklist', label: 'Checklist' },
@@ -56,6 +60,8 @@ const VISUAL_OPTIONS = [
     { id: 'knowledge_graph', label: 'Knowledge Graph' },
     { id: 'chart', label: 'Chart' },
     { id: 'kanban', label: 'Kanban' },
+    { id: 'sme_questions', label: 'SME Questions' },
+    { id: 'implementation_handoff_package', label: 'Handoff' },
     { id: 'no_visual', label: 'No visual' }
 ];
 
@@ -71,7 +77,9 @@ const OUTPUT_SHAPE_VIEW = {
     chart: 'chartData',
     kanban: 'preview',
     review_annotations: 'gaps',
+    sme_questions: 'sme',
     source_coverage: 'sources',
+    implementation_handoff_package: 'preview',
     no_visual: 'mindmap'
 };
 
@@ -81,10 +89,12 @@ const OUTPUT_SHAPE_ROUTE = {
     table: { roleId: 'data-table-interpreter', actionId: 'interpret_table_data' },
     chart: { roleId: 'data-table-interpreter', actionId: 'interpret_table_data' },
     flow_chart: { roleId: 'workflow-mapper', actionId: 'custom_prompt' },
-    knowledge_graph: { roleId: 'gap-analyst', actionId: 'find_duplicate_overlapping_nodes' },
+    knowledge_graph: { roleId: 'standards-extractor', actionId: 'custom_prompt' },
     outline: { roleId: 'training-guide-builder', actionId: 'generate_training_outline' },
     kanban: { roleId: 'task-planner', actionId: 'generate_tasks' },
+    sme_questions: { roleId: 'sme-question-generator', actionId: 'create_sme_questions' },
     source_coverage: { roleId: 'source-ref-repair', actionId: 'find_missing_source_support' },
+    implementation_handoff_package: { roleId: 'integration-readiness-reviewer', actionId: 'custom_prompt' },
     review_annotations: { roleId: 'gap-analyst', actionId: 'find_gaps' },
     no_visual: { roleId: 'custom', actionId: 'custom_prompt' },
     mind_map: { roleId: 'workflow-mapper', actionId: 'custom_prompt' },
@@ -104,6 +114,12 @@ const inferOutputShape = (prompt, actionId = '') => {
     }
     if (/\b(flowchart|flow chart|process map|swimlane|decision tree)\b/.test(text)) {
         return 'flow_chart';
+    }
+    if (/\b(handoff package|implementation package|implementation handoff|handoff readiness)\b/.test(text)) {
+        return 'implementation_handoff_package';
+    }
+    if (/\b(sme|subject matter expert|review packet|review questions?)\b/.test(text)) {
+        return 'sme_questions';
     }
     if (
         /\b(checklist|check list|steps|step[- ]by[- ]step|recipe|instructions?|walkthrough)\b/.test(text) ||
@@ -455,6 +471,12 @@ const nodeTypeForShape = (shape, actionId) => {
     if (shape === 'review_annotations') {
         return 'question';
     }
+    if (shape === 'sme_questions') {
+        return 'question';
+    }
+    if (shape === 'implementation_handoff_package') {
+        return 'task';
+    }
     if (shape === 'table') {
         return 'reference';
     }
@@ -468,10 +490,14 @@ const routeForOutputShape = ({ outputShape, profiles, promptScope, fallbackRole,
         fallbackRole ||
         profiles[0];
     const roleActions = getActionsForProfileAndScope(nextRole, promptScope);
-    const nextAction =
-        roleActions.find((action) => action.id === route.actionId) ||
+    const fallbackActionForRole = roleActions.find((action) => action.id === fallbackAction?.id);
+    const shouldKeepSopAction =
+        outputShape === 'outline' && fallbackActionForRole?.id === 'export_branch_as_sop_draft';
+    const nextAction = shouldKeepSopAction
+        ? fallbackActionForRole
+        : roleActions.find((action) => action.id === route.actionId) ||
         roleActions.find((action) => action.id === 'custom_prompt') ||
-        fallbackAction ||
+        fallbackActionForRole ||
         roleActions[0];
     return { role: nextRole, action: nextAction };
 };
@@ -883,6 +909,13 @@ const PromptModal = ({
         [role, promptScope, selectedAction, targetLabel]
     );
     const compactSuggestions = useMemo(() => suggestions.slice(0, 3), [suggestions]);
+    const scopedStarterTransformations = useMemo(
+        () =>
+            starterTransformations.filter((starter) =>
+                !Array.isArray(starter.scopes) || starter.scopes.includes(promptScope)
+            ),
+        [promptScope]
+    );
     const scopeDisplayLabel =
         scope === 'workspace'
             ? 'Whole workspace'
@@ -990,6 +1023,16 @@ const PromptModal = ({
                 initialContextSourceId: selectedContextSourceIds[0] || ''
             }
         });
+    };
+
+    const applyStarterTransformation = (starter) => {
+        setCustomPrompt(starter.prompt);
+        setSelectedVisual(starter.visual || 'auto');
+        setSelectedRoleId(starter.roleId || selectedRoleId);
+        setSelectedActionId(starter.actionId || selectedActionId);
+        setStageMessage('');
+        setStageDebug(null);
+        setGenerationStage('');
     };
 
     const stagePreviewRequest = async () => {
@@ -1225,7 +1268,7 @@ const PromptModal = ({
                 session: candidateSession,
                 inferredShape
             })) {
-                setStageMessage('AI generation was too generic for an initial mind map, so no starter canvas was created. Try again after the model path is available.');
+                setStageMessage('AI generation was too generic for an initial TraceSpace map, so no starter canvas was created. Try again after the model path is available.');
                 setStageDebug({
                     timestamp: new Date().toISOString(),
                     mode: 'blocked_generic_initial_seed',
@@ -1524,6 +1567,25 @@ const PromptModal = ({
                         Your prompt looks generative, so this will run as Workflow Mapper / Custom prompt.
                     </small>
                 ) : null}
+            </div>
+            <div className="ai-action-starter-library">
+                <div>
+                    <strong>Starter transformations</strong>
+                    <span>{scopedStarterTransformations.length} ready prompts</span>
+                </div>
+                <div className="ai-action-starter-grid">
+                    {scopedStarterTransformations.map((starter) => (
+                        <button
+                            type="button"
+                            key={starter.id}
+                            onClick={() => applyStarterTransformation(starter)}
+                            className={customPrompt === starter.prompt ? 'selected' : ''}
+                        >
+                            <strong>{starter.label}</strong>
+                            <small>{starter.description}</small>
+                        </button>
+                    ))}
+                </div>
             </div>
             <div className="ai-action-natural">
                 <label>

@@ -1,4 +1,7 @@
 import { useMemo } from 'react';
+import useStore from '../stores/store';
+import flowStore from '../stores/flowStore';
+import useActivityStore from '../stores/activityStore';
 import {
     buildFilteredGraphProjection,
     getTaskCandidateRows,
@@ -10,6 +13,17 @@ const VIEW_LABELS = {
     tasks: 'Tasks',
     table: 'Table'
 };
+
+const TASK_STATUS_OPTIONS = [
+    'ai_generated',
+    'needs_review',
+    'reviewed',
+    'approved',
+    'rejected',
+    'deprecated'
+];
+
+const TASK_PRIORITY_OPTIONS = ['', 'low', 'medium', 'high', 'critical'];
 
 const sourceLabel = (node) => {
     const ref = node.source_ref || {};
@@ -104,7 +118,111 @@ const CanvasStructuredView = ({
         () => getTaskCandidateRows(projection).slice(0, 24),
         [projection]
     );
+    const setNodes = useStore((state) => state.setNodes);
+    const flowId = flowStore((state) => state.flow_id);
+    const setSaveStatus = flowStore((state) => state.setSaveStatus);
+    const recordActivity = useActivityStore((state) => state.recordActivity);
     const label = VIEW_LABELS[view] || 'Structured view';
+
+    const markDirty = () => {
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+    };
+
+    const updateTaskField = (nodeId, key, value, options = {}) => {
+        setNodes(
+            nodes.map((node) => {
+                if (node.id !== nodeId) {
+                    return node;
+                }
+
+                const taskProjection =
+                    node.data?.task_projection &&
+                    typeof node.data.task_projection === 'object'
+                        ? {
+                              ...node.data.task_projection,
+                              ...(node.data.task_projection.accepted
+                                  ? { [key === 'status' ? 'preview_status' : key]: value }
+                                  : {})
+                          }
+                        : node.data?.task_projection;
+
+                return {
+                    ...node,
+                    data: {
+                        ...node.data,
+                        [key]: value,
+                        ...(key === 'owner_id' ? { assignee: value } : {}),
+                        task_projection: taskProjection
+                    }
+                };
+            })
+        );
+        markDirty();
+        if (options.record !== false) {
+            recordActivity({
+                type: 'task_metadata_changed',
+                title: 'Task metadata changed',
+                summary: `Updated ${key.replaceAll('_', ' ')} for a task.`,
+                node_ids: [nodeId],
+                metadata: { field: key, value },
+                status: 'completed'
+            });
+        }
+    };
+
+    const confirmTaskCandidate = (row) => {
+        const acceptedAt = new Date().toISOString();
+        setNodes(
+            nodes.map((node) => {
+                if (node.id !== row.id) {
+                    return node;
+                }
+
+                const nextStatus = row.preview_status || 'needs_review';
+                const nextPriority = row.priority || node.data?.priority || '';
+                const nextOwner = row.owner_id || node.data?.owner_id || '';
+                const nextDue = row.due_date || node.data?.due_date || '';
+
+                return {
+                    ...node,
+                    data: {
+                        ...node.data,
+                        node_type: row.preview_type || 'task',
+                        status: nextStatus,
+                        priority: nextPriority,
+                        owner_id: nextOwner,
+                        due_date: nextDue,
+                        task_projection: {
+                            ...(node.data?.task_projection || {}),
+                            accepted: true,
+                            accepted_at: acceptedAt,
+                            preview_type: row.preview_type || 'task',
+                            preview_status: nextStatus,
+                            priority: nextPriority,
+                            owner_id: nextOwner,
+                            due_date: nextDue,
+                            generated_preview_id: '',
+                            generated_preview_item_id: ''
+                        }
+                    }
+                };
+            })
+        );
+        markDirty();
+        recordActivity({
+            type: 'task_candidate_confirmed',
+            title: 'Confirmed task candidate',
+            summary: `Confirmed ${row.title || row.id} as a task.`,
+            node_ids: [row.id],
+            metadata: {
+                preview_type: row.preview_type || 'task',
+                preview_status: row.preview_status || 'needs_review'
+            },
+            status: 'completed'
+        });
+    };
 
     if (nodes.length === 0) {
         return (
@@ -119,7 +237,7 @@ const CanvasStructuredView = ({
             <header className="canvas-structured-header">
                 <div>
                     <span>
-                        {view === 'table' ? 'View graph as table' : 'Workspace projection'}
+                        {view === 'table' ? 'View workspace as table' : 'Workspace view'}
                     </span>
                     <strong>{label}</strong>
                 </div>
@@ -167,6 +285,7 @@ const CanvasStructuredView = ({
                                             <th>Task</th>
                                             <th>Type</th>
                                             <th>Status</th>
+                                            <th>Priority</th>
                                             <th>Owner</th>
                                             <th>Due</th>
                                             <th>Source</th>
@@ -182,9 +301,70 @@ const CanvasStructuredView = ({
                                                     {summaryText(row) ? <p>{summaryText(row)}</p> : null}
                                                 </td>
                                                 <td>{rowTypeLabel(row)}</td>
-                                                <td>{row.status || '-'}</td>
-                                                <td>{row.owner_id || '-'}</td>
-                                                <td>{row.due_date || '-'}</td>
+                                                <td>
+                                                    <select
+                                                        className="canvas-structured-task-control"
+                                                        value={row.status || 'needs_review'}
+                                                        onChange={(event) =>
+                                                            updateTaskField(row.id, 'status', event.target.value)
+                                                        }
+                                                        aria-label={`Status for ${row.title}`}
+                                                    >
+                                                        {TASK_STATUS_OPTIONS.map((status) => (
+                                                            <option key={status} value={status}>
+                                                                {status}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </td>
+                                                <td>
+                                                    <select
+                                                        className="canvas-structured-task-control"
+                                                        value={row.priority || ''}
+                                                        onChange={(event) =>
+                                                            updateTaskField(row.id, 'priority', event.target.value)
+                                                        }
+                                                        aria-label={`Priority for ${row.title}`}
+                                                    >
+                                                        {TASK_PRIORITY_OPTIONS.map((priority) => (
+                                                            <option key={priority || 'none'} value={priority}>
+                                                                {priority || 'None'}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </td>
+                                                <td>
+                                                    <input
+                                                        className="canvas-structured-task-control"
+                                                        value={row.owner_id || ''}
+                                                        placeholder="Owner"
+                                                        onChange={(event) =>
+                                                            updateTaskField(row.id, 'owner_id', event.target.value, {
+                                                                record: false
+                                                            })
+                                                        }
+                                                        onBlur={(event) =>
+                                                            updateTaskField(row.id, 'owner_id', event.target.value)
+                                                        }
+                                                        aria-label={`Owner for ${row.title}`}
+                                                    />
+                                                </td>
+                                                <td>
+                                                    <input
+                                                        className="canvas-structured-task-control"
+                                                        value={row.due_date || ''}
+                                                        placeholder="Due"
+                                                        onChange={(event) =>
+                                                            updateTaskField(row.id, 'due_date', event.target.value, {
+                                                                record: false
+                                                            })
+                                                        }
+                                                        onBlur={(event) =>
+                                                            updateTaskField(row.id, 'due_date', event.target.value)
+                                                        }
+                                                        aria-label={`Due date for ${row.title}`}
+                                                    />
+                                                </td>
                                                 <td>{sourceLabel(row)}</td>
                                             </tr>
                                         ))}
@@ -209,14 +389,25 @@ const CanvasStructuredView = ({
                             </div>
                             <div className="canvas-structured-potential-list">
                                 {potentialTaskRows.map((row) => (
-                                    <button
+                                    <article
                                         key={row.id}
-                                        type="button"
-                                        onClick={() => onOpenNode?.(row.id)}
+                                        className="canvas-structured-potential-item"
                                     >
-                                        <strong>{row.title}</strong>
-                                        <span>{rowTypeLabel(row)} · candidate</span>
-                                    </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => onOpenNode?.(row.id)}
+                                        >
+                                            <strong>{row.title}</strong>
+                                            <span>{rowTypeLabel(row)} · candidate</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="canvas-structured-confirm-task"
+                                            onClick={() => confirmTaskCandidate(row)}
+                                        >
+                                            Confirm
+                                        </button>
+                                    </article>
                                 ))}
                             </div>
                         </section>

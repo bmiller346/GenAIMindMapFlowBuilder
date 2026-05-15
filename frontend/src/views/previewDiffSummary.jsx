@@ -130,7 +130,7 @@ export const makePreviewDiffSummary = ({
             label:
                 mode === 'generated'
                     ? 'No generated changes selected yet'
-                    : 'No local projection changes selected yet'
+                    : 'No local workspace changes selected yet'
         });
     }
 
