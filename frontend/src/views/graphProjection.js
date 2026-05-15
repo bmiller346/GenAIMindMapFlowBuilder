@@ -56,6 +56,29 @@ const tableColumns = (rows) =>
         }, new Set())
     );
 
+const normalizeDelimitedValues = (value) => {
+    if (Array.isArray(value)) {
+        return value.map(String).map((entry) => entry.trim()).filter(Boolean);
+    }
+    if (typeof value === 'string') {
+        return value.split(',').map((entry) => entry.trim()).filter(Boolean);
+    }
+    return [];
+};
+
+const relationshipTypeForEdge = (edge = {}) =>
+    edge.relationship_type ||
+    edge.data?.relationship_type ||
+    edge.data?.relationshipType ||
+    edge.data?.type ||
+    edge.type ||
+    '';
+
+const relationshipLabel = (value = '') =>
+    String(value || '')
+        .replaceAll('_', ' ')
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
 const hasSourceDocument = (sourceRef) => Boolean(sourceRef?.document_id);
 
 const hasCompleteSourceRef = (sourceRef) =>
@@ -88,6 +111,8 @@ export const normalizeGraphNode = (node) => {
     const workspaceData = getWorkspaceNodeData(node);
     const sourceRef = firstSourceRef(node);
     const rows = tableRows(node);
+    const data = node?.data || {};
+    const nestedData = getNestedData(node);
     const nodeType =
         workspaceData.nodeType ||
         firstValue(node, ['node_type', 'component_type', 'name']) ||
@@ -117,6 +142,16 @@ export const normalizeGraphNode = (node) => {
         source_refs: workspaceData.sourceRefs.length ? workspaceData.sourceRefs : sourceRefs(node),
         table_rows: workspaceData.df.length ? workspaceData.df : rows,
         table_columns: tableColumns(workspaceData.df.length ? workspaceData.df : rows),
+        graph: workspaceData.graph || data.graph || nestedData.graph || {},
+        query: workspaceData.query || data.query || nestedData.query || '',
+        tags: normalizeDelimitedValues(data.tags || nestedData.tags),
+        entities: normalizeDelimitedValues(data.entities || nestedData.entities),
+        local_preview_acceptances: Array.isArray(data.local_preview_acceptances)
+            ? data.local_preview_acceptances
+            : [],
+        monday_selection_input: data.monday_selection_input,
+        monday_status_back_input: data.monday_status_back_input,
+        hidden_from_export: Boolean(data.hidden_from_export || nestedData.hidden_from_export),
         is_manual: workspaceData.manual,
         display: workspaceData.display,
         react_flow_type: node?.type || ''
@@ -438,7 +473,10 @@ export const buildGraphProjection = (nodes, edges, branchId) => {
 
     return {
         nodes: visibleNodes,
-        edges: visibleEdges,
+        edges: visibleEdges.map((edge) => ({
+            ...edge,
+            relationship_type: relationshipTypeForEdge(edge)
+        })),
         roots:
             selectedRoot && branchIds.has(selectedRoot.id)
                 ? [
@@ -451,6 +489,131 @@ export const buildGraphProjection = (nodes, edges, branchId) => {
         branchIds
     };
 };
+
+const activeFilterIds = (filters = []) => {
+    if (Array.isArray(filters)) {
+        return filters.filter(Boolean);
+    }
+    if (filters && typeof filters === 'object') {
+        return Object.entries(filters)
+            .filter(([, enabled]) => Boolean(enabled))
+            .map(([id]) => id);
+    }
+    return [];
+};
+
+const nodeMatchesFilter = (node, filterId) => {
+    if (filterId === 'source-backed') {
+        return node.source_refs?.some((ref) => ref?.document_id);
+    }
+    if (filterId === 'needs-review') {
+        return node.status === 'needs_review' || node.node_type === 'needs_review';
+    }
+    if (filterId === 'manual') {
+        return node.is_manual;
+    }
+    if (filterId === 'ai-generated') {
+        return !node.is_manual && node.status !== 'approved' && node.status !== 'reviewed';
+    }
+    if (filterId === 'tasks-only') {
+        return TASK_CAPABLE_TYPES.has(node.node_type);
+    }
+    if (filterId === 'unassigned') {
+        return TASK_CAPABLE_TYPES.has(node.node_type) && !node.owner_id;
+    }
+    if (filterId === 'missing-due-date') {
+        return TASK_CAPABLE_TYPES.has(node.node_type) && !node.due_date;
+    }
+    if (filterId === 'missing-source') {
+        return node.react_flow_type !== 'dataSource' && !node.source_refs?.some((ref) => ref?.document_id);
+    }
+    if (filterId === 'low-confidence') {
+        const confidence = Number(node.confidence);
+        return node.confidence !== '' && Number.isFinite(confidence) && confidence < 0.6;
+    }
+    if (filterId === 'hidden-from-export') {
+        return node.hidden_from_export;
+    }
+
+    return true;
+};
+
+const rootsForFilteredGraph = (nodes, edges) => {
+    const targetedIds = new Set(edges.map((edge) => edge.target));
+    return nodes.filter((node) => !targetedIds.has(node.id));
+};
+
+export const applyGraphFilters = (projection, filters = []) => {
+    const filtersToApply = activeFilterIds(filters);
+    if (filtersToApply.length === 0) {
+        return projection;
+    }
+
+    const visibleIds = new Set(
+        projection.nodes
+            .filter((node) => filtersToApply.every((filterId) => nodeMatchesFilter(node, filterId)))
+            .map((node) => node.id)
+    );
+    const nodes = projection.nodes.filter((node) => visibleIds.has(node.id));
+    const edges = projection.edges.filter(
+        (edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target)
+    );
+    const nodeLookup = new Map(nodes.map((node) => [node.id, node]));
+    const childrenByParent = edges.reduce((children, edge) => {
+        const nextChildren = children.get(edge.source) || [];
+        nextChildren.push(edge.target);
+        children.set(edge.source, nextChildren);
+        return children;
+    }, new Map());
+
+    return {
+        ...projection,
+        nodes,
+        edges,
+        roots: rootsForFilteredGraph(nodes, edges),
+        nodeLookup,
+        childrenByParent,
+        branchIds: visibleIds,
+        appliedFilters: filtersToApply
+    };
+};
+
+export const buildFilteredGraphProjection = (nodes, edges, { branchId, filters } = {}) =>
+    applyGraphFilters(buildGraphProjection(nodes, edges, branchId), filters);
+
+export const getConnectionRows = (projection) =>
+    projection.edges
+        .map((edge) => {
+            const source = projection.nodeLookup.get(edge.source);
+            const target = projection.nodeLookup.get(edge.target);
+
+            if (!source || !target) {
+                return undefined;
+            }
+
+            return {
+                id: edge.id || `${edge.source}-${edge.target}`,
+                source,
+                target,
+                relationship:
+                    relationshipLabel(edge.relationship_type) ||
+                    edge.label ||
+                    edge.data?.relationship ||
+                    edge.data?.label ||
+                    'parent-child',
+                locally_projected: true
+            };
+        })
+        .filter(Boolean);
+
+export const getKnowledgeGraphRows = (projection) =>
+    projection.nodes.map((node) => ({
+        ...node,
+        relationship_count: projection.edges.filter(
+            (edge) => edge.source === node.id || edge.target === node.id
+        ).length,
+        locally_projected: true
+    }));
 
 export const getTaskRows = (projection) =>
     projection.nodes

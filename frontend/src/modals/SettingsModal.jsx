@@ -3,15 +3,36 @@ import CROSSSvg from '../assets/cross.svg';
 import modalStore from '../stores/modalStore';
 import {
     CREDENTIAL_RETENTION_OPTIONS,
+    NUDGE_CATEGORY_KEYS,
+    NUDGE_DENSITY_OPTIONS,
     clearCredentialSettings,
     getCredentialStorageInfo,
     getCredentialStorageMode,
     getCredentialSettings,
     saveCredentialSettings
 } from '../config/localSettings';
+import useStore from '../stores/store';
+
+const NUDGE_CATEGORY_LABELS = {
+    canvas: 'Canvas',
+    review: 'Review',
+    sources: 'Sources',
+    tasks: 'Tasks',
+    ai_outputs: 'AI outputs',
+    integrations: 'Integrations',
+    knowledge_graph: 'Knowledge graph'
+};
+
+const DENSITY_LABELS = {
+    quiet: 'Quiet',
+    normal: 'Normal',
+    assertive: 'Assertive'
+};
 
 const SettingsModal = () => {
     const popNode = modalStore((s) => s.popNode);
+    const nudgePreferences = useStore((s) => s.nudgePreferences);
+    const setNudgePreferences = useStore((s) => s.setNudgePreferences);
     const [openaiApiKey, setOpenaiApiKey] = useState('');
     const [miroApiToken, setMiroApiToken] = useState('');
     const [mondayApiToken, setMondayApiToken] = useState('');
@@ -23,7 +44,13 @@ const SettingsModal = () => {
         encrypted: false,
         persistence: 'browser-local'
     });
+    const [draftNudgePreferences, setDraftNudgePreferences] =
+        useState(nudgePreferences);
     const credentialStorageMode = getCredentialStorageMode();
+
+    useEffect(() => {
+        setDraftNudgePreferences(nudgePreferences);
+    }, [nudgePreferences]);
 
     useEffect(() => {
         let mounted = true;
@@ -63,6 +90,7 @@ const SettingsModal = () => {
 
         try {
             const persistedSettings = await saveCredentialSettings(nextSettings);
+            setNudgePreferences(draftNudgePreferences);
             setOpenaiApiKey(persistedSettings.openaiApiKey);
             setMiroApiToken(persistedSettings.miroApiToken);
             setMondayApiToken(persistedSettings.mondayApiToken);
@@ -81,6 +109,30 @@ const SettingsModal = () => {
             setSaved(false);
             setError(saveError.message || 'Settings could not be saved.');
         }
+    };
+
+    const toggleNudges = (enabled) => {
+        setDraftNudgePreferences((current) => ({
+            ...current,
+            enabled
+        }));
+    };
+
+    const toggleNudgeCategory = (category, enabled) => {
+        setDraftNudgePreferences((current) => ({
+            ...current,
+            categories: {
+                ...current.categories,
+                [category]: enabled
+            }
+        }));
+    };
+
+    const setNudgeDensity = (density) => {
+        setDraftNudgePreferences((current) => ({
+            ...current,
+            density
+        }));
     };
 
     const clearSettings = async () => {
@@ -177,6 +229,64 @@ const SettingsModal = () => {
                     ))}
                 </select>
             </div>
+            <section className="settings-section">
+                <div className="settings-section-title">
+                    <div>
+                        <strong>Workspace guidance</strong>
+                        <span>Local preferences only. Graph data and validation state stay unchanged.</span>
+                    </div>
+                </div>
+                <label className="settings-toggle-row" htmlFor="show-nudges">
+                    <span>
+                        <strong>Show nudges</strong>
+                        <small>Hide lightweight suggestions without hiding validation errors.</small>
+                    </span>
+                    <input
+                        id="show-nudges"
+                        type="checkbox"
+                        checked={draftNudgePreferences.enabled}
+                        onChange={(event) => toggleNudges(event.target.checked)}
+                    />
+                </label>
+                <div className="input-bar">
+                    <label htmlFor="nudge-density">Nudge density</label>
+                    <select
+                        id="nudge-density"
+                        value={draftNudgePreferences.density}
+                        onChange={(event) => setNudgeDensity(event.target.value)}
+                        disabled={!draftNudgePreferences.enabled}
+                    >
+                        {NUDGE_DENSITY_OPTIONS.map((density) => (
+                            <option key={density} value={density}>
+                                {DENSITY_LABELS[density]}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                <details className="settings-advanced">
+                    <summary>Advanced nudge categories</summary>
+                    <div className="settings-category-grid">
+                        {NUDGE_CATEGORY_KEYS.map((category) => (
+                            <label
+                                key={category}
+                                className="settings-toggle-row settings-category-row"
+                                htmlFor={`nudge-category-${category}`}
+                            >
+                                <span>{NUDGE_CATEGORY_LABELS[category]}</span>
+                                <input
+                                    id={`nudge-category-${category}`}
+                                    type="checkbox"
+                                    checked={draftNudgePreferences.categories[category]}
+                                    disabled={!draftNudgePreferences.enabled}
+                                    onChange={(event) =>
+                                        toggleNudgeCategory(category, event.target.checked)
+                                    }
+                                />
+                            </label>
+                        ))}
+                    </div>
+                </details>
+            </section>
             {saved ? (
                 <p className="settings-saved">
                     {credentialRetentionDays === 0

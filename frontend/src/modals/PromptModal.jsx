@@ -18,7 +18,11 @@ import {
     legacyPersonaNames
 } from "../prompts/promptsModel";
 import { getWorkspaceNodeData } from "../utils/manualNodes";
-import { createAIDraftSession } from "../utils/aiDraftSessions";
+import {
+    buildAIDraftSessionRequestPayload,
+    buildSelectedSourceDraftPayload,
+    createAIDraftSession
+} from "../utils/aiDraftSessions";
 
 const viewForAction = (actionId) => {
     if (actionId.includes('question')) {
@@ -63,6 +67,9 @@ const draftSessionEndpoint = ({ flowId }) =>
 const PromptModal = ({
     scope,
     nodeId,
+    nodeIds = [],
+    sourceId: propSourceId,
+    source,
     initialRoleId,
     initialActionId
 }) => {
@@ -93,7 +100,9 @@ const PromptModal = ({
     } = useStore(useShallow(storeSelector));
     const recordActivity = useActivityStore((state) => state.recordActivity);
     const flowId = flowStore((state) => state.flow_id);
-    const targetNodeId = nodeId || sourceId;
+    const targetSourceId = propSourceId || (scope === 'source' ? sourceId : undefined);
+    const selectedNodeIds = Array.isArray(nodeIds) ? nodeIds.filter(Boolean) : [];
+    const targetNodeId = scope === 'source' || scope === 'nodes' ? undefined : nodeId || sourceId;
     const targetNode = nodes.find((node) => node.id === targetNodeId);
     const initialLegacyAgent = legacyAgents.includes(targetNode?.data?.prompt)
         ? targetNode.data.prompt
@@ -110,10 +119,17 @@ const PromptModal = ({
 
     const isPreviewFlow = Boolean(scope);
     const targetData = targetNode ? getWorkspaceNodeData(targetNode) : {};
+    const selectedSourcePayload =
+        scope === 'source' ? buildSelectedSourceDraftPayload(source || { id: targetSourceId }) : null;
     const targetLabel =
+        selectedSourcePayload?.metadata?.selected_source_title ||
         targetData.title ||
         targetData.body ||
+        (scope === 'nodes' && selectedNodeIds.length
+            ? `${selectedNodeIds.length} selected nodes`
+            : '') ||
         targetNodeId ||
+        targetSourceId ||
         (scope === 'workspace' ? 'Whole workspace' : 'Selected scope');
 
     const profiles = useMemo(
@@ -141,6 +157,16 @@ const PromptModal = ({
         () => getFollowUpSuggestions(role, selectedAction, targetLabel, scope || 'node'),
         [role, scope, selectedAction, targetLabel]
     );
+    const scopeDisplayLabel =
+        scope === 'workspace'
+            ? 'Whole workspace'
+            : scope === 'source'
+              ? 'Selected source'
+              : scope === 'nodes'
+                ? 'Selected nodes'
+                : scope === 'branch'
+                  ? 'Selected branch'
+                  : 'Selected node';
 
     const updateRole = (roleId) => {
         const nextRole = profiles.find((profile) => profile.id === roleId);
@@ -160,18 +186,25 @@ const PromptModal = ({
         setIsGeneratingPreview(true);
         setStageMessage('');
         const childEdges = edges.filter((edge) => edge.source === targetNodeId);
-        const sourceRefs = targetData.sourceRefs || [];
+        const sourceRefs =
+            scope === 'source'
+                ? selectedSourcePayload?.source_refs || []
+                : targetData.sourceRefs || [];
         const shouldDraftNode = actionsThatDraftNodes.has(selectedAction.id);
         const draftNodeId = `draft-${Date.now()}`;
         const normalizedScope =
             scope === 'workspace'
                 ? { type: 'workspace' }
-                : { type: scope || 'node', node_id: targetNodeId };
+                : scope === 'source'
+                  ? selectedSourcePayload?.scope || { type: 'source', source_id: targetSourceId }
+                  : scope === 'nodes'
+                    ? { type: 'nodes', node_ids: selectedNodeIds }
+                  : { type: scope || 'node', node_id: targetNodeId };
         const draftNodes = shouldDraftNode
             ? [
                   {
                       id: draftNodeId,
-                      parent_id: targetNodeId,
+                      parent_id: targetNodeId || null,
                       title: `${selectedAction.label}: ${targetLabel}`,
                       summary:
                           customPrompt.trim() ||
@@ -222,7 +255,11 @@ const PromptModal = ({
                 role_id: role.id,
                 action_label: selectedAction.label,
                 preview_mode: 'local_fallback',
-                source_node_id: scope === 'workspace' ? null : targetNodeId
+                source_node_id:
+                    scope === 'workspace' || scope === 'source' || scope === 'nodes'
+                        ? null
+                        : targetNodeId,
+                source_context: selectedSourcePayload?.metadata
             }
         });
         const legacyPreview = {
@@ -230,7 +267,10 @@ const PromptModal = ({
             ai_action_id: fallbackSession.session_id,
             workspace_id: flowId || '',
             scope: normalizedScope,
-            source_node_id: scope === 'workspace' ? null : targetNodeId,
+            source_node_id:
+                scope === 'workspace' || scope === 'source' || scope === 'nodes'
+                    ? null
+                    : targetNodeId,
             role: role.label,
             role_id: role.id,
             action: selectedAction.id,
@@ -239,6 +279,8 @@ const PromptModal = ({
             input_node_ids:
                 scope === 'branch'
                     ? [targetNodeId, ...childEdges.map((edge) => edge.target)]
+                    : scope === 'nodes'
+                      ? selectedNodeIds
                     : targetNodeId
                       ? [targetNodeId]
                       : [],
@@ -260,7 +302,8 @@ const PromptModal = ({
                 model_reason:
                     selectedModel === 'auto'
                         ? 'Backend unavailable; model would be selected by intent.'
-                        : 'User selected the model explicitly.'
+                        : 'User selected the model explicitly.',
+                source_context: selectedSourcePayload?.metadata
             }
         };
 
@@ -278,7 +321,7 @@ const PromptModal = ({
             if (scope === 'branch' || scope === 'node') {
                 setSelectedBranchId(targetNodeId);
                 setInspectorNodeId(targetNodeId);
-            } else if (scope === 'workspace') {
+            } else if (scope === 'workspace' || scope === 'source' || scope === 'nodes') {
                 setSelectedBranchId(undefined);
                 setInspectorNodeId(undefined);
             }
@@ -290,6 +333,8 @@ const PromptModal = ({
                 node_ids: targetNodeId ? [targetNodeId] : [],
                 metadata: {
                     scope,
+                    source_id: targetSourceId,
+                    node_ids: selectedNodeIds,
                     role: role.label,
                     action: selectedAction.id,
                     model: selectedModel
@@ -302,18 +347,17 @@ const PromptModal = ({
         try {
             const endpoint = flowId ? draftSessionEndpoint({ flowId }) : '';
             const response = endpoint
-                ? await axios.post(endpoint, {
-                      role: role.id,
-                      role_id: role.id,
-                      action: selectedAction.id,
-                      intent: selectedAction.id,
-                      scope: normalizedScope,
-                      custom_prompt: customPrompt.trim() || null,
-                      prompt: customPrompt.trim() || selectedAction.label,
-                      created_by: 'user',
-                      model_policy: selectedModel === 'auto' ? 'balanced' : 'explicit',
-                      model: selectedModel === 'auto' ? null : selectedModel
-                  })
+                ? await axios.post(
+                      endpoint,
+                      buildAIDraftSessionRequestPayload({
+                          role,
+                          action: selectedAction,
+                          scope: normalizedScope,
+                          prompt: customPrompt.trim() || selectedAction.label,
+                          selectedModel,
+                          selectedSourcePayload
+                      })
+                  )
                 : null;
             activateSession(response?.data || fallbackSession);
         } catch (error) {
@@ -404,13 +448,7 @@ const PromptModal = ({
                 <img src={CROSSSvg} alt="Cross Svg" onClick={() => popNode()} />
             </div>
             <div className="ai-action-scope">
-                <span>
-                    {scope === 'workspace'
-                        ? 'Whole workspace'
-                        : scope === 'branch'
-                          ? 'Selected branch'
-                          : 'Selected node'}
-                </span>
+                <span>{scopeDisplayLabel}</span>
                 <strong>{targetLabel}</strong>
             </div>
             <div className="ai-action-grid">

@@ -154,8 +154,10 @@ from ai.roles import (
     clean_source_intake_value as clean_role_source_intake_value,
     resolve_source_intake_role_label,
 )
+from ai_model_policy import normalize_model_name
 from ai_helpers import (
     accept_ai_draft_revision,
+    add_source_to_ai_draft_session,
     append_ai_draft_revision,
     build_ai_draft_revision,
     build_ai_draft_session,
@@ -215,7 +217,13 @@ def resolve_assistants_model(model_name: str | None = None) -> str:
     requested_model = clean_source_intake_value(model_name, 120)
     if not requested_model:
         return OPENAI_DEFAULT_MODEL
-    return requested_model
+    try:
+        return normalize_model_name(requested_model)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 def legacy_assistants_fallback_enabled() -> bool:
@@ -1078,7 +1086,7 @@ def answer_component_with_responses(
         context=query_with_workspace_brief(context, request.workspace_brief),
         persona=record.get("persona_name") or "DocMap reviewer",
         instructions=record.get("instructions") or "",
-        model=OPENAI_DEFAULT_MODEL,
+        model=getattr(request, "model_name", None),
         workspace_brief=request.workspace_brief,
     )
     entries = [
@@ -2491,6 +2499,47 @@ def _append_accepted_graph_to_flow_snapshot(
         for edge in snapshot.get("edges", [])
         if isinstance(edge, dict)
     }
+
+    for operation in accept_result.get("patch_operations", []):
+        if not isinstance(operation, dict):
+            continue
+        op = operation.get("op")
+        if op == "remove_node":
+            node_id = operation.get("node_id")
+            snapshot["nodes"] = [
+                node for node in snapshot.get("nodes", [])
+                if not isinstance(node, dict) or node.get("id") != node_id
+            ]
+            existing_node_ids.discard(node_id)
+            continue
+        if op == "remove_edge":
+            edge_id = operation.get("edge_id")
+            snapshot["edges"] = [
+                edge for edge in snapshot.get("edges", [])
+                if not isinstance(edge, dict) or edge.get("id") != edge_id
+            ]
+            existing_edge_ids.discard(edge_id)
+            continue
+        if op == "update_node":
+            node_id = operation.get("node_id")
+            graph_node = node_lookup.get(node_id)
+            if not graph_node:
+                continue
+            updated_node = _react_node_from_graph_node(graph_node, len(snapshot.get("nodes", [])) + 1)
+            snapshot["nodes"] = [
+                (
+                    {
+                        **node,
+                        **updated_node,
+                        "position": node.get("position") or updated_node.get("position"),
+                    }
+                    if isinstance(node, dict) and node.get("id") == node_id
+                    else node
+                )
+                for node in snapshot.get("nodes", [])
+            ]
+            continue
+
     for index, node_id in enumerate(accept_result.get("accepted_node_ids", []), start=1):
         if node_id in existing_node_ids:
             continue
@@ -2513,7 +2562,11 @@ def _draft_revision_from_request(
     graph: dict,
     request: dict[str, Any],
 ) -> dict:
-    if isinstance(request.get("draft_nodes"), list) or isinstance(request.get("draft_items"), list):
+    if (
+        isinstance(request.get("draft_nodes"), list)
+        or isinstance(request.get("draft_items"), list)
+        or isinstance(request.get("generated_artifacts"), list)
+    ):
         return build_ai_draft_revision(
             session=session,
             prompt=request.get("prompt") or request.get("custom_prompt") or "",
@@ -2521,6 +2574,7 @@ def _draft_revision_from_request(
             draft_edges=request.get("draft_edges") or [],
             draft_annotations=request.get("draft_annotations") or [],
             draft_items=request.get("draft_items"),
+            generated_artifacts=request.get("generated_artifacts") or [],
             model=request.get("model") or session.get("selected_model", ""),
             metadata=request.get("metadata") if isinstance(request.get("metadata"), dict) else {},
         )
@@ -2626,6 +2680,67 @@ def create_ai_draft_revision(
     return save_ai_draft_session(session)
 
 
+@app.post("/api/workspaces/{flow_id}/ai/draft-sessions/{session_id}/sources")
+def add_ai_draft_session_source(
+    flow_id: str,
+    session_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    session = get_ai_draft_session_or_404(flow_id, session_id)
+    if session.get("status") != "drafting":
+        raise HTTPException(status_code=409, detail="Only active draft sessions can add sources.")
+    source_chunks = request.get("source_chunks")
+    if not isinstance(source_chunks, list):
+        source_chunks = []
+    graph = get_workspace_graph_or_404(flow_id)
+    if request.get("source_id") and not source_chunks:
+        source_id = str(request.get("source_id"))
+        source_library = graph.get("source_library", {}) if isinstance(graph.get("source_library"), dict) else {}
+        for document in source_library.get("documents", []) if isinstance(source_library.get("documents"), list) else []:
+            if not isinstance(document, dict):
+                continue
+            if str(document.get("id") or document.get("document_id") or "") != source_id:
+                continue
+            source_chunks = [
+                {
+                    **chunk,
+                    "document_id": source_id,
+                    "source_ref": {
+                        "document_id": source_id,
+                        "chunk_id": chunk.get("id", ""),
+                        "page": chunk.get("page"),
+                        "section": chunk.get("heading", ""),
+                        "quote_snippet": chunk.get("snippet", ""),
+                        "confidence": "medium",
+                    },
+                }
+                for chunk in document.get("chunks", [])
+                if isinstance(chunk, dict)
+            ]
+            break
+    try:
+        session = add_source_to_ai_draft_session(
+            session,
+            graph,
+            source_chunks=source_chunks,
+            prompt=request.get("prompt"),
+            model_policy=request.get("model_policy"),
+            model=request.get("model"),
+        )
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "AI draft source reconciliation failed schema validation.",
+                "errors": exc.errors,
+            },
+        ) from exc
+    return save_ai_draft_session(session)
+
+
 @app.post("/api/workspaces/{flow_id}/ai/draft-sessions/{session_id}/discard")
 def discard_ai_draft_session_endpoint(
     flow_id: str,
@@ -2677,7 +2792,13 @@ def accept_ai_draft_session_endpoint(
     snapshot = _append_accepted_graph_to_flow_snapshot(flow, accept_result, accepted_graph)
     _persist_flow_snapshot(flow_id, snapshot)
     save_ai_draft_session(session)
-    return accept_result
+    response = {
+        **accept_result,
+        "graph": snapshot,
+        "session": session,
+        "accept_result": accept_result,
+    }
+    return response
 
 
 @app.post("/api/workspaces/{flow_id}/ai/actions/preview")
@@ -4258,7 +4379,7 @@ async def create_img_component(
             mime_type=file.content_type,
             contents=contents,
             flow_id=flow_id,
-            model=OPENAI_DEFAULT_MODEL,
+            model=None,
         )
 
         response_json = ground_mindmap_with_source_refs(response_json, source_context)
@@ -4416,7 +4537,7 @@ async def create_audio_component(
             file_name=file.filename,
             transcript=transcript,
             flow_id=flow_id,
-            model=OPENAI_DEFAULT_MODEL,
+            model=None,
         )
         response_json = ground_mindmap_with_source_refs(response_json, source_context)
         print(response_json)
@@ -4778,7 +4899,7 @@ async def create_video_component(
             mime_type=file.content_type,
             contents=contents,
             flow_id=flow_id,
-            model=OPENAI_DEFAULT_MODEL,
+            model=None,
         )
 
         response_json = ground_mindmap_with_source_refs(response_json, source_context)
@@ -5388,7 +5509,7 @@ async def create_web_crawler(
         response_json = generate_web_mindmap(
             url=web_url,
             flow_id=flow_id,
-            model=OPENAI_DEFAULT_MODEL,
+            model=None,
         )
         response_json = ground_mindmap_with_source_refs(response_json, source_context)
 
@@ -5416,247 +5537,6 @@ async def create_web_crawler(
             "type": "web",
             "mindmap_json": response_json,
             "flow_type": flow_type,
-        }
-
-        unique_id = str(uuid4())
-
-        async with AsyncWebCrawler() as crawler:
-            result = await crawler.arun(url=web_url)
-
-        response = result.markdown
-
-        file_bytes = response.encode("utf-8")
-
-        mime_type = "text/markdown"
-
-        if flow_type == "manual":
-            assistant = openai.beta.assistants.create(
-                name="Summarize agent",
-                instructions="Your task is to only summarize the document",
-                model=OPENAI_DEFAULT_MODEL,
-                tools=[{"type": "file_search"}],
-            )
-            vector_store = openai.beta.vector_stores.create(name=f"web_{flow_id}")
-
-            assistant = openai.beta.assistants.update(
-                assistant_id=assistant.id,
-                tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}},
-            )
-
-
-            messages_file = openai.files.create(
-                file=(f"website_{unique_id}.md", file_bytes, mime_type),
-                purpose="assistants",
-            )
-
-            thread = openai.beta.threads.create(
-                messages=[
-                {
-                    "role": "user",
-                    "content": "Generate a concise summary of the following document",
-                    "attachments": [
-                        {
-                            "file_id": messages_file.id,
-                            "tools": [{"type": "file_search"}],
-                        }
-                    ],
-                }
-                ]
-            )
-
-            run = openai.beta.threads.runs.create_and_poll(
-                thread_id=thread.id, assistant_id=assistant.id
-            )
-
-            messages = list(
-                openai.beta.threads.messages.list(thread_id=thread.id, run_id=run.id)
-            )
-
-            print(messages)
-            message_content = messages[0].content[0].text
-            annotations = message_content.annotations
-
-            for index, annotation in enumerate(annotations):
-                message_content.value = message_content.value.replace(annotation.text, f"[{index}]")
-
-            component_metadata = {
-                "flow_id": ObjectId(flow_id),
-                "file_id": messages_file.id,
-                "assistant_id": assistant.id,
-                "vector_store_id": vector_store.id,
-                "size": len(file_bytes),
-                "type": "web",
-                "web_url": web_url,
-                "processing_type": "gpt",
-                "summary": message_content.value,
-            }
-
-            component_id = component_collection.insert_one(component_metadata).inserted_id
-
-            return {
-                "component_id": str(component_id),
-                "type": "web",
-                "message": "Component created successfully",
-            }
-
-        else:
-            assistant = openai.beta.assistants.create(
-            name="MindMap Builder",
-            instructions="Your task is to create the mindmap of the document",
-            model=OPENAI_DEFAULT_MODEL,
-            tools=[{"type": "file_search"}],
-            )
-            vector_store = openai.beta.vector_stores.create(name=f"web_mindmap_{flow_id}")
-
-            assistant = openai.beta.assistants.update(
-            assistant_id=assistant.id,
-            tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}},
-            )
-
-            messages_file = openai.files.create(
-                file=(f"website_mindmap_{unique_id}.md", file_bytes, mime_type), purpose="assistants"
-            )
-
-            thread = openai.beta.threads.create(
-
-            messages=[
-            {
-                "role": "user",
-                "content" : f"""
-                You are tasked with generating a JSON mind map that is compatible with React Flow for rendering a flow diagram which should cover all the details and important aspects of the component for which multiple nodes can be required. The mind map should adhere to the following rules:
-
-                1. **Node Types:**
-                - There will always be one `dataSource` node, which serves as the root of the flow.
-                - There will be `question` node which will be connected to the subsequent `response` node.
-                - The `question` node can be connected to data sources or other `response` nodes.
-                - There will be `response` for the above question
-
-                2. **Node Relationships:**
-                - `response` nodes may also connect to each other if it improves the logical flow or visualization.
-                - `question` node will always have a `response` node
-                - `dataSource` node will always be connected to a question node
-
-                3. **Node Properties:**
-                - Each node should have:
-                    - `id` (unique identifier of 12 or 24 digit unique uuid or nanoid)
-                    - `type` (`dataSource` or `response`)
-                    - `position` (coordinates in the form {{ "x": <number>, "y": <number> }} for layout)
-                    - `measured` (an object defining width and height):
-                        {{
-                            "width": <number>,
-                            "height": <number>
-                        }}
-                    - `targetPosition` (position of the target connection, default to `"left"`)
-                    - `sourcePosition` (position of the source connection, default to `"right"`)
-                    - `selected` (boolean, default to `false`)
-                    - `deletable` (boolean, default to `true` for `response` and `false` for `dataSource`)
-
-                4. **Node Data Format:**
-                - `dataSource` Node:
-                    - `data` contains the following properties:
-                        {{
-                            "prompt": "<data source description>",
-                            "name": "{web_url}", !!!DOESN"T CHANGES
-                            "content": "<file name or content>",
-                            "flow_id": "{flow_id}",
-                            "file": "{web_url}"  // Empty object or file metadata
-                        }}
-                5. **Question Data Format:**
-                - `question` Node:
-                    - `data` contains the following properties:
-                        {{
-                            "question": "<the question asked for the response>",
-                            "component_id": "<component reference ID - unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                            "component_type" : "web",
-                        }}
-                6. **RESPONSE NODE FORMAT**
-                - `response` Node:
-                    - `data` contains nested properties:
-                        {{
-                            "id": "<unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                            "type": "response" !!DOESN'T CHANGE,
-                            "data": {{
-                                "question": "<question text, if applicable>",
-                                "summ": "<!!give me a detailed answer for the above question>",
-                                "df": [],
-                                "graph": "",
-                                "flow_id": "{flow_id}",
-                                "component_id": "<component reference ID - unique identifier of 12 or 24 digit unique uuid or nanoid>",
-                                "component_type": "web"
-                            }}
-                        }}
-
-                7. **Connections:**
-                - Connections between nodes should be represented by edges, with the following format:
-                    - `id` (unique identifier for the edge)
-                    - `source` (ID of the source node)
-                    - `target` (ID of the target node)
-                    - `type` (optional, defaults to `default`)
-                    - 'animated' !!WILL ALWAYS BE TRUE
-
-                8. **Viewport Configuration:**
-                - Include a `viewport` object that specifies:
-                    - `x` (horizontal position of the viewport)
-                    - `y` (vertical position of the viewport)
-                    - `zoom` (zoom level for initial rendering)
-
-                ### Additional Considerations:
-                - Ensure that the node positions are distributed properly to avoid overlap.
-                - Prioritize connecting `response` nodes where it adds logical structure to the flow.
-
-                ### IMPORTANT:
-                - **RETURN ONLY THE VALID JSON OBJECT AND NO ADDITIONAL COMMENTS**.
-                - Do **not** include any explanations, text, or additional information.
-                - Maintain the format with double curly braces `{{` and `}}` as shown in the format.
-                """,
-
-                "attachments": [
-                    {"file_id": messages_file.id, "tools": [{"type": "file_search"}]}
-                ],
-            }
-            ]
-        )
-
-        run = openai.beta.threads.runs.create_and_poll(thread_id=thread.id, assistant_id=assistant.id)
-
-        messages = list(openai.beta.threads.messages.list(thread_id=thread.id, run_id=run.id))
-
-        message_content = messages[0].content[0].text
-        annotations = message_content.annotations
-
-        for index, annotation in enumerate(annotations):
-            message_content.value = message_content.value.replace(annotation.text, f"[{index}]")
-
-        response_json = parse_ai_mindmap_or_422(message_content.value)
-        print(response_json)
-
-        component_metadata = {
-            "flow_id": ObjectId(flow_id),
-            "web_url": web_url,
-            "file_id": messages_file.id,
-            "assistant_id": assistant.id,
-            "vector_store_id": vector_store.id,
-            "size": len(file_bytes),
-            "type": "web",
-            "processing_type": "gpt",
-            "mindmap_json": response_json,
-        }
-
-        component_id = component_collection.insert_one(component_metadata).inserted_id
-        update_operation_progress(
-            operation_id,
-            phase="complete",
-            message="Generated web workspace is ready",
-            detail="The derived mind map was saved to the workspace.",
-            progress=100,
-            status_value="completed",
-        )
-
-        return {
-            "component_id": str(component_id),
-            "type": "web",
-            "mindmap_json": response_json,
-            "flow_type": flow_type
         }
 
     except HTTPException as exc:

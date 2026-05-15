@@ -34,6 +34,7 @@ import AutomationsPanel from './global-components/AutomationsPanel.jsx';
 import ManualNodeControls from './global-components/ManualNodeControls.jsx';
 import AiHelpersPanel from './global-components/AiHelpersPanel.jsx';
 import SourceDraftReviewPanel from './global-components/SourceDraftReviewPanel.jsx';
+import WorkspaceNudgeSurface from './global-components/WorkspaceNudgeSurface.jsx';
 import { getLocalSetting, setLocalSetting, SETTINGS_KEYS } from './config/localSettings';
 import { parseFlowSnapshot, stringifyFlowSnapshot } from './utils/flowSnapshots';
 import { rememberWorkspace, selectStartupWorkspace } from './utils/workspaceSession';
@@ -403,6 +404,18 @@ const App = () => {
                     />
                 </Panel>
                 <Panel
+                    position="top-left"
+                    className="workspace-nudge-panel"
+                    style={{ display: 'block', pointerEvents: 'auto' }}
+                >
+                    <WorkspaceNudgeSurface
+                        validationIssues={validationReport?.issues || []}
+                        onFocusNode={focusNodeForReview}
+                        onOpenSources={() => setIsSourcesOpen(true)}
+                        onOpenAiHelpers={() => setIsAiHelpersOpen(true)}
+                    />
+                </Panel>
+                <Panel
                     position="top-center"
                     style={{ display: 'block' }}
                 >
@@ -415,7 +428,10 @@ const App = () => {
                     position="bottom-right"
                     style={{ display: 'block' }}
                 >
-                    <AiHelpersPanel hidden={!isAiHelpersOpen} />
+                    <AiHelpersPanel
+                        hidden={!isAiHelpersOpen}
+                        selectedNodes={selectedNodes || []}
+                    />
                 </Panel>
                 <Panel
                     position="top-right"

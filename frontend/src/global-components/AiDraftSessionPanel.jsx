@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useShallow } from 'zustand/shallow';
 import modalStore from '../stores/modalStore';
@@ -11,9 +11,17 @@ import {
     AI_DRAFT_ACCEPT_MODES,
     acceptAIDraftSession,
     buildAIDraftPreviewDiff,
+    formatAIDraftPreviewDiffSummary,
+    getAIDraftItemBadges,
+    getAIDraftModelMetadata,
     latestAIDraftRevision,
+    rejectAIDraftSession,
     reviseAIDraftSession
 } from '../utils/aiDraftSessions';
+import {
+    previewDiffToChanges,
+    PreviewDiffSummary
+} from '../views/previewDiffSummary';
 
 const PROJECTIONS = [
     { id: 'mind_map', label: 'Mind map' },
@@ -72,8 +80,14 @@ const extractRevisionItems = (revision = {}) => [
         title: node.title || node.label || 'AI draft',
         content: nodeText(node),
         source_refs: asArray(node.source_refs),
+        assumptions: asArray(node.assumptions),
+        confidence: node.confidence,
         status: node.status || 'draft',
-        metadata: { draft_node_id: node.id || node.node_id, node_type: node.node_type || node.type }
+        metadata: {
+            ...(node.metadata || {}),
+            draft_node_id: node.id || node.node_id,
+            node_type: node.node_type || node.type
+        }
     })),
     ...asArray(revision.draft_items).map((item) => ({
         ...item,
@@ -101,6 +115,16 @@ const sourceCoverage = (items = []) => {
     };
 };
 
+const projectionHints = {
+    mind_map: 'Draft branches and child nodes will appear here before they touch the graph.',
+    outline: 'Ask AI for an outline or accept graph nodes to project a hierarchy here.',
+    checklist: 'Checklist items appear when the draft includes tasks, checks, or review steps.',
+    tasks: 'Task drafts appear when Ask AI generates owner-ready work items.',
+    table: 'Table rows appear when Ask AI returns structured comparison or matrix data.',
+    kanban: 'Kanban cards appear when Ask AI groups draft work by status.',
+    presentation: 'Presentation sections appear when the draft includes slide-ready structure.'
+};
+
 const revisionEndpoint = ({ flowId, sessionId }) =>
     `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions/${sessionId}/revisions`;
 
@@ -110,7 +134,7 @@ const acceptEndpoint = ({ flowId, sessionId }) =>
 const requestImmediateWorkspaceSave = () => {
     window.setTimeout(() => {
         window.dispatchEvent(new CustomEvent('docmap:save-workspace-now'));
-    }, 0);
+    }, 50);
 };
 
 const AiDraftSessionPanel = ({ session, onClose }) => {
@@ -141,6 +165,7 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
     const [message, setMessage] = useState('');
     const [isRevising, setIsRevising] = useState(false);
     const [isAccepting, setIsAccepting] = useState(false);
+    const promptRef = useRef(null);
     const revision = useMemo(() => latestAIDraftRevision(session), [session]);
     const items = useMemo(() => extractRevisionItems(revision), [revision]);
     const coverage = useMemo(() => sourceCoverage(items), [items]);
@@ -152,11 +177,18 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
             }),
         [acceptMode, selectedItemIds, session]
     );
+    const diffSummary = useMemo(() => formatAIDraftPreviewDiffSummary(previewDiff), [previewDiff]);
+    const sharedDiffSummary = useMemo(
+        () => previewDiffToChanges(previewDiff),
+        [previewDiff]
+    );
 
     const selectedSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
-    const model = session?.selected_model || revision?.model || 'auto';
-    const modelReason =
-        session?.model_reason || session?.metadata?.model_reason || revision?.metadata?.model_reason || '';
+    const modelMeta = useMemo(() => getAIDraftModelMetadata(session, revision), [revision, session]);
+
+    useEffect(() => {
+        promptRef.current?.focus();
+    }, [session?.session_id]);
 
     const toggleItem = (itemId) => {
         setSelectedItemIds((current) =>
@@ -333,6 +365,11 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
     };
 
     const discardDraft = () => {
+        updateActiveAIDraftSession(
+            rejectAIDraftSession(session, {
+                reason: 'Draft session was closed without changing the graph.'
+            })
+        );
         clearActiveAIDraftSession();
         recordActivity({
             type: 'ai_draft_discarded',
@@ -360,7 +397,15 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
 
     const renderProjection = () => {
         if (items.length === 0) {
-            return <p className="ai-draft-empty">No draft items are available in this revision.</p>;
+            return (
+                <div className="ai-draft-empty" role="status">
+                    <strong>{projectionHints[projection]}</strong>
+                    <span>
+                        Refine the prompt to generate proposed nodes, review notes, source coverage,
+                        or projection rows. Nothing changes in the graph until an accept action runs.
+                    </span>
+                </div>
+            );
         }
         if (projection === 'table') {
             return (
@@ -375,7 +420,7 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
                             <strong role="cell">{item.title}</strong>
                             <span role="cell">{humanizeId(item.item_type || item.metadata?.node_type)}</span>
                             <span role="cell">
-                                {asArray(item.source_refs).length ? 'Cited' : 'Needs review'}
+                                <DraftBadges item={item} compact />
                             </span>
                         </div>
                     ))}
@@ -417,8 +462,15 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
                             <span>{humanizeId(item.item_type || item.metadata?.node_type || 'item')}</span>
                         </label>
                         <strong>{item.title}</strong>
-                        {item.content ? <p>{item.content}</p> : null}
-                        <small>{asArray(item.source_refs).length ? 'Source cited' : 'Needs review'}</small>
+                        {item.content ? (
+                            <p>{item.content}</p>
+                        ) : (
+                            <p className="ai-draft-weak-preview">
+                                This draft item has structure but no body yet. Refine the prompt to add
+                                detail, sources, or acceptance criteria before accepting it.
+                            </p>
+                        )}
+                        <DraftBadges item={item} />
                     </article>
                 ))}
             </div>
@@ -440,9 +492,18 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
 
             <div className="ai-draft-meta-grid">
                 <div>
-                    <span>Model</span>
-                    <strong>{model}</strong>
-                    {modelReason ? <small>{modelReason}</small> : null}
+                    <span>Actual model</span>
+                    <strong>{modelMeta.model}</strong>
+                    {modelMeta.reason ? <small>{modelMeta.reason}</small> : null}
+                    {modelMeta.policy ? <small>Policy: {humanizeId(modelMeta.policy)}</small> : null}
+                </div>
+                <div>
+                    <span>Risk / cost</span>
+                    <strong>{modelMeta.riskTier ? humanizeId(modelMeta.riskTier) : 'Not estimated'}</strong>
+                    <small>
+                        {modelMeta.tokenEstimate ? `${modelMeta.tokenEstimate} tokens` : 'Token estimate pending'}
+                        {modelMeta.costEstimate ? ` / ${modelMeta.costEstimate}` : ''}
+                    </small>
                 </div>
                 <div>
                     <span>Source coverage</span>
@@ -453,7 +514,7 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
                 </div>
                 <div>
                     <span>Preview diff</span>
-                    <strong>{previewDiff.summary || 'No graph changes'}</strong>
+                    <strong>{diffSummary.text}</strong>
                     <small>{previewDiff.review_outputs} review outputs</small>
                 </div>
             </div>
@@ -470,8 +531,14 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
                 <label>
                     Refine draft
                     <textarea
+                        ref={promptRef}
                         value={prompt}
                         onChange={(event) => setPrompt(event.target.value)}
+                        onKeyDown={(event) => {
+                            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                                submitRevision();
+                            }
+                        }}
                         placeholder="Ask for a sharper structure, a different projection, or more detail."
                     />
                 </label>
@@ -485,8 +552,20 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
                     <button
                         key={tab.id}
                         type="button"
+                        role="tab"
+                        aria-selected={projection === tab.id}
                         className={projection === tab.id ? 'active' : ''}
                         onClick={() => setProjection(tab.id)}
+                        onKeyDown={(event) => {
+                            if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+                                return;
+                            }
+                            event.preventDefault();
+                            const currentIndex = PROJECTIONS.findIndex((candidate) => candidate.id === projection);
+                            const delta = event.key === 'ArrowRight' ? 1 : -1;
+                            const next = PROJECTIONS[(currentIndex + delta + PROJECTIONS.length) % PROJECTIONS.length];
+                            setProjection(next.id);
+                        }}
                     >
                         {tab.label}
                     </button>
@@ -494,6 +573,8 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
             </div>
 
             {renderProjection()}
+
+            <PreviewDiffSummary changes={sharedDiffSummary} />
 
             <div className="ai-draft-accept">
                 <label>
@@ -532,3 +613,16 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
 };
 
 export default AiDraftSessionPanel;
+
+const DraftBadges = ({ item, compact = false }) => {
+    const badges = getAIDraftItemBadges(item);
+    return (
+        <span className={compact ? 'ai-draft-badges compact' : 'ai-draft-badges'}>
+            {badges.map((badge) => (
+                <span key={`${item.id}-${badge.id}`} className={`ai-draft-badge ${badge.tone}`}>
+                    {badge.label}
+                </span>
+            ))}
+        </span>
+    );
+};

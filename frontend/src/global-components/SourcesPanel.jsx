@@ -2,7 +2,9 @@
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import useActivityStore from '../stores/activityStore';
+import modalStore from '../stores/modalStore';
 import useStore from '../stores/store';
+import PromptModal from '../modals/PromptModal';
 import { buildSourceLibraryProjection } from '../views/graphProjection';
 
 const STATUS_LABELS = {
@@ -76,7 +78,9 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
     const { nodes, edges, workspaceBrief, sourceLibrary, setActiveView } = useStore(
         useShallow(selector)
     );
+    const pushNode = modalStore((state) => state.pushNode);
     const activities = useActivityStore((state) => state.activities);
+    const recordActivity = useActivityStore((state) => state.recordActivity);
     const [selectedSourceId, setSelectedSourceId] = useState('');
 
     const projection = useMemo(
@@ -197,6 +201,30 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
 
                             <section className="sources-repair-note">
                                 <p>{sourceRepairText(projection, selectedSource)}</p>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        pushNode(PromptModal, {
+                                            scope: 'source',
+                                            sourceId: selectedSource.id,
+                                            source: selectedSource,
+                                            initialRoleId: 'source-ref-repair',
+                                            initialActionId: 'find_missing_source_support'
+                                        });
+                                        recordActivity({
+                                            type: 'ai_source_draft_requested',
+                                            title: 'Source Ask AI opened',
+                                            summary: `Opened Ask AI for ${selectedSource.title}.`,
+                                            source_ids: [selectedSource.id],
+                                            metadata: {
+                                                scope: 'source',
+                                                source_id: selectedSource.id
+                                            }
+                                        });
+                                    }}
+                                >
+                                    Ask AI about source
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => {

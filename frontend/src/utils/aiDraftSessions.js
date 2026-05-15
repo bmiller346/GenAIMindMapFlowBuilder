@@ -18,6 +18,23 @@ export const AI_DRAFT_ACCEPT_MODES = [
 const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 const firstText = (...values) =>
     values.find((value) => typeof value === 'string' && value.trim()) || '';
+const numericConfidence = (value) => {
+    if (typeof value === 'number') {
+        return value;
+    }
+    const normalized = String(value || '').trim().toLowerCase();
+    if (normalized === 'high') {
+        return 0.9;
+    }
+    if (normalized === 'medium') {
+        return 0.65;
+    }
+    if (normalized === 'low') {
+        return 0.35;
+    }
+    const parsed = Number.parseFloat(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+};
 
 export const normalizeAIDraftScope = (scope = {}) => {
     const type = ['workspace', 'source', 'branch', 'node', 'nodes'].includes(scope.type)
@@ -39,6 +56,92 @@ export const normalizeAIDraftScope = (scope = {}) => {
     }
     return { type };
 };
+
+export const normalizeAIDraftSourceChunk = (chunk = {}, source = {}) => {
+    const documentId = firstText(
+        chunk.document_id,
+        chunk.documentId,
+        chunk.source_id,
+        source.id,
+        source.document_id
+    );
+    const chunkId = firstText(chunk.id, chunk.chunk_id, `${documentId || 'source'}_chunk`);
+    const section = firstText(chunk.heading, chunk.section);
+    const snippet = firstText(chunk.snippet, chunk.text, chunk.quote_snippet);
+    const sourceRef =
+        chunk.source_ref && typeof chunk.source_ref === 'object'
+            ? { ...chunk.source_ref }
+            : {
+                  document_id: documentId,
+                  chunk_id: chunkId,
+                  page: chunk.page ?? '',
+                  section,
+                  quote_snippet: snippet,
+                  confidence: firstText(chunk.confidence, 'medium')
+              };
+
+    return {
+        id: chunkId,
+        document_id: documentId,
+        page: chunk.page ?? '',
+        heading: section,
+        snippet,
+        text: firstText(chunk.text, snippet),
+        source_ref: sourceRef,
+        source_refs: asArray(chunk.source_refs).length ? asArray(chunk.source_refs) : [sourceRef],
+        metadata: {
+            source_title: firstText(source.title, source.filename, source.name),
+            ...(chunk.metadata && typeof chunk.metadata === 'object' ? chunk.metadata : {})
+        }
+    };
+};
+
+export const buildSelectedSourceDraftPayload = (source = {}) => {
+    const sourceId = firstText(source.id, source.document_id, source.source_id);
+    const chunks = asArray(source.chunks).map((chunk) =>
+        normalizeAIDraftSourceChunk(chunk, source)
+    );
+    const sourceRefs = mergeSourceRefs(
+        asArray(source.source_refs),
+        chunks.flatMap((chunk) => asArray(chunk.source_refs))
+    );
+    return {
+        scope: { type: 'source', source_id: sourceId },
+        source_chunks: chunks,
+        source_refs: sourceRefs,
+        metadata: {
+            selected_source_id: sourceId,
+            selected_source_title: firstText(source.title, source.filename, source.name),
+            selected_source_type: firstText(source.type, source.type_label),
+            selected_source_chunk_count: chunks.length
+        }
+    };
+};
+
+export const buildAIDraftSessionRequestPayload = ({
+    role = {},
+    action = {},
+    scope = { type: 'workspace' },
+    prompt = '',
+    createdBy = 'user',
+    selectedModel = 'auto',
+    selectedSourcePayload = null
+} = {}) => ({
+    role: role.id || role.role_id || role.label || 'ask-ai',
+    role_id: role.id || role.role_id || '',
+    action: action.id || action.action || 'custom_prompt',
+    intent: action.id || action.action || 'custom_prompt',
+    scope: normalizeAIDraftScope(scope),
+    custom_prompt: prompt.trim() || null,
+    prompt: prompt.trim() || action.label || action.id || 'Ask AI',
+    created_by: createdBy,
+    model_policy: selectedModel === 'auto' ? 'balanced' : 'explicit',
+    model: selectedModel === 'auto' ? null : selectedModel,
+    source_chunks: selectedSourcePayload?.source_chunks || [],
+    metadata: {
+        source_context: selectedSourcePayload?.metadata
+    }
+});
 
 export const normalizeAIDraftItem = (item = {}) => {
     const title = firstText(item.title, item.label, 'AI draft item');
@@ -226,6 +329,100 @@ export const reviseAIDraftSession = (session = {}, options = {}) => {
 
 export const latestAIDraftRevision = (session = {}) => asArray(session.revisions).at(-1) || {};
 
+export const getAIDraftModelMetadata = (session = {}, revision = latestAIDraftRevision(session)) => {
+    const metadata = {
+        ...(session.metadata || {}),
+        ...(revision.metadata || {})
+    };
+    const policy =
+        typeof session.model_policy === 'string'
+            ? session.model_policy
+            : session.model_policy?.policy || metadata.model_policy || '';
+    const riskTier = firstText(
+        metadata.risk_tier,
+        metadata.risk,
+        metadata.model_tier,
+        metadata.cost_tier,
+        metadata.token_cost_tier
+    );
+    const tokenEstimate =
+        metadata.token_estimate ?? metadata.estimated_tokens ?? metadata.input_tokens ?? metadata.tokens;
+    const costEstimate =
+        metadata.estimated_cost_usd ?? metadata.estimated_cost ?? metadata.cost_estimate ?? metadata.cost;
+    return {
+        model: firstText(
+            metadata.actual_model,
+            metadata.model,
+            session.selected_model,
+            revision.model,
+            'auto'
+        ),
+        reason: firstText(
+            session.model_reason,
+            metadata.model_reason,
+            revision.model_reason,
+            'Model will be selected when the draft is generated.'
+        ),
+        policy,
+        riskTier,
+        tokenEstimate,
+        costEstimate
+    };
+};
+
+export const formatAIDraftPreviewDiffSummary = (diff = {}) => ({
+    nodes: Number(diff.added_nodes || diff.nodes || 0),
+    edges: Number(diff.added_edges || diff.edges || 0),
+    updates: Number(diff.updated_nodes || diff.updates || 0),
+    needsReview: Number(diff.needs_review_repairs || diff.needs_review_items || 0),
+    reviewOutputs: Number(diff.review_outputs || 0),
+    text: [
+        `+${Number(diff.added_nodes || diff.nodes || 0)} nodes`,
+        `+${Number(diff.added_edges || diff.edges || 0)} edges`,
+        `~${Number(diff.updated_nodes || diff.updates || 0)} updates`,
+        `!${Number(diff.needs_review_repairs || diff.needs_review_items || 0)} needs_review items`
+    ].join('  ')
+});
+
+export const getAIDraftItemBadges = (item = {}) => {
+    const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+    const sourceRefs = asArray(item.source_refs);
+    const assumptions = asArray(item.assumptions);
+    const confidence = numericConfidence(item.confidence ?? metadata.confidence);
+    const status = firstText(item.status, metadata.status).toLowerCase();
+    const type = firstText(item.item_type, metadata.node_type, metadata.type).toLowerCase();
+    const badges = [];
+
+    if (sourceRefs.length > 0) {
+        badges.push({ id: 'source-backed', label: 'Source-backed', tone: 'good' });
+    } else {
+        badges.push({ id: 'needs-review', label: 'Needs review', tone: 'warn' });
+    }
+    if (status === 'needs_review' || type === 'needs_review' || metadata.needs_review === true) {
+        if (!badges.some((badge) => badge.id === 'needs-review')) {
+            badges.push({ id: 'needs-review', label: 'Needs review', tone: 'warn' });
+        }
+    }
+    if (
+        assumptions.length > 0 ||
+        metadata.assumption === true ||
+        metadata.assumptions === true ||
+        type === 'assumption'
+    ) {
+        badges.push({ id: 'assumption', label: 'Assumption', tone: 'neutral' });
+    }
+    if (confidence !== null && confidence < 0.6) {
+        badges.push({ id: 'low-confidence', label: 'Low confidence', tone: 'warn' });
+    }
+    if (metadata.duplicate === true || metadata.duplicate_of || type.includes('duplicate')) {
+        badges.push({ id: 'duplicate', label: 'Duplicate', tone: 'caution' });
+    }
+    if (metadata.conflict === true || metadata.conflicts || type.includes('conflict')) {
+        badges.push({ id: 'conflict', label: 'Conflict', tone: 'danger' });
+    }
+    return badges;
+};
+
 export const selectedDraftNodes = ({ revision = {}, mode = 'append', selectedItemIds = [] } = {}) => {
     const selected = new Set(asArray(selectedItemIds));
     let nodes = asArray(revision.draft_nodes).map(normalizeAIDraftNode);
@@ -279,6 +476,23 @@ export const buildAIDraftPreviewDiff = (
         .join(', ');
     return diff;
 };
+
+export const rejectAIDraftSession = (
+    session = {},
+    { rejectedAt = new Date().toISOString(), rejectedBy = 'user', reason = 'Rejected by user' } = {}
+) => ({
+    ...session,
+    status: 'discarded',
+    accept_history: asArray(session.accept_history),
+    metadata: {
+        ...(session.metadata || {}),
+        ai_draft_session_contract_version: AI_DRAFT_SESSION_CONTRACT_VERSION,
+        canonical: false,
+        rejected_at: rejectedAt,
+        rejected_by: rejectedBy,
+        rejection_reason: reason
+    }
+});
 
 export const acceptAIDraftSession = ({
     session = {},

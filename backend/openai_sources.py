@@ -511,12 +511,14 @@ def _responses_json(
 
     output_text = _extract_output_text(data)
     try:
-        return parse_ai_mindmap_response(output_text)
+        graph = parse_ai_mindmap_response(output_text)
     except GraphSchemaError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"message": "OpenAI source graph failed schema validation.", "errors": exc.errors},
         ) from exc
+    graph.setdefault("metadata", {})["ai_provider"] = _decision_metadata(decision)
+    return graph
 
 
 def _responses_payload(

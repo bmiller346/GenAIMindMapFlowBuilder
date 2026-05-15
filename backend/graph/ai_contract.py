@@ -8,10 +8,34 @@ from .schemas import GraphSchemaError
 
 ALLOWED_AI_NODE_TYPES = {"dataSource", "question", "response", "followUp"}
 AI_GRAPH_CONTRACT_VERSION = "1"
+KNOWLEDGE_GRAPH_RELATIONSHIP_TYPES = {
+    "contains",
+    "references",
+    "depends_on",
+    "duplicates",
+    "conflicts_with",
+    "similar_to",
+    "derived_from",
+    "supports",
+    "contradicts",
+    "implements",
+    "owned_by",
+    "requires_review_by",
+    "related_to",
+}
+KNOWLEDGE_GRAPH_SOURCE_SIGNALS = {
+    "explicit_text",
+    "shared_source",
+    "semantic_similarity",
+    "user_created",
+    "ai_inferred",
+    "external_ref",
+}
 AI_GRAPH_PROMPT_CONTRACT = f"""
 Canonical AI graph contract:
 - Return exactly one JSON object. Do not wrap it in prose or markdown.
-- The top-level object must include nodes, edges, and viewport.
+- The top-level object must include nodes, edges, and viewport when artifact_type is mind_map.
+- Mind map is one supported artifact type, not the only DocMap output. Use registered artifact_type/output_shape instructions when a user requests another artifact.
 - nodes must be an array of objects with non-empty string id, type, data, and position.
 - Valid node types are dataSource, question, response, and followUp.
 - response nodes must include title, question, summ, or summary text.
@@ -19,8 +43,59 @@ Canonical AI graph contract:
 - Do not create duplicate node IDs, duplicate edge IDs, self-loop edges, or edges to missing nodes.
 - source_refs, when present, must be an array. Each source ref needs a non-empty document_id.
 - If a generated node has no grounded source reference, set source_refs to [] and status to needs_review.
+- knowledge_graph relationship_edges must follow the DocMap relationship contract: source_node_id, target_node_id, relationship_type, source_signal, confidence, rationale, source_refs or assumptions, and review_state.
 - Include metadata.ai_graph_contract_version as "{AI_GRAPH_CONTRACT_VERSION}" when possible.
 """
+
+
+def validate_knowledge_graph_relationship_edge(edge: Any, path: str = "relationship_edge") -> dict[str, Any]:
+    errors: list[str] = []
+    if not isinstance(edge, dict):
+        raise GraphSchemaError([f"{path}: must be an object"])
+
+    normalized = deepcopy(edge)
+    for key in ("source_node_id", "target_node_id", "relationship_type", "source_signal", "rationale", "review_state"):
+        _require_stringish(normalized, key, path, errors)
+
+    if normalized.get("relationship_type") not in KNOWLEDGE_GRAPH_RELATIONSHIP_TYPES:
+        errors.append(f"{path}.relationship_type: must be a registered relationship type")
+    if normalized.get("source_signal") not in KNOWLEDGE_GRAPH_SOURCE_SIGNALS:
+        errors.append(f"{path}.source_signal: must be a registered source signal")
+    if normalized.get("source_node_id") == normalized.get("target_node_id"):
+        errors.append(f"{path}: source_node_id and target_node_id must be different")
+
+    confidence = normalized.get("confidence")
+    if not isinstance(confidence, (int, float, str)):
+        errors.append(f"{path}.confidence: must be a number or string")
+    elif isinstance(confidence, (int, float)) and not 0 <= confidence <= 1:
+        errors.append(f"{path}.confidence: must be between 0 and 1")
+
+    source_refs = normalized.get("source_refs", [])
+    assumptions = normalized.get("assumptions", [])
+    if source_refs is None:
+        source_refs = []
+    if assumptions is None:
+        assumptions = []
+    if not isinstance(source_refs, list):
+        errors.append(f"{path}.source_refs: must be a list when provided")
+        source_refs = []
+    if not isinstance(assumptions, list) or not all(isinstance(item, str) for item in assumptions):
+        errors.append(f"{path}.assumptions: must be a list of strings when provided")
+        assumptions = []
+    for index, source_ref in enumerate(source_refs):
+        _validate_source_ref(source_ref, f"{path}.source_refs.{index}", errors)
+    if not source_refs and not assumptions:
+        errors.append(f"{path}: must include source_refs or assumptions")
+
+    if normalized.get("source_signal") in {"ai_inferred", "semantic_similarity"} and normalized.get("review_state") != "needs_review":
+        normalized["review_state"] = "needs_review"
+
+    if errors:
+        raise GraphSchemaError(errors)
+
+    normalized["source_refs"] = source_refs
+    normalized["assumptions"] = assumptions
+    return normalized
 
 
 def parse_ai_mindmap_response(raw_response: str | dict[str, Any]) -> dict[str, Any]:

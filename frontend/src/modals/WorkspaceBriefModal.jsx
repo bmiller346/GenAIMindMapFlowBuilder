@@ -18,6 +18,9 @@ const OUTPUT_GROUPS = [
         label: 'Visual',
         options: [
             { id: 'mind_map', label: 'Mind map' },
+            { id: 'knowledge_graph', label: 'Knowledge graph' },
+            { id: 'connections', label: 'Connections' },
+            { id: 'flow_chart', label: 'Flow chart' },
             { id: 'outline', label: 'Outline' },
             { id: 'table', label: 'Table' }
         ]
@@ -26,7 +29,8 @@ const OUTPUT_GROUPS = [
         label: 'Actionable',
         options: [
             { id: 'tasks', label: 'Tasks' },
-            { id: 'checklist', label: 'Checklist' }
+            { id: 'checklist', label: 'Checklist' },
+            { id: 'chart_data', label: 'Chart data' }
         ]
     },
     {
@@ -538,7 +542,7 @@ const WorkspaceBriefModal = () => {
                     <span>2</span>
                     <div>
                         <h3>What should AI create?</h3>
-                        <p>Choose internal projections now. External handoff happens after review.</p>
+                        <p>Choose generated outputs. Views are just lenses on accepted data after review.</p>
                     </div>
                 </div>
                 <div className="workspace-brief-output-groups">

@@ -11,10 +11,14 @@ const SOURCE_MODE_LABELS = {
 
 const OUTPUT_LABELS = {
     mind_map: 'Mind map',
+    knowledge_graph: 'Knowledge graph',
+    connections: 'Connections',
+    flow_chart: 'Flow chart',
     outline: 'Outline',
     table: 'Table',
     tasks: 'Tasks',
     checklist: 'Checklist',
+    chart_data: 'Chart data',
     sme_questions: 'SME questions',
     missing_info_report: 'Missing info',
     source_coverage_report: 'Coverage report',

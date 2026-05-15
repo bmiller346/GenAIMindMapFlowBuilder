@@ -200,6 +200,7 @@ def _normalize_node(raw_node: dict, parent_id: str | None) -> dict:
     source_refs = _source_refs(data, nested_data)
     monday_selection_input = _monday_selection_input(data, nested_data)
 
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     node = {
         "id": raw_node.get("id", ""),
         "parent_id": parent_id,
@@ -214,6 +215,7 @@ def _normalize_node(raw_node: dict, parent_id: str | None) -> dict:
         "source_refs": source_refs,
         "external_refs": _external_refs(data, nested_data),
         "metadata": {
+            **metadata,
             "react_flow_type": raw_node.get("type", ""),
             "position": raw_node.get("position", {}),
             "component_id": data.get("component_id") or nested_data.get("component_id", ""),

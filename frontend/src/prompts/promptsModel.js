@@ -3,7 +3,9 @@ export const defaultOpenAIModel = 'gpt-5.5';
 
 export const AI_ACTION_SCOPES = {
     node: 'node',
+    nodes: 'nodes',
     branch: 'branch',
+    source: 'source',
     workspace: 'workspace'
 };
 
@@ -34,8 +36,19 @@ export const workspaceAiActions = [
     { id: 'suggest_follow_up_questions', label: 'Suggest follow-up questions' },
     { id: 'find_unsupported_assumptions', label: 'Find unsupported assumptions' },
     { id: 'find_duplicate_overlapping_nodes', label: 'Find duplicate or overlapping nodes' },
+    { id: 'generate_tasks', label: 'Generate tasks' },
+    { id: 'generate_checklist', label: 'Generate checklist' },
+    { id: 'interpret_table_data', label: 'Interpret table/data' },
     { id: 'generate_training_outline', label: 'Generate training outline' },
-    { id: 'export_branch_as_sop_draft', label: 'Export branch as SOP draft' }
+    { id: 'export_branch_as_sop_draft', label: 'Export branch as SOP draft' },
+    { id: 'custom_prompt', label: 'Custom prompt' }
+];
+
+export const sourceAiActions = [
+    { id: 'find_missing_source_support', label: 'Review source coverage' },
+    { id: 'generate_child_nodes', label: 'Draft cited branches' },
+    { id: 'create_sme_questions', label: 'Create source review questions' },
+    { id: 'custom_prompt', label: 'Custom prompt' }
 ];
 
 export const docMapPromptProfiles = [
@@ -44,7 +57,7 @@ export const docMapPromptProfiles = [
         label: 'Standards Extractor',
         group: 'DocMap',
         description: 'Extract requirements, definitions, controls, and cited standard language.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
             'expand_this_node',
             'generate_child_nodes',
@@ -61,7 +74,7 @@ export const docMapPromptProfiles = [
         label: 'Workflow Mapper',
         group: 'DocMap',
         description: 'Turn procedures and branches into workflow steps and dependencies.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
             'expand_this_node',
             'generate_child_nodes',
@@ -77,7 +90,7 @@ export const docMapPromptProfiles = [
         label: 'Training Guide Builder',
         group: 'DocMap',
         description: 'Draft learning outlines, checklists, and training-friendly branch structure.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
             'convert_to_checklist',
             'generate_checklist',
@@ -92,7 +105,7 @@ export const docMapPromptProfiles = [
         label: 'SME Question Generator',
         group: 'DocMap',
         description: 'Create review questions where source support or expert judgment is needed.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
             'ask_follow_up',
             'create_sme_questions',
@@ -107,7 +120,7 @@ export const docMapPromptProfiles = [
         label: 'Task Planner',
         group: 'DocMap',
         description: 'Convert map structure into accountable tasks and checklists.',
-        scopes: ['node', 'branch'],
+        scopes: ['node', 'branch', 'workspace'],
         supportedActions: [
             'generate_tasks',
             'convert_to_checklist',
@@ -121,7 +134,7 @@ export const docMapPromptProfiles = [
         label: 'Data/Table Interpreter',
         group: 'DocMap',
         description: 'Explain table-like node data and surface useful rows, fields, or anomalies.',
-        scopes: ['node', 'branch'],
+        scopes: ['node', 'branch', 'workspace'],
         supportedActions: ['interpret_table_data', 'generate_tasks', 'custom_prompt'],
         preferredActions: ['interpret_table_data', 'generate_child_nodes']
     },
@@ -130,7 +143,7 @@ export const docMapPromptProfiles = [
         label: 'Gap Analyst',
         group: 'DocMap',
         description: 'Find missing, duplicate, unsupported, or contradictory graph content.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
             'find_missing_source_support',
             'find_gaps',
@@ -145,7 +158,7 @@ export const docMapPromptProfiles = [
         label: 'Source Ref Repair',
         group: 'DocMap',
         description: 'Suggest source-reference fixes while keeping node claims intact.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
             'find_missing_source_support',
             'find_unsupported_assumptions',
@@ -158,7 +171,7 @@ export const docMapPromptProfiles = [
         label: 'Integration Readiness Reviewer',
         group: 'DocMap',
         description: 'Review whether branch nodes are ready for downstream handoff.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
             'generate_tasks',
             'find_gaps',
@@ -172,7 +185,7 @@ export const docMapPromptProfiles = [
         label: 'Custom',
         group: 'DocMap',
         description: 'Use your own instruction while preserving preview-first graph changes.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: ['custom_prompt'],
         preferredActions: ['custom_prompt']
     }
@@ -184,7 +197,7 @@ export const legacyPromptProfiles = [
         label: 'Strategic Advisor',
         group: 'General',
         description: 'Legacy general-purpose planning and strategy persona.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: ['ask_follow_up', 'summarize_branch', 'suggest_follow_up_questions', 'custom_prompt'],
         legacy: true
     },
@@ -193,7 +206,7 @@ export const legacyPromptProfiles = [
         label: 'Research Assistant',
         group: 'General',
         description: 'Legacy research, learning, writing, and organization persona.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: ['ask_follow_up', 'summarize_branch', 'suggest_follow_up_questions', 'custom_prompt'],
         legacy: true
     },
@@ -202,7 +215,7 @@ export const legacyPromptProfiles = [
         label: 'Productivity Coach',
         group: 'General',
         description: 'Legacy productivity, focus, and prioritization persona.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: ['generate_tasks', 'convert_to_checklist', 'generate_checklist', 'custom_prompt'],
         legacy: true
     },
@@ -211,7 +224,7 @@ export const legacyPromptProfiles = [
         label: 'Data Interpreter',
         group: 'General',
         description: 'Legacy general data interpretation persona.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: ['interpret_table_data', 'find_gaps', 'custom_prompt'],
         legacy: true
     },
@@ -231,14 +244,25 @@ export const legacyPersonaNames = legacyPromptProfiles.map((profile) => profile.
 export const aiActionProfiles = [...docMapPromptProfiles, ...legacyPromptProfiles];
 
 export const getPromptProfilesForScope = (scope) =>
-    aiActionProfiles.filter((profile) => profile.scopes.includes(scope));
+    aiActionProfiles.filter((profile) =>
+        scope === AI_ACTION_SCOPES.nodes
+            ? profile.scopes.includes(AI_ACTION_SCOPES.branch) ||
+              profile.scopes.includes(AI_ACTION_SCOPES.node)
+            : profile.scopes.includes(scope)
+    );
 
 export const getActionsForScope = (scope) => {
+    if (scope === AI_ACTION_SCOPES.nodes) {
+        return branchAiActions;
+    }
     if (scope === AI_ACTION_SCOPES.branch) {
         return branchAiActions;
     }
     if (scope === AI_ACTION_SCOPES.workspace) {
         return workspaceAiActions;
+    }
+    if (scope === AI_ACTION_SCOPES.source) {
+        return sourceAiActions;
     }
     return nodeAiActions;
 };

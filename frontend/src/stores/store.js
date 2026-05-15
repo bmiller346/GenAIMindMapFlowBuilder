@@ -12,6 +12,12 @@ import {
     mergeAIActionRun,
     normalizeAIActionRuns
 } from '../utils/aiActionRuns';
+import {
+    getLastUsedGraphFilters,
+    getNudgePreferences,
+    saveLastUsedGraphFilters,
+    saveNudgePreferences
+} from '../config/localSettings';
 
 // Sample
 const data = {
@@ -209,6 +215,8 @@ const useStore = create((set, get) => ({
     ],
     edges: [],
     activeView: 'mindmap',
+    activeGraphFilters: getLastUsedGraphFilters(),
+    nudgePreferences: getNudgePreferences(),
     selectedBranchId: undefined,
     inspectorNodeId: undefined,
     workspaceBrief: {
@@ -284,6 +292,12 @@ const useStore = create((set, get) => ({
     },
     setActiveView: (activeView) => {
         set({ activeView });
+    },
+    setActiveGraphFilters: (filters = []) => {
+        set({ activeGraphFilters: saveLastUsedGraphFilters(filters) });
+    },
+    setNudgePreferences: (preferences = {}) => {
+        set({ nudgePreferences: saveNudgePreferences(preferences) });
     },
     setSelectedBranchId: (selectedBranchId) => {
         set({ selectedBranchId });

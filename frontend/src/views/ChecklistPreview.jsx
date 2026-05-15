@@ -2,6 +2,10 @@
 import { useMemo, useState } from 'react';
 import { getChecklistPreviewRows } from './graphProjection';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
+import {
+    makePreviewDiffSummary,
+    PreviewDiffSummary
+} from './previewDiffSummary';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
 
@@ -53,7 +57,8 @@ const ChecklistPreview = ({
     setNodes,
     setActiveView,
     generatedPreview,
-    onRejectGeneratedPreview
+    onRejectGeneratedPreview,
+    onAskAi
 }) => {
     const previewRows = useMemo(
         () => mergeGeneratedChecklistPreviewRows(
@@ -68,6 +73,17 @@ const ChecklistPreview = ({
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
+    const diffSummary = useMemo(
+        () =>
+            makePreviewDiffSummary({
+                rows: previewRows,
+                activeIds,
+                artifactLabel: 'checklist artifact',
+                updatedFields: ['checklist', 'review state'],
+                mode: generatedPreview ? 'generated' : 'local'
+            }),
+        [activeIds, generatedPreview, previewRows]
+    );
     const addActivity = useActivityStore((s) => s.addActivity);
     const flowId = flowStore((s) => s.flow_id);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
@@ -177,9 +193,15 @@ const ChecklistPreview = ({
         <div className="local-checklist-preview">
             <div className="local-task-preview-header">
                 <div>
-                    <strong>Branch-to-checklist preview</strong>
-                    <span>{previewRows.length} candidate checklist items</span>
+                    <strong>Create checklist from this branch</strong>
+                    <span>
+                        {generatedPreview ? 'AI-generated output' : 'Locally projected output'} |{' '}
+                        {previewRows.length} candidate checklist items
+                    </span>
                 </div>
+                <span className="output-state-pill">
+                    {generatedPreview ? 'AI-generated' : 'Locally projected'}
+                </span>
                 <button type="button" onClick={acceptChecklistPreview}>
                     Accept selected
                 </button>
@@ -189,6 +211,7 @@ const ChecklistPreview = ({
                     </button>
                 ) : null}
             </div>
+            <PreviewDiffSummary changes={diffSummary} />
             <div className="local-table-wrap">
                 <table className="local-projection-table">
                     <thead>
@@ -231,9 +254,19 @@ const ChecklistPreview = ({
                 </table>
             </div>
             {previewRows.length === 0 ? (
-                <p className="local-table-empty">
-                    No checklist candidates in this branch.
-                </p>
+                <div className="local-table-empty local-empty-actions">
+                    <strong>No checklist candidates in this branch.</strong>
+                    <span>
+                        Project now found no checklist rows. Ask AI to infer checklist items,
+                        or review gaps before generating.
+                    </span>
+                    <button type="button" onClick={onAskAi} disabled={!flowId}>
+                        Ask AI to create checklist
+                    </button>
+                    <button type="button" onClick={() => setActiveView('gaps')}>
+                        Review missing fields
+                    </button>
+                </div>
             ) : null}
         </div>
     );

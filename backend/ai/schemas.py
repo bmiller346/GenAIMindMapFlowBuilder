@@ -7,6 +7,7 @@ from typing import Any
 AI_HELPER_PREVIEW_CONTRACT_VERSION = "1"
 AI_ACTION_PREVIEW_CONTRACT_VERSION = "1"
 AI_DRAFT_SESSION_CONTRACT_VERSION = "1"
+ARTIFACT_REGISTRY_VERSION = "1"
 AIDRAFT_SCOPE_TYPES = {"workspace", "source", "branch", "node", "nodes"}
 AIDRAFT_ACCEPT_MODES = {
     "append",
@@ -24,15 +25,268 @@ AI_DRAFT_MODEL_POLICIES = {
 }
 AI_DRAFT_OUTPUT_SHAPES = {
     "graph_draft",
+    "mind_map",
+    "knowledge_graph",
+    "flow_chart",
     "patch_diff",
     "source_coverage",
+    "source_repair",
     "tasks_checklist",
+    "tasks",
+    "checklist",
     "outline",
     "table",
+    "chart",
     "kanban",
     "presentation_sections",
     "review_annotations",
+    "sme_questions",
+    "missing_info_report",
+    "implementation_handoff_package",
 }
+
+KNOWLEDGE_GRAPH_RELATIONSHIP_TYPES = {
+    "contains",
+    "references",
+    "depends_on",
+    "duplicates",
+    "conflicts_with",
+    "similar_to",
+    "derived_from",
+    "supports",
+    "contradicts",
+    "implements",
+    "owned_by",
+    "requires_review_by",
+    "related_to",
+}
+
+KNOWLEDGE_GRAPH_SOURCE_SIGNALS = {
+    "explicit_text",
+    "shared_source",
+    "semantic_similarity",
+    "user_created",
+    "ai_inferred",
+    "external_ref",
+}
+
+
+def _artifact_definition(
+    artifact_type: str,
+    *,
+    requires: list[str],
+    optional: list[str],
+    generated_schema: dict[str, Any],
+    projection_requirements: list[str],
+    supported_views: list[str],
+    preview_component: str,
+    accept_behavior: str,
+    export_behavior: str,
+    validation_rules: list[str],
+) -> dict[str, Any]:
+    return {
+        "artifact_type": artifact_type,
+        "requires": requires,
+        "optional": optional,
+        "generated_schema": generated_schema,
+        "projection_requirements": projection_requirements,
+        "supported_views": supported_views,
+        "preview_component": preview_component,
+        "accept_behavior": accept_behavior,
+        "export_behavior": export_behavior,
+        "validation_rules": validation_rules,
+    }
+
+
+GENERIC_ARTIFACT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": ["id", "artifact_type", "status", "data", "provenance", "validation"],
+    "properties": {
+        "id": {"type": "string"},
+        "artifact_type": {"type": "string"},
+        "title": {"type": "string"},
+        "status": {"type": "string"},
+        "data": {"type": "object"},
+        "source_refs": {"type": "array"},
+        "assumptions": {"type": "array"},
+        "provenance": {"type": "object"},
+        "validation": {"type": "object"},
+    },
+}
+
+
+ARTIFACT_REGISTRY: dict[str, dict[str, Any]] = {
+    "mind_map": _artifact_definition(
+        "mind_map",
+        requires=["nodes"],
+        optional=["edges", "source_refs", "workspace_brief"],
+        generated_schema={"nodes": "React Flow draft nodes", "edges": "hierarchical draft edges"},
+        projection_requirements=["nodes have ids and titles"],
+        supported_views=["map", "outline"],
+        preview_component="MindMapPreview",
+        accept_behavior="append_or_merge_nodes_and_edges_after_preview_acceptance",
+        export_behavior="react_flow_json, mermaid, opml, markdown",
+        validation_rules=["draft_nodes_valid", "unsourced_nodes_marked_needs_review"],
+    ),
+    "knowledge_graph": _artifact_definition(
+        "knowledge_graph",
+        requires=["nodes"],
+        optional=["source_refs", "entities", "tags", "explicit_edges", "semantic_similarity"],
+        generated_schema={
+            "relationship_edges": {
+                "required": [
+                    "source_node_id",
+                    "target_node_id",
+                    "relationship_type",
+                    "source_signal",
+                    "confidence",
+                    "rationale",
+                    "review_state",
+                ],
+                "requires_one_of": ["source_refs", "assumptions"],
+            },
+            "clusters": "optional grouped node ids with rationale",
+        },
+        projection_requirements=["relationship_edges are typed and source-signal backed"],
+        supported_views=["knowledge_graph", "connections"],
+        preview_component="KnowledgeGraphPreview",
+        accept_behavior="append_relationship_edges_and_metadata_after_preview_acceptance",
+        export_behavior="graph_json, markdown_relationship_report",
+        validation_rules=[
+            "relationship_edge_contract",
+            "edge_has_source_refs_or_assumptions",
+            "inferred_edges_marked_needs_review",
+        ],
+    ),
+    "flow_chart": _artifact_definition(
+        "flow_chart",
+        requires=["nodes"],
+        optional=["sequence_edges", "decision_points", "dependencies", "handoffs", "source_refs"],
+        generated_schema={"steps": "process nodes", "decisions": "decision nodes", "dependencies": "typed edges"},
+        projection_requirements=["process, decision, dependency, or handoff structure exists"],
+        supported_views=["flow_chart"],
+        preview_component="FlowChartPreview",
+        accept_behavior="append_workflow_nodes_edges_or_attach_artifact_after_preview_acceptance",
+        export_behavior="mermaid_flowchart, markdown",
+        validation_rules=["flow_steps_have_ids", "decisions_identify_paths", "inferred_steps_marked_needs_review"],
+    ),
+    "table": _artifact_definition(
+        "table",
+        requires=["nodes"],
+        optional=["columns", "source_refs", "extracted_rows"],
+        generated_schema={"columns": "column definitions", "rows": "source-backed values"},
+        projection_requirements=["columns are defined and rows reference nodes or sources"],
+        supported_views=["table"],
+        preview_component="TableArtifactPreview",
+        accept_behavior="attach_table_artifact_after_preview_acceptance",
+        export_behavior="csv, markdown_table, xlsx",
+        validation_rules=["columns_have_keys", "rows_match_columns", "unsourced_cells_marked_needs_review"],
+    ),
+    "chart": _artifact_definition(
+        "chart",
+        requires=["structured_or_extracted_data"],
+        optional=["nodes", "source_refs", "chart_goal"],
+        generated_schema={"chart_spec": "chart type, encodings, labels", "data_rows": "source-backed chart data"},
+        projection_requirements=["chart_spec and source/extracted data rows are present"],
+        supported_views=["chart"],
+        preview_component="ChartArtifactPreview",
+        accept_behavior="attach_chart_artifact_after_extracted_data_preview_acceptance",
+        export_behavior="png, svg, csv_data, markdown_summary",
+        validation_rules=["chart_spec_present", "data_rows_present", "chart_data_has_source_or_needs_review"],
+    ),
+    "tasks": _artifact_definition(
+        "tasks",
+        requires=["nodes"],
+        optional=["owners", "due_dates", "priority", "source_refs"],
+        generated_schema={"tasks": "task candidates with owner/status/priority fields"},
+        projection_requirements=["task-like nodes or task candidates exist"],
+        supported_views=["tasks", "table"],
+        preview_component="TasksPreview",
+        accept_behavior="append_or_update_task_nodes_after_preview_acceptance",
+        export_behavior="csv_tasks, monday_payload, markdown",
+        validation_rules=["task_has_title", "missing_owner_due_date_marked_needs_review"],
+    ),
+    "checklist": _artifact_definition(
+        "checklist",
+        requires=["nodes"],
+        optional=["order", "owners", "due_dates", "source_refs"],
+        generated_schema={"items": "ordered checklist items with review flags"},
+        projection_requirements=["ordered checklist item labels exist"],
+        supported_views=["checklist"],
+        preview_component="ChecklistPreview",
+        accept_behavior="attach_checklist_projection_or_task_nodes_after_preview_acceptance",
+        export_behavior="markdown_checklist, csv",
+        validation_rules=["checklist_items_have_labels", "review_required_when_unsourced"],
+    ),
+    "sme_questions": _artifact_definition(
+        "sme_questions",
+        requires=["nodes"],
+        optional=["source_refs", "review_rules", "domain_context"],
+        generated_schema={"questions": "SME questions tied to nodes or sources"},
+        projection_requirements=["unresolved review reasons exist"],
+        supported_views=["sme_questions", "review"],
+        preview_component="SmeQuestionsPreview",
+        accept_behavior="attach_review_artifact_after_preview_acceptance",
+        export_behavior="markdown, csv",
+        validation_rules=["question_has_review_target", "unsourced_questions_marked_needs_review"],
+    ),
+    "missing_info_report": _artifact_definition(
+        "missing_info_report",
+        requires=["nodes"],
+        optional=["source_refs", "tasks", "review_policy"],
+        generated_schema={"gaps": "missing source, metadata, task, or decision gaps"},
+        projection_requirements=["review gaps can be tied to nodes or sources"],
+        supported_views=["gaps", "review"],
+        preview_component="MissingInfoReportPreview",
+        accept_behavior="attach_review_artifact_after_preview_acceptance",
+        export_behavior="markdown_report, csv",
+        validation_rules=["gap_has_reason", "gap_has_target_or_assumption"],
+    ),
+    "source_coverage": _artifact_definition(
+        "source_coverage",
+        requires=["nodes"],
+        optional=["source_library", "source_refs"],
+        generated_schema={"coverage_items": "covered, incomplete, and uncited source findings"},
+        projection_requirements=["source refs or source library entries are available"],
+        supported_views=["source_coverage", "sources"],
+        preview_component="SourceCoveragePreview",
+        accept_behavior="attach_source_review_artifact_after_preview_acceptance",
+        export_behavior="markdown_report, csv",
+        validation_rules=["coverage_item_has_status", "source_gap_has_document_or_assumption"],
+    ),
+    "source_repair": _artifact_definition(
+        "source_repair",
+        requires=["nodes"],
+        optional=["source_library", "source_refs", "nearby_citations"],
+        generated_schema={"repairs": "suggested source refs or source lookup requests"},
+        projection_requirements=["source gaps are present"],
+        supported_views=["source_repair", "sources"],
+        preview_component="SourceRepairPreview",
+        accept_behavior="apply_source_ref_repairs_after_preview_acceptance",
+        export_behavior="markdown_report",
+        validation_rules=["repair_has_target_node", "suggested_source_ref_or_lookup_assumption"],
+    ),
+    "implementation_handoff_package": _artifact_definition(
+        "implementation_handoff_package",
+        requires=["accepted_nodes"],
+        optional=["tasks", "checklist", "source_refs", "sme_questions", "risks", "monday_candidates", "miro_candidates"],
+        generated_schema={
+            "summary": "implementation-ready summary",
+            "tasks": "execution tasks",
+            "checklist": "review checklist",
+            "risks": "open risks",
+            "recommended_next_actions": "ordered action list",
+        },
+        projection_requirements=["accepted structure exists with review status and provenance"],
+        supported_views=["handoff", "tasks", "checklist"],
+        preview_component="ImplementationHandoffPackagePreview",
+        accept_behavior="attach_handoff_artifact_after_preview_acceptance",
+        export_behavior="markdown_package, monday_payload_candidates, miro_payload_candidates",
+        validation_rules=["handoff_preserves_scope", "handoff_lists_assumptions", "handoff_references_sources"],
+    ),
+}
+
+REGISTERED_ARTIFACT_TYPES = set(ARTIFACT_REGISTRY)
 
 
 AI_DRAFT_REVISION_OUTPUT_SCHEMA: dict[str, Any] = {
@@ -77,9 +331,13 @@ AI_DRAFT_REVISION_OUTPUT_SCHEMA: dict[str, Any] = {
         },
         "draft_annotations": {"type": "array", "items": {"type": "object"}},
         "draft_items": {"type": "array", "items": {"type": "object"}},
+        "generated_artifacts": {"type": "array", "items": GENERIC_ARTIFACT_SCHEMA},
         "source_coverage": {"type": "array", "items": {"type": "object"}},
         "tasks": {"type": "array", "items": {"type": "object"}},
         "checklist": {"type": "array", "items": {"type": "object"}},
+        "flow_chart": {"type": "object"},
+        "knowledge_graph": {"type": "object"},
+        "chart": {"type": "object"},
         "outline": {"type": "array", "items": {"type": "object"}},
         "table": {"type": "array", "items": {"type": "object"}},
         "kanban": {"type": "array", "items": {"type": "object"}},
@@ -96,9 +354,13 @@ AI_DRAFT_REVISION_OUTPUT_SCHEMA: dict[str, Any] = {
         "draft_edges",
         "draft_annotations",
         "draft_items",
+        "generated_artifacts",
         "source_coverage",
         "tasks",
         "checklist",
+        "flow_chart",
+        "knowledge_graph",
+        "chart",
         "outline",
         "table",
         "kanban",
@@ -149,9 +411,24 @@ Canonical Ask AI draft-session contract:
 - revisions is an ordered list of AIDraftRevision objects. Each revision includes revision_id, session_id, prompt, draft_items, draft_nodes, draft_edges, draft_annotations, preview_diff, validation_report, created_at, model, and metadata.
 - draft_items is a normalized selection surface. Each item includes id, item_type, title, content, source_refs, assumptions, status, selected, and metadata.
 - draft_nodes and draft_edges are proposal state only. They must not be treated as canonical graph state until explicit accept.
+- generated_artifacts is a preview-only array of registered artifact records. artifact_type must be in the Artifact Registry.
+- Each generated artifact must include provenance with generated_by, prompt_profile, ai_role, input_scope, input_source_refs, generated_at, model_provider, model, confidence_summary, assumptions, and validation_status.
 - Accept modes are append, replace, merge, selected, cited_only, and notes_only.
 - Acceptance must produce a preview diff with added_nodes, added_edges, updated_nodes, review_outputs, needs_review_repairs, and accepted_item_ids.
 - Accepted graph changes must run canonical graph validation before persistence.
 - Accepted generated nodes without source_refs must be persisted as needs_review.
 - Include metadata.ai_draft_session_contract_version as "{AI_DRAFT_SESSION_CONTRACT_VERSION}".
+"""
+
+
+ARTIFACT_REGISTRY_CONTRACT = f"""
+Canonical DocMap Artifact Registry contract:
+- Registered artifact types are: {", ".join(sorted(REGISTERED_ARTIFACT_TYPES))}.
+- Do not emit unregistered artifact_type values.
+- Every artifact type declares required inputs, optional inputs, generated schema, projection requirements, supported views, preview component, accept behavior, export behavior, and validation rules.
+- Visual artifacts must reference canonical nodes, relationship edges, source chunks, or accepted artifact data unless explicitly marked draft or export_only.
+- Charts require chart_spec and source-backed or extracted data rows before rendering.
+- Relationship edges for knowledge_graph artifacts must include source_node_id, target_node_id, relationship_type, source_signal, confidence, rationale, source_refs or assumptions, and review_state.
+- Unsupported, inferred, or unsourced items must be marked needs_review.
+- Include metadata.artifact_registry_version as "{ARTIFACT_REGISTRY_VERSION}" when returning registry metadata.
 """

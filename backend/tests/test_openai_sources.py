@@ -81,6 +81,8 @@ def test_responses_json_posts_to_openai_responses_with_web_search(monkeypatch):
     )
 
     assert graph["nodes"][0]["data"]["content"] == "source"
+    assert graph["metadata"]["ai_provider"]["provider"] == "responses"
+    assert graph["metadata"]["ai_provider"]["model"] == "gpt-5.4"
     assert requests[0][1] == "test-key"
     assert requests[0][0]["model"] == "gpt-5.4"
     assert requests[0][0]["tools"] == [{"type": "web_search"}]
@@ -88,6 +90,27 @@ def test_responses_json_posts_to_openai_responses_with_web_search(monkeypatch):
     prompt_text = requests[0][0]["input"][0]["content"][0]["text"]
     assert "Canonical AI graph contract:" in prompt_text
     assert 'metadata.ai_graph_contract_version as "1"' in prompt_text
+
+
+def test_web_search_uses_model_policy_when_model_is_not_explicit(monkeypatch):
+    requests = []
+
+    monkeypatch.setattr(openai_sources, "_require_openai_api_key", lambda: "test-key")
+
+    def fake_post(payload, api_key):
+        requests.append((payload, api_key))
+        return {"output_text": json.dumps(VALID_GRAPH)}
+
+    monkeypatch.setattr(openai_sources, "_post_openai_json", fake_post)
+
+    graph = openai_sources.generate_web_mindmap(
+        url="https://example.com/docs",
+        flow_id="flow-1",
+    )
+
+    assert requests[0][0]["model"] == "gpt-5.5"
+    assert graph["metadata"]["ai_provider"]["model_tier"] == "deep"
+    assert graph["metadata"]["ai_provider"]["tool_policy"] == "responses_tools"
 
 
 def test_extract_output_text_accepts_nested_responses_output():

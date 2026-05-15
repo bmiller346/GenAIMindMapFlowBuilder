@@ -6,7 +6,30 @@ export const SETTINGS_KEYS = {
     mondayApiToken: 'docmap.mondayApiToken',
     credentialRetentionDays: 'docmap.credentialRetentionDays',
     credentialExpiresAt: 'docmap.credentialExpiresAt',
-    theme: 'docmap.theme'
+    theme: 'docmap.theme',
+    nudgePreferences: 'docmap.nudgePreferences',
+    dismissedNudges: 'docmap.dismissedNudges',
+    lastUsedGraphFilters: 'docmap.lastUsedGraphFilters'
+};
+
+export const NUDGE_CATEGORY_KEYS = [
+    'canvas',
+    'review',
+    'sources',
+    'tasks',
+    'ai_outputs',
+    'integrations',
+    'knowledge_graph'
+];
+
+export const NUDGE_DENSITY_OPTIONS = ['quiet', 'normal', 'assertive'];
+
+export const DEFAULT_NUDGE_PREFERENCES = {
+    enabled: true,
+    density: 'normal',
+    categories: Object.fromEntries(
+        NUDGE_CATEGORY_KEYS.map((category) => [category, true])
+    )
 };
 
 const CREDENTIAL_LOCAL_STORAGE_KEYS = [
@@ -105,6 +128,123 @@ export const setLocalSetting = (key, value) => {
     } catch {
         // Local settings are a convenience layer; requests still work without them.
     }
+};
+
+const getJsonLocalSetting = (key, fallback) => {
+    const rawValue = getLocalSetting(key);
+    if (!rawValue) {
+        return fallback;
+    }
+
+    try {
+        return JSON.parse(rawValue);
+    } catch {
+        return fallback;
+    }
+};
+
+const setJsonLocalSetting = (key, value) => {
+    setLocalSetting(key, JSON.stringify(value));
+};
+
+export const normalizeNudgePreferences = (preferences = {}) => {
+    const legacyCategoryValues = Object.fromEntries(
+        NUDGE_CATEGORY_KEYS.map((category) => [category, preferences[category]])
+    );
+    const categoryValues =
+        preferences.categories && typeof preferences.categories === 'object'
+            ? preferences.categories
+            : legacyCategoryValues;
+    const categories = Object.fromEntries(
+        NUDGE_CATEGORY_KEYS.map((category) => [
+            category,
+            categoryValues[category] === undefined
+                ? DEFAULT_NUDGE_PREFERENCES.categories[category]
+                : Boolean(categoryValues[category])
+        ])
+    );
+    const density = NUDGE_DENSITY_OPTIONS.includes(preferences.density)
+        ? preferences.density
+        : DEFAULT_NUDGE_PREFERENCES.density;
+
+    return {
+        enabled:
+            preferences.enabled === undefined
+                ? DEFAULT_NUDGE_PREFERENCES.enabled
+                : Boolean(preferences.enabled),
+        density,
+        categories
+    };
+};
+
+export const getNudgePreferences = () =>
+    normalizeNudgePreferences(
+        getJsonLocalSetting(
+            SETTINGS_KEYS.nudgePreferences,
+            DEFAULT_NUDGE_PREFERENCES
+        )
+    );
+
+export const saveNudgePreferences = (preferences) => {
+    const normalized = normalizeNudgePreferences(preferences);
+    setJsonLocalSetting(SETTINGS_KEYS.nudgePreferences, normalized);
+    return normalized;
+};
+
+export const isNudgeCategoryEnabled = (preferences, category) => {
+    const normalized = normalizeNudgePreferences(preferences);
+    return Boolean(normalized.enabled && normalized.categories[category]);
+};
+
+const normalizeDismissedNudges = (dismissed = []) => {
+    if (!Array.isArray(dismissed)) {
+        return [];
+    }
+
+    return Array.from(
+        new Set(dismissed.map((key) => String(key || '').trim()).filter(Boolean))
+    );
+};
+
+export const getDismissedNudges = () =>
+    normalizeDismissedNudges(getJsonLocalSetting(SETTINGS_KEYS.dismissedNudges, []));
+
+export const saveDismissedNudges = (dismissed = []) => {
+    const normalized = normalizeDismissedNudges(dismissed);
+    setJsonLocalSetting(SETTINGS_KEYS.dismissedNudges, normalized);
+    return normalized;
+};
+
+export const dismissNudge = (dismissKey) => {
+    const normalizedKey = String(dismissKey || '').trim();
+    if (!normalizedKey) {
+        return getDismissedNudges();
+    }
+
+    return saveDismissedNudges([...getDismissedNudges(), normalizedKey]);
+};
+
+const normalizeGraphFilters = (filters = []) => {
+    if (Array.isArray(filters)) {
+        return filters.filter(Boolean).map(String);
+    }
+    if (filters && typeof filters === 'object') {
+        return Object.entries(filters)
+            .filter(([, enabled]) => Boolean(enabled))
+            .map(([id]) => id);
+    }
+    return [];
+};
+
+export const getLastUsedGraphFilters = () =>
+    normalizeGraphFilters(
+        getJsonLocalSetting(SETTINGS_KEYS.lastUsedGraphFilters, [])
+    );
+
+export const saveLastUsedGraphFilters = (filters) => {
+    const normalized = normalizeGraphFilters(filters);
+    setJsonLocalSetting(SETTINGS_KEYS.lastUsedGraphFilters, normalized);
+    return normalized;
 };
 
 const removeRendererCredentialCache = () => {

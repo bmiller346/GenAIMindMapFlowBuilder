@@ -38,6 +38,33 @@ const hasSourceRefs = (data, nestedData) => {
     return Array.isArray(refs) && refs.length > 0;
 };
 
+const getListValue = (data, nestedData, keys) => {
+    const value = firstValue(data, nestedData, keys);
+    if (Array.isArray(value)) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        return value.split(',').map((item) => item.trim()).filter(Boolean);
+    }
+    return [];
+};
+
+const getGraphData = (data, nestedData) => data?.graph ?? nestedData?.graph;
+
+const hasChartData = (data, nestedData) => {
+    const rows = data?.df ?? nestedData?.df;
+    const graph = getGraphData(data, nestedData);
+
+    if (Array.isArray(rows) && rows.length > 0) {
+        return true;
+    }
+    if (graph && typeof graph === 'object' && Array.isArray(graph.data)) {
+        return graph.data.length > 0;
+    }
+
+    return false;
+};
+
 const formatConfidence = (value) => {
     if (value === '' || value === undefined || value === null) {
         return '';
@@ -60,7 +87,19 @@ const NodeMetadataBadges = ({ data }) => {
     );
     const sourceMode = firstValue(data, nestedData, ['source_mode']);
     const assumption = firstValue(data, nestedData, ['assumption']);
+    const duplicate = firstValue(data, nestedData, ['duplicate', 'duplicate_of']);
+    const conflict = firstValue(data, nestedData, ['conflict', 'conflicts']);
+    const owner = firstValue(data, nestedData, ['owner_id', 'assignee', 'owner']);
+    const desiredOutput = firstValue(data, nestedData, ['desired_output', 'output_type']);
     const sourceBacked = hasSourceRefs(data, nestedData);
+    const isTaskLike = ['task', 'procedure', 'workflow', 'requirement'].includes(nodeType);
+    const hasConnectionCue =
+        sourceBacked ||
+        getListValue(data, nestedData, ['tags']).length > 0 ||
+        getListValue(data, nestedData, ['entities']).length > 0;
+    const needsChartData =
+        ['chart', 'rendered_chart', 'chart_data'].includes(desiredOutput) &&
+        !hasChartData(data, nestedData);
     const needsReview = status === 'needs_review' || assumption || !sourceBacked;
     const indicators = [
         !sourceBacked
@@ -75,6 +114,27 @@ const NodeMetadataBadges = ({ data }) => {
                   id: 'needs-review',
                   label: 'Needs review',
                   className: 'node-review-indicator-review'
+              }
+            : undefined,
+        isTaskLike && !owner
+            ? {
+                  id: 'missing-owner',
+                  label: 'Missing owner',
+                  className: 'node-review-indicator-owner'
+              }
+            : undefined,
+        hasConnectionCue
+            ? {
+                  id: 'connection-opportunity',
+                  label: 'Connection cue',
+                  className: 'node-review-indicator-connection'
+              }
+            : undefined,
+        needsChartData
+            ? {
+                  id: 'chart-data-needed',
+                  label: 'Chart data needed',
+                  className: 'node-review-indicator-chart'
               }
             : undefined,
         assumption
@@ -128,6 +188,31 @@ const NodeMetadataBadges = ({ data }) => {
                 {assumption ? (
                     <span className="node-metadata-badge node-metadata-badge-missing-source">
                         Assumption
+                    </span>
+                ) : null}
+                {duplicate ? (
+                    <span className="node-metadata-badge node-metadata-badge-missing-source">
+                        Duplicate
+                    </span>
+                ) : null}
+                {conflict ? (
+                    <span className="node-metadata-badge node-metadata-badge-missing-source">
+                        Conflict
+                    </span>
+                ) : null}
+                {isTaskLike && !owner ? (
+                    <span className="node-metadata-badge node-metadata-badge-owner">
+                        Missing owner
+                    </span>
+                ) : null}
+                {hasConnectionCue ? (
+                    <span className="node-metadata-badge node-metadata-badge-connection">
+                        Connection cue
+                    </span>
+                ) : null}
+                {needsChartData ? (
+                    <span className="node-metadata-badge node-metadata-badge-chart">
+                        Chart data needed
                     </span>
                 ) : null}
                 <span

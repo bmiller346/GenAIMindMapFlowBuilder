@@ -6,6 +6,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ai.providers import FixtureDocMapAIProvider
 from ai_helpers import (
+    accept_ai_draft_revision,
+    add_source_to_ai_draft_session,
+    build_ai_draft_source_context,
     classify_ai_draft_intent,
     generate_ai_draft_session_with_provider,
     revise_ai_draft_session_with_provider,
@@ -27,6 +30,52 @@ def _graph():
             }
         ],
         "edges": [],
+    }
+
+
+def _graph_with_source_library():
+    graph = _graph()
+    graph["source_library"] = {
+        "documents": [
+            {
+                "id": "doc-general-mills",
+                "filename": "general-mills.txt",
+                "coverage": {"cited_chunks": 0, "total_chunks": 1},
+                "chunks": [
+                    {
+                        "id": "chunk-general-mills",
+                        "document_id": "doc-general-mills",
+                        "page": 1,
+                        "heading": "Manufacturers",
+                        "snippet": "General Mills makes Cheerios cereal.",
+                        "cited_by_count": 0,
+                    }
+                ],
+            }
+        ],
+        "failures": [],
+    }
+    return graph
+
+
+GENERAL_MILLS_REF = {
+    "document_id": "doc-general-mills",
+    "chunk_id": "chunk-general-mills",
+    "page": 1,
+    "section": "Manufacturers",
+    "quote_snippet": "General Mills makes Cheerios cereal.",
+    "confidence": "high",
+}
+
+
+def _general_mills_chunk():
+    return {
+        "id": "chunk-general-mills",
+        "document_id": "doc-general-mills",
+        "page": 1,
+        "heading": "Manufacturers",
+        "text": "General Mills makes Cheerios cereal.",
+        "source_ref": GENERAL_MILLS_REF,
     }
 
 
@@ -141,6 +190,79 @@ def _cereal_response(request):
     )
 
 
+def _cited_general_mills_response(request):
+    content = request.input[0]["content"]
+    ref = GENERAL_MILLS_REF if "doc-general-mills" in content else {}
+    return json.dumps(
+        {
+            "intent": "reconcile_source_context",
+            "output_shape": "graph_draft",
+            "summary": "Reconciled General Mills against supplied source.",
+            "draft_nodes": [
+                {
+                    "id": "draft_general_mills",
+                    "title": "General Mills",
+                    "summary": "General Mills is a cereal manufacturer.",
+                    "node_type": "category",
+                    "parent_id": "root",
+                    "status": "ai_generated",
+                    "source_refs": [ref] if ref else [],
+                    "metadata": {},
+                },
+                {
+                    "id": "draft_cheerios",
+                    "title": "Cheerios",
+                    "summary": "Cheerios is a cereal made by General Mills.",
+                    "node_type": "concept",
+                    "parent_id": "draft_general_mills",
+                    "status": "ai_generated",
+                    "source_refs": [ref] if ref else [],
+                    "metadata": {},
+                },
+                {
+                    "id": "draft_unsupported_claim",
+                    "title": "Unsupported claim",
+                    "summary": "This claim has no supplied citation.",
+                    "node_type": "concept",
+                    "parent_id": "draft_general_mills",
+                    "status": "ai_generated",
+                    "source_refs": [],
+                    "metadata": {},
+                },
+            ],
+            "draft_edges": [
+                {
+                    "id": "draft_edge_root_general_mills",
+                    "source_node_id": "root",
+                    "target_node_id": "draft_general_mills",
+                },
+                {
+                    "id": "draft_edge_general_mills_cheerios",
+                    "source_node_id": "draft_general_mills",
+                    "target_node_id": "draft_cheerios",
+                },
+                {
+                    "id": "draft_edge_general_mills_unsupported",
+                    "source_node_id": "draft_general_mills",
+                    "target_node_id": "draft_unsupported_claim",
+                },
+            ],
+            "draft_annotations": [],
+            "draft_items": [],
+            "source_coverage": [],
+            "tasks": [],
+            "checklist": [],
+            "outline": [],
+            "table": [],
+            "kanban": [],
+            "presentation_sections": [],
+            "review_annotations": [],
+            "assumptions": ["Unsupported claim remains uncited and needs review."],
+            "source_refs": [ref] if ref else [],
+        }
+    )
+
+
 def test_create_cereal_mind_map_returns_structured_draft_branches():
     provider = FixtureDocMapAIProvider(response_factory=_cereal_response)
 
@@ -211,3 +333,64 @@ def test_intent_classification_maps_output_shapes_and_policy():
     assert table["model_policy"] == "balanced"
     assert coverage["output_shape"] == "source_coverage"
     assert coverage["model_policy"] == "deep_review"
+
+
+def test_source_context_includes_scope_library_gaps_chunks_and_draft_state():
+    session = generate_ai_draft_session_with_provider(
+        _graph(),
+        workspace_id="workspace-cereal",
+        prompt="create a mind map for cereals by manufacturer",
+        scope={"type": "node", "node_id": "root"},
+        provider=FixtureDocMapAIProvider(response_factory=_cereal_response),
+    )
+
+    context = build_ai_draft_source_context(
+        _graph_with_source_library(),
+        scope={"type": "source", "source_id": "doc-general-mills"},
+        source_chunks=[_general_mills_chunk()],
+        prior_session=session,
+    )
+
+    assert context["scope"] == {"type": "source", "source_id": "doc-general-mills"}
+    assert context["source_refs"][0]["document_id"] == "doc-general-mills"
+    assert context["source_library_gaps"]["documents_with_uncited_chunks"][0]["uncited_chunks"] == 1
+    assert context["draft_session_state"]["session_id"] == session["session_id"]
+    assert context["draft_session_state"]["latest_revision"]["draft_nodes"]
+
+
+def test_add_source_mid_session_reconciles_and_preserves_citations_after_accept():
+    session = generate_ai_draft_session_with_provider(
+        _graph(),
+        workspace_id="workspace-cereal",
+        prompt="create a mind map for cereals by manufacturer",
+        scope={"type": "node", "node_id": "root"},
+        provider=FixtureDocMapAIProvider(response_factory=_cereal_response),
+    )
+    provider = FixtureDocMapAIProvider(response_factory=_cited_general_mills_response)
+
+    reconciled = add_source_to_ai_draft_session(
+        session,
+        _graph_with_source_library(),
+        source_chunks=[_general_mills_chunk()],
+        provider=provider,
+    )
+
+    latest = reconciled["revisions"][-1]
+    cited = {node["id"]: node for node in latest["draft_nodes"]}
+    assert cited["draft_general_mills"]["source_refs"] == [GENERAL_MILLS_REF]
+    assert cited["draft_cheerios"]["source_refs"] == [GENERAL_MILLS_REF]
+    assert cited["draft_unsupported_claim"]["source_refs"] == []
+    assert reconciled["metadata"]["last_added_source_refs"] == [GENERAL_MILLS_REF]
+    assert "Source context" in provider.requests[0].input[0]["content"]
+
+    accepted_graph, _, _ = accept_ai_draft_revision(
+        _graph(),
+        reconciled,
+        revision_id=latest["revision_id"],
+    )
+
+    accepted_by_id = {node["id"]: node for node in accepted_graph["nodes"]}
+    assert accepted_by_id["draft_general_mills"]["source_refs"] == [GENERAL_MILLS_REF]
+    assert accepted_by_id["draft_cheerios"]["source_refs"] == [GENERAL_MILLS_REF]
+    assert accepted_by_id["draft_unsupported_claim"]["status"] == "needs_review"
+    assert accepted_by_id["draft_unsupported_claim"]["source_refs"] == []

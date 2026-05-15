@@ -2,6 +2,10 @@
 import { useMemo, useState } from 'react';
 import { getSourceRepairPreviewRows } from './graphProjection';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
+import {
+    makePreviewDiffSummary,
+    PreviewDiffSummary
+} from './previewDiffSummary';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
 
@@ -72,7 +76,8 @@ const SourceRepairPreview = ({
     generatedPreview,
     onRejectGeneratedPreview,
     setNodes,
-    setActiveView
+    setActiveView,
+    onAskAi
 }) => {
     const previewRows = useMemo(
         () => {
@@ -89,6 +94,18 @@ const SourceRepairPreview = ({
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
+    const diffSummary = useMemo(
+        () =>
+            makePreviewDiffSummary({
+                rows: previewRows,
+                activeIds,
+                idKey: 'repair_id',
+                artifactLabel: 'source repair',
+                updatedFields: ['source refs', 'review state'],
+                mode: generatedPreview ? 'generated' : 'local'
+            }),
+        [activeIds, generatedPreview, previewRows]
+    );
     const addActivity = useActivityStore((s) => s.addActivity);
     const flowId = flowStore((s) => s.flow_id);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
@@ -194,8 +211,14 @@ const SourceRepairPreview = ({
             <div className="local-task-preview-header">
                 <div>
                     <strong>Source-reference repair</strong>
-                    <span>{previewRows.length} nodes need source repair</span>
+                    <span>
+                        {generatedPreview ? 'AI-generated source output' : 'Local source projection'} |{' '}
+                        {previewRows.length} nodes need source repair
+                    </span>
                 </div>
+                <span className="output-state-pill">
+                    {generatedPreview ? 'AI-generated' : 'Locally projected'}
+                </span>
                 <button type="button" onClick={acceptRepairs}>
                     Accept selected
                 </button>
@@ -205,6 +228,7 @@ const SourceRepairPreview = ({
                     </button>
                 ) : null}
             </div>
+            <PreviewDiffSummary changes={diffSummary} />
             <div className="local-table-wrap">
                 <table className="local-projection-table">
                     <thead>
@@ -241,9 +265,19 @@ const SourceRepairPreview = ({
                 </table>
             </div>
             {previewRows.length === 0 ? (
-                <p className="local-table-empty">
-                    No source-reference repairs are needed for this branch.
-                </p>
+                <div className="local-table-empty local-empty-actions">
+                    <strong>No source-reference repairs are needed for this branch.</strong>
+                    <span>
+                        Project now found no local citation repairs. Ask AI to review source
+                        coverage when you want a deeper evidence-support pass.
+                    </span>
+                    <button type="button" onClick={onAskAi} disabled={!flowId}>
+                        Ask AI to review source coverage
+                    </button>
+                    <button type="button" onClick={() => setActiveView('gaps')}>
+                        Review missing fields
+                    </button>
+                </div>
             ) : null}
         </div>
     );

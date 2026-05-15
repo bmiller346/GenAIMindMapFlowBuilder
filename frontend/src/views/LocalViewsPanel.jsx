@@ -7,10 +7,13 @@ import DataSourceSelect from '../global-components/DataSourceSelect';
 import PromptModal from '../modals/PromptModal';
 import WorkspaceBriefModal from '../modals/WorkspaceBriefModal';
 import {
-    buildGraphProjection,
+    buildFilteredGraphProjection,
+    getConnectionRows,
+    getKnowledgeGraphRows,
     getTaskPreviewRows,
     getTaskRows
 } from './graphProjection';
+import { isNudgeCategoryEnabled } from '../config/localSettings';
 import ChecklistPreview from './ChecklistPreview';
 import MissingInfoPreview from './MissingInfoPreview';
 import SmeQuestionsPreview from './SmeQuestionsPreview';
@@ -18,23 +21,101 @@ import SourceRepairPreview from './SourceRepairPreview';
 import MondaySelectionInput from './MondaySelectionInput';
 import MondayStatusBackPreview from './MondayStatusBackPreview';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
+import {
+    makePreviewDiffSummary,
+    PreviewDiffSummary
+} from './previewDiffSummary';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
 import { createWorkspaceNode, getRootPosition } from '../utils/manualNodes';
 
 const CORE_VIEWS = [
-    { id: 'mindmap', label: 'Map' },
-    { id: 'outline', label: 'Outline' },
-    { id: 'tasks', label: 'Tasks' },
-    { id: 'table', label: 'Table' }
+    { id: 'mindmap', label: 'Mind Map', detail: 'Hierarchical canvas lens' },
+    { id: 'knowledgeGraph', label: 'Knowledge Graph', detail: 'Entity and relationship lens' },
+    { id: 'outline', label: 'Outline', detail: 'Hierarchy as rows' },
+    { id: 'tasks', label: 'Tasks', detail: 'Accepted task fields' },
+    { id: 'table', label: 'Table', detail: 'Accepted node fields' }
 ];
 
 const REVIEW_VIEWS = [
-    { id: 'preview', label: 'Tasks preview' },
-    { id: 'checklist', label: 'Checklist' },
-    { id: 'gaps', label: 'Gaps' },
-    { id: 'sme', label: 'SME Qs' },
+    { id: 'preview', label: 'Task preview' },
+    { id: 'gaps', label: 'Missing info' },
+    { id: 'sme', label: 'SME questions' },
     { id: 'sources', label: 'Source repair' }
+];
+
+const AI_OUTPUT_VIEWS = [
+    { id: 'connections', label: 'Find connections', detail: 'AI can propose relationship edges' },
+    { id: 'flowchart', label: 'Create flow chart', detail: 'AI can infer process structure' },
+    { id: 'chartData', label: 'Extract chart data', detail: 'AI can extract structured chart rows' },
+    { id: 'preview', label: 'Generate task preview', detail: 'AI or local task projection' },
+    { id: 'checklist', label: 'Create checklist', detail: 'AI or local checklist projection' }
+];
+
+const AI_ACTION_PRESETS = {
+    knowledgeGraph: {
+        role: 'gap-analyst',
+        action: 'find_duplicate_overlapping_nodes',
+        scope: 'workspace'
+    },
+    connections: {
+        role: 'gap-analyst',
+        action: 'find_duplicate_overlapping_nodes',
+        scope: 'workspace'
+    },
+    flowchart: {
+        role: 'workflow-mapper',
+        action: 'custom_prompt',
+        scope: 'branch'
+    },
+    chartData: {
+        role: 'data-table-interpreter',
+        action: 'interpret_table_data',
+        scope: 'branch'
+    },
+    tasks: {
+        role: 'task-planner',
+        action: 'generate_tasks',
+        scope: 'branch'
+    },
+    checklist: {
+        role: 'training-guide-builder',
+        action: 'generate_checklist',
+        scope: 'branch'
+    },
+    gaps: {
+        role: 'gap-analyst',
+        action: 'find_gaps',
+        scope: 'workspace'
+    },
+    sme: {
+        role: 'sme-question-generator',
+        action: 'create_sme_questions',
+        scope: 'workspace'
+    },
+    sources: {
+        role: 'source-ref-repair',
+        action: 'find_missing_source_support',
+        scope: 'workspace'
+    }
+};
+
+const HANDOFF_VIEWS = [
+    { id: 'mondayInput', label: 'Implementation package' },
+    { id: 'mondayStatus', label: 'Status review' }
+];
+
+const GRAPH_FILTERS = [
+    { id: 'source-backed', label: 'Source-backed' },
+    { id: 'needs-review', label: 'Needs review' },
+    { id: 'manual', label: 'Manual' },
+    { id: 'ai-generated', label: 'AI-generated' },
+    { id: 'tasks-only', label: 'Tasks only' },
+    { id: 'unassigned', label: 'Unassigned' },
+    { id: 'missing-due-date', label: 'Missing due' },
+    { id: 'missing-source', label: 'Missing source' },
+    { id: 'low-confidence', label: 'Low confidence' },
+    { id: 'hidden-from-export', label: 'Hidden export' }
 ];
 
 const sourceLabel = (node) => {
@@ -62,6 +143,25 @@ const tableShapeLabel = (node) => {
     const columnCount = node.table_columns?.length || 0;
     return `${node.table_rows.length} x ${columnCount || '-'} table`;
 };
+
+const outputState = (row) => {
+    if (row.monday_selection_input || row.monday_status_back_input) {
+        return 'Applied/exported';
+    }
+    if (row.local_preview_acceptances?.some((acceptance) => acceptance.accepted)) {
+        return 'Accepted';
+    }
+    if (row.generated_preview_item) {
+        return 'AI-generated';
+    }
+    return 'Locally projected';
+};
+
+const OutputStatePill = ({ state }) => (
+    <span className={`output-state-pill output-state-${state.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
+        {state}
+    </span>
+);
 
 const mergeGeneratedTaskPreviewRows = (rows, generatedPreview) => {
     const items = Array.isArray(generatedPreview?.preview_items)
@@ -137,35 +237,71 @@ const EmptyState = ({
     onAddRoot,
     onAddSource,
     onOpenBrief,
-    onAskAi
-}) => (
-    <div className="local-view-empty">
-        <span className="local-view-empty-kicker">Start your Think Space</span>
-        <strong>No graph nodes yet</strong>
-        <span>
-            {activeView === 'mindmap'
-                ? 'Add sources, sketch a root node, or define the brief that AI should use.'
-                : 'This view will populate once the workspace has graph nodes.'}
-        </span>
-        <div className="local-view-empty-actions">
-            <button type="button" onClick={onAddSource}>
-                Add source
-            </button>
-            <button type="button" onClick={onAddRoot} disabled={!canUseWorkspace}>
-                Create root node
-            </button>
-            <button type="button" onClick={onOpenBrief}>
-                Set brief
-            </button>
-            <button type="button" onClick={onAskAi} disabled={!canUseWorkspace}>
-                Ask AI
-            </button>
+    onAskAi,
+    onSetView,
+    showCanvasNudges
+}) => {
+    const isReviewOutput = ['preview', 'checklist', 'gaps', 'sme', 'sources'].includes(activeView);
+    const isAiOutput = ['connections', 'flowchart', 'chartData'].includes(activeView);
+    const primaryLabel =
+        activeView === 'sources'
+            ? 'Add source'
+            : isReviewOutput || isAiOutput
+              ? 'Start with AI'
+              : 'Create root node';
+
+    return (
+        <div className="local-view-empty">
+            {showCanvasNudges ? (
+                <span className="local-view-empty-kicker">
+                    {isReviewOutput || isAiOutput ? 'Output needs graph context' : 'Start your Think Space'}
+                </span>
+            ) : null}
+            <strong>No graph nodes yet</strong>
+            {showCanvasNudges ? (
+                <span>
+                    {isReviewOutput || isAiOutput
+                        ? 'Add a source or root node first, then generate a preview-first output from the same panel.'
+                        : activeView === 'mindmap'
+                          ? 'Add sources, sketch a root node, or define the brief that AI should use.'
+                          : 'This view will populate once the workspace has graph nodes.'}
+                </span>
+            ) : null}
+            <div className="local-view-empty-actions">
+                <button
+                    type="button"
+                    onClick={
+                        primaryLabel === 'Add source'
+                            ? onAddSource
+                            : primaryLabel === 'Start with AI'
+                              ? () => onAskAi()
+                              : onAddRoot
+                    }
+                    disabled={primaryLabel !== 'Add source' && !canUseWorkspace}
+                >
+                    {primaryLabel}
+                </button>
+                <button type="button" onClick={onAddSource}>
+                    Add source
+                </button>
+                <button type="button" onClick={onAddRoot} disabled={!canUseWorkspace}>
+                    Create root node
+                </button>
+                <button type="button" onClick={onOpenBrief}>
+                    Set brief
+                </button>
+                {isReviewOutput ? (
+                    <button type="button" onClick={() => onSetView('gaps')} disabled={!canUseWorkspace}>
+                        Review gaps
+                    </button>
+                ) : null}
+            </div>
+            {!canUseWorkspace ? (
+                <small>Open or create a workspace to add nodes or ask AI.</small>
+            ) : null}
         </div>
-        {!canUseWorkspace ? (
-            <small>Open or create a workspace to add nodes or ask AI.</small>
-        ) : null}
-    </div>
-);
+    );
+};
 
 const LocalViewsPanel = ({ hidden, onSelectNode }) => {
     const selector = (state) => ({
@@ -177,7 +313,10 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
         selectedBranchId: state.selectedBranchId,
         setSelectedBranchId: state.setSelectedBranchId,
         generatedHelperPreviews: state.generatedHelperPreviews,
-        clearGeneratedHelperPreview: state.clearGeneratedHelperPreview
+        clearGeneratedHelperPreview: state.clearGeneratedHelperPreview,
+        activeGraphFilters: state.activeGraphFilters,
+        setActiveGraphFilters: state.setActiveGraphFilters,
+        nudgePreferences: state.nudgePreferences
     });
     const {
         nodes,
@@ -188,7 +327,10 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
         selectedBranchId,
         setSelectedBranchId,
         generatedHelperPreviews,
-        clearGeneratedHelperPreview
+        clearGeneratedHelperPreview,
+        activeGraphFilters,
+        setActiveGraphFilters,
+        nudgePreferences
     } = useStore(useShallow(selector));
     const [acceptedPreviewIds, setAcceptedPreviewIds] = useState(new Set());
     const addActivity = useActivityStore((s) => s.addActivity);
@@ -198,10 +340,20 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
     const pushNode = modalStore((s) => s.pushNode);
 
     const projection = useMemo(
-        () => buildGraphProjection(nodes, edges, selectedBranchId),
-        [nodes, edges, selectedBranchId]
+        () =>
+            buildFilteredGraphProjection(nodes, edges, {
+                branchId: selectedBranchId,
+                filters: activeGraphFilters
+            }),
+        [activeGraphFilters, nodes, edges, selectedBranchId]
+    );
+    const activeFilterSet = useMemo(
+        () => new Set(activeGraphFilters),
+        [activeGraphFilters]
     );
     const taskRows = useMemo(() => getTaskRows(projection), [projection]);
+    const knowledgeGraphRows = useMemo(() => getKnowledgeGraphRows(projection), [projection]);
+    const connectionRows = useMemo(() => getConnectionRows(projection), [projection]);
     const generatedTaskPreview = generatedHelperPreviews.projectPlannerTasks;
     const generatedChecklistPreview = generatedHelperPreviews.projectPlannerChecklist;
     const generatedSourceRepairPreview = generatedHelperPreviews.sourceLibrarianSources;
@@ -217,6 +369,19 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
         () => new Set(previewRows.filter((row) => row.included).map((row) => row.id)),
         [previewRows]
     );
+    const taskPreviewDiffSummary = useMemo(
+        () =>
+            makePreviewDiffSummary({
+                rows: previewRows,
+                activeIds:
+                    acceptedPreviewIds.size > 0 ? acceptedPreviewIds : allPreviewIds,
+                artifactLabel: 'task preview item',
+                updatedFields: ['type', 'status', 'owner/status fields'],
+                relationshipEdges: projection.edges.length,
+                mode: generatedTaskPreview ? 'generated' : 'local'
+            }),
+        [acceptedPreviewIds, allPreviewIds, generatedTaskPreview, previewRows, projection.edges.length]
+    );
 
     const selectedRoot = projection.nodes.find((node) => node.id === selectedBranchId);
     const activePreviewIds =
@@ -224,6 +389,18 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
     const activeReviewView = REVIEW_VIEWS.some((view) => view.id === activeView)
         ? activeView
         : '';
+    const activeHandoffView = HANDOFF_VIEWS.some((view) => view.id === activeView)
+        ? activeView
+        : '';
+    const showCanvasNudges = isNudgeCategoryEnabled(nudgePreferences, 'canvas');
+    const showTaskNudges = isNudgeCategoryEnabled(nudgePreferences, 'tasks');
+
+    const toggleGraphFilter = (filterId) => {
+        const nextFilters = activeFilterSet.has(filterId)
+            ? activeGraphFilters.filter((id) => id !== filterId)
+            : [...activeGraphFilters, filterId];
+        setActiveGraphFilters(nextFilters);
+    };
 
     const togglePreviewRow = (nodeId) => {
         setAcceptedPreviewIds(() => {
@@ -277,19 +454,33 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
         pushNode(WorkspaceBriefModal);
     };
 
-    const openWorkspaceAskAi = () => {
+    const openWorkspaceAskAi = (preset = {}) => {
         if (!flowId) {
             return;
         }
-        pushNode(PromptModal, { scope: 'workspace' });
+        const preferredScope =
+            preset.scope === 'branch' && selectedBranchId ? 'branch' : 'workspace';
+        pushNode(PromptModal, {
+            scope: preferredScope,
+            nodeId: preferredScope === 'branch' ? selectedBranchId : undefined,
+            initialRoleId: preset.role,
+            initialActionId: preset.action
+        });
         recordActivity({
             type: 'ai_action_picker_opened',
             title: 'Workspace Ask AI opened',
-            summary: 'Opened preview-first AI actions from the empty workspace state.',
+            summary: preset.action
+                ? `Opened preview-first AI action: ${preset.action}.`
+                : 'Opened preview-first AI actions from the workspace.',
             metadata: {
-                scope: 'workspace'
+                scope: preferredScope,
+                action: preset.action || ''
             }
         });
+    };
+
+    const openAiPreset = (presetKey) => {
+        openWorkspaceAskAi(AI_ACTION_PRESETS[presetKey]);
     };
 
     const acceptTaskPreview = () => {
@@ -372,34 +563,102 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
     return (
         <section className="local-views-panel">
             <div className="local-views-toolbar">
-                <div className="local-view-tabs" role="tablist" aria-label="Graph views">
-                    {CORE_VIEWS.map((view) => (
-                        <button
-                            key={view.id}
-                            type="button"
-                            className={activeView === view.id ? 'active' : ''}
-                            onClick={() => setActiveView(view.id)}
+                <div className="local-view-taxonomy" role="navigation" aria-label="Workspace lenses and outputs">
+                    <div className="local-view-section">
+                        <span>Views</span>
+                        <div className="local-view-tabs" role="tablist" aria-label="Accepted workspace views">
+                            {CORE_VIEWS.map((view) => (
+                                <button
+                                    key={view.id}
+                                    type="button"
+                                    title={view.detail}
+                                    className={activeView === view.id ? 'active' : ''}
+                                    onClick={() => setActiveView(view.id)}
+                                >
+                                    {view.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                    <div className="local-view-section">
+                        <span>Filters</span>
+                        <div className="local-filter-chips">
+                            <button
+                                type="button"
+                                className={!selectedBranchId ? 'active' : ''}
+                                onClick={() => setSelectedBranchId(undefined)}
+                            >
+                                Whole workspace
+                            </button>
+                            <button
+                                type="button"
+                                className={selectedBranchId ? 'active' : ''}
+                                disabled={!selectedRoot}
+                                onClick={() => selectedRoot && setSelectedBranchId(selectedRoot.id)}
+                            >
+                                Selected branch
+                            </button>
+                        </div>
+                    </div>
+                    <div className="local-view-section">
+                        <span>AI Outputs</span>
+                        <select
+                            value={AI_OUTPUT_VIEWS.some((view) => view.id === activeView) ? activeView : ''}
+                            onChange={(event) => {
+                                if (event.target.value) {
+                                    setActiveView(event.target.value);
+                                }
+                            }}
+                            aria-label="AI output previews"
                         >
-                            {view.label}
-                        </button>
-                    ))}
-                    <select
-                        className={activeReviewView ? 'active' : ''}
-                        value={activeReviewView}
-                        onChange={(event) => {
-                            if (event.target.value) {
-                                setActiveView(event.target.value);
-                            }
-                        }}
-                        aria-label="Review views"
-                    >
-                        <option value="">Review</option>
-                        {REVIEW_VIEWS.map((view) => (
-                            <option key={view.id} value={view.id}>
-                                {view.label}
-                            </option>
-                        ))}
-                    </select>
+                            <option value="">Choose output</option>
+                            {AI_OUTPUT_VIEWS.map((view) => (
+                                <option key={view.id} value={view.id}>
+                                    {view.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="local-view-section">
+                        <span>Review</span>
+                        <select
+                            className={activeReviewView ? 'active' : ''}
+                            value={activeReviewView}
+                            onChange={(event) => {
+                                if (event.target.value) {
+                                    setActiveView(event.target.value);
+                                }
+                            }}
+                            aria-label="Review outputs"
+                        >
+                            <option value="">Choose review</option>
+                            {REVIEW_VIEWS.map((view) => (
+                                <option key={view.id} value={view.id}>
+                                    {view.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="local-view-section">
+                        <span>Handoff</span>
+                        <select
+                            className={activeHandoffView ? 'active' : ''}
+                            value={activeHandoffView}
+                            onChange={(event) => {
+                                if (event.target.value) {
+                                    setActiveView(event.target.value);
+                                }
+                            }}
+                            aria-label="Handoff outputs"
+                        >
+                            <option value="">Choose handoff</option>
+                            {HANDOFF_VIEWS.map((view) => (
+                                <option key={view.id} value={view.id}>
+                                    {view.label}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
                 <div className="local-branch-control">
                     <span>{selectedRoot ? selectedRoot.title : 'Whole graph'}</span>
@@ -410,6 +669,27 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                     ) : null}
                 </div>
             </div>
+            <div className="local-filter-bar" aria-label="Persisted graph filters">
+                {GRAPH_FILTERS.map((filter) => (
+                    <button
+                        key={filter.id}
+                        type="button"
+                        className={activeFilterSet.has(filter.id) ? 'active' : ''}
+                        onClick={() => toggleGraphFilter(filter.id)}
+                    >
+                        {filter.label}
+                    </button>
+                ))}
+                {activeGraphFilters.length > 0 ? (
+                    <button
+                        type="button"
+                        className="local-filter-reset"
+                        onClick={() => setActiveGraphFilters([])}
+                    >
+                        Reset
+                    </button>
+                ) : null}
+            </div>
 
             {nodes.length === 0 ? (
                 <EmptyState
@@ -419,7 +699,161 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                     onAddSource={openSourcePicker}
                     onOpenBrief={openBrief}
                     onAskAi={openWorkspaceAskAi}
+                    onSetView={setActiveView}
+                    showCanvasNudges={showCanvasNudges}
                 />
+            ) : null}
+
+            {activeView === 'mindmap' && nodes.length > 0 ? (
+                <div className="local-lens-summary">
+                    <OutputStatePill state="Locally projected" />
+                    <div>
+                        <strong>Mind Map</strong>
+                        <span>
+                            Hierarchical lens on accepted workspace nodes. Changing this view does
+                            not ask AI to create a new artifact.
+                        </span>
+                    </div>
+                    <button type="button" onClick={() => openAiPreset('knowledgeGraph')} disabled={!flowId}>
+                        Ask AI to enrich graph links
+                    </button>
+                </div>
+            ) : null}
+
+            {activeView === 'knowledgeGraph' && nodes.length > 0 ? (
+                <div className="local-table-wrap">
+                    <div className="local-lens-summary">
+                        <OutputStatePill state="Locally projected" />
+                        <div>
+                            <strong>Knowledge Graph</strong>
+                            <span>
+                                Locally projected relationship lens on accepted nodes. Use AI
+                                enrichment when you want inferred links reviewed before acceptance.
+                            </span>
+                        </div>
+                        <button type="button" onClick={() => openAiPreset('knowledgeGraph')} disabled={!flowId}>
+                            Ask AI to enrich links
+                        </button>
+                    </div>
+                    <table className="local-projection-table">
+                        <thead>
+                            <tr>
+                                <th>Entity</th>
+                                <th>Type</th>
+                                <th>Relationships</th>
+                                <th>Status</th>
+                                <th>Output state</th>
+                                <th>Source</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {knowledgeGraphRows.map((row) => (
+                                <tr key={row.id}>
+                                    <td>
+                                        <button
+                                            type="button"
+                                            className="local-row-link"
+                                            onClick={() => openNode(row.id)}
+                                        >
+                                            {row.title}
+                                        </button>
+                                    </td>
+                                    <td>{rowTypeLabel(row)}</td>
+                                    <td>{row.relationship_count}</td>
+                                    <td>{row.status}</td>
+                                    <td>
+                                        <OutputStatePill state={outputState(row)} />
+                                    </td>
+                                    <td>{sourceLabel(row)}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            ) : null}
+
+            {activeView === 'connections' && nodes.length > 0 ? (
+                <div className="local-table-wrap">
+                    <div className="local-lens-summary">
+                        <OutputStatePill state="Locally projected" />
+                        <div>
+                            <strong>Find connections</strong>
+                            <span>
+                                Project now shows accepted edges. Ask AI to find candidate
+                                duplicates, overlaps, or relationship edges as a review preview.
+                            </span>
+                        </div>
+                        <button type="button" onClick={() => openAiPreset('connections')} disabled={!flowId}>
+                            Ask AI to find connections
+                        </button>
+                    </div>
+                    <table className="local-projection-table">
+                        <thead>
+                            <tr>
+                                <th>From</th>
+                                <th>Relationship</th>
+                                <th>To</th>
+                                <th>Output state</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {connectionRows.map((row) => (
+                                <tr key={row.id}>
+                                    <td>{row.source.title}</td>
+                                    <td>{row.relationship}</td>
+                                    <td>{row.target.title}</td>
+                                    <td>
+                                        <OutputStatePill state="Locally projected" />
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    {connectionRows.length === 0 ? (
+                        <div className="local-table-empty local-empty-actions">
+                            <strong>No relationship edges in this scope.</strong>
+                            <span>
+                                This is not broken: the current filter has nodes but no accepted
+                                connections to project.
+                            </span>
+                            <button type="button" onClick={() => openAiPreset('connections')} disabled={!flowId}>
+                                Ask AI to find connections
+                            </button>
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
+
+            {(activeView === 'flowchart' || activeView === 'chartData') && nodes.length > 0 ? (
+                <div className="local-view-empty">
+                    <span className="local-view-empty-kicker">AI output target</span>
+                    <strong>
+                        {activeView === 'flowchart'
+                            ? 'Create flow chart'
+                            : 'Extract chart data'}
+                    </strong>
+                    <span>
+                        This output needs AI enrichment. Generate a preview first, then review
+                        the proposed structure before accepting anything into the graph.
+                    </span>
+                    <div className="local-view-empty-actions">
+                        <button
+                            type="button"
+                            onClick={() => openAiPreset(activeView)}
+                            disabled={!flowId}
+                        >
+                            {activeView === 'flowchart'
+                                ? 'Ask AI to draft flow chart'
+                                : 'Ask AI to extract chart data'}
+                        </button>
+                        <button type="button" onClick={() => setActiveView('gaps')}>
+                            Review missing fields
+                        </button>
+                        <button type="button" onClick={() => setActiveView('knowledgeGraph')}>
+                            Project now
+                        </button>
+                    </div>
+                </div>
             ) : null}
 
             {activeView === 'outline' && nodes.length > 0 ? (
@@ -450,6 +884,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                                 <th>Owner</th>
                                 <th>Due</th>
                                 <th>Table</th>
+                                <th>Output state</th>
                                 <th>Source</th>
                             </tr>
                         </thead>
@@ -471,13 +906,30 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                                     <td>{row.owner_id || '-'}</td>
                                     <td>{row.due_date || '-'}</td>
                                     <td>{tableShapeLabel(row)}</td>
+                                    <td>
+                                        <OutputStatePill state={outputState(row)} />
+                                    </td>
                                     <td>{sourceLabel(row)}</td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
-                    {taskRows.length === 0 ? (
-                        <p className="local-table-empty">No task-capable nodes in this branch.</p>
+                    {taskRows.length === 0 && showTaskNudges ? (
+                        <div className="local-table-empty local-empty-actions">
+                            <strong>No accepted task fields in this scope.</strong>
+                            <span>
+                                The workspace data exists, but this view needs task metadata.
+                            </span>
+                            <button type="button" onClick={() => setActiveView('preview')}>
+                                Generate task preview
+                            </button>
+                            <button type="button" onClick={() => setActiveView('gaps')}>
+                                Review missing fields
+                            </button>
+                            <button type="button" onClick={() => openAiPreset('tasks')} disabled={!flowId}>
+                                Ask AI to generate tasks
+                            </button>
+                        </div>
                     ) : null}
                 </div>
             ) : null}
@@ -492,6 +944,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                                 <th>Status</th>
                                 <th>Confidence</th>
                                 <th>Table</th>
+                                <th>Output state</th>
                                 <th>Source</th>
                             </tr>
                         </thead>
@@ -511,6 +964,9 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                                     <td>{row.status}</td>
                                     <td>{row.confidence || '-'}</td>
                                     <td>{tableShapeLabel(row)}</td>
+                                    <td>
+                                        <OutputStatePill state={outputState(row)} />
+                                    </td>
                                     <td>{sourceLabel(row)}</td>
                                 </tr>
                             ))}
@@ -523,12 +979,23 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                 <div className="local-task-preview">
                     <div className="local-task-preview-header">
                         <div>
-                            <strong>Branch-to-task preview</strong>
-                            <span>{previewRows.length} candidate nodes</span>
+                            <strong>Generate task preview</strong>
+                            <span>
+                                {generatedTaskPreview ? 'AI-generated output' : 'Locally projected output'} |{' '}
+                                {previewRows.length} candidate nodes
+                            </span>
                         </div>
+                        <OutputStatePill
+                            state={generatedTaskPreview ? 'AI-generated' : 'Locally projected'}
+                        />
                         <button type="button" onClick={acceptTaskPreview}>
                             Accept selected
                         </button>
+                        {!generatedTaskPreview ? (
+                            <button type="button" onClick={() => openAiPreset('tasks')} disabled={!flowId}>
+                                Ask AI to generate tasks
+                            </button>
+                        ) : null}
                         {generatedTaskPreview ? (
                             <button
                                 type="button"
@@ -540,6 +1007,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                             </button>
                         ) : null}
                     </div>
+                    <PreviewDiffSummary changes={taskPreviewDiffSummary} />
                     <div className="local-table-wrap">
                         <table className="local-projection-table">
                             <thead>
@@ -551,6 +1019,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                                     <th>Priority</th>
                                     <th>Owner</th>
                                     <th>Due</th>
+                                    <th>Output state</th>
                                     <th>Source</th>
                                 </tr>
                             </thead>
@@ -571,12 +1040,30 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                                         <td>{row.priority || '-'}</td>
                                         <td>{row.owner_id || '-'}</td>
                                         <td>{row.due_date || '-'}</td>
+                                        <td>
+                                            <OutputStatePill state={outputState(row)} />
+                                        </td>
                                         <td>{sourceLabel(row)}</td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
+                    {previewRows.length === 0 ? (
+                        <div className="local-table-empty local-empty-actions">
+                            <strong>No task preview candidates in this scope.</strong>
+                            <span>
+                                Project now found no task-like rows. Ask AI to infer task
+                                candidates, or add a non-reference node first.
+                            </span>
+                            <button type="button" onClick={() => openAiPreset('tasks')} disabled={!flowId}>
+                                Ask AI to generate tasks
+                            </button>
+                            <button type="button" onClick={() => setActiveView('gaps')}>
+                                Review missing fields
+                            </button>
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
 
@@ -590,6 +1077,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                     onRejectGeneratedPreview={() =>
                         clearGeneratedHelperPreview('projectPlannerChecklist')
                     }
+                    onAskAi={() => openAiPreset('checklist')}
                 />
             ) : null}
 
@@ -603,6 +1091,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                     }
                     setNodes={setNodes}
                     setActiveView={setActiveView}
+                    onAskAi={() => openAiPreset('gaps')}
                 />
             ) : null}
 
@@ -616,6 +1105,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                     }
                     setNodes={setNodes}
                     setActiveView={setActiveView}
+                    onAskAi={() => openAiPreset('sme')}
                 />
             ) : null}
 
@@ -629,6 +1119,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                     }
                     setNodes={setNodes}
                     setActiveView={setActiveView}
+                    onAskAi={() => openAiPreset('sources')}
                 />
             ) : null}
 

@@ -2,6 +2,10 @@
 import { useMemo, useState } from 'react';
 import { getMissingInfoPreviewRows } from './graphProjection';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
+import {
+    makePreviewDiffSummary,
+    PreviewDiffSummary
+} from './previewDiffSummary';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
 
@@ -41,7 +45,8 @@ const MissingInfoPreview = ({
     generatedPreview,
     onRejectGeneratedPreview,
     setNodes,
-    setActiveView
+    setActiveView,
+    onAskAi
 }) => {
     const previewRows = useMemo(
         () => {
@@ -58,6 +63,17 @@ const MissingInfoPreview = ({
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
+    const diffSummary = useMemo(
+        () =>
+            makePreviewDiffSummary({
+                rows: previewRows,
+                activeIds,
+                artifactLabel: 'review finding',
+                updatedFields: ['missing-info review'],
+                mode: generatedPreview ? 'generated' : 'local'
+            }),
+        [activeIds, generatedPreview, previewRows]
+    );
     const addActivity = useActivityStore((s) => s.addActivity);
     const flowId = flowStore((s) => s.flow_id);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
@@ -149,8 +165,14 @@ const MissingInfoPreview = ({
             <div className="local-task-preview-header">
                 <div>
                     <strong>Missing-information review</strong>
-                    <span>{previewRows.length} nodes need reviewer input</span>
+                    <span>
+                        {generatedPreview ? 'AI-generated review output' : 'Local review projection'} |{' '}
+                        {previewRows.length} nodes need reviewer input
+                    </span>
                 </div>
+                <span className="output-state-pill">
+                    {generatedPreview ? 'AI-generated' : 'Locally projected'}
+                </span>
                 <button type="button" onClick={acceptMissingInfoReview}>
                     Accept selected
                 </button>
@@ -160,6 +182,7 @@ const MissingInfoPreview = ({
                     </button>
                 ) : null}
             </div>
+            <PreviewDiffSummary changes={diffSummary} />
             <div className="local-table-wrap">
                 <table className="local-projection-table">
                     <thead>
@@ -192,9 +215,19 @@ const MissingInfoPreview = ({
                 </table>
             </div>
             {previewRows.length === 0 ? (
-                <p className="local-table-empty">
-                    No missing-information issues found in this branch.
-                </p>
+                <div className="local-table-empty local-empty-actions">
+                    <strong>No missing-information issues found in this branch.</strong>
+                    <span>
+                        Project now did not find obvious gaps. Ask AI for a reviewer pass
+                        when you want deeper source, contradiction, or completeness checks.
+                    </span>
+                    <button type="button" onClick={onAskAi} disabled={!flowId}>
+                        Ask AI to find gaps
+                    </button>
+                    <button type="button" onClick={() => setActiveView('sources')}>
+                        Review source repair
+                    </button>
+                </div>
             ) : null}
         </div>
     );

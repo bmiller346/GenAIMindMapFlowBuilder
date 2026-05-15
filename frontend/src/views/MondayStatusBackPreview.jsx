@@ -1,6 +1,10 @@
 /* eslint-disable react/prop-types */
 import { useMemo, useState } from 'react';
 import { buildMondayStatusBackRows } from './mondayStatusProjection';
+import {
+    makePreviewDiffSummary,
+    PreviewDiffSummary
+} from './previewDiffSummary';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
 
@@ -95,6 +99,17 @@ const MondayStatusBackPreview = ({
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
+    const diffSummary = useMemo(
+        () =>
+            makePreviewDiffSummary({
+                rows: statusRows,
+                activeIds,
+                artifactLabel: 'status-back item',
+                updatedFields: ['status-back staging'],
+                mode: generatedPreview ? 'generated' : 'local'
+            }),
+        [activeIds, generatedPreview, statusRows]
+    );
 
     const toggleRow = (nodeId) => {
         setSelectedIds(() => {
@@ -181,12 +196,15 @@ const MondayStatusBackPreview = ({
         <div className="local-monday-status-preview">
             <div className="local-task-preview-header">
                 <div>
-                    <strong>monday status input</strong>
+                    <strong>Review handoff status input</strong>
                     <span>
-                        {selectedCount} ready from {statusRows.length} monday-linked
-                        candidates
+                        {generatedPreview ? 'AI-generated sync review' : 'Local integration projection'} |{' '}
+                        {selectedCount} ready from {statusRows.length} monday-linked candidates
                     </span>
                 </div>
+                <span className="output-state-pill">
+                    {generatedPreview ? 'AI-generated' : 'Locally projected'} {'->'} Applied/exported next
+                </span>
                 <button type="button" onClick={stageStatusBack}>
                     Stage selected
                 </button>
@@ -196,6 +214,7 @@ const MondayStatusBackPreview = ({
                     </button>
                 ) : null}
             </div>
+            <PreviewDiffSummary title="Before staging" changes={diffSummary} />
             <div className="local-table-wrap">
                 <table className="local-projection-table">
                     <thead>

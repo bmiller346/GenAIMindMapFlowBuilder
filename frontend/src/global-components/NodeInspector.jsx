@@ -172,7 +172,7 @@ const externalRefSummary = (provider, ref) => {
 const requestImmediateWorkspaceSave = () => {
     window.setTimeout(() => {
         window.dispatchEvent(new CustomEvent('docmap:save-workspace-now'));
-    }, 0);
+    }, 50);
 };
 
 const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
@@ -183,6 +183,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
         setEdges: state.setEdges,
         activeAIDraftSession: state.activeAIDraftSession,
         activeAIActionPreview: state.activeAIActionPreview,
+        clearActiveAIDraftSession: state.clearActiveAIDraftSession,
         clearActiveAIActionPreview: state.clearActiveAIActionPreview,
         recordAIActionRun: state.recordAIActionRun
     });
@@ -193,6 +194,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
         setEdges,
         activeAIDraftSession,
         activeAIActionPreview,
+        clearActiveAIDraftSession,
         clearActiveAIActionPreview,
         recordAIActionRun
     } = useStore(useShallow(selector));
@@ -228,6 +230,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
     const aiDraftSessionAppliesHere =
         activeAIDraftSession &&
         (activeAIDraftSession.scope?.type === 'workspace' ||
+            (activeAIDraftSession.scope?.type === 'source' && !selectedNodeId) ||
             activeAIDraftSession.scope?.node_id === selectedNodeId ||
             activeAIDraftSession.scope?.source_node_id === selectedNodeId ||
             (activeAIDraftSession.scope?.type === 'nodes' &&
@@ -480,6 +483,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
     };
 
     const closeWorkspacePreview = () => {
+        clearActiveAIDraftSession();
         clearActiveAIActionPreview();
         onClose();
     };

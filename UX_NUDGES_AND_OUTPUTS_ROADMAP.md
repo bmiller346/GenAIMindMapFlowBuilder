@@ -807,76 +807,117 @@ Update the roadmap with pass/fail notes.
 
 ### Phase 1: Output Contract
 
-- [ ] Agent A: Define output type enum/contract.
-- [ ] Agent A: Add Artifact Registry with required inputs, optional inputs,
+- [x] Agent A: Define output type enum/contract.
+- [x] Agent A: Add Artifact Registry with required inputs, optional inputs,
   schema, projection requirements, preview component, accept behavior, export
   behavior, and validation rules.
-- [ ] Agent A: Define artifact/render-block contract for flow charts and
+- [x] Agent A: Define artifact/render-block contract for flow charts and
   rendered charts.
-- [ ] Agent A: Define knowledge graph relationship contract for non-hierarchical
+- [x] Agent A: Define knowledge graph relationship contract for non-hierarchical
   links, clusters, source signals, confidence, and rationale.
-- [ ] Agent A: Update generation prompts so "mind map" is not the default
+- [x] Agent A: Update generation prompts so "mind map" is not the default
   language for every artifact.
-- [ ] Agent A: Make workspace brief `desired_outputs` drive generation.
-- [ ] Agent A: Add typed output metadata to generated previews.
-- [ ] Agent A: Add backend tests for knowledge graph/flow chart/chart/tasks/checklist/table/SME/source coverage.
+- [x] Agent A: Make workspace brief `desired_outputs` drive generation.
+- [x] Agent A: Add typed output metadata to generated previews.
+- [x] Agent A: Add backend tests for knowledge graph/flow chart/chart/tasks/checklist/table/SME/source coverage.
 
 ### Phase 2: Output UX Taxonomy
 
-- [ ] Agent B: Group current Local Views into clear product sections.
-- [ ] Agent B: Add Knowledge Graph / Connections as a distinct view or output
+- [x] Agent B: Group current Local Views into clear product sections.
+- [x] Agent B: Add Knowledge Graph / Connections as a distinct view or output
   surface from hierarchical Map.
-- [ ] Agent B: Add scope selector affordance for workspace, branch, selected
+- [x] Agent B: Add scope selector affordance for workspace, branch, selected
   nodes, selected source document, and current filtered view.
-- [ ] Agent B: Add preview diff summaries before generated output acceptance.
-- [ ] Agent B: Rename action labels to distinguish "view" from "generate."
-- [ ] Agent B: Add accepted/applied state to output views.
-- [ ] Agent B: Add output empty states with concrete AI actions.
-- [ ] Agent B: Show selected scope: whole graph vs branch.
+- [x] Agent B: Add preview diff summaries before generated output acceptance.
+- [x] Agent B: Rename action labels to distinguish "view" from "generate."
+- [x] Agent B: Add accepted/applied state to output views.
+- [x] Agent B: Add output empty states with concrete AI actions.
+- [x] Agent B: Show selected scope: whole graph vs branch.
+
+Agent B status: Local Views now separates Views, Filters, AI Outputs, Review,
+and Handoff. Mind Map is labeled as the hierarchical lens; Knowledge Graph and
+Connections are separate relationship lenses and Connections uses typed
+`relationship_type` labels when present. AI Helpers exposes the full initial
+scope set: whole workspace, selected branch, selected nodes, selected source
+document, and current filtered view. Draft-session generation preserves rich
+`nodes` and `source` scopes; legacy helper-preview endpoints continue using
+their existing backend-supported scope payloads. Preview diff summaries are
+shared across local helper previews and AI draft acceptance.
 
 ### Phase 3: Filters
 
 - [ ] Agent B + C: Define filter state shape.
-- [ ] Agent C: Implement filter projection over canonical graph data.
-- [ ] Agent C: Add a projection-readiness check that reports missing fields
+- [x] Agent C: Implement filter projection over canonical graph data.
+- [x] Agent C: Add a projection-readiness check that reports missing fields
   before filters or views pretend to work.
-- [ ] Agent B: Add UX copy/actions for "project now", "enrich missing fields",
+- [x] Agent B: Add UX copy/actions for "project now", "enrich missing fields",
   and "generate target artifact."
-- [ ] Agent B: Add compact filter controls.
-- [ ] Agent D: Decide whether filter state persists locally.
+- [x] Agent B: Add compact filter controls.
+- [x] Agent D: Decide whether filter state persists locally.
 - [ ] Agent E: Verify filters do not conflict with selected branch scoping.
 
 ### Phase 4: Nudge Engine
 
-- [ ] Agent C: Add nudge projection utility.
-- [ ] Agent C: Add source/review/task/output/integration nudge categories.
-- [ ] Agent C: Add stable dismiss keys.
-- [ ] Agent C: Add focused unit tests.
-- [ ] Agent C: Document which nudges are informational vs action-required.
+- [x] Agent C: Add nudge projection utility.
+- [x] Agent C: Add source/review/task/output/integration nudge categories.
+- [x] Agent C: Add stable dismiss keys.
+- [x] Agent C: Add focused unit tests.
+- [x] Agent C: Document which nudges are informational vs action-required.
+  Categories use severity as the action level: `high`/`medium` require review
+  before handoff, while `low` is informational guidance or optional enrichment.
 
 ### Phase 5: Settings Overrides
 
-- [ ] Agent D: Add master "Show nudges" setting.
-- [ ] Agent D: Add advanced category toggles.
-- [ ] Agent D: Add nudge density.
-- [ ] Agent D: Persist settings in local settings.
-- [ ] Agent D: Ensure validation remains visible when nudges are off.
+- [x] Agent D: Add master "Show nudges" setting.
+- [x] Agent D: Add advanced category toggles.
+- [x] Agent D: Add nudge density.
+- [x] Agent D: Persist settings in local settings.
+- [x] Agent D: Ensure validation remains visible when nudges are off.
+
+Agent D status: Settings now persist local-only nudge preferences with category
+keys `canvas`, `review`, `sources`, `tasks`, `ai_outputs`, `integrations`, and
+`knowledge_graph`, plus density `quiet`, `normal`, or `assertive`. Last-used
+graph filters persist locally and are not included in workspace snapshots.
+Validation remains on its own rendering path and is not gated by nudge
+preferences.
 
 ### Phase 6: Nudge UI
 
-- [ ] Agent E: Add compact global nudge surface.
-- [ ] Agent E: Add subtle node-level indicators.
-- [ ] Agent E: Wire nudge actions.
-- [ ] Agent E: Add dismiss behavior.
-- [ ] Agent E: Add browser regression coverage.
+- [x] Agent E: Add compact global nudge surface.
+- [x] Agent E: Add subtle node-level indicators.
+- [x] Agent E: Wire nudge actions.
+- [x] Agent E: Add dismiss behavior.
+- [x] Agent E: Add browser regression coverage.
 
 ### Phase 7: Integration And QA
 
-- [ ] Agent E: Verify dense graph does not become noisy.
-- [ ] Agent E: Verify no nudges appear when disabled.
+- [x] Agent E: Verify dense graph does not become noisy.
+- [x] Agent E: Verify no nudges appear when disabled.
 - [ ] Agent E: Verify output generation labels match backend behavior.
 - [ ] Agent E: Verify source/SME/task/checklist flows from empty states.
-- [ ] Agent E: Record pass/fail notes in this roadmap.
+- [x] Agent E: Record pass/fail notes in this roadmap.
+
+Agent E QA notes:
+
+- PASS: Compact global guidance renders at the canvas edge with density limits
+  (`quiet`, `normal`, `assertive`) and does not cover the main canvas or local
+  views.
+- PASS: Master nudge setting suppresses nudge UI only; graph validation remains
+  visible and expandable for true validation issues.
+- PASS: Category toggles suppress only matching nudge categories through the
+  Agent C -> Agent D category adapter.
+- PASS: Nudge actions route to node focus/inspector, source repair, task
+  preview, checklist/AI output targets, knowledge graph connections,
+  integrations, and settings.
+- PASS: Dismiss stores stable `dismiss_key` values in local preference storage
+  so dismissed nudges stay hidden across reloads.
+- PASS: Node-level indicators stay as compact dots by default, with expanded
+  labels available only on hover/focus.
+- PARTIAL: Output generation labels use existing local view/helper labels; final
+  backend wording should be rechecked when backend artifact contracts settle.
+- PARTIAL: Empty-state source/SME/task/checklist paths still depend on the
+  current Local Views and AI Helpers behavior; no backend artifact contract work
+  was added in this slice.
 
 ## Evaluation Fixtures
 

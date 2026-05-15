@@ -4,6 +4,10 @@ import {
     buildMondaySelectionInput,
     buildMondaySelectionManifest
 } from './mondaySelectionProjection';
+import {
+    makePreviewDiffSummary,
+    PreviewDiffSummary
+} from './previewDiffSummary';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
 
@@ -128,6 +132,17 @@ const MondaySelectionInput = ({
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
+    const diffSummary = useMemo(
+        () =>
+            makePreviewDiffSummary({
+                rows: selectionRows,
+                activeIds,
+                artifactLabel: 'handoff package item',
+                updatedFields: ['handoff staging'],
+                mode: generatedPreview ? 'generated' : 'local'
+            }),
+        [activeIds, generatedPreview, selectionRows]
+    );
 
     const toggleRow = (nodeId) => {
         setSelectedIds(() => {
@@ -239,12 +254,15 @@ const MondaySelectionInput = ({
         <div className="local-monday-selection-preview">
             <div className="local-task-preview-header">
                 <div>
-                    <strong>monday selection input</strong>
+                    <strong>Create implementation handoff package</strong>
                     <span>
-                        {selectedCount} selected from {selectionRows.length} accepted
-                        preview candidates
+                        {generatedPreview ? 'AI-generated handoff output' : 'Local accepted-data projection'} |{' '}
+                        {selectedCount} selected from {selectionRows.length} candidates
                     </span>
                 </div>
+                <span className="output-state-pill">
+                    {generatedPreview ? 'AI-generated' : 'Locally projected'} {'->'} Applied/exported next
+                </span>
                 <button type="button" onClick={stageMondaySelection}>
                     Stage selected
                 </button>
@@ -254,6 +272,7 @@ const MondaySelectionInput = ({
                     </button>
                 ) : null}
             </div>
+            <PreviewDiffSummary title="Before staging" changes={diffSummary} />
             <div className="local-table-wrap">
                 <table className="local-projection-table">
                     <thead>

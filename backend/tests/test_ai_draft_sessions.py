@@ -11,6 +11,7 @@ from ai_helpers import (
     build_ai_draft_revision,
     build_ai_draft_session,
 )
+from export.workspace_graph import build_workspace_graph
 
 
 def sample_graph():
@@ -46,6 +47,34 @@ def draft_node(node_id="draft-1", *, sourced=False):
         "source_refs": [{"document_id": "doc-1"}] if sourced else [],
         "external_refs": {},
         "metadata": {"source": "test"},
+    }
+
+
+def react_root_flow():
+    return {
+        "_id": "workspace-1",
+        "flow_name": "Demo",
+        "summary": "",
+        "flow_type": "manual",
+        "flow_json": json.dumps(
+            {
+                "nodes": [
+                    {
+                        "id": "root",
+                        "type": "custom",
+                        "position": {"x": 0, "y": 0},
+                        "data": {
+                            "title": "Root",
+                            "status": "approved",
+                            "source_refs": [{"document_id": "doc-1"}],
+                            "metadata": {"workspace_role": "root"},
+                        },
+                    }
+                ],
+                "edges": [],
+                "viewport": {},
+            }
+        ),
     }
 
 
@@ -144,26 +173,7 @@ def test_draft_session_endpoints_persist_without_graph_changes_until_accept(monk
     graph = sample_graph()
     persisted = {}
     saved_flow_json = {}
-    flow = {
-        "_id": "workspace-1",
-        "flow_name": "Demo",
-        "summary": "",
-        "flow_type": "manual",
-        "flow_json": json.dumps(
-            {
-                "nodes": [
-                    {
-                        "id": "root",
-                        "type": "custom",
-                        "position": {"x": 0, "y": 0},
-                        "data": {"title": "Root", "status": "approved", "source_refs": [{"document_id": "doc-1"}]},
-                    }
-                ],
-                "edges": [],
-                "viewport": {},
-            }
-        ),
-    }
+    flow = react_root_flow()
 
     def fake_save(session):
         persisted[session["session_id"]] = copy.deepcopy(session)
@@ -218,3 +228,114 @@ def test_draft_session_endpoints_persist_without_graph_changes_until_accept(monk
 
     assert any(node["id"] == "draft-1" for node in saved_flow_json["nodes"])
     assert persisted[session_id]["accept_history"][-1]["metadata"]["undo_snapshot"] == flow["flow_json"]
+
+
+def test_accept_endpoint_save_reload_preserves_source_refs_needs_review_and_audit(monkeypatch):
+    persisted = {}
+    flow = react_root_flow()
+
+    def fake_save(session):
+        persisted[session["session_id"]] = copy.deepcopy(session)
+        return session
+
+    def fake_persist(flow_id, snapshot):
+        flow["flow_json"] = json.dumps(snapshot)
+
+    monkeypatch.setattr(app, "get_workspace_graph_or_404", lambda flow_id: build_workspace_graph(flow))
+    monkeypatch.setattr(app, "get_workspace_flow_or_404", lambda flow_id: copy.deepcopy(flow))
+    monkeypatch.setattr(app, "get_source_components", lambda flow_id: [])
+    monkeypatch.setattr(app, "save_ai_draft_session", fake_save)
+    monkeypatch.setattr(
+        app,
+        "get_ai_draft_session_or_404",
+        lambda flow_id, session_id: copy.deepcopy(persisted[session_id]),
+    )
+    monkeypatch.setattr(app, "_persist_flow_snapshot", fake_persist)
+
+    session = app.create_ai_draft_session(
+        "workspace-1",
+        {
+            "prompt": "Add cited and uncited cereal branches",
+            "scope": {"type": "node", "node_id": "root"},
+            "draft_nodes": [draft_node("cited-branch", sourced=True), draft_node("uncited-branch")],
+            "draft_edges": [
+                {
+                    "id": "edge-cited",
+                    "source_node_id": "root",
+                    "target_node_id": "cited-branch",
+                    "relationship_type": "contains",
+                    "metadata": {},
+                },
+                {
+                    "id": "edge-uncited",
+                    "source_node_id": "root",
+                    "target_node_id": "uncited-branch",
+                    "relationship_type": "contains",
+                    "metadata": {},
+                },
+            ],
+        },
+    )
+    accept_response = app.accept_ai_draft_session_endpoint(
+        "workspace-1",
+        session["session_id"],
+        {
+            "mode": "selected",
+            "selected_item_ids": ["item_cited-branch", "item_uncited-branch"],
+        },
+    )
+
+    reloaded_graph = build_workspace_graph(flow)
+    cited = next(node for node in reloaded_graph["nodes"] if node["id"] == "cited-branch")
+    uncited = next(node for node in reloaded_graph["nodes"] if node["id"] == "uncited-branch")
+    accepted_session = persisted[session["session_id"]]
+
+    assert cited["source_refs"] == [{"document_id": "doc-1"}]
+    assert cited["metadata"]["ai_draft_session_id"] == session["session_id"]
+    assert uncited["status"] == "needs_review"
+    assert uncited["metadata"]["ai_draft_session_id"] == session["session_id"]
+    assert accepted_session["accept_history"][-1]["metadata"]["undo_snapshot"]
+    assert accept_response["accept_result"]["accepted_node_ids"] == [
+        "cited-branch",
+        "uncited-branch",
+    ]
+    assert accept_response["graph"]["nodes"][1]["data"]["source_refs"] == [{"document_id": "doc-1"}]
+
+
+def test_discard_endpoint_persists_rejection_without_graph_mutation(monkeypatch):
+    persisted = {}
+    flow = react_root_flow()
+    original_flow_json = flow["flow_json"]
+    persist_calls = []
+
+    def fake_save(session):
+        persisted[session["session_id"]] = copy.deepcopy(session)
+        return session
+
+    monkeypatch.setattr(app, "get_workspace_graph_or_404", lambda flow_id: build_workspace_graph(flow))
+    monkeypatch.setattr(app, "save_ai_draft_session", fake_save)
+    monkeypatch.setattr(
+        app,
+        "get_ai_draft_session_or_404",
+        lambda flow_id, session_id: copy.deepcopy(persisted[session_id]),
+    )
+    monkeypatch.setattr(app, "_persist_flow_snapshot", lambda flow_id, snapshot: persist_calls.append(snapshot))
+
+    session = app.create_ai_draft_session(
+        "workspace-1",
+        {
+            "prompt": "Add a branch",
+            "scope": {"type": "node", "node_id": "root"},
+            "draft_nodes": [draft_node("discarded-branch")],
+        },
+    )
+
+    discarded = app.discard_ai_draft_session_endpoint(
+        "workspace-1",
+        session["session_id"],
+        {"discarded_by": "tester"},
+    )
+
+    assert discarded["status"] == "discarded"
+    assert flow["flow_json"] == original_flow_json
+    assert persist_calls == []

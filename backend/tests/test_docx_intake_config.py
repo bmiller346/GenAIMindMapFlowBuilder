@@ -44,6 +44,14 @@ def test_legacy_assistants_model_resolver_no_longer_downshifts_to_gpt_4_1():
     assert app.resolve_assistants_model("gpt-5.4") == "gpt-5.4"
 
 
+def test_legacy_assistants_model_resolver_rejects_old_models():
+    with pytest.raises(HTTPException) as exc_info:
+        app.resolve_assistants_model("gpt-4.1")
+
+    assert exc_info.value.status_code == 400
+    assert "Unsupported OpenAI model 'gpt-4.1'" in exc_info.value.detail
+
+
 def test_legacy_assistants_fallback_can_be_disabled(monkeypatch):
     monkeypatch.setenv("DOCMAP_ALLOW_LEGACY_ASSISTANTS", "false")
 
@@ -122,6 +130,7 @@ def test_component_qa_uses_responses_context_without_assistants(monkeypatch):
     assert calls[0]["persona"] == "Research Assistant"
     assert "Use source-backed requirements." in calls[0]["context"]
     assert calls[0]["workspace_brief"]["goal"] == "Review source handling"
+    assert calls[0]["model"] is None
 
 
 def test_component_follow_up_uses_responses_and_updates_persona(monkeypatch):

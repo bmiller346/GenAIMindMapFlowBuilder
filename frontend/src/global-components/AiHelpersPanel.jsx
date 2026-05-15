@@ -5,8 +5,11 @@ import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
+import modalStore from '../stores/modalStore';
+import PromptModal from '../modals/PromptModal';
 import {
     buildGraphProjection,
+    buildFilteredGraphProjection,
     getChecklistPreviewRows,
     getMissingInfoPreviewRows,
     getSmeQuestionPreviewRows,
@@ -25,7 +28,55 @@ const helperAction = (id, label, view, count, detail, helperId, previewAction, p
     previewKey
 });
 
-const AiHelpersPanel = ({ hidden }) => {
+const SCOPE_OPTIONS = [
+    { id: 'workspace', label: 'Whole workspace' },
+    { id: 'branch', label: 'Selected branch' },
+    { id: 'nodes', label: 'Selected nodes' },
+    { id: 'source_document', label: 'Selected source document' },
+    { id: 'filtered_view', label: 'Current filtered view' }
+];
+
+const OUTPUT_PROMPT_DEFAULTS = {
+    'create-knowledge-graph': {
+        role: 'workflow-mapper',
+        action: 'custom_prompt'
+    },
+    'find-connections': {
+        role: 'gap-analyst',
+        action: 'find_duplicate_overlapping_nodes'
+    },
+    'create-flow-chart': {
+        role: 'workflow-mapper',
+        action: 'custom_prompt'
+    },
+    'extract-chart-data': {
+        role: 'data-table-interpreter',
+        action: 'interpret_table_data'
+    }
+};
+
+const sourceIdsFromNode = (node = {}) =>
+    [
+        node.id,
+        node.data?.source_document_id,
+        node.data?.source_document?.id,
+        node.data?.document_id,
+        node.data?.component_id
+    ].filter(Boolean);
+
+const sourceTitleFromNode = (node = {}) =>
+    node.title ||
+    node.filename ||
+    node.name ||
+    node.data?.source_document?.original_filename ||
+    node.data?.source_document?.filename ||
+    node.data?.filename ||
+    node.data?.title ||
+    node.data?.content ||
+    node.id ||
+    'Selected source';
+
+const AiHelpersPanel = ({ hidden, selectedNodes = [] }) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -33,7 +84,9 @@ const AiHelpersPanel = ({ hidden }) => {
         setActiveView: state.setActiveView,
         selectedBranchId: state.selectedBranchId,
         setSelectedBranchId: state.setSelectedBranchId,
-        setGeneratedHelperPreview: state.setGeneratedHelperPreview
+        setGeneratedHelperPreview: state.setGeneratedHelperPreview,
+        activeGraphFilters: state.activeGraphFilters,
+        sourceLibrary: state.sourceLibrary
     });
     const {
         nodes,
@@ -42,17 +95,54 @@ const AiHelpersPanel = ({ hidden }) => {
         setActiveView,
         selectedBranchId,
         setSelectedBranchId,
-        setGeneratedHelperPreview
+        setGeneratedHelperPreview,
+        activeGraphFilters,
+        sourceLibrary
     } = useStore(useShallow(selector));
     const addActivity = useActivityStore((s) => s.addActivity);
     const flowId = flowStore((s) => s.flow_id);
+    const pushNode = modalStore((s) => s.pushNode);
+    const selectedSourceId = modalStore((s) => s.sourceId);
     const [isOpen, setIsOpen] = useState(false);
     const [runningActionId, setRunningActionId] = useState('');
     const [actionError, setActionError] = useState('');
+    const [scopeType, setScopeType] = useState('workspace');
 
     const projection = useMemo(
         () => buildGraphProjection(nodes, edges, selectedBranchId),
         [nodes, edges, selectedBranchId]
+    );
+    const filteredProjection = useMemo(
+        () =>
+            buildFilteredGraphProjection(nodes, edges, {
+                branchId: selectedBranchId,
+                filters: activeGraphFilters
+            }),
+        [activeGraphFilters, edges, nodes, selectedBranchId]
+    );
+    const selectedNodeIds = useMemo(
+        () => selectedNodes.map((node) => node.id).filter(Boolean),
+        [selectedNodes]
+    );
+    const selectedSource = useMemo(
+        () => {
+            const librarySource = sourceLibrary.find(
+                (source) =>
+                    source.id === selectedSourceId ||
+                    source.source_document_id === selectedSourceId ||
+                    source.document_id === selectedSourceId
+            );
+            if (librarySource) {
+                return librarySource;
+            }
+
+            return nodes.find(
+                (node) =>
+                    node.type === 'dataSource' &&
+                    sourceIdsFromNode(node).includes(selectedSourceId)
+            );
+        },
+        [nodes, selectedSourceId, sourceLibrary]
     );
 
     const helperCounts = useMemo(
@@ -76,7 +166,122 @@ const AiHelpersPanel = ({ hidden }) => {
     );
 
     const selectedRoot = projection.nodes.find((node) => node.id === selectedBranchId);
+    const hasFilteredScope = (activeGraphFilters || []).length > 0 || Boolean(selectedBranchId);
+    const effectiveScopeType =
+        (scopeType === 'branch' && !selectedBranchId) ||
+        (scopeType === 'nodes' && selectedNodeIds.length === 0) ||
+        (scopeType === 'source_document' && !selectedSourceId) ||
+        (scopeType === 'filtered_view' && !hasFilteredScope)
+            ? 'workspace'
+            : scopeType;
+    const scopeLabel =
+        SCOPE_OPTIONS.find((option) => option.id === effectiveScopeType)?.label ||
+        'Whole workspace';
+    const requestedScopeLabel =
+        SCOPE_OPTIONS.find((option) => option.id === scopeType)?.label ||
+        'Whole workspace';
+    const scopePayload = () => {
+        if (effectiveScopeType === 'source_document' && selectedSourceId) {
+            return { type: 'source', source_id: selectedSourceId };
+        }
+        if (effectiveScopeType === 'nodes' && selectedNodeIds.length > 0) {
+            return { type: 'nodes', node_ids: selectedNodeIds };
+        }
+        if (
+            (effectiveScopeType === 'branch' || effectiveScopeType === 'filtered_view') &&
+            selectedBranchId
+        ) {
+            return { type: 'branch', node_id: selectedBranchId };
+        }
+
+        return { type: 'workspace' };
+    };
+    const draftScopePayload = () => {
+        if (effectiveScopeType === 'source_document' && selectedSourceId) {
+            return {
+                scope: 'source',
+                sourceId: selectedSourceId,
+                source: selectedSource
+                    ? {
+                          id: selectedSourceId,
+                          title: sourceTitleFromNode(selectedSource),
+                          type:
+                              selectedSource.data?.source_document?.type ||
+                              selectedSource.type ||
+                              selectedSource.type_label,
+                          chunks: selectedSource.chunks || [],
+                          source_refs: selectedSource.source_refs || []
+                      }
+                    : { id: selectedSourceId }
+            };
+        }
+        if (effectiveScopeType === 'nodes' && selectedNodeIds.length > 0) {
+            return { scope: 'nodes', nodeIds: selectedNodeIds };
+        }
+        if (effectiveScopeType === 'filtered_view') {
+            return {
+                scope: 'nodes',
+                nodeIds: filteredProjection.nodes.map((node) => node.id)
+            };
+        }
+        if (effectiveScopeType === 'branch' && selectedBranchId) {
+            return { scope: 'branch', nodeId: selectedBranchId };
+        }
+        return { scope: 'workspace' };
+    };
+    const scopeDetail = () => {
+        if (effectiveScopeType === 'branch' && selectedRoot) {
+            return `${scopeLabel}: ${selectedRoot.title}`;
+        }
+        if (effectiveScopeType === 'nodes') {
+            return `${scopeLabel}: ${selectedNodeIds.length} nodes`;
+        }
+        if (effectiveScopeType === 'source_document') {
+            return `${scopeLabel}: ${
+                selectedSource ? sourceTitleFromNode(selectedSource) : selectedSourceId
+            }`;
+        }
+        if (effectiveScopeType === 'filtered_view') {
+            return `${scopeLabel}: ${filteredProjection.nodes.length} filtered nodes`;
+        }
+        return `${scopeLabel}: ${projection.nodes.length} nodes`;
+    };
     const helperRoles = [
+        {
+            id: 'output-builder',
+            name: 'AI Output Builder',
+            permission: 'Creates new artifact previews; nothing is accepted until review.',
+            actions: [
+                helperAction(
+                    'create-knowledge-graph',
+                    'Create knowledge graph',
+                    'knowledgeGraph',
+                    projection.nodes.length,
+                    'Prepared knowledge graph output target.'
+                ),
+                helperAction(
+                    'find-connections',
+                    'Find connections',
+                    'connections',
+                    projection.edges.length,
+                    'Prepared connection discovery output target.'
+                ),
+                helperAction(
+                    'create-flow-chart',
+                    'Create flow chart',
+                    'flowchart',
+                    projection.nodes.length,
+                    'Prepared flow chart generation target.'
+                ),
+                helperAction(
+                    'extract-chart-data',
+                    'Extract chart data',
+                    'chartData',
+                    projection.nodes.filter((node) => node.table_rows?.length).length,
+                    'Prepared chart data extraction target.'
+                )
+            ]
+        },
         {
             id: 'source-librarian',
             name: 'Source Librarian',
@@ -111,14 +316,14 @@ const AiHelpersPanel = ({ hidden }) => {
             actions: [
                 helperAction(
                     'preview-tasks',
-                    'Preview tasks',
+                    'Generate task preview',
                     'preview',
                     helperCounts.taskCandidates,
                     'Project Planner prepared branch-to-task candidates.'
                 ),
                 helperAction(
                     'preview-checklist',
-                    'Preview checklist',
+                    'Create checklist from this branch',
                     'checklist',
                     helperCounts.checklistCandidates,
                     'Project Planner prepared checklist candidates.'
@@ -142,7 +347,7 @@ const AiHelpersPanel = ({ hidden }) => {
                 ),
                 helperAction(
                     'draft-sme-questions',
-                    'Draft SME Qs',
+                    'Draft SME questions',
                     'sme',
                     helperCounts.smeQuestions,
                     'Reviewer prepared SME review questions.',
@@ -169,7 +374,7 @@ const AiHelpersPanel = ({ hidden }) => {
             actions: [
                 helperAction(
                     'prepare-monday',
-                    'monday input',
+                    'Create implementation handoff package',
                     'mondayInput',
                     helperCounts.mondayReady,
                     'Integration Operator prepared monday input rows.',
@@ -179,7 +384,7 @@ const AiHelpersPanel = ({ hidden }) => {
                 ),
                 helperAction(
                     'review-monday-status',
-                    'monday status',
+                    'Review handoff status',
                     'mondayStatus',
                     helperCounts.mondayMapped,
                     'Integration Operator prepared monday status review.',
@@ -208,9 +413,7 @@ const AiHelpersPanel = ({ hidden }) => {
             `http://localhost:8000/api/workspaces/${flowId}/ai/project-planner/preview`,
             {
                 action: previewAction,
-                scope: selectedBranchId
-                    ? { type: 'branch', node_id: selectedBranchId }
-                    : { type: 'workspace' },
+                scope: scopePayload(),
                 use_ai: true,
                 allow_deterministic_fallback: true
             }
@@ -234,9 +437,7 @@ const AiHelpersPanel = ({ hidden }) => {
             `http://localhost:8000/api/workspaces/${flowId}/ai/${action.helperId}/preview`,
             {
                 action: action.previewAction,
-                scope: selectedBranchId
-                    ? { type: 'branch', node_id: selectedBranchId }
-                    : { type: 'workspace' },
+                scope: scopePayload(),
                 use_ai: true,
                 allow_deterministic_fallback: true
             }
@@ -253,7 +454,15 @@ const AiHelpersPanel = ({ hidden }) => {
         setRunningActionId(action.id);
         try {
             let generatedPreview;
-            if (role.id === 'project-planner') {
+            if (!action.helperId && role.id === 'output-builder') {
+                const promptDefaults = OUTPUT_PROMPT_DEFAULTS[action.id] || {};
+                pushNode(PromptModal, {
+                    ...draftScopePayload(),
+                    initialRoleId: promptDefaults.role,
+                    initialActionId: promptDefaults.action
+                });
+                generatedPreview = undefined;
+            } else if (role.id === 'project-planner') {
                 generatedPreview = await projectPlannerAction(action);
             } else {
                 generatedPreview = await backendPreviewAction(action);
@@ -270,8 +479,16 @@ const AiHelpersPanel = ({ hidden }) => {
                       }.`
                     : action.detail,
                 context: selectedRoot
-                    ? `Scope: ${selectedRoot.title}`
-                    : `Scope: whole graph (${projection.nodes.length} nodes)`
+                    ? `Scope: ${scopeDetail()}${
+                          requestedScopeLabel !== scopeLabel
+                              ? ` (requested ${requestedScopeLabel})`
+                              : ''
+                      }`
+                    : `Scope: ${scopeDetail()}${
+                          requestedScopeLabel !== scopeLabel
+                              ? ` (requested ${requestedScopeLabel})`
+                              : ''
+                      }`
             });
         } catch (error) {
             const detail =
@@ -285,8 +502,8 @@ const AiHelpersPanel = ({ hidden }) => {
                 title: `${role.name}: ${action.label}`,
                 detail: String(detail),
                 context: selectedRoot
-                    ? `Scope: ${selectedRoot.title}`
-                    : `Scope: whole graph (${projection.nodes.length} nodes)`
+                    ? `Scope: ${scopeDetail()}`
+                    : `Scope: ${scopeDetail()}`
             });
         } finally {
             setRunningActionId('');
@@ -311,17 +528,49 @@ const AiHelpersPanel = ({ hidden }) => {
             {isOpen ? (
                 <div className="ai-helpers-body">
                     <div className="ai-helper-scope">
-                        <span>
-                            {selectedRoot
-                                ? `Selected branch: ${selectedRoot.title}`
-                                : `${projection.nodes.length} nodes in scope`}
-                        </span>
+                        <label htmlFor="ai-helper-scope-select">Scope before generation</label>
+                        <select
+                            id="ai-helper-scope-select"
+                            value={scopeType}
+                            onChange={(event) => setScopeType(event.target.value)}
+                        >
+                            {SCOPE_OPTIONS.map((option) => (
+                                <option
+                                    key={option.id}
+                                    value={option.id}
+                                    disabled={
+                                        (option.id === 'branch' && !selectedBranchId) ||
+                                        (option.id === 'nodes' && selectedNodeIds.length === 0) ||
+                                        (option.id === 'source_document' && !selectedSourceId) ||
+                                        (option.id === 'filtered_view' && !hasFilteredScope)
+                                    }
+                                >
+                                    {option.label}
+                                    {option.id === 'branch' && !selectedBranchId
+                                        ? ' (select branch first)'
+                                        : ''}
+                                    {option.id === 'nodes' && selectedNodeIds.length === 0
+                                        ? ' (select nodes first)'
+                                        : ''}
+                                    {option.id === 'source_document' && !selectedSourceId
+                                        ? ' (select source first)'
+                                        : ''}
+                                    {option.id === 'filtered_view' && !hasFilteredScope
+                                        ? ' (apply filter first)'
+                                        : ''}
+                                </option>
+                            ))}
+                        </select>
+                        <span>{scopeDetail()}</span>
                         {selectedBranchId ? (
                             <button
                                 type="button"
-                                onClick={() => setSelectedBranchId(undefined)}
+                                onClick={() => {
+                                    setSelectedBranchId(undefined);
+                                    setScopeType('workspace');
+                                }}
                             >
-                                Whole graph
+                                Whole workspace
                             </button>
                         ) : null}
                     </div>
