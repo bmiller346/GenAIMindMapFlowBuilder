@@ -124,6 +124,12 @@ const externalRefSummary = (provider, ref) => {
     return details.length ? details.join(' | ') : `${provider} ref is empty`;
 };
 
+const requestImmediateWorkspaceSave = () => {
+    window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('docmap:save-workspace-now'));
+    }, 0);
+};
+
 const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
     const selector = (state) => ({
         nodes: state.nodes,
@@ -360,6 +366,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
         clearActiveAIActionPreview();
         if (flowId) {
             setSaveStatus('dirty');
+            requestImmediateWorkspaceSave();
         }
         recordActivity({
             type: 'ai_action_accepted',
@@ -397,6 +404,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
         clearActiveAIActionPreview();
         if (flowId) {
             setSaveStatus('dirty');
+            requestImmediateWorkspaceSave();
         }
         recordActivity({
             type: 'ai_action_rejected',

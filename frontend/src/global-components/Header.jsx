@@ -277,6 +277,48 @@ const Header = ({
         });
     };
 
+    const saveLatestWorkspaceSnapshot = useCallback(async () => {
+        if (!flowStore.getState().flow_id) {
+            return;
+        }
+
+        const latestSnapshot = buildLatestSnapshotFromStores();
+        const latestFingerprint = stringifyFlowSnapshot(latestSnapshot);
+        const latestFlowState = flowStore.getState();
+        setSaveStatus('saving');
+        try {
+            await saveFlowCall(latestFlowState.flow_name, latestSnapshot);
+            setSavedSnapshot(
+                latestSnapshot,
+                latestFingerprint,
+                latestFlowState.flow_name,
+                latestFlowState.flow_type
+            );
+        } catch (err) {
+            setSaveError(err?.message || 'Autosave failed');
+        }
+    }, [
+        buildLatestSnapshotFromStores,
+        saveFlowCall,
+        setSaveError,
+        setSaveStatus,
+        setSavedSnapshot
+    ]);
+
+    useEffect(() => {
+        const handleImmediateSave = () => {
+            clearTimeout(autosaveTimerRef.current);
+            saveLatestWorkspaceSnapshot();
+        };
+
+        window.addEventListener('docmap:save-workspace-now', handleImmediateSave);
+        return () =>
+            window.removeEventListener(
+                'docmap:save-workspace-now',
+                handleImmediateSave
+            );
+    }, [saveLatestWorkspaceSnapshot]);
+
     useEffect(() => {
         if (!hasUnsavedChanges || saveStatus === 'saving') {
             return;
