@@ -494,6 +494,17 @@ const modelOptions = ['auto', ...supportedOpenAIModels];
 const draftSessionEndpoint = ({ flowId }) =>
     `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions`;
 
+const hasWorkspaceBriefContext = (brief = {}) =>
+    Boolean(
+        brief?.configured ||
+            String(brief?.goal || '').trim() ||
+            String(brief?.audience || '').trim() ||
+            String(brief?.domain_context || '').trim() ||
+            String(brief?.review_rules || '').trim() ||
+            (Array.isArray(brief?.desired_outputs) &&
+                brief.desired_outputs.some((output) => output !== 'mind_map'))
+    );
+
 const PromptModal = ({
     scope,
     nodeId,
@@ -942,6 +953,7 @@ const PromptModal = ({
                           selectedModel,
                           selectedSourcePayload,
                           desiredOutputs: ['graph_draft', 'no_visual'].includes(inferredShape) ? [] : [inferredShape],
+                          workspaceBrief,
                           metadata: {
                               requested_visual: selectedVisual,
                               output_shape: inferredShape,
@@ -1052,6 +1064,23 @@ const PromptModal = ({
                 <span>{scopeDisplayLabel}</span>
                 <strong>{targetLabel}</strong>
             </div>
+            <div className="ai-action-brief-context">
+                <span>Workspace brief</span>
+                <strong>
+                    {hasWorkspaceBriefContext(workspaceBrief)
+                        ? workspaceBrief.goal || workspaceBrief.domain_context || 'Brief configured'
+                        : 'No brief configured'}
+                </strong>
+                {hasWorkspaceBriefContext(workspaceBrief) ? (
+                    <small>
+                        Ask AI will use this as the project foundation; your question refines this run.
+                    </small>
+                ) : (
+                    <small>
+                        Add a brief when you want project-level goals, audience, output style, and review rules.
+                    </small>
+                )}
+            </div>
             <div className="ai-action-source-context">
                 <div>
                     <span>Source context</span>
@@ -1091,7 +1120,7 @@ const PromptModal = ({
                     <textarea
                         value={customPrompt}
                         onChange={(event) => setCustomPrompt(event.target.value)}
-                        placeholder="Example: how do I make a grilled cheese?"
+                        placeholder="Example: turn this commissioning plan into a task-ready workflow."
                     />
                 </label>
                 <label>
