@@ -2,6 +2,10 @@
 import { useMemo, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
+import modalStore from '../stores/modalStore';
+import DataSourceSelect from '../global-components/DataSourceSelect';
+import PromptModal from '../modals/PromptModal';
+import WorkspaceBriefModal from '../modals/WorkspaceBriefModal';
 import {
     buildGraphProjection,
     getTaskPreviewRows,
@@ -16,6 +20,7 @@ import MondayStatusBackPreview from './MondayStatusBackPreview';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
+import { createWorkspaceNode, getRootPosition } from '../utils/manualNodes';
 
 const CORE_VIEWS = [
     { id: 'mindmap', label: 'Map' },
@@ -126,14 +131,39 @@ const OutlineNode = ({ node, childrenByParent, nodeLookup, depth, onSelectBranch
     );
 };
 
-const EmptyState = ({ activeView }) => (
+const EmptyState = ({
+    activeView,
+    canUseWorkspace,
+    onAddRoot,
+    onAddSource,
+    onOpenBrief,
+    onAskAi
+}) => (
     <div className="local-view-empty">
+        <span className="local-view-empty-kicker">Start your Think Space</span>
         <strong>No graph nodes yet</strong>
         <span>
             {activeView === 'mindmap'
-                ? 'Add or open a workspace.'
-                : 'This view will populate from the current graph.'}
+                ? 'Add sources, sketch a root node, or define the brief that AI should use.'
+                : 'This view will populate once the workspace has graph nodes.'}
         </span>
+        <div className="local-view-empty-actions">
+            <button type="button" onClick={onAddSource}>
+                Add source
+            </button>
+            <button type="button" onClick={onAddRoot} disabled={!canUseWorkspace}>
+                Create root node
+            </button>
+            <button type="button" onClick={onOpenBrief}>
+                Set brief
+            </button>
+            <button type="button" onClick={onAskAi} disabled={!canUseWorkspace}>
+                Ask AI
+            </button>
+        </div>
+        {!canUseWorkspace ? (
+            <small>Open or create a workspace to add nodes or ask AI.</small>
+        ) : null}
     </div>
 );
 
@@ -162,8 +192,10 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
     } = useStore(useShallow(selector));
     const [acceptedPreviewIds, setAcceptedPreviewIds] = useState(new Set());
     const addActivity = useActivityStore((s) => s.addActivity);
+    const recordActivity = useActivityStore((s) => s.recordActivity);
     const flowId = flowStore((s) => s.flow_id);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
+    const pushNode = modalStore((s) => s.pushNode);
 
     const projection = useMemo(
         () => buildGraphProjection(nodes, edges, selectedBranchId),
@@ -212,6 +244,52 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
 
     const openNode = (nodeId) => {
         onSelectNode?.(nodeId);
+    };
+
+    const addRootNode = () => {
+        if (!flowId) {
+            return;
+        }
+
+        const manualNode = createWorkspaceNode({
+            title: 'New workspace root',
+            nodeType: 'concept',
+            position: getRootPosition(nodes)
+        });
+        setNodes([...nodes, manualNode]);
+        setSaveStatus('dirty');
+        recordActivity({
+            type: 'manual_node_created',
+            title: 'Manual node added',
+            summary: 'Added New workspace root from the empty workspace state.',
+            node_ids: [manualNode.id],
+            metadata: {
+                node_type: 'concept'
+            }
+        });
+    };
+
+    const openSourcePicker = () => {
+        pushNode(DataSourceSelect);
+    };
+
+    const openBrief = () => {
+        pushNode(WorkspaceBriefModal);
+    };
+
+    const openWorkspaceAskAi = () => {
+        if (!flowId) {
+            return;
+        }
+        pushNode(PromptModal, { scope: 'workspace' });
+        recordActivity({
+            type: 'ai_action_picker_opened',
+            title: 'Workspace Ask AI opened',
+            summary: 'Opened preview-first AI actions from the empty workspace state.',
+            metadata: {
+                scope: 'workspace'
+            }
+        });
     };
 
     const acceptTaskPreview = () => {
@@ -333,7 +411,16 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                 </div>
             </div>
 
-            {nodes.length === 0 ? <EmptyState activeView={activeView} /> : null}
+            {nodes.length === 0 ? (
+                <EmptyState
+                    activeView={activeView}
+                    canUseWorkspace={Boolean(flowId)}
+                    onAddRoot={addRootNode}
+                    onAddSource={openSourcePicker}
+                    onOpenBrief={openBrief}
+                    onAskAi={openWorkspaceAskAi}
+                />
+            ) : null}
 
             {activeView === 'outline' && nodes.length > 0 ? (
                 <ol className="local-outline">

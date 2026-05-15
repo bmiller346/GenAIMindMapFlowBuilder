@@ -30,6 +30,7 @@ import IntegrationsPanel from './global-components/IntegrationsPanel.jsx';
 import AutomationsPanel from './global-components/AutomationsPanel.jsx';
 import ManualNodeControls from './global-components/ManualNodeControls.jsx';
 import AiHelpersPanel from './global-components/AiHelpersPanel.jsx';
+import SourceDraftReviewPanel from './global-components/SourceDraftReviewPanel.jsx';
 import { getLocalSetting, setLocalSetting, SETTINGS_KEYS } from './config/localSettings';
 import { parseFlowSnapshot, stringifyFlowSnapshot } from './utils/flowSnapshots';
 import { rememberWorkspace, selectStartupWorkspace } from './utils/workspaceSession';
@@ -304,7 +305,6 @@ const App = () => {
         <div className={lightMode ? 'app light' : 'app dark'}>
             <Modal ChildProp={Prompts} />
             <Header
-                isDrawer={isDrawer}
                 setIsDrawer={setIsDrawer}
                 flowList={flowList}
                 setFlowList={setFlowList}
@@ -344,10 +344,7 @@ const App = () => {
                 minZoom={-1}
                 maxZoom={100}
             >
-                <Panel
-                    position="bottom-left"
-                    style={isDrawer ? { display: 'none' } : { display: 'flex' }}
-                >
+                <Panel position="bottom-left" style={{ display: 'flex' }}>
                     <div className="workspace-flow-controls">
                         <WorkspaceBriefPanel />
                         <ManualNodeControls />
@@ -362,7 +359,7 @@ const App = () => {
                 </Panel>
                 <Panel
                     position="top-left"
-                    style={isDrawer ? { display: 'none' } : { display: 'block' }}
+                    style={{ display: 'block' }}
                 >
                     <GraphValidationPanel
                         flowId={flow_id}
@@ -374,7 +371,7 @@ const App = () => {
                 </Panel>
                 <Panel
                     position="top-center"
-                    style={isDrawer ? { display: 'none' } : { display: 'block' }}
+                    style={{ display: 'block' }}
                 >
                     <LocalViewsPanel
                         hidden={false}
@@ -383,13 +380,13 @@ const App = () => {
                 </Panel>
                 <Panel
                     position="bottom-right"
-                    style={isDrawer ? { display: 'none' } : { display: 'block' }}
+                    style={{ display: 'block' }}
                 >
                     <AiHelpersPanel hidden={!isAiHelpersOpen} />
                 </Panel>
                 <Panel
                     position="top-right"
-                    style={isDrawer ? { display: 'none' } : { display: 'block' }}
+                    style={{ display: 'block' }}
                 >
                     <NodeInspector
                         selectedNodeId={inspectorNodeId}
@@ -397,6 +394,7 @@ const App = () => {
                         onClose={closeNodeInspector}
                     />
                 </Panel>
+                <SourceDraftReviewPanel />
             </ReactFlow>
         </div>
     );

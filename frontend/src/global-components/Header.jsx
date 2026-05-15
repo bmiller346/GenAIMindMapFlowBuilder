@@ -26,7 +26,6 @@ import useActivityStore from '../stores/activityStore';
 import useAutomationStore from '../stores/automationStore';
 import { createSourceLibrarySnapshot } from '../views/graphProjection';
 const Header = ({
-    isDrawer,
     setIsDrawer,
     setFlowList,
     lightMode,
@@ -1184,7 +1183,7 @@ const Header = ({
     return (
         <div
             className="header"
-            style={isDrawer ? { display: 'none' } : { display: 'flex' }}
+            style={{ display: 'flex' }}
         >
             <div className="header-left">
                 <img

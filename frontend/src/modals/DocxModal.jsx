@@ -21,10 +21,6 @@ import { sourceUploadLoading } from '../config/loadingStates';
 import useActivityStore from '../stores/activityStore';
 import { isCanceledRequest, requestErrorMessage } from '../utils/requestErrors';
 import {
-    createOperationSnapshot,
-    restoreOperationSnapshot
-} from '../utils/operationSnapshots';
-import {
     createFlowSnapshot,
     stringifyFlowSnapshot
 } from '../utils/flowSnapshots';
@@ -64,18 +60,17 @@ const DocxModal = () => {
         setEdges: state.setEdges,
         setViewPort: state.setViewPort,
         workspaceBrief: state.workspaceBrief,
-        setWorkspaceBrief: state.setWorkspaceBrief,
-        viewport: state.viewport
+        viewport: state.viewport,
+        setPendingSourceDraft: state.setPendingSourceDraft
     });
     const flowId = flowStore((s) => s.flow_id);
     const setFlowId = flowStore((s) => s.setFlow);
-    const flow_id = flowStore((s) => s.flow_id);
     const setFlowName = flowStore((s) => s.setFlowName);
     const flowName = flowStore((s) => s.flow_name);
     const flowType = flowStore((s) => s.flow_type);
     const setFlowType = flowStore((s) => s.setFlowType);
     const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
-    const { fitView, setViewport } = useReactFlow();
+    const { fitView } = useReactFlow();
     const [file, setFile] = useState();
     const [intakeProfileId, setIntakeProfileId] = useState('');
     const [intakeModel, setIntakeModel] = useState(DOCX_INTAKE_MODELS[0]);
@@ -97,8 +92,8 @@ const DocxModal = () => {
         setEdges,
         setViewPort,
         workspaceBrief,
-        setWorkspaceBrief,
-        viewport
+        viewport,
+        setPendingSourceDraft
     } = useStore(useShallow(selector));
 
     const showError = (statusCode, message) => {
@@ -189,12 +184,6 @@ const DocxModal = () => {
             intakeModel: intakeModel === 'auto' ? '' : intakeModel,
             intakePrompt: intakeBrief.trim()
         };
-        const undoSnapshot = createOperationSnapshot({
-            nodes,
-            edges,
-            viewport,
-            workspaceBrief
-        });
         const controller = new AbortController();
         const activityId = addActivity({
             type: 'source_upload_started',
@@ -215,21 +204,6 @@ const DocxModal = () => {
                 popNode();
             }
         });
-        const undoSourceAdd = () => {
-            restoreOperationSnapshot({
-                snapshot: undoSnapshot,
-                setNodes,
-                setEdges,
-                setWorkspaceBrief,
-                setViewPort,
-                setViewport
-            });
-            updateActivity(activityId, {
-                status: 'completed',
-                context: 'DOCX source add was undone.',
-                undo: undefined
-            });
-        };
         const [url, body, headerConfig] = setRequestData('docx', currentFlowId, data);
         axios
             .post(`http://localhost:8000/${url}`, body, {
@@ -243,8 +217,7 @@ const DocxModal = () => {
                     type: 'source_upload_completed',
                     status: 'completed',
                     source_ids: [file?.name],
-                    context: 'DOCX source was added to the workspace.',
-                    undo: undoSourceAdd
+                    context: 'DOCX source draft is ready for review.'
                 });
                 setupNodes(res.data);
             })
@@ -273,45 +246,39 @@ const DocxModal = () => {
         setupFlow(data)
     }
     const setupFlow = (data) => {
-        console.log("SETUUUUUUUUUUUUUUUUUUP new flow")
-        setFlowId(data.flow_id);
-        console.log('DEDEDE', data);
-        setFlowName(data.flow_name);
-        const jsonString = JSON.stringify(data.mindmap_json)
-        console.log(jsonString, "JSON STRINGGGGGGGGGGGGGG")
+        const jsonString = JSON.stringify(data.mindmap_json || {});
         if (jsonString.length > 0) {
             const flow = applySourceIntakeMetadata(JSON.parse(jsonString), data);
-            console.log('NODEEEEEEEEEE', flow.nodes);
-            if (flow.nodes.length === 0 && flow.edges.length === 0) {
-                console.log('not clled');
+            if ((flow.nodes || []).length === 0 && (flow.edges || []).length === 0) {
                 setTrigger(!trigger);
                 setViewPort(0, 0, 1);
                 popNode();
+                return;
             }
             if (flow) {
-                const { x = 0, y = 0, zoom = 1.25 } = flow.viewport;
-                setNodes(flow.nodes || []);
-                setEdges(flow.edges || []);
-                setViewPort(x, y, zoom);
-                // fitView();
-                console.log(
-                    'FLow selecteed sadassssssssssssssssssssss',
-                    flow_id,
-                    data.flow_id,
-                    nodes
-                );
+                setPendingSourceDraft({
+                    id: `source_draft_${data.component_id || data.flow_id || nanoid()}`,
+                    flowId: data.flow_id,
+                    flowName: data.flow_name,
+                    flowType: data.flow_type || 'automatic',
+                    componentId: data.component_id,
+                    sourceType: data.type || 'docx',
+                    sourceName: file?.name || data.type || 'DOCX source',
+                    intakeRole: intakeProfileId,
+                    intakeRoleLabel: sourcePromptLabel() || 'No intake role',
+                    intakeModel,
+                    intakePrompt: intakeBrief.trim(),
+                    graph: flow,
+                    createdAt: new Date().toISOString()
+                });
                 popNode();
             } else {
                 console.log('Flow error');
             }
         } else {
-            setNodes([]);
-            setEdges([]);
-            // setViewPort({});
             fitView();
             popNode();
         }
-        // setTrigger(!trigger);
     };
 
 

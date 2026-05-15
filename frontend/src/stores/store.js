@@ -237,6 +237,7 @@ const useStore = create((set, get) => ({
     },
     viewport: {},
     sourceLibrary: [],
+    pendingSourceDraft: undefined,
     generatedHelperPreviews: {},
     activeAIActionPreview: undefined,
     aiActionRuns: [],
@@ -294,6 +295,12 @@ const useStore = create((set, get) => ({
     },
     setSourceLibrary: (sourceLibrary) => {
         set({ sourceLibrary: Array.isArray(sourceLibrary) ? sourceLibrary : [] });
+    },
+    setPendingSourceDraft: (draft) => {
+        set({ pendingSourceDraft: draft || undefined });
+    },
+    clearPendingSourceDraft: () => {
+        set({ pendingSourceDraft: undefined });
     },
     setGeneratedHelperPreview: (key, preview) => {
         set({
