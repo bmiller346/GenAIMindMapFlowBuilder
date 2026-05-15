@@ -2585,7 +2585,14 @@ def _draft_revision_from_request(
         role=request.get("role") or session.get("role") or "Custom",
         action=request.get("action") or "custom_prompt",
         scope=session.get("scope") or {"type": "workspace"},
-        custom_prompt=request.get("prompt") or request.get("custom_prompt") or "",
+        custom_prompt=query_with_workspace_brief(
+            request.get("prompt") or request.get("custom_prompt") or "",
+            request.get("workspace_brief")
+            if isinstance(request.get("workspace_brief"), dict)
+            else (request.get("metadata") or {}).get("workspace_brief")
+            if isinstance(request.get("metadata"), dict)
+            else None,
+        ),
         created_by=request.get("created_by") or "user",
         model=request.get("model"),
     )

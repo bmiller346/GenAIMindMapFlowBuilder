@@ -328,14 +328,14 @@ const customPromptDraftBranches = (prompt) => {
 
 const fallbackChecklistSteps = (prompt) => {
     const lower = String(prompt || '').toLowerCase();
-    if (lower.includes('grilled cheese') || lower.includes('grill cheese')) {
+    if (/\b(commission|commissioning|punch\s*list|rfi|submittal|field\s*report|inspection)\b/.test(lower)) {
         return [
-            'Gather bread, cheese, butter, and a skillet.',
-            'Butter one side of each bread slice.',
-            'Place cheese between the unbuttered sides.',
-            'Cook over medium-low heat until the first side is golden.',
-            'Flip and cook until the cheese melts and the second side is golden.',
-            'Rest briefly, slice, and serve warm.'
+            'Confirm the scope, acceptance criteria, and source documents.',
+            'Identify responsible parties, handoffs, and required approvals.',
+            'Sequence the field or review steps in execution order.',
+            'Capture evidence, exceptions, and open questions as review items.',
+            'Assign owners, due dates, and closeout requirements.',
+            'Validate completion against the workspace brief and cited sources.'
         ];
     }
     return [
