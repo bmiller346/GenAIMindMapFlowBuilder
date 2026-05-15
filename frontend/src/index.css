@@ -5228,7 +5228,7 @@ img:hover {
 }
 
 .workspace-nudge-surface {
-  width: min(25rem, calc(100vw - 2rem));
+  width: min(18rem, calc(100vw - 2rem));
   margin-top: 7.25rem;
   color: var(--font-color);
   pointer-events: auto;
@@ -5306,7 +5306,7 @@ img:hover {
 
 .workspace-nudge {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 1fr;
   gap: 0.5rem;
   align-items: center;
   border: 1px solid rgba(148, 163, 184, 0.22);
@@ -5359,6 +5359,7 @@ img:hover {
   display: inline-flex;
   gap: 0.25rem;
   align-items: center;
+  justify-content: space-between;
 }
 
 .workspace-nudge-actions .workspace-nudge-dismiss {

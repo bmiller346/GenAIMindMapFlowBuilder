@@ -181,6 +181,19 @@ const App = () => {
         onChange
     });
 
+    useEffect(() => {
+        const responseNodes = nodes.filter(
+            (node) => node.selected && node.type === 'response'
+        );
+        if (responseNodes.length > 1 && responseNodes.length <= 4) {
+            setSelectedNodes(responseNodes);
+            setAskMultipleClass('animate');
+        } else if (responseNodes.length <= 1) {
+            setSelectedNodes(undefined);
+            setAskMultipleClass('deanimate');
+        }
+    }, [nodes]);
+
     // const setFlowId = flowStore((s) => s.setFlow);
     // const flow_id = flowStore((s) => s.flow_id);
     // const setFlowName = flowStore((s) => s.setFlowName);

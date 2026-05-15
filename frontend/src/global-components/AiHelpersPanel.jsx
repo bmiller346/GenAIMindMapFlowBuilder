@@ -120,10 +120,15 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [] }) => {
             }),
         [activeGraphFilters, edges, nodes, selectedBranchId]
     );
-    const selectedNodeIds = useMemo(
-        () => selectedNodes.map((node) => node.id).filter(Boolean),
-        [selectedNodes]
-    );
+    const selectedNodeIds = useMemo(() => {
+        const ids = [
+            ...selectedNodes.map((node) => node.id),
+            ...nodes
+                .filter((node) => node.selected && node.type === 'response')
+                .map((node) => node.id)
+        ].filter(Boolean);
+        return Array.from(new Set(ids));
+    }, [nodes, selectedNodes]);
     const selectedSource = useMemo(
         () => {
             const librarySource = sourceLibrary.find(

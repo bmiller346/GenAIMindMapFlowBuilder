@@ -735,6 +735,82 @@ test('selected source Ask AI sends source scope and chunks to draft sessions', a
     expect(structuralNodes(latestSnapshot(savedRequests))).toEqual([]);
 });
 
+test('multi-selected node Ask AI sends nodes scope from AI helpers', async ({ page }) => {
+    const { draftSessionRequests, state } = await setupMockBackend(page);
+    state.createdFlow = true;
+    state.savedFlowName = 'Multi node scoped QA';
+    state.savedFlowJson = JSON.stringify({
+        nodes: [
+            {
+                id: 'node-alpha',
+                type: 'response',
+                selected: true,
+                position: { x: 0, y: 240 },
+                data: {
+                    title: 'Alpha requirement',
+                    body: 'Alpha source-backed work.',
+                    node_type: 'requirement',
+                    status: 'ai_generated',
+                    source_refs: [{ document_id: 'doc-alpha', page: 1 }],
+                    data: { summ: 'Alpha source-backed work.' }
+                }
+            },
+            {
+                id: 'node-beta',
+                type: 'response',
+                selected: true,
+                position: { x: 360, y: 240 },
+                data: {
+                    title: 'Beta requirement',
+                    body: 'Beta source-backed work.',
+                    node_type: 'requirement',
+                    status: 'ai_generated',
+                    source_refs: [{ document_id: 'doc-beta', page: 2 }],
+                    data: { summ: 'Beta source-backed work.' }
+                }
+            }
+        ],
+        edges: [],
+        viewport: {},
+        workspace_brief: {},
+        source_library: [],
+        activity_events: [],
+        ai_action_runs: [],
+        automations: []
+    });
+
+    await page.goto('/');
+    await expect(page.getByRole('textbox', { name: 'Workspace name' })).toHaveValue('Multi node scoped QA');
+    const beforePreview = parseSnapshot(state.savedFlowJson);
+    const graphNodes = page.locator('.react-flow__node');
+    await expect(graphNodes).toHaveCount(2);
+
+    await page.getByAltText('Open workspaces').click();
+    await page.locator('.drawer-tool').filter({ hasText: 'AI helpers' }).click();
+    await page.locator('.ai-helpers-summary').click();
+    await page.getByLabel('Scope before generation').selectOption('nodes');
+    await expect(page.locator('.ai-helper-scope')).toContainText('Selected nodes: 2 nodes');
+
+    await page.getByRole('button', { name: /Create knowledge graph/ }).click();
+    await expect(page.locator('.ai-action-modal')).toBeVisible();
+    await expect(page.locator('.ai-action-scope')).toContainText('Selected nodes');
+    await expect(page.locator('.ai-action-scope')).toContainText('2 selected nodes');
+    await page.locator('.ai-action-custom textarea').fill('Find shared implementation themes across these selected nodes.');
+
+    await page.getByRole('button', { name: 'Generate preview' }).click();
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('nodes generated child');
+    await expect.poll(() => draftSessionRequests.length, { timeout: 7000 }).toBe(1);
+
+    expect(draftSessionRequests[0].scope).toBe('nodes');
+    expect(draftSessionRequests[0].requestBody.scope).toEqual({
+        type: 'nodes',
+        node_ids: ['node-alpha', 'node-beta']
+    });
+    expect(structuralNodes(parseSnapshot(state.savedFlowJson))).toEqual(
+        structuralNodes(beforePreview)
+    );
+});
+
 test('legacy personas and custom prompts remain discoverable in Ask AI', async ({ page }) => {
     const { savedRequests } = await setupMockBackend(page);
     await createRoot(page, savedRequests, 'Persona root');

@@ -116,6 +116,7 @@ const PromptModal = ({
     const [customPrompt, setCustomPrompt] = useState('');
     const [stageMessage, setStageMessage] = useState('');
     const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
+    const promptScope = scope === 'nodes' ? 'node' : scope || 'node';
 
     const isPreviewFlow = Boolean(scope);
     const targetData = targetNode ? getWorkspaceNodeData(targetNode) : {};
@@ -133,8 +134,8 @@ const PromptModal = ({
         (scope === 'workspace' ? 'Whole workspace' : 'Selected scope');
 
     const profiles = useMemo(
-        () => getPromptProfilesForScope(scope || 'node'),
-        [scope]
+        () => getPromptProfilesForScope(promptScope),
+        [promptScope]
     );
     const role = useMemo(
         () =>
@@ -143,19 +144,19 @@ const PromptModal = ({
         [profiles, selectedRoleId]
     );
     const actions = useMemo(
-        () => getActionsForProfileAndScope(role, scope || 'node'),
-        [role, scope]
+        () => getActionsForProfileAndScope(role, promptScope),
+        [role, promptScope]
     );
     const selectedAction = useMemo(
         () =>
             actions.find((action) => action.id === selectedActionId) ||
-            actions.find((action) => action.id === getDefaultActionForProfile(role, scope || 'node')) ||
+            actions.find((action) => action.id === getDefaultActionForProfile(role, promptScope)) ||
             actions[0],
-        [actions, role, scope, selectedActionId]
+        [actions, role, promptScope, selectedActionId]
     );
     const suggestions = useMemo(
-        () => getFollowUpSuggestions(role, selectedAction, targetLabel, scope || 'node'),
-        [role, scope, selectedAction, targetLabel]
+        () => getFollowUpSuggestions(role, selectedAction, targetLabel, promptScope),
+        [role, promptScope, selectedAction, targetLabel]
     );
     const scopeDisplayLabel =
         scope === 'workspace'
@@ -171,7 +172,7 @@ const PromptModal = ({
     const updateRole = (roleId) => {
         const nextRole = profiles.find((profile) => profile.id === roleId);
         setSelectedRoleId(roleId);
-        setSelectedActionId(getDefaultActionForProfile(nextRole, scope || 'node'));
+        setSelectedActionId(getDefaultActionForProfile(nextRole, promptScope));
     };
 
     const stagePreviewRequest = async () => {

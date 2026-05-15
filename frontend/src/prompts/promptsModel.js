@@ -34,6 +34,7 @@ export const branchAiActions = [
 
 export const workspaceAiActions = [
     { id: 'suggest_follow_up_questions', label: 'Suggest follow-up questions' },
+    { id: 'find_missing_source_support', label: 'Find missing source support' },
     { id: 'find_unsupported_assumptions', label: 'Find unsupported assumptions' },
     { id: 'find_duplicate_overlapping_nodes', label: 'Find duplicate or overlapping nodes' },
     { id: 'generate_tasks', label: 'Generate tasks' },

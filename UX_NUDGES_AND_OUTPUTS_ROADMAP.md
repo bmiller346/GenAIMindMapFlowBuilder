@@ -893,8 +893,8 @@ preferences.
 
 - [x] Agent E: Verify dense graph does not become noisy.
 - [x] Agent E: Verify no nudges appear when disabled.
-- [ ] Agent E: Verify output generation labels match backend behavior.
-- [ ] Agent E: Verify source/SME/task/checklist flows from empty states.
+- [x] Agent E: Verify output generation labels match backend behavior.
+- [x] Agent E: Verify source/SME/task/checklist flows from empty states.
 - [x] Agent E: Record pass/fail notes in this roadmap.
 
 Agent E QA notes:
@@ -913,11 +913,13 @@ Agent E QA notes:
   so dismissed nudges stay hidden across reloads.
 - PASS: Node-level indicators stay as compact dots by default, with expanded
   labels available only on hover/focus.
-- PARTIAL: Output generation labels use existing local view/helper labels; final
-  backend wording should be rechecked when backend artifact contracts settle.
-- PARTIAL: Empty-state source/SME/task/checklist paths still depend on the
-  current Local Views and AI Helpers behavior; no backend artifact contract work
-  was added in this slice.
+- PASS: Output generation labels now distinguish project-now local projections
+  from AI enrichment/generation actions, and CTA presets open valid Ask AI
+  role/action combinations for chart data, source coverage, tasks, checklist,
+  flow chart, knowledge graph, gaps, and SME questions.
+- PASS: Empty-state source/SME/task/checklist paths now include direct next
+  actions to ask AI for the matching preview or route to adjacent gap/source
+  review, without requiring backend artifact contract changes.
 
 ## Evaluation Fixtures
 
