@@ -129,6 +129,7 @@ test('acceptAIActionPreview creates canonical nodes only on accept', () => {
     assert.equal(beforeEdges.length, 0);
     assert.equal(result.nodes.length, 3);
     assert.equal(result.edges.length, 2);
+    assert.equal(result.edges.every((edge) => edge.animated), true);
     assert.equal(result.nodes.find((node) => node.id === 'draft-1').data.status, 'ai_generated');
     assert.equal(result.nodes.find((node) => node.id === 'draft-2').data.status, 'needs_review');
     assert.deepEqual(result.run.generated_node_ids, ['draft-1', 'draft-2']);

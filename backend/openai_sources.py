@@ -107,6 +107,98 @@ def generate_document_mindmap(
     return graph, _decision_metadata(decision)
 
 
+def generate_component_answer(
+    *,
+    question: str,
+    context: str,
+    persona: str = "",
+    instructions: str = "",
+    model: str | None = None,
+    workspace_brief: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    prompt = (
+        "Answer the user's component question from the provided component context. "
+        "Return only JSON with keys `summ`, `df`, and `graph`. Use an empty list "
+        "for `df` and an empty string for `graph` when table or chart data is not useful. "
+        "Do not invent facts beyond the component context.\n\n"
+        f"Persona: {persona or 'DocMap reviewer'}\n"
+        f"Instructions: {instructions or 'Use source-grounded, concise answers.'}\n"
+        f"Workspace brief: {json.dumps(workspace_brief or {}, ensure_ascii=False)}\n\n"
+        f"Question:\n{question}\n\n"
+        f"Component context:\n{context}"
+    )
+    decision = choose_openai_model(
+        requested_model=model,
+        task="answer component question",
+        content=f"{question}\n\n{context}",
+        requires_source_grounding=True,
+    )
+    data = _post_openai_json(
+        _responses_payload(
+            model=decision.model,
+            input_items=[_text_message(prompt)],
+            json_output=True,
+        ),
+        _require_openai_api_key(),
+    )
+    output_text = _extract_output_text(data)
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="OpenAI component answer was not valid JSON.",
+        ) from exc
+    return {
+        "summ": str(parsed.get("summ") or ""),
+        "df": parsed.get("df") if isinstance(parsed.get("df"), list) else [],
+        "graph": parsed.get("graph") if isinstance(parsed.get("graph"), str) else "",
+    }
+
+
+def generate_component_follow_up_questions(
+    *,
+    context: str,
+    persona: str = "",
+    instructions: str = "",
+    model: str | None = None,
+) -> list[str]:
+    prompt = (
+        "Generate up to three useful follow-up questions for this component. "
+        "Return only JSON with a `questions` array of strings. If the context is "
+        "insufficient, return an empty array.\n\n"
+        f"Persona: {persona or 'DocMap reviewer'}\n"
+        f"Instructions: {instructions or 'Ask source-grounded review questions.'}\n\n"
+        f"Component context:\n{context}"
+    )
+    decision = choose_openai_model(
+        requested_model=model,
+        task="generate component follow-up questions",
+        content=context,
+        requires_source_grounding=True,
+    )
+    data = _post_openai_json(
+        _responses_payload(
+            model=decision.model,
+            input_items=[_text_message(prompt)],
+            json_output=True,
+        ),
+        _require_openai_api_key(),
+    )
+    output_text = _extract_output_text(data)
+    try:
+        parsed = json.loads(output_text)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="OpenAI follow-up response was not valid JSON.",
+        ) from exc
+    questions = parsed.get("questions")
+    if not isinstance(questions, list):
+        return []
+    return [str(question).strip() for question in questions if str(question).strip()][:3]
+
+
 def generate_web_mindmap(*, url: str, flow_id: str, model: str | None = None) -> dict[str, Any]:
     prompt = _graph_prompt(
         source_type="web",

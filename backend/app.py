@@ -167,6 +167,8 @@ from graph.ai_contract import (
 )
 from graph.schemas import GraphSchemaError, validate_workspace_brief
 from openai_sources import (
+    generate_component_answer,
+    generate_component_follow_up_questions,
     generate_document_mindmap,
     generate_document_summary,
     generate_audio_mindmap,
@@ -247,20 +249,6 @@ def build_source_intake_instruction(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Unknown DOCX intake role.",
         ) from exc
-
-
-def require_legacy_assistants_enabled(feature: str) -> None:
-    if legacy_assistants_fallback_enabled():
-        return
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail=(
-            f"{feature} used the legacy Assistants API path and is disabled. "
-            "Use preview-first Ask AI, Source Librarian, Reviewer, Project Planner, "
-            "or a Responses-backed source workflow instead. Set "
-            "DOCMAP_ALLOW_LEGACY_ASSISTANTS=true only as a temporary migration fallback."
-        ),
-    )
 
 
 def repair_flow_snapshot_for_persistence(
@@ -764,10 +752,18 @@ def prepare_source_upload(file: UploadFile, flow_id: str, expected_extension: st
         ) from exc
 
     if existing_component:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="File already exists in the workspace.",
-        )
+        source_document = dict(existing_component.get("source_document") or {})
+        if not source_document:
+            source_document = source_document_from_upload(upload, version=existing_component.get("version", 1) or 1)
+        return {
+            "upload": upload,
+            "file_bytes": file_bytes,
+            "source_document": source_document,
+            "source_segments": existing_component.get("source_segments", []),
+            "document_chunks": existing_component.get("document_chunks", []),
+            "existing_component": existing_component,
+            "reused_existing_source": True,
+        }
 
     return ingest_supported_document(
         upload["filename"],
@@ -803,10 +799,22 @@ def prepare_ai_intake_upload(file: UploadFile, flow_id: str) -> dict:
         ) from exc
 
     if existing_component:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="File already exists in the workspace.",
-        )
+        source_document = dict(existing_component.get("source_document") or {})
+        if not source_document:
+            source_document = build_ai_intake_source_document(
+                upload["filename"],
+                file_bytes,
+                version=existing_component.get("version", 1) or 1,
+            )
+        return {
+            "upload": upload,
+            "file_bytes": file_bytes,
+            "source_document": source_document,
+            "source_segments": existing_component.get("source_segments", []),
+            "document_chunks": existing_component.get("document_chunks", []),
+            "existing_component": existing_component,
+            "reused_existing_source": True,
+        }
 
     source_document = build_ai_intake_source_document(
         upload["filename"],
@@ -904,6 +912,221 @@ def source_segments_from_page_records(records: list[dict]) -> list[dict]:
         cursor_by_page[page] = cursor + len(text) + 2
 
     return segments
+
+
+RESPONSES_COMPONENT_TYPES = {"pdf", "txt", "md", "html", "docx", "pptx", "web"}
+COMPONENT_QA_RESPONSE_MODELS = {
+    "pdf": PDFNodeQueryResponse,
+    "txt": TXTNodeQueryResponse,
+    "md": MDNodeQueryResponse,
+    "html": HTMLNodeQueryResponse,
+    "docx": DOCXNodeQueryResponse,
+    "pptx": PPTXNodeQueryResponse,
+    "web": WebNodeQueryResponse,
+}
+COMPONENT_QA_NODE_TYPES = {
+    "pdf": "PDFNode",
+    "txt": "TXTNode",
+    "md": "MDNode",
+    "html": "HTMLNode",
+    "docx": "DOCXNode",
+    "pptx": "PPTXNode",
+    "web": "WebNode",
+}
+
+
+def component_context_text(record: dict | None, max_length: int = 48000) -> str:
+    if not record:
+        return ""
+
+    chunks = record.get("document_chunks")
+    if isinstance(chunks, list) and chunks:
+        parts = []
+        for chunk in chunks:
+            if not isinstance(chunk, dict):
+                continue
+            text = str(chunk.get("text") or "").strip()
+            if not text:
+                continue
+            parts.append(
+                f"[chunk_id={chunk.get('id', '')}; page={chunk.get('page') or ''}; "
+                f"section={chunk.get('heading') or chunk.get('section') or ''}]\n{text}"
+            )
+        context = "\n\n".join(parts)
+        if context.strip():
+            return context[:max_length]
+
+    segments = record.get("source_segments")
+    if isinstance(segments, list) and segments:
+        context = "\n\n".join(
+            str(segment.get("text") or "").strip()
+            for segment in segments
+            if isinstance(segment, dict) and str(segment.get("text") or "").strip()
+        )
+        if context.strip():
+            return context[:max_length]
+
+    summary = record.get("summary")
+    if isinstance(summary, list):
+        context = " ".join(str(item) for item in summary if item)
+    elif summary is None:
+        context = ""
+    else:
+        context = str(summary)
+
+    if not context.strip():
+        context = str(record.get("content") or record.get("name") or "")
+    return context.strip()[:max_length]
+
+
+def get_component_record_or_404(flow_id: str, component_id: str, component_type: str) -> dict:
+    record = component_collection.find_one(
+        {
+            "flow_id": ObjectId(flow_id),
+            "_id": ObjectId(component_id),
+            "type": component_type,
+        }
+    )
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{component_type.upper()} component not found.",
+        )
+    return record
+
+
+def update_component_persona(record_id: str, *, instructions: str, persona_name: str) -> None:
+    component_collection.update_one(
+        {"_id": ObjectId(record_id)},
+        {"$set": {"instructions": instructions, "persona_name": persona_name}},
+    )
+
+
+def answer_component_with_responses(
+    request: Any,
+    component_type: str,
+    response_model: Any,
+):
+    record = get_component_record_or_404(
+        request.flow_id,
+        request.component_id,
+        component_type,
+    )
+    context = component_context_text(record)
+    if not context:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{component_type.upper()} component has no source context to answer from.",
+        )
+    answer = generate_component_answer(
+        question=request.query,
+        context=query_with_workspace_brief(context, request.workspace_brief),
+        persona=record.get("persona_name") or "DocMap reviewer",
+        instructions=record.get("instructions") or "",
+        model=OPENAI_DEFAULT_MODEL,
+        workspace_brief=request.workspace_brief,
+    )
+    entries = [
+        response_model(
+            id=request.node_id,
+            type=COMPONENT_QA_NODE_TYPES.get(component_type, "ResponseNode"),
+            data={
+                "question": request.query,
+                "summ": answer["summ"],
+                "df": validate_dataframe(answer["df"]),
+                "graph": answer["graph"],
+                "flow_id": request.flow_id,
+                "component_id": request.component_id,
+                "component_type": component_type,
+            },
+        )
+    ]
+    if request.request_type == "question":
+        entries.append(
+            response_model(
+                id=str(ObjectId()),
+                type="question",
+                data={
+                    "question": "",
+                    "flow_id": request.flow_id,
+                    "component_id": request.component_id,
+                    "component_type": component_type,
+                },
+            )
+        )
+    return entries
+
+
+def follow_up_entries(
+    *,
+    flow_id: str,
+    component_id: str,
+    component_type: str,
+    questions: list[str],
+) -> list[ComponentFollowUpQueryResponse]:
+    entries = [
+        ComponentFollowUpQueryResponse(
+            id=str(ObjectId()),
+            flow_id=flow_id,
+            data={
+                "question": question,
+                "component_id": component_id,
+                "component_type": component_type,
+            },
+            type="followUp",
+            position={"x": 0, "y": 0},
+        )
+        for question in questions
+    ]
+    entries.append(
+        ComponentFollowUpQueryResponse(
+            id=str(ObjectId()),
+            flow_id=flow_id,
+            position={"x": 0, "y": 0},
+            data={
+                "question": "",
+                "component_id": component_id,
+                "component_type": component_type,
+            },
+            type="question",
+        )
+    )
+    return entries
+
+
+def follow_up_questions_with_responses(
+    request: ComponentFollowUpQueryRequest,
+) -> list[ComponentFollowUpQueryResponse]:
+    record = get_component_record_or_404(
+        request.flow_id,
+        request.component_id,
+        request.component_type,
+    )
+    update_component_persona(
+        request.component_id,
+        instructions=request.instructions,
+        persona_name=request.persona_name,
+    )
+    context = component_context_text(record)
+    if not context:
+        return follow_up_entries(
+            flow_id=request.flow_id,
+            component_id=request.component_id,
+            component_type=request.component_type,
+            questions=[],
+        )
+    questions = generate_component_follow_up_questions(
+        context=context,
+        persona=request.persona_name,
+        instructions=request.instructions,
+        model=request.model_name,
+    )
+    return follow_up_entries(
+        flow_id=request.flow_id,
+        component_id=request.component_id,
+        component_type=request.component_type,
+        questions=questions,
+    )
 
 
 def ground_mindmap_with_source_refs(response_json: dict, source_context: dict) -> dict:
@@ -1198,7 +1421,7 @@ def camelot_pdf_processing(flow_id, file, flow_type):
         print(chunks)
 
         summary = process_pdf_summary(chunks)
-        
+
         if flow_type == "manual":
 
             component_metadata = {
@@ -1227,9 +1450,9 @@ def camelot_pdf_processing(flow_id, file, flow_type):
 
             vector_store_from_client.add_documents(documents=EmbeddingsDocuments, ids=uuids)
             return {"component_id": str(component_id), "type": "pdf"}
-        
+
         else:
-                    
+
             template = """You are tasked with generating a JSON mind map for given summary of the pdf document and that should be compatible with React Flow for rendering a flow diagram. The mind map should adhere to the following rules:
 
                 1. **Node Types:**
@@ -1260,7 +1483,7 @@ def camelot_pdf_processing(flow_id, file, flow_type):
                     - `data` contains the following properties:
                         {{
                             "prompt": "<data source description>",
-                            "name": "pdf", !!!DOESN"T CHANGES 
+                            "name": "pdf", !!!DOESN"T CHANGES
                             "content": "<file name or content>",
                             "flow_id": "{flow_id}",
                             "file": "{filename}"  // Empty object or file metadata
@@ -1295,7 +1518,7 @@ def camelot_pdf_processing(flow_id, file, flow_type):
                     - `x` (horizontal position of the viewport)
                     - `y` (vertical position of the viewport)
                     - `zoom` (zoom level for initial rendering)
-                    
+
                 Here is the PDF summary for which you need to generate the mind map:
                 {summary_pdf}
 
@@ -1314,7 +1537,7 @@ def camelot_pdf_processing(flow_id, file, flow_type):
             prompt = PromptTemplate.from_template(template)
 
             lm_chain = prompt | llm
-            
+
             answer = lm_chain.invoke(
                     {"summary_pdf": summary, "flow_id": flow_id, "filename": source_document["filename"]}
             )
@@ -1324,11 +1547,11 @@ def camelot_pdf_processing(flow_id, file, flow_type):
             print(responseList)
 
             response_json = parse_ai_mindmap_or_422(responseList)
-            
+
             print(response_json)
 
             response_json = ground_mindmap_with_source_refs(response_json, source_context)
-            
+
             component_metadata = {
                 "flow_id": ObjectId(flow_id),
                 "type": "pdf",
@@ -1345,7 +1568,7 @@ def camelot_pdf_processing(flow_id, file, flow_type):
                 "mindmap_json": response_json,
                 "flow_type": "automatic"
             }
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1481,9 +1704,9 @@ def use_aws_textract(file, flow_id, flow_type):
     print(chunks)
 
     summary = process_pdf_summary(chunks)
-    
+
     if flow_type == "manual":
-        
+
         component_metadata = {
             "flow_id": ObjectId(flow_id),
             "size": len(file_bytes),
@@ -1510,9 +1733,9 @@ def use_aws_textract(file, flow_id, flow_type):
 
         vector_store_from_client.add_documents(documents=EmbeddingsDocuments, ids=uuids)
         return {"component_id": str(component_id), "type": "pdf"}
-    
+
     else:
-        
+
         template = """You are tasked with generating a JSON mind map for given summary of the pdf document and that should be compatible with React Flow for rendering a flow diagram. The mind map should adhere to the following rules:
 
                 1. **Node Types:**
@@ -1543,7 +1766,7 @@ def use_aws_textract(file, flow_id, flow_type):
                     - `data` contains the following properties:
                         {{
                             "prompt": "<data source description>",
-                            "name": "pdf", !!!DOESN"T CHANGES 
+                            "name": "pdf", !!!DOESN"T CHANGES
                             "content": "<file name or content>",
                             "flow_id": "{flow_id}",
                             "file": "{filename}"  // Empty object or file metadata
@@ -1578,7 +1801,7 @@ def use_aws_textract(file, flow_id, flow_type):
                     - `x` (horizontal position of the viewport)
                     - `y` (vertical position of the viewport)
                     - `zoom` (zoom level for initial rendering)
-                    
+
                 Here is the PDF summary for which you need to generate the mind map:
                 {summary_pdf}
 
@@ -1597,7 +1820,7 @@ def use_aws_textract(file, flow_id, flow_type):
         prompt = PromptTemplate.from_template(template)
 
         lm_chain = prompt | llm
-        
+
         answer = lm_chain.invoke(
             {"summary_pdf": summary, "flow_id": flow_id, "filename": source_document["filename"]}
         )
@@ -1607,11 +1830,11 @@ def use_aws_textract(file, flow_id, flow_type):
         print(responseList)
 
         response_json = parse_ai_mindmap_or_422(responseList)
-        
+
         print(response_json)
 
         response_json = ground_mindmap_with_source_refs(response_json, source_context)
-        
+
         component_metadata = {
             "flow_id": ObjectId(flow_id),
             "type": "pdf",
@@ -1751,21 +1974,21 @@ def fetch_question_answer_from_node_collection(parent_id: str, flow_id: str):
             answer = "Answer: " + str(record.get("summ", "Answer not found."))
             df_list = record.get("df", [])
             df_string = " | ".join([str(item) for item in df_list])
-            
+
             answer += " DataFrame: " + df_string
 
         elif record["type"] == "web":
             answer = "Answer: " + str(record.get("summ", "Answer not found."))
             df_list = record.get("df", [])
             df_string = " | ".join([str(item) for item in df_list])
-            
+
             answer += " DataFrame: " + df_string
 
         elif record["type"] == "MultipleQA":
             answer = "Answer: " + str(record.get("summ", "Answer not found."))
             df_list = record.get("df", [])
             df_string = " | ".join([str(item) for item in df_list])
-            
+
             answer += " DataFrame: " + df_string
 
         print("Answer:", answer)
@@ -2106,6 +2329,7 @@ def preview_ai_action(
             scope=scope,
             custom_prompt=request.get("custom_prompt"),
             created_by=request.get("created_by") or "user",
+            model=request.get("model"),
         )
     except GraphSchemaError as exc:
         raise HTTPException(
@@ -2863,6 +3087,7 @@ def get_summary_from_openai(
     source_document = source_context["source_document"]
     file_bytes = source_context["file_bytes"]
     file_extension = source_document["type"]
+    existing_component = source_context.get("existing_component")
 
     if len(file_bytes) == 0:
         raise ValueError("The uploaded file is actually empty!")
@@ -2895,7 +3120,20 @@ def get_summary_from_openai(
             "ai_provider": ai_metadata,
             **source_metadata_fields(source_context),
         }
-        component_id = component_collection.insert_one(component_metadata).inserted_id
+        if existing_component:
+            component_id = existing_component["_id"]
+            component_collection.update_one(
+                {"_id": component_id},
+                {
+                    "$set": {
+                        "summary": summary_text,
+                        "processing_type": "responses",
+                        "ai_provider": ai_metadata,
+                    }
+                },
+            )
+        else:
+            component_id = component_collection.insert_one(component_metadata).inserted_id
         update_operation_progress(
             operation_id,
             phase="complete",
@@ -3009,7 +3247,7 @@ def get_summary_from_openai(
     )
     print(thread)
     print(run)
-    
+
     messages = list(
         openai.beta.threads.messages.list(thread_id=thread.id, run_id=run.id)
     )
@@ -3095,6 +3333,7 @@ def openai_mindmap_generator(
     source_document = source_context["source_document"]
     file_bytes = source_context["file_bytes"]
     file_extension = source_document["type"]
+    existing_component = source_context.get("existing_component")
 
     if len(file_bytes) == 0:
         raise ValueError("The uploaded file is actually empty!")
@@ -3134,7 +3373,20 @@ def openai_mindmap_generator(
             "ai_provider": ai_metadata,
             **source_metadata_fields(source_context),
         }
-        component_id = component_collection.insert_one(component_metadata).inserted_id
+        if existing_component:
+            component_id = existing_component["_id"]
+            component_collection.update_one(
+                {"_id": component_id},
+                {
+                    "$set": {
+                        "mindmap_json": response_json,
+                        "processing_type": "responses",
+                        "ai_provider": ai_metadata,
+                    }
+                },
+            )
+        else:
+            component_id = component_collection.insert_one(component_metadata).inserted_id
         flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
         update_operation_progress(
             operation_id,
@@ -3246,7 +3498,7 @@ def openai_mindmap_generator(
                 - There will be `question` node which will be connected to the subsequent `response` node.
                 - The `question` node can be connected to data sources or other `response` nodes.
                 - There will be `response` for the above question
-                
+
                 2. **Node Relationships:**
                 - `response` nodes may also connect to each other if it improves the logical flow or visualization.
                 - `question` node will always have a `response` node
@@ -3275,7 +3527,7 @@ def openai_mindmap_generator(
                             "model_name": {json.dumps(assistant_model if intake_role_label or intake_prompt_text else "")},
                             "intake_model": {json.dumps(assistant_model)},
                             "intake_prompt": {json.dumps(intake_prompt_text)},
-                            "name": "{file_extension}", !!!DOESN"T CHANGES 
+                            "name": "{file_extension}", !!!DOESN"T CHANGES
                             "content": "<file name or content>",
                             "flow_id": "{flow_id}",
                             "file": "{source_document["filename"]}"  // Empty object or file metadata
@@ -3329,7 +3581,7 @@ def openai_mindmap_generator(
                 - Do **not** include any explanations, text, or additional information.
                 - Maintain the format with double curly braces `{{` and `}}` as shown in the format.
                 {append_ai_graph_prompt_contract("")}
-                """,     
+                """,
 
                 "attachments": [
                     {"file_id": messages_file.id, "tools": [{"type": "file_search"}]}
@@ -3402,95 +3654,6 @@ def openai_mindmap_generator(
         "mindmap_json": response_json,
         "flow_type": flow_type
     }
-
-    
-def one_shot_openai(query, vector_store_id, file_id, assistant_id):
-    require_legacy_assistants_enabled("component Q&A")
-    try:
-        template = f"""
-        You are an AI assistant tasked with answering the user’s question based on the provided conversation history. Return the results in **JSON format** with the structure below:  
-
-        #### **Response Format:**  
-        {{
-        "summ": "Your summarized response here...",
-        "df": an array of JSON objects,
-        "graph": "json_string_representation_of_plotly_graph"
-        }}
-
-        ### **Instructions:**
-        1. Answer the question using the conversation history.
-        2. Extract relevant tabular data into a JSON object compatible with Ag-Grid. If no table exists, return empty JSON object.
-        3. If a dataframe is available, generate a relevant **Plotly graph**. Return it as a **valid JSON string** that can be parsed in React.js.
-        4. If no graph is possible, return an empty string `""`.
-        5. ** The graph's background will be black, so adjust the theme accordingly**.
-
-        NOTE -- "Make sure you need to return only json as response only & please don't add any comments"
-        NOTE -- "Make sure you need only need the answer for which context of data is available if not available return empty json as per format"
-
-        **Here is the question:** {query}  
-
-        ### **Example Output:**  
-        If the conversation history contains a table and a relevant graph, return:  
-
-        ```json
-        {{
-        "summ": "Based on the conversation, the key points discussed were...",
-        "df": [
-            {{
-            "column1": "value1",
-            "column2": "value2",
-            "column3": "value3"
-            }},
-            {{
-            "column1": "value1",
-            "column2": "value2",
-            "column3": "value3"
-            }}
-        ],
-        "graph": "{{\"data\": [{{\"x\": [\"2024-02-01\", \"2024-02-02\"], \"y\": [100, 150], \"type\": \"line\"}}], \"layout\": {{\"title\": \"Sample Graph\"}}"
-        }}
-        """
-
-        print(file_id)
-        print(assistant_id)
-        print(template)
-        thread = openai.beta.threads.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": template,
-                    "attachments": [
-                        {"file_id": file_id, "tools": [{"type": "file_search"}]}
-                    ],
-                }
-            ]
-        )
-        run = openai.beta.threads.runs.create_and_poll(
-            thread_id=thread.id, assistant_id=assistant_id
-        )
-
-        messages = list(
-            openai.beta.threads.messages.list(thread_id=thread.id, run_id=run.id)
-        )
-        message_content = messages[0].content[0].text
-        print(message_content)
-        annotations = message_content.annotations
-        for index, annotation in enumerate(annotations):
-            message_content.value = message_content.value.replace(
-                annotation.text, f"[{index}]"
-            )
-            message_content.value = (
-                message_content.value.replace("```json", "").replace("```", "").strip()
-            )
-            message_content.value = message_content.value.replace("\n", "")
-        response = message_content.value.replace("```json", "").replace("```", "").strip().replace("\n", "") 
-        print(response)
-        return response
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(e.with_traceback())
-        raise HTTPException(status_code=500)
 
 
 def get_page_len(file: UploadFile):
@@ -3677,7 +3840,7 @@ async def create_img_component(
             source_type="image",
             flow_id=flow_id,
         )
-        
+
         if flow["flow_type"] == 'manual':
 
             component_metadata = {
@@ -3707,7 +3870,7 @@ async def create_img_component(
                 "component_id": str(component_id),
                 "type": "image",
             }
-        
+
         update_operation_progress(
             operation_id,
             phase="ai_deriving",
@@ -3722,10 +3885,10 @@ async def create_img_component(
             flow_id=flow_id,
             model=OPENAI_DEFAULT_MODEL,
         )
-        
+
         response_json = ground_mindmap_with_source_refs(response_json, source_context)
         print(response_json)
-        
+
         component_metadata = {
             "flow_id": ObjectId(flow_id),
             "name": file.filename,
@@ -3754,7 +3917,7 @@ async def create_img_component(
             "type": "image",
             "mindmap_json": response_json,
             "flow_type": "automatic"
-        }  
+        }
 
     except HTTPException as exc:
         update_operation_progress(
@@ -3824,7 +3987,7 @@ async def create_audio_component(
             source_type="audio",
             flow_id=flow_id,
         )
-        
+
         if flow["flow_type"] == 'manual':
 
             component_metadata = {
@@ -3854,7 +4017,7 @@ async def create_audio_component(
                 "component_id": str(component_id),
                 "type": "audio",
             }
-            
+
         update_operation_progress(
             operation_id,
             phase="transcribing",
@@ -3882,7 +4045,7 @@ async def create_audio_component(
         )
         response_json = ground_mindmap_with_source_refs(response_json, source_context)
         print(response_json)
-        
+
         component_metadata = {
             "flow_id": ObjectId(flow_id),
             "name": file.filename,
@@ -3952,14 +4115,14 @@ def create_youtube_component(
             progress=12,
         )
         flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
-        
+
         print(youtube_url)
         source_context = virtual_source_context(
             label=youtube_url,
             source_type="youtube",
             flow_id=flow_id,
         )
-        
+
         if flow["flow_type"] == 'manual':
             component_metadata = {
                 "flow_id": ObjectId(flow_id),
@@ -3986,10 +4149,10 @@ def create_youtube_component(
                 "component_id": str(component_id),
                 "type": "youtube",
             }
-            
+
         else:
             mime_type = "video/*"
-            
+
             template = f"""
                 You are tasked with generating a JSON mind map for give youtube URL and should be compatible with React Flow for rendering a flow diagram which should cover all the details and important aspects of the component for which multiple nodes can be required. The mind map should adhere to the following rules:
 
@@ -3998,7 +4161,7 @@ def create_youtube_component(
                 - There will be `question` node which will be connected to the subsequent `response` node.
                 - The `question` node can be connected to data sources or other `response` nodes.
                 - There will be `response` for the above question
-                
+
                 2. **Node Relationships:**
                 - `response` nodes may also connect to each other if it improves the logical flow or visualization.
                 - `question` node will always have a `response` node
@@ -4024,7 +4187,7 @@ def create_youtube_component(
                     - `data` contains the following properties:
                         {{
                             "prompt": "<data source description>",
-                            "name": "youtube", !!!DOESN"T CHANGES 
+                            "name": "youtube", !!!DOESN"T CHANGES
                             "content": "<file name or content>",
                             "flow_id": "{flow_id}",
                             "file": "{youtube_url}"  // Empty object or file metadata
@@ -4091,9 +4254,9 @@ def create_youtube_component(
 
         response_json = parse_ai_mindmap_or_422(response.text)
         response_json = ground_mindmap_with_source_refs(response_json, source_context)
-        
+
         print(response_json)
-        
+
         component_metadata = {
             "flow_id": ObjectId(flow_id),
             "youtube_url": youtube_url,
@@ -4123,7 +4286,7 @@ def create_youtube_component(
             "mindmap_json": response_json,
             "flow_type": "automatic"
         }
-            
+
 
     except HTTPException as exc:
         update_operation_progress(
@@ -4197,7 +4360,7 @@ async def create_video_component(
             source_type="video",
             flow_id=flow_id,
         )
-        
+
         if flow["flow_type"] == 'manual':
 
             component_metadata = {
@@ -4227,7 +4390,7 @@ async def create_video_component(
                 "component_id": str(component_id),
                 "type": "video",
             }
-            
+
         update_operation_progress(
             operation_id,
             phase="ai_deriving",
@@ -4242,10 +4405,10 @@ async def create_video_component(
             flow_id=flow_id,
             model=OPENAI_DEFAULT_MODEL,
         )
-        
+
         response_json = ground_mindmap_with_source_refs(response_json, source_context)
         print(response_json)
-                
+
         component_metadata = {
             "flow_id": ObjectId(flow_id),
             "name": file.filename,
@@ -4281,7 +4444,7 @@ async def create_video_component(
             "mindmap_json": response_json,
             "flow_type": "automatic"
         }
-            
+
     except HTTPException as exc:
         update_operation_progress(
             operation_id,
@@ -4890,7 +5053,7 @@ async def create_web_crawler(
         file_bytes = response.encode("utf-8")
 
         mime_type = "text/markdown"
-        
+
         if flow_type == "manual":
             assistant = openai.beta.assistants.create(
                 name="Summarize agent",
@@ -4905,7 +5068,7 @@ async def create_web_crawler(
                 tool_resources={"file_search": {"vector_store_ids": [vector_store.id]}},
             )
 
-            
+
             messages_file = openai.files.create(
                 file=(f"website_{unique_id}.md", file_bytes, mime_type),
                 purpose="assistants",
@@ -4933,7 +5096,7 @@ async def create_web_crawler(
             messages = list(
                 openai.beta.threads.messages.list(thread_id=thread.id, run_id=run.id)
             )
-            
+
             print(messages)
             message_content = messages[0].content[0].text
             annotations = message_content.annotations
@@ -4960,7 +5123,7 @@ async def create_web_crawler(
                 "type": "web",
                 "message": "Component created successfully",
             }
-            
+
         else:
             assistant = openai.beta.assistants.create(
             name="MindMap Builder",
@@ -4980,7 +5143,7 @@ async def create_web_crawler(
             )
 
             thread = openai.beta.threads.create(
-            
+
             messages=[
             {
                 "role": "user",
@@ -4992,7 +5155,7 @@ async def create_web_crawler(
                 - There will be `question` node which will be connected to the subsequent `response` node.
                 - The `question` node can be connected to data sources or other `response` nodes.
                 - There will be `response` for the above question
-                
+
                 2. **Node Relationships:**
                 - `response` nodes may also connect to each other if it improves the logical flow or visualization.
                 - `question` node will always have a `response` node
@@ -5018,7 +5181,7 @@ async def create_web_crawler(
                     - `data` contains the following properties:
                         {{
                             "prompt": "<data source description>",
-                            "name": "{web_url}", !!!DOESN"T CHANGES 
+                            "name": "{web_url}", !!!DOESN"T CHANGES
                             "content": "<file name or content>",
                             "flow_id": "{flow_id}",
                             "file": "{web_url}"  // Empty object or file metadata
@@ -5070,7 +5233,7 @@ async def create_web_crawler(
                 - **RETURN ONLY THE VALID JSON OBJECT AND NO ADDITIONAL COMMENTS**.
                 - Do **not** include any explanations, text, or additional information.
                 - Maintain the format with double curly braces `{{` and `}}` as shown in the format.
-                """,   
+                """,
 
                 "attachments": [
                     {"file_id": messages_file.id, "tools": [{"type": "file_search"}]}
@@ -5082,7 +5245,7 @@ async def create_web_crawler(
         run = openai.beta.threads.runs.create_and_poll(thread_id=thread.id, assistant_id=assistant.id)
 
         messages = list(openai.beta.threads.messages.list(thread_id=thread.id, run_id=run.id))
-        
+
         message_content = messages[0].content[0].text
         annotations = message_content.annotations
 
@@ -5147,615 +5310,27 @@ async def create_web_crawler(
 
 @app.post("/pdf-component-qa", response_model=List[PDFNodeQueryResponse])
 def PDF_QA(request: PDFNodeQueryRequest):
-    require_legacy_assistants_enabled("PDF component Q&A")
-    try:
-        record = component_collection.find_one(
-            {
-                "flow_id": ObjectId(request.flow_id),
-                "_id": ObjectId(request.component_id),
-                "type": "pdf",
-            }
-        )
-
-        if not record or "processing_type" not in record:
-            raise HTTPException(
-                status_code=404,
-                detail="processing_type not found for the given flow_id and component_id",
-            )
-
-        processing_type = record["processing_type"]
-
-        if processing_type == "gpt":
-            vector_store_id = record["vector_store_id"]
-            file_id = record["file_id"]
-            assistant_id = record["assistant_id"]
-            response = one_shot_openai(
-                query_with_workspace_brief(request.query, request.workspace_brief),
-                vector_store_id,
-                file_id,
-                assistant_id,
-            )
-            response_json = json.loads(response)
-            print(response_json)
-
-            node_data = {
-                "_id": ObjectId(request.node_id),
-                "flow_id": ObjectId(request.flow_id),
-                "component_id": ObjectId(request.component_id),
-                "question": request.query,
-                "summ": response_json.get("summ", ""),
-                "df": validate_dataframe(response_json.get("df", [])),
-                "graph": response_json.get("graph", ""),
-                "type": "pdf",
-                "is_delete": "false",
-                "timestamp": datetime.datetime.utcnow(),
-            }
-
-            node_id_response = node_collection.insert_one(node_data)
-            
-            print(node_id_response)
-            
-            question_entries = []
-
-            question_entries.append(
-                PDFNodeQueryResponse(
-                    data={
-                        "question": request.query,
-                        "summ": response_json.get("summ", ""),
-                        "df": validate_dataframe(response_json.get("df", [])),
-                        "graph": response_json.get("graph", ""),
-                        "flow_id": request.flow_id,
-                        "component_id": request.component_id,
-                        "component_type": "pdf",
-                    },
-                    id=request.node_id,
-                    type="PDFNode",
-                )
-            )
-
-            if request.request_type == "question":
-                empty_question_entry = PDFNodeQueryResponse(
-                    id=str(ObjectId()),
-                    data={
-                        "question": "",
-                        "flow_id": request.flow_id,
-                        "component_id": request.component_id,
-                        "component_type": "pdf",
-                    },
-                    type="question",
-                )
-
-                question_entries.append(empty_question_entry)
-                print(question_entries)
-            return question_entries
-
-        else:
-            passages = get_relevant_passage(
-                request.query, request.flow_id, request.component_id, 2
-            )
-            if not passages:
-                raise HTTPException(
-                    status_code=404, detail="No relevant passages found for the query."
-                )
-
-            relevant_passage = " ".join(passages)
-
-            instructions = record["instructions"]
-
-            template = """
-                You are an AI assistant tasked with answering the user’s question based on the provided passages and the given persona. Return the results in **JSON format** with the structure below:  
-
-                #### **Response Format:**  
-                {{
-                "summ": "Your summarized response here...",
-                "df": an array of JSON objects,
-                "graph": "json_string_representation_of_plotly_graph"
-                }}
-
-                ### **Instructions:**
-                1. Answer the question using the passage.
-                2. Extract relevant tabular data into a JSON object compatible with Ag-Grid. If no table exists, return empty JSON object.
-                3. If a dataframe is available, generate a relevant **Plotly graph**. Return it as a **valid JSON string** that can be parsed in React.js.
-                4. If no graph is possible, return an empty string `""`.
-                5. ** The graph's background will be black, so adjust the theme accordingly**.
-
-                NOTE -- "Make sure you need to return only json as response only & please don't add any comments"
-                NOTE -- "Make sure you need only need the answer for which context of data is available if not available return empty json as per format"
-
-
-                **Here is the question:** {query}  
-                **Here is the persona:** {instructions}
-                **Here is the passage: {escaped_passage}
-
-                ### **Example Output:**  
-                If the passage contains a table and a relevant graph, return:  
-
-                ```json
-                {{
-                "summ": "Based on the passage, the key points discussed were...",
-                "df": [
-                    {{
-                    "column1": "value1",
-                    "column2": "value2",
-                    "column3": "value3"
-                    }},
-                    {{
-                    "column1": "value1",
-                    "column2": "value2",
-                    "column3": "value3"
-                    }}
-                ],
-                "graph": "{{\"data\": [{{\"x\": [\"2024-02-01\", \"2024-02-02\"], \"y\": [100, 150], \"type\": \"line\"}}], \"layout\": {{\"title\": \"Sample Graph\"}}"
-                }}
-                }}
-                """
-
-            prompt = PromptTemplate.from_template(template)
-
-            print(prompt)
-
-            llm_chain = prompt | llm
-            augmented_query = query_with_workspace_brief(
-                request.query, request.workspace_brief
-            )
-            answer = llm_chain.invoke(
-                {
-                    "instructions": instructions,
-                    "query": augmented_query,
-                    "escaped_passage": relevant_passage,
-                }
-            )
-
-            answer = answer.content.replace("```json", "").replace("```", "").strip()
-            response = answer.replace("\n", "")
-            response_json = json.loads(response)
-
-            node_data = {
-                "_id": ObjectId(request.node_id),
-                "flow_id": ObjectId(request.flow_id),
-                "component_id": ObjectId(request.component_id),
-                "question": request.query,
-                "summ": response_json.get("summ", ""),
-                "df": validate_dataframe(response_json.get("df", [])),
-                "graph": response_json.get("graph", ""),
-                "type": "pdf",
-                "is_delete": "false",
-                "timestamp": datetime.datetime.utcnow(),
-            }
-            node_id_response = node_collection.insert_one(node_data)
-
-            question_entries = []
-
-            question_entries.append(
-                PDFNodeQueryResponse(
-                    data={
-                        "question": request.query,
-                        "summ": response_json.get("summ", ""),
-                        "df": validate_dataframe(response_json.get("df", [])),
-                        "graph": response_json.get("graph", ""),
-                        "flow_id": request.flow_id,
-                        "component_id": request.component_id,
-                        "component_type": "pdf",
-                    },
-                    id=request.node_id,
-                    type="PDFNode",
-                )
-            )
-
-            if request.request_type == "question":
-                empty_question_entry = PDFNodeQueryResponse(
-                    id=str(ObjectId()),
-                    data={
-                        "question": "",
-                        "flow_id": request.flow_id,
-                        "component_id": request.component_id,
-                        "component_type": "pdf",
-                    },
-                    type="question",
-                )
-
-                question_entries.append(empty_question_entry)
-
-            return question_entries
-
-    except Exception as e:
-        print(traceback.print_exc())
-        print(f"Error in /pdf-component-qa endpoint: {e.__traceback__}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-
+    return answer_component_with_responses(request, "pdf", PDFNodeQueryResponse)
 
 @app.post("/txt-component-qa", response_model=List[TXTNodeQueryResponse])
 def TXT_QA(request: TXTNodeQueryRequest):
-    require_legacy_assistants_enabled("TXT component Q&A")
-    try:
-        record = component_collection.find_one(
-            {
-                "flow_id": ObjectId(request.flow_id),
-                "_id": ObjectId(request.component_id),
-                "type": "txt",
-            }
-        )
-
-        vector_store_id = record["vector_store_id"]
-        file_id = record["file_id"]
-        assistant_id = record["assistant_id"]
-        response = one_shot_openai(
-            query_with_workspace_brief(request.query, request.workspace_brief),
-            vector_store_id,
-            file_id,
-            assistant_id,
-        )
-        response_json = json.loads(response)
-        print(response_json)
-
-        node_data = {
-            "_id": ObjectId(request.node_id),
-            "flow_id": ObjectId(request.flow_id),
-            "component_id": ObjectId(request.component_id),
-            "question": request.query,
-            "summ": response_json.get("summ", ""),
-            "df": validate_dataframe(response_json.get("df", [])),
-            "graph": response_json.get("graph", ""),
-            "type": "txt",
-            "is_delete": "false",
-            "timestamp": datetime.datetime.utcnow(),
-        }
-
-        node_id_response = node_collection.insert_one(node_data)
-
-        question_entries = []
-
-        question_entries.append(
-            TXTNodeQueryResponse(
-                data={
-                    "question": request.query,
-                    "summ": response_json.get("summ", ""),
-                    "df": validate_dataframe(response_json.get("df", [])),
-                    "graph": response_json.get("graph", ""),
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "txt",
-                },
-                id=request.node_id,
-                type="TXTNode",
-            )
-        )
-
-        if request.request_type == "question":
-            empty_question_entry = TXTNodeQueryResponse(
-                id=str(ObjectId()),
-                data={
-                    "question": "",
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "txt",
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-        return question_entries
-
-    except Exception as e:
-        print(f"Error in /txt-component-qa endpoint: {e.__traceback__}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-
+    return answer_component_with_responses(request, "txt", TXTNodeQueryResponse)
 
 @app.post("/md-component-qa", response_model=List[MDNodeQueryResponse])
 def MD_QA(request: MDNodeQueryRequest):
-    require_legacy_assistants_enabled("Markdown component Q&A")
-    try:
-        record = component_collection.find_one(
-            {
-                "flow_id": ObjectId(request.flow_id),
-                "_id": ObjectId(request.component_id),
-                "type": "md",
-            }
-        )
-
-        vector_store_id = record["vector_store_id"]
-        file_id = record["file_id"]
-        assistant_id = record["assistant_id"]
-        response = one_shot_openai(
-            query_with_workspace_brief(request.query, request.workspace_brief),
-            vector_store_id,
-            file_id,
-            assistant_id,
-        )
-        response_json = json.loads(response)
-        print(response_json)
-
-        node_data = {
-            "_id": ObjectId(request.node_id),
-            "flow_id": ObjectId(request.flow_id),
-            "component_id": ObjectId(request.component_id),
-            "question": request.query,
-            "summ": response_json.get("summ", ""),
-            "df": validate_dataframe(response_json.get("df", [])),
-            "graph": response_json.get("graph", ""),
-            "type": "md",
-            "is_delete": "false",
-            "timestamp": datetime.datetime.utcnow(),
-        }
-
-        node_id_response = node_collection.insert_one(node_data)
-
-        question_entries = []
-
-        question_entries.append(
-            MDNodeQueryResponse(
-                data={
-                    "question": request.query,
-                    "summ": response_json.get("summ", ""),
-                    "df": validate_dataframe(response_json.get("df", [])),
-                    "graph": response_json.get("graph", ""),
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "md",
-                },
-                id=request.node_id,
-                type="MDNode",
-            )
-        )
-
-        if request.request_type == "question":
-            empty_question_entry = MDNodeQueryResponse(
-                id=str(ObjectId()),
-                data={
-                    "question": "",
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "md",
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-            return question_entries
-
-        return question_entries
-
-    except Exception as e:
-        print(f"Error in /md-component-qa endpoint: {e.__traceback__}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-
+    return answer_component_with_responses(request, "md", MDNodeQueryResponse)
 
 @app.post("/html-component-qa", response_model=List[HTMLNodeQueryResponse])
 def HTML_QA(request: HTMLNodeQueryRequest):
-    require_legacy_assistants_enabled("HTML component Q&A")
-    try:
-        record = component_collection.find_one(
-            {
-                "flow_id": ObjectId(request.flow_id),
-                "_id": ObjectId(request.component_id),
-                "type": "html",
-            }
-        )
-
-        vector_store_id = record["vector_store_id"]
-        file_id = record["file_id"]
-        assistant_id = record["assistant_id"]
-        response = one_shot_openai(
-            query_with_workspace_brief(request.query, request.workspace_brief),
-            vector_store_id,
-            file_id,
-            assistant_id,
-        )
-        response_json = json.loads(response)
-        print(response_json)
-
-        node_data = {
-            "_id": ObjectId(request.node_id),
-            "flow_id": ObjectId(request.flow_id),
-            "component_id": ObjectId(request.component_id),
-            "question": request.query,
-            "summ": response_json.get("summ", ""),
-            "df": validate_dataframe(response_json.get("df", [])),
-            "graph": response_json.get("graph", ""),
-            "type": "html",
-            "is_delete": "false",
-            "timestamp": datetime.datetime.utcnow(),
-        }
-
-        node_id_response = node_collection.insert_one(node_data)
-
-        question_entries = []
-
-        question_entries.append(
-            HTMLNodeQueryResponse(
-                data={
-                    "question": request.query,
-                    "summ": response_json.get("summ", ""),
-                    "df": validate_dataframe(response_json.get("df", [])),
-                    "graph": response_json.get("graph", ""),
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "html",
-                },
-                id=request.node_id,
-                type="HTMLNode",
-            )
-        )
-
-        if request.request_type == "question":
-            empty_question_entry = HTMLNodeQueryResponse(
-                id=str(ObjectId()),
-                data={
-                    "question": "",
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "html",
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-            return question_entries
-
-        return question_entries
-
-    except Exception as e:
-        print(f"Error in /html-component-qa endpoint: {e.__traceback__}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-
+    return answer_component_with_responses(request, "html", HTMLNodeQueryResponse)
 
 @app.post("/docx-component-qa", response_model=List[DOCXNodeQueryResponse])
 def DOCX_QA(request: DOCXNodeQueryRequest):
-    require_legacy_assistants_enabled("DOCX component Q&A")
-    try:
-        record = component_collection.find_one(
-            {
-                "flow_id": ObjectId(request.flow_id),
-                "_id": ObjectId(request.component_id),
-                "type": "docx",
-            }
-        )
-
-        vector_store_id = record["vector_store_id"]
-        file_id = record["file_id"]
-        assistant_id = record["assistant_id"]
-        response = one_shot_openai(
-            query_with_workspace_brief(request.query, request.workspace_brief),
-            vector_store_id,
-            file_id,
-            assistant_id,
-        )
-        response_json = json.loads(response)
-        print(response_json)
-
-        node_data = {
-            "_id": ObjectId(request.node_id),
-            "flow_id": ObjectId(request.flow_id),
-            "component_id": ObjectId(request.component_id),
-            "question": request.query,
-            "summ": response_json.get("summ", ""),
-            "df": validate_dataframe(response_json.get("df", [])),
-            "graph": response_json.get("graph", ""),
-            "type": "docx",
-            "is_delete": "false",
-            "timestamp": datetime.datetime.utcnow(),
-        }
-
-        node_id_response = node_collection.insert_one(node_data)
-
-        question_entries = []
-
-        question_entries.append(
-            DOCXNodeQueryResponse(
-                data={
-                    "question": request.query,
-                    "summ": response_json.get("summ", ""),
-                    "df": validate_dataframe(response_json.get("df", [])),
-                    "graph": response_json.get("graph", ""),
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "docx",
-                },
-                id=request.node_id,
-                type="DOCXNode",
-            )
-        )
-
-        if request.request_type == "question":
-            empty_question_entry = DOCXNodeQueryResponse(
-                id=str(ObjectId()),
-                data={
-                    "question": "",
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "docx",
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-            return question_entries
-
-        return question_entries
-
-    except Exception as e:
-        print(f"Error in /docx-component-qa endpoint: {e.__traceback__}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-
+    return answer_component_with_responses(request, "docx", DOCXNodeQueryResponse)
 
 @app.post("/pptx-component-qa", response_model=List[PPTXNodeQueryResponse])
 def PPTX_QA(request: PPTXNodeQueryRequest):
-    require_legacy_assistants_enabled("PPTX component Q&A")
-    try:
-        record = component_collection.find_one(
-            {
-                "flow_id": ObjectId(request.flow_id),
-                "_id": ObjectId(request.component_id),
-                "type": "pptx",
-            }
-        )
-
-        vector_store_id = record["vector_store_id"]
-        file_id = record["file_id"]
-        assistant_id = record["assistant_id"]
-        response = one_shot_openai(
-            query_with_workspace_brief(request.query, request.workspace_brief),
-            vector_store_id,
-            file_id,
-            assistant_id,
-        )
-        response_json = json.loads(response)
-        print(response_json)
-
-        node_data = {
-            "_id": ObjectId(request.node_id),
-            "flow_id": ObjectId(request.flow_id),
-            "component_id": ObjectId(request.component_id),
-            "question": request.query,
-            "summ": response_json.get("summ", ""),
-            "df": validate_dataframe(response_json.get("df", [])),
-            "graph": response_json.get("graph", ""),
-            "type": "pptx",
-            "is_delete": "false",
-            "timestamp": datetime.datetime.utcnow(),
-        }
-
-        node_id_response = node_collection.insert_one(node_data)
-
-        question_entries = []
-
-        question_entries.append(
-            PPTXNodeQueryResponse(
-                data={
-                    "question": request.query,
-                    "summ": response_json.get("summ", ""),
-                    "df": validate_dataframe(response_json.get("df", [])),
-                    "graph": response_json.get("graph", ""),
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "pptx",
-                },
-                id=request.node_id,
-                type="PPTXNode",
-            )
-        )
-
-        if request.request_type == "question":
-            empty_question_entry = PPTXNodeQueryResponse(
-                id=str(ObjectId()),
-                data={
-                    "question": "",
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "pptx",
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-            return question_entries
-
-        return question_entries
-
-    except Exception as e:
-        print(f"Error in /pptx-component-qa endpoint: {e.__traceback__}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-
+    return answer_component_with_responses(request, "pptx", PPTXNodeQueryResponse)
 
 @app.post("/csv-component-qa", response_model=List[CSVNodeQueryResponse])
 def CSV_QA(request: CSVNodeQueryRequest):
@@ -5892,81 +5467,7 @@ def CSV_QA(request: CSVNodeQueryRequest):
 
 @app.post("/web-component-qa", response_model=List[WebNodeQueryResponse])
 def WEB_QA(request: WebNodeQueryRequest):
-    require_legacy_assistants_enabled("Web component Q&A")
-    try:
-        record = component_collection.find_one(
-            {
-                "flow_id": ObjectId(request.flow_id),
-                "_id": ObjectId(request.component_id),
-                "type": "web",
-            }
-        )
-        vector_store_id = record["vector_store_id"]
-        file_id = record["file_id"]
-        assistant_id = record["assistant_id"]
-        response = one_shot_openai(
-            query_with_workspace_brief(request.query, request.workspace_brief),
-            vector_store_id,
-            file_id,
-            assistant_id,
-        )
-        response_json = json.loads(response)
-        print(response_json)
-        
-        node_data = {
-            "_id": ObjectId(request.node_id),
-            "flow_id": ObjectId(request.flow_id),
-            "component_id": ObjectId(request.component_id),
-            "question": request.query,
-            "summ": response_json.get("summ", ""),
-            "df": validate_dataframe(response_json.get("df", [])),
-            "graph": response_json.get("graph", {}),
-            "type": "web",
-            "is_delete": "false",
-            "timestamp": datetime.datetime.utcnow(),
-        }
-
-        node_id_response = node_collection.insert_one(node_data)
-
-        question_entries = []
-
-        question_entries.append(
-            WebNodeQueryResponse(
-                data={
-                    "question": request.query,
-                    "summ": response_json.get("summ", ""),
-                    "df": validate_dataframe(response_json.get("df", [])),
-                    "graph": response_json.get("graph", {}),
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "web",
-                },
-                id=request.node_id,
-                type="WebNode",
-            )
-        )
-
-        if request.request_type == "question":
-            empty_question_entry = WebNodeQueryResponse(
-                id=str(ObjectId()),
-                data={
-                    "question": "",
-                    "flow_id": request.flow_id,
-                    "component_id": request.component_id,
-                    "component_type": "web",
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-
-        return question_entries
-
-    except Exception as e:
-        print(f"Error in /web-component-qa endpoint: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-
+    return answer_component_with_responses(request, "web", WebNodeQueryResponse)
 
 @app.post("/img-component-qa", response_model=List[ImgNodeQueryResponse])
 def IMG_QA(request: ImgNodeQueryRequest):
@@ -5988,9 +5489,9 @@ def IMG_QA(request: ImgNodeQueryRequest):
         image_part = {"mime_type": mime_type, "data": image_bytes}
 
         template = f"""
-    You are an AI assistant tasked with answering the user’s question based on the provided question and persona. Return the results in **JSON format** with the structure below:  
+    You are an AI assistant tasked with answering the user’s question based on the provided question and persona. Return the results in **JSON format** with the structure below:
 
-    #### **Response Format:**  
+    #### **Response Format:**
     {{
     "summ": "Your summarized response here...",
     "df": an array of JSON objects,
@@ -6007,11 +5508,11 @@ def IMG_QA(request: ImgNodeQueryRequest):
     NOTE -- "Make sure you need to return only json as response only & please don't add any comments"
     NOTE -- "Make sure you need only need the answer for which context of data is available if not available return empty json as per format"
 
-    **Here is the question:** {request.query}  
+    **Here is the question:** {request.query}
     **Here is the persona:** {persona_name}
 
-    ### **Example Output:**  
-    If the conversation history contains a table and a relevant graph, return:  
+    ### **Example Output:**
+    If the conversation history contains a table and a relevant graph, return:
 
     ```json
     {{
@@ -6112,7 +5613,7 @@ def AUDIO_QA(request: AudioNodeQueryRequest):
                 "type": "audio",
             }
         )
-        
+
         instructions = record.get("instructions", "")
         persona_name = record.get("persona_name", "DocMap reviewer")
 
@@ -6122,9 +5623,9 @@ def AUDIO_QA(request: AudioNodeQueryRequest):
 
         audio_part = {"mime_type": mime_type, "data": audio_bytes}
 
-        template = f"""You are an AI assistant tasked with answering the user’s question based on the provided question and persona. Return the results in **JSON format** with the structure below:  
+        template = f"""You are an AI assistant tasked with answering the user’s question based on the provided question and persona. Return the results in **JSON format** with the structure below:
 
-    #### **Response Format:**  
+    #### **Response Format:**
     {{
     "summ": "Your summarized response here...",
     "df": an array of JSON objects,
@@ -6141,11 +5642,11 @@ def AUDIO_QA(request: AudioNodeQueryRequest):
     NOTE -- "Make sure you need to return only json as response only & please don't add any comments"
     NOTE -- "Make sure you need only need the answer for which context of data is available if not available return empty json as per format"
 
-    **Here is the question:** {request.query}  
+    **Here is the question:** {request.query}
     **Here is the persona:** {persona_name}
 
-    ### **Example Output:**  
-    If the conversation history contains a table and a relevant graph, return:  
+    ### **Example Output:**
+    If the conversation history contains a table and a relevant graph, return:
 
     ```json
     {{
@@ -6247,14 +5748,14 @@ def YOUTUBE_QA(request: YoutubeNodeQueryRequest):
 
         instructions = record.get("instructions", "")
         persona_name = record.get("persona_name", "DocMap reviewer")
-        
+
         youtube_url = record["youtube_url"]
         mime_type = "video/*"
 
         template = f"""
-      You are an AI assistant tasked with answering the user’s question based on the provided question and persona. Return the results in **JSON format** with the structure below:  
+      You are an AI assistant tasked with answering the user’s question based on the provided question and persona. Return the results in **JSON format** with the structure below:
 
-    #### **Response Format:**  
+    #### **Response Format:**
     {{
     "summ": "Your summarized response here...",
     "df": an array of JSON objects,
@@ -6271,11 +5772,11 @@ def YOUTUBE_QA(request: YoutubeNodeQueryRequest):
     NOTE -- "Make sure you need to return only json as response only & please don't add any comments"
     NOTE -- "Make sure you need only need the answer for which context of data is available if not available return empty json as per format"
 
-    **Here is the question:** {request.query}  
+    **Here is the question:** {request.query}
     **Here is the persona:** {persona_name}
 
-    ### **Example Output:**  
-    If the conversation history contains a table and a relevant graph, return:  
+    ### **Example Output:**
+    If the conversation history contains a table and a relevant graph, return:
 
     ```json
     {{
@@ -6379,7 +5880,7 @@ def VIDEO_QA(request: VideoNodeQueryRequest):
 
         instructions = record.get("instructions", "")
         persona_name = record.get("persona_name", "DocMap reviewer")
-        
+
         video_url = record.get("video_url")
         mime_type = record.get("mime_type", "video/*")
         if not video_url:
@@ -6393,9 +5894,9 @@ def VIDEO_QA(request: VideoNodeQueryRequest):
             )
 
         template = f"""
-          You are an AI assistant tasked with answering the user’s question based on the provided question and persona. Return the results in **JSON format** with the structure below:  
+          You are an AI assistant tasked with answering the user’s question based on the provided question and persona. Return the results in **JSON format** with the structure below:
 
-    #### **Response Format:**  
+    #### **Response Format:**
     {{
     "summ": "Your summarized response here...",
     "df": an array of JSON objects,
@@ -6412,11 +5913,11 @@ def VIDEO_QA(request: VideoNodeQueryRequest):
     NOTE -- "Make sure you need to return only json as response only & please don't add any comments"
     NOTE -- "Make sure you need only need the answer for which context of data is available if not available return empty json as per format"
 
-    **Here is the question:** {request.query}  
+    **Here is the question:** {request.query}
     **Here is the persona:** {persona_name}
 
-    ### **Example Output:**  
-    If the conversation history contains a table and a relevant graph, return:  
+    ### **Example Output:**
+    If the conversation history contains a table and a relevant graph, return:
 
     ```json
     {{
@@ -6603,10 +6104,10 @@ def create_sql_component(request: SQLComponentRequest):
             progress=12,
         )
         flow = flow_collection.find_one({"_id": ObjectId(request.flow_id)})
-        
+
         if flow["flow_type"] != 'manual':
             raise HTTPException(status_code=400, detail="Only Manual Mindmap is supported for SQL.")
-        
+
         update_operation_progress(
             request.operation_id,
             phase="schema",
@@ -6693,1043 +6194,15 @@ def create_sql_component(request: SQLComponentRequest):
 
 @app.post("/components-follow-up-questions", response_model=List[ComponentFollowUpQueryResponse])
 def create_follow_up_questions(request: ComponentFollowUpQueryRequest):
-    if request.component_type not in {"sql", "csv"}:
-        require_legacy_assistants_enabled("component follow-up questions")
-    try:
-        if request.component_type == "pdf":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "pdf",
-                }
-            )
-
-            if record["processing_type"] == "gpt":
-                assistant = openai.beta.assistants.update(
-                    assistant_id=record["assistant_id"],
-                    name=request.persona_name,
-                    instructions=request.instructions,
-                    model=request.model_name,
-                    temperature=request.temperature,
-                    top_p=request.top_p,
-                    tool_resources={
-                        "file_search": {"vector_store_ids": [record["vector_store_id"]]}
-                    },
-                )
-            else:
-                component_collection.update_one(
-                    {"_id": ObjectId(request.component_id)},
-                    {
-                        "$set": {
-                            "instructions": request.instructions,
-                            "persona_name": request.persona_name,
-                        }
-                    },
-                )
-
-            summary_pdf = record["summary"]
-            relevant_passage = " ".join(summary_pdf)
-            template = """Given the following summary and persona, generate three follow-up questions that the persona might ask about the text data. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string.
-
-            Here is the summary :- {summary_pdf}
-            Here is the persona :- {persona}"""
-
-            prompt = PromptTemplate.from_template(template)
-
-            llm_chain = prompt | llm
-            answer = llm_chain.invoke(
-                {"summary_pdf": relevant_passage, "persona": request.persona_name}
-            )
-
-            responseList = answer.content
-
-            print(responseList)
-
-            responseList = (
-                responseList.replace("```python", "").replace("```", "").strip()
-            )
-            responseList = responseList.replace("\n", "")
-
-            responseList = [item.strip() for item in responseList.split("|||")]
-
-            question_entries = []
-
-            if responseList:
-
-                for q in responseList:
-                    question_entries.append(
-                        ComponentFollowUpQueryResponse(
-                            id=str(ObjectId()),
-                            flow_id=request.flow_id,
-                            data={
-                                "question": q,
-                                "component_id": request.component_id,
-                                "component_type": request.component_type,
-                            },
-                            type="followUp",
-                            position={"x": 0, "y": 0},
-                        )
-                    )
-
-            empty_question_entry = ComponentFollowUpQueryResponse(
-                id=str(ObjectId()),
-                flow_id=request.flow_id,
-                position={"x": 0, "y": 0},
-                data={
-                    "question": "",
-                    "component_id": request.component_id,
-                    "component_type": request.component_type,
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-
-            return question_entries
-
-        elif request.component_type == "txt":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "txt",
-                }
-            )
-
-            assistant = openai.beta.assistants.update(
-                assistant_id=record["assistant_id"],
-                name=request.persona_name,
-                instructions=request.instructions,
-                model=request.model_name,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                tool_resources={
-                    "file_search": {"vector_store_ids": [record["vector_store_id"]]}
-                },
-            )
-
-
-            summary_txt = record["summary"]
-
-            relevant_passage = " ".join(summary_txt)
-
-            template = """Given the following summary and persona, generate three follow-up questions that the persona might ask about the text data. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string.
-
-            Here is the summary :- {summary_txt}
-            Here is the persona :- {persona}"""
-
-            prompt = PromptTemplate.from_template(template)
-
-            llm_chain = prompt | llm
-            answer = llm_chain.invoke(
-                {"summary_txt": relevant_passage, "persona": request.persona_name}
-            )
-
-            responseList = answer.content
-
-            print(responseList)
-
-            responseList = (
-                responseList.replace("```python", "").replace("```", "").strip()
-            )
-            responseList = responseList.replace("\n", "")
-
-            responseList = [item.strip() for item in responseList.split("|||")]
-
-            question_entries = []
-
-            if responseList:
-
-                for q in responseList:
-                    question_entries.append(
-                        ComponentFollowUpQueryResponse(
-                            id=str(ObjectId()),
-                            flow_id=request.flow_id,
-                            data={
-                                "question": q,
-                                "component_id": request.component_id,
-                                "component_type": request.component_type,
-                            },
-                            type="followUp",
-                            position={"x": 0, "y": 0},
-                        )
-                    )
-
-            empty_question_entry = ComponentFollowUpQueryResponse(
-                id=str(ObjectId()),
-                flow_id=request.flow_id,
-                position={"x": 0, "y": 0},
-                data={
-                    "question": "",
-                    "component_id": request.component_id,
-                    "component_type": request.component_type,
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-
-            return question_entries
-
-        elif request.component_type == "md":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "md",
-                }
-            )
-
-            assistant = openai.beta.assistants.update(
-                assistant_id=record["assistant_id"],
-                name=request.persona_name,
-                instructions=request.instructions,
-                model=request.model_name,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                tool_resources={
-                    "file_search": {"vector_store_ids": [record["vector_store_id"]]}
-                },
-            )
-
-            summary_md = record["summary"]
-
-            relevant_passage = " ".join(summary_md)
-
-            template = """Given the following summary and persona, generate three follow-up questions that the persona might ask about the text data. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string.
-
-            Here is the summary :- {summary_md}
-            Here is the persona :- {persona}"""
-
-            prompt = PromptTemplate.from_template(template)
-
-            llm_chain = prompt | llm
-            answer = llm_chain.invoke(
-                {"summary_md": relevant_passage, "persona": request.persona_name}
-            )
-
-            responseList = answer.content
-
-            print(responseList)
-
-            responseList = (
-                responseList.replace("```python", "").replace("```", "").strip()
-            )
-            responseList = responseList.replace("\n", "")
-
-            responseList = [item.strip() for item in responseList.split("|||")]
-
-            question_entries = []
-
-            if responseList:
-
-                for q in responseList:
-                    question_entries.append(
-                        ComponentFollowUpQueryResponse(
-                            id=str(ObjectId()),
-                            flow_id=request.flow_id,
-                            data={
-                                "question": q,
-                                "component_id": request.component_id,
-                                "component_type": request.component_type,
-                            },
-                            type="followUp",
-                            position={"x": 0, "y": 0},
-                        )
-                    )
-
-            empty_question_entry = ComponentFollowUpQueryResponse(
-                id=str(ObjectId()),
-                flow_id=request.flow_id,
-                position={"x": 0, "y": 0},
-                data={
-                    "question": "",
-                    "component_id": request.component_id,
-                    "component_type": request.component_type,
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-
-            return question_entries
-
-        elif request.component_type == "html":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "html",
-                }
-            )
-
-            assistant = openai.beta.assistants.update(
-                assistant_id=record["assistant_id"],
-                name=request.persona_name,
-                instructions=request.instructions,
-                model=request.model_name,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                tool_resources={
-                    "file_search": {"vector_store_ids": [record["vector_store_id"]]}
-                },
-            )
-
-            summary_html = record["summary"]
-
-            relevant_passage = " ".join(summary_html)
-
-            template = """Given the following summary and persona, generate three follow-up questions that the persona might ask about the text data. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string.
-
-            Here is the summary :- {summary_html}
-            Here is the persona :- {persona}"""
-
-            prompt = PromptTemplate.from_template(template)
-
-            llm_chain = prompt | llm
-            answer = llm_chain.invoke(
-                {"summary_html": relevant_passage, "persona": request.persona_name}
-            )
-
-            responseList = answer.content
-
-            print(responseList)
-
-            responseList = (
-                responseList.replace("```python", "").replace("```", "").strip()
-            )
-            responseList = responseList.replace("\n", "")
-
-            responseList = [item.strip() for item in responseList.split("|||")]
-
-            question_entries = []
-
-            if responseList:
-
-                for q in responseList:
-                    question_entries.append(
-                        ComponentFollowUpQueryResponse(
-                            id=str(ObjectId()),
-                            flow_id=request.flow_id,
-                            data={
-                                "question": q,
-                                "component_id": request.component_id,
-                                "component_type": request.component_type,
-                            },
-                            type="followUp",
-                            position={"x": 0, "y": 0},
-                        )
-                    )
-
-            empty_question_entry = ComponentFollowUpQueryResponse(
-                id=str(ObjectId()),
-                flow_id=request.flow_id,
-                position={"x": 0, "y": 0},
-                data={
-                    "question": "",
-                    "component_id": request.component_id,
-                    "component_type": request.component_type,
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-
-            return question_entries
-
-        elif request.component_type == "docx":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "docx",
-                }
-            )
-
-            assistant = openai.beta.assistants.update(
-                assistant_id=record["assistant_id"],
-                name=request.persona_name,
-                instructions=request.instructions,
-                model=request.model_name,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                tool_resources={
-                    "file_search": {"vector_store_ids": [record["vector_store_id"]]}
-                },
-            )
-
-            summary_docx = record["summary"]
-
-            relevant_passage = " ".join(summary_docx)
-
-            template = """Given the following summary and persona, generate three follow-up questions that the persona might ask about the text data. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string.
-
-            Here is the summary :- {summary_docx}
-            Here is the persona :- {persona}"""
-
-            prompt = PromptTemplate.from_template(template)
-
-            llm_chain = prompt | llm
-            answer = llm_chain.invoke(
-                {"summary_docx": relevant_passage, "persona": request.persona_name}
-            )
-
-            responseList = answer.content
-
-            print(responseList)
-
-            responseList = (
-                responseList.replace("```python", "").replace("```", "").strip()
-            )
-            responseList = responseList.replace("\n", "")
-
-            responseList = [item.strip() for item in responseList.split("|||")]
-
-            question_entries = []
-
-            if responseList:
-
-                for q in responseList:
-                    question_entries.append(
-                        ComponentFollowUpQueryResponse(
-                            id=str(ObjectId()),
-                            flow_id=request.flow_id,
-                            data={
-                                "question": q,
-                                "component_id": request.component_id,
-                                "component_type": request.component_type,
-                            },
-                            type="followUp",
-                            position={"x": 0, "y": 0},
-                        )
-                    )
-
-            empty_question_entry = ComponentFollowUpQueryResponse(
-                id=str(ObjectId()),
-                flow_id=request.flow_id,
-                position={"x": 0, "y": 0},
-                data={
-                    "question": "",
-                    "component_id": request.component_id,
-                    "component_type": request.component_type,
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-
-            return question_entries
-
-        elif request.component_type == "pptx":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "pptx",
-                }
-            )
-
-            assistant = openai.beta.assistants.update(
-                assistant_id=record["assistant_id"],
-                name=request.persona_name,
-                instructions=request.instructions,
-                model=request.model_name,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                tool_resources={
-                    "file_search": {"vector_store_ids": [record["vector_store_id"]]}
-                },
-            )
-
-
-            summary_pptx = record["summary"]
-
-            relevant_passage = " ".join(summary_pptx)
-
-            template = """Given the following summary and persona, generate three follow-up questions that the persona might ask about the text data. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string.
-
-            Here is the summary :- {summary_pptx}
-            Here is the persona :- {persona}"""
-
-            prompt = PromptTemplate.from_template(template)
-
-            llm_chain = prompt | llm
-            answer = llm_chain.invoke(
-                {"summary_pptx": relevant_passage, "persona": request.persona_name}
-            )
-
-            responseList = answer.content
-
-            print(responseList)
-
-            responseList = (
-                responseList.replace("```python", "").replace("```", "").strip()
-            )
-            responseList = responseList.replace("\n", "")
-
-            responseList = [item.strip() for item in responseList.split("|||")]
-
-            question_entries = []
-
-            if responseList:
-
-                for q in responseList:
-                    question_entries.append(
-                        ComponentFollowUpQueryResponse(
-                            id=str(ObjectId()),
-                            flow_id=request.flow_id,
-                            data={
-                                "question": q,
-                                "component_id": request.component_id,
-                                "component_type": request.component_type,
-                            },
-                            type="followUp",
-                            position={"x": 0, "y": 0},
-                        )
-                    )
-
-            empty_question_entry = ComponentFollowUpQueryResponse(
-                id=str(ObjectId()),
-                flow_id=request.flow_id,
-                position={"x": 0, "y": 0},
-                data={
-                    "question": "",
-                    "component_id": request.component_id,
-                    "component_type": request.component_type,
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-
-            return question_entries
-
-        elif request.component_type == "sql":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "sql",
-                }
-            )
-            table_name = record["table_name"]
-            responseDDL = sqlBot.get_related_ddl(table_name)
-            responseDOC = sqlBot.get_related_documentation(table_name)
-            responseSimilarSQL = sqlBot.get_similar_question_sql(table_name)
-            responseList = sqlBot.get_followup_questions_custom(
-                table_name, responseSimilarSQL, responseDDL, responseDOC
-            )
-            responseList = (
-                responseList.replace("```python", "").replace("```", "").strip()
-            )
-            responseList = responseList.replace("\n", "")  # Remove newlines
-            responseList = responseList.replace("\\", "")  # Remove backslashes
-
-            responseList = [item.strip() for item in responseList.split("|||")]
-
-            print(responseList)
-
-            question_entries = []
-
-            if responseList:
-
-                for q in responseList:
-                    question_entries.append(
-                        ComponentFollowUpQueryResponse(
-                            id=str(ObjectId()),
-                            flow_id=request.flow_id,
-                            data={
-                                "question": q,
-                                "component_id": request.component_id,
-                                "component_type": request.component_type,
-                            },
-                            type="followUp",
-                            position={"x": 0, "y": 0},
-                        )
-                    )
-
-            empty_question_entry = ComponentFollowUpQueryResponse(
-                id=str(ObjectId()),
-                flow_id=request.flow_id,
-                position={"x": 0, "y": 0},
-                data={
-                    "question": "",
-                    "component_id": request.component_id,
-                    "component_type": request.component_type,
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-
-            return question_entries
-
-        elif request.component_type == "csv":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "csv",
-                }
-            )
-            table_name = record["table_name"]
-            print("Thissssss is table name", table_name)
-            responseDDL = csvBot.get_related_ddl(table_name)
-            print("THIS IS RESSSPONSE -----", responseDDL)
-            responseDOC = csvBot.get_related_documentation(table_name)
-            responseSimilarSQL = csvBot.get_similar_question_sql(table_name)
-            responseList = csvBot.get_followup_questions_custom(
-                table_name, responseSimilarSQL, responseDDL, responseDOC
-            )
-            responseList = (
-                responseList.replace("```python", "").replace("```", "").strip()
-            )
-            responseList = responseList.replace("\n", "")
-            responseList = responseList.replace("\\", "")  # Remove backslashes
-
-            responseList = [item.strip() for item in responseList.split("|||")]
-
-            print(responseList)
-
-            question_entries = []
-
-            if responseList:
-
-                for q in responseList:
-                    question_entries.append(
-                        ComponentFollowUpQueryResponse(
-                            id=str(ObjectId()),
-                            flow_id=request.flow_id,
-                            data={
-                                "question": q,
-                                "component_id": request.component_id,
-                                "component_type": request.component_type,
-                            },
-                            type="followUp",
-                            position={"x": 0, "y": 0},
-                        )
-                    )
-
-            empty_question_entry = ComponentFollowUpQueryResponse(
-                id=str(ObjectId()),
-                flow_id=request.flow_id,
-                position={"x": 0, "y": 0},
-                data={
-                    "question": "",
-                    "component_id": request.component_id,
-                    "component_type": request.component_type,
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-
-            return question_entries
-
-        elif request.component_type == "web":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "web",
-                }
-            )
-            
-            assistant = openai.beta.assistants.update(
-                assistant_id=record["assistant_id"],
-                name=request.persona_name,
-                instructions=request.instructions,
-                model=request.model_name,
-                temperature=request.temperature,
-                top_p=request.top_p,
-                tool_resources={
-                    "file_search": {"vector_store_ids": [record["vector_store_id"]]}
-                },
-            )
-
-            summary_web = record["summary"]
-
-            relevant_passage = " ".join(summary_web)
-
-            template = """
-            Given the following summary and persona, generate three follow-up questions that the persona might ask about the text data. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string.
-
-            Here is the summary :- {summary_web}
-            Here is the persona :- {persona}
-            """
-
-            prompt = PromptTemplate.from_template(template)
-
-            llm_chain = prompt | llm
-            answer = llm_chain.invoke(
-                {"summary_web": relevant_passage, "persona": request.persona_name}
-            )
-
-            responseList = answer.content
-
-            print(responseList)
-
-            responseList = (
-                responseList.replace("```python", "").replace("```", "").strip()
-            )
-            responseList = responseList.replace("\n", "")  # Remove newlines
-
-            responseList = [item.strip() for item in responseList.split("|||")]
-
-            question_entries = []
-
-            if responseList:
-
-                for q in responseList:
-                    question_entries.append(
-                        ComponentFollowUpQueryResponse(
-                            id=str(ObjectId()),
-                            flow_id=request.flow_id,
-                            data={
-                                "question": q,
-                                "component_id": request.component_id,
-                                "component_type": request.component_type,
-                            },
-                            type="followUp",
-                            position={"x": 0, "y": 0},
-                        )
-                    )
-
-            empty_question_entry = ComponentFollowUpQueryResponse(
-                id=str(ObjectId()),
-                flow_id=request.flow_id,
-                position={"x": 0, "y": 0},
-                data={
-                    "question": "",
-                    "component_id": request.component_id,
-                    "component_type": request.component_type,
-                },
-                type="question",
-            )
-
-            question_entries.append(empty_question_entry)
-
-            return question_entries
-
-        elif request.component_type == "image":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "image",
-                }
-            )
-
-            if record:
-                component_collection.update_one(
-                    {"_id": ObjectId(request.component_id)},
-                    {
-                        "$set": {
-                            "instructions": request.instructions,
-                            "persona_name": request.persona_name,
-                        }
-                    },
-                )
-
-                base64_image = record["base64_image"]
-                mime_type = record["mime_type"]
-                image_bytes = base64.b64decode(base64_image)
-
-                image_part = {"mime_type": mime_type, "data": image_bytes}
-                #    and persona - "+request.persona_name+" ,
-
-                response = model.generate_content(
-                    contents=[
-                        "Given the following image generate three follow-up questions that the persona - "+ request.persona_name +" might ask about the image. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string and return only questions only",
-                        image_part,
-                    ]
-                )
-
-                responseList = response.text
-                responseList = (
-                    responseList.replace("```python", "").replace("```", "").strip()
-                )
-                responseList = [
-                    q.strip()
-                    for q in responseList.strip('"').replace("\n", "").split("|||")
-                ]
-
-                print(responseList)
-
-                question_entries = []
-
-                if responseList:
-
-                    for q in responseList:
-                        question_entries.append(
-                            ComponentFollowUpQueryResponse(
-                                id=str(ObjectId()),
-                                flow_id=request.flow_id,
-                                data={
-                                    "question": q,
-                                    "component_id": request.component_id,
-                                    "component_type": request.component_type,
-                                },
-                                type="followUp",
-                                position={"x": 0, "y": 0},
-                            )
-                        )
-
-                empty_question_entry = ComponentFollowUpQueryResponse(
-                    id=str(ObjectId()),
-                    flow_id=request.flow_id,
-                    position={"x": 0, "y": 0},
-                    data={
-                        "question": "",
-                        "component_id": request.component_id,
-                        "component_type": request.component_type,
-                    },
-                    type="question",
-                )
-                
-                question_entries.append(empty_question_entry)
-
-                return question_entries
-        elif request.component_type == "audio":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "audio",
-                }
-            )
-
-            if record:
-
-                component_collection.update_one(
-                    {"_id": ObjectId(request.component_id)},
-                    {
-                        "$set": {
-                            "instructions": request.instructions,
-                            "persona_name": request.persona_name,
-                        }
-                    },
-                )
-
-                base64_audio = record["base64_audio"]
-                mime_type = record["mime_type"]
-                audio_bytes = base64.b64decode(base64_audio)
-
-                audio_part = {"mime_type": mime_type, "data": audio_bytes}
-
-                response = model.generate_content(
-                    contents=[
-                        "Given the following audio generate three follow-up questions that the persona - "+ request.persona_name +" might ask about the image. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string and return only questions only",
-                        audio_part,
-                    ]
-                )
-
-                responseList = response.text
-                responseList = (
-                    responseList.replace("```python", "").replace("```", "").strip()
-                )
-                responseList = [
-                    q.strip()
-                    for q in responseList.strip('"').replace("\n", "").split("|||")
-                ]
-
-                print(responseList)
-
-                question_entries = []
-
-                if responseList:
-
-                    for q in responseList:
-                        question_entries.append(
-                            ComponentFollowUpQueryResponse(
-                                id=str(ObjectId()),
-                                flow_id=request.flow_id,
-                                data={
-                                    "question": q,
-                                    "component_id": request.component_id,
-                                    "component_type": request.component_type,
-                                },
-                                type="followUp",
-                                position={"x": 0, "y": 0},
-                            )
-                        )
-
-                empty_question_entry = ComponentFollowUpQueryResponse(
-                    id=str(ObjectId()),
-                    flow_id=request.flow_id,
-                    position={"x": 0, "y": 0},
-                    data={
-                        "question": "",
-                        "component_id": request.component_id,
-                        "component_type": request.component_type,
-                    },
-                    type="question",
-                )
-                
-                question_entries.append(empty_question_entry)
-
-                return question_entries
-
-        elif request.component_type == "youtube":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "youtube",
-                }
-            )
-
-            if record:
-
-                component_collection.update_one(
-                    {"_id": ObjectId(request.component_id)},
-                    {
-                        "$set": {
-                            "instructions": request.instructions,
-                            "persona_name": request.persona_name,
-                        }
-                    },
-                )
-
-                youtube_url = record["youtube_url"]
-                mime_type = "video/*"
-
-                response = model_vertexai.generate_content(
-                    contents=[
-                        "Given the following youtube video generate three follow-up questions that the persona - "+ request.persona_name +" might ask about the image. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string and return only questions only",
-                        Part.from_uri(youtube_url, mime_type),
-                    ]
-                )
-                
-                responseList = response.text
-                responseList = (
-                    responseList.replace("```python", "").replace("```", "").strip()
-                )
-                responseList = [
-                    q.strip()
-                    for q in responseList.strip('"').replace("\n", "").split("|||")
-                ]
-
-                print(responseList)
-
-                question_entries = []
-
-                if responseList:
-
-                    for q in responseList:
-                        question_entries.append(
-                            ComponentFollowUpQueryResponse(
-                                id=str(ObjectId()),
-                                flow_id=request.flow_id,
-                                data={
-                                    "question": q,
-                                    "component_id": request.component_id,
-                                    "component_type": request.component_type,
-                                },
-                                type="followUp",
-                                position={"x": 0, "y": 0},
-                            )
-                        )
-
-                empty_question_entry = ComponentFollowUpQueryResponse(
-                    id=str(ObjectId()),
-                    flow_id=request.flow_id,
-                    position={"x": 0, "y": 0},
-                    data={
-                        "question": "",
-                        "component_id": request.component_id,
-                        "component_type": request.component_type,
-                    },
-                    type="question",
-                )
-
-                question_entries.append(empty_question_entry)
-
-                return question_entries
-
-        elif request.component_type == "video":
-            record = component_collection.find_one(
-                {
-                    "flow_id": ObjectId(request.flow_id),
-                    "_id": ObjectId(request.component_id),
-                    "type": "video",
-                }
-            )
-
-            if record:
-
-                component_collection.update_one(
-                    {"_id": ObjectId(request.component_id)},
-                    {
-                        "$set": {
-                            "instructions": request.instructions,
-                            "persona_name": request.persona_name,
-                        }
-                    },
-                )
-
-                video_url = record["video_url"]
-                mime_type = record["mime_type"]
-
-
-                response = model_vertexai.generate_content(
-                    contents=[
-                        "Given the following video generate three follow-up questions that the persona - "+ request.persona_name +" might ask about the image. Respond with a list of questions, one per line, in Python string format delimited by |||. If no relevant questions are found, return an empty string and return only questions only",
-                        Part.from_uri(video_url, mime_type),
-                    ]
-                )
-
-                responseList = response.text
-                responseList = (
-                    responseList.replace("```python", "").replace("```", "").strip()
-                )
-                responseList = [
-                    q.strip()
-                    for q in responseList.strip('"').replace("\n", "").split("|||")
-                ]
-
-                question_entries = []
-
-                if responseList:
-
-                    for q in responseList:
-                        question_entries.append(
-                            ComponentFollowUpQueryResponse(
-                                id=str(ObjectId()),
-                                flow_id=request.flow_id,
-                                data={
-                                    "question": q,
-                                    "component_id": request.component_id,
-                                    "component_type": request.component_type,
-                                },
-                                type="followUp",
-                                position={"x": 0, "y": 0},
-                            )
-                        )
-
-                empty_question_entry = ComponentFollowUpQueryResponse(
-                    id=str(ObjectId()),
-                    flow_id=request.flow_id,
-                    position={"x": 0, "y": 0},
-                    data={
-                        "question": "",
-                        "component_id": request.component_id,
-                        "component_type": request.component_type,
-                    },
-                    type="question",
-                )
-
-                question_entries.append(empty_question_entry)
-
-                return question_entries
-        else:
-            pass
-
-    except Exception as e:
-        print(f"Error in /components-follow-up-questions: {e}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
-
+    if request.component_type in RESPONSES_COMPONENT_TYPES:
+        return follow_up_questions_with_responses(request)
+
+    return follow_up_entries(
+        flow_id=request.flow_id,
+        component_id=request.component_id,
+        component_type=request.component_type,
+        questions=[],
+    )
 
 @app.post("/sql-component-qa", response_model=List[SQLNodeQueryResponse])
 def SQL_QA(request: SQLNodeQueryRequest):
@@ -7901,9 +6374,9 @@ def multiple_qa_summarize(request: MultipleQuestionAnswerQueryRequest):
         print(conversation)
 
         template = """
-        You are an AI assistant tasked with answering the user’s question based on the provided conversation history. Return the results in **JSON format** with the structure below:  
+        You are an AI assistant tasked with answering the user’s question based on the provided conversation history. Return the results in **JSON format** with the structure below:
 
-        #### **Response Format:**  
+        #### **Response Format:**
         {{
         "summ": "Your summarized response here...",
         "df": an array of JSON objects,
@@ -7917,15 +6390,15 @@ def multiple_qa_summarize(request: MultipleQuestionAnswerQueryRequest):
         4. If no graph is possible, return an empty string `""`.
         5. ** The graph's background will be black, so adjust the theme accordingly**.
 
-        **Here is the question:** {query}  
+        **Here is the question:** {query}
         **Here is the conversation history:** {history}
 
         NOTE -- "Make sure you need to return only json as response only & please don't add any comments"
         NOTE -- "Make sure you need only need the answer for which context of data is available if not available return empty json as per format"
-        
 
-        ### **Example Output:**  
-        If the conversation history contains a table and a relevant graph, return:  
+
+        ### **Example Output:**
+        If the conversation history contains a table and a relevant graph, return:
 
         ```json
         {{
@@ -8053,11 +6526,11 @@ def flow_summarizer(request: FlowSummarizeRequest):
         2. **Use only `plotly.js` and `ag-grid-community`. No other libraries are allowed.**
         3. **The output must look like a structured financial report, not just 2-3 components.**
         4. **The layout should have clear sections like:**
-            - Executive Summary (must be 100-150 words) 
+            - Executive Summary (must be 100-150 words)
             - Key Financial Metrics  (must highlight all the crucial points)
             - Performance Tables  (most important and data crucial)
-            - Multiple Charts for Trends  
-            - Additional Insights  
+            - Multiple Charts for Trends
+            - Additional Insights
         5. **Ensure proper spacing, professional styling, and structured formatting.**
         6. **Use `ag-grid-community` for multiple tables.**
         7. **Use `plotly.js` for multiple relevant graphs.**
@@ -8078,14 +6551,14 @@ def flow_summarizer(request: FlowSummarizeRequest):
         ### **Conversation History**
         Here is the conversation history :- {conversation}
 
-        ### **Reference Output (Only JSX, No Comments or Extra Text, No Need to follow as given below):**  
+        ### **Reference Output (Only JSX, No Comments or Extra Text, No Need to follow as given below):**
 
         <div>
             <p style={{ fontSize: "16px", fontWeight: "bold", marginBottom: "10px" }}>
                 Summary: {{Your Answer}}
             </p>
 
-            <div className="ag-theme-alpine"> 
+            <div className="ag-theme-alpine">
                 <AgGridReact
                     rowData=[
                         {{ column1: "value1", column2: "value2", column3: "value3" }},
@@ -8112,7 +6585,7 @@ def flow_summarizer(request: FlowSummarizeRequest):
                     layout={{ title: "Graph Title", width: 600, height: 400 }}
                 />
             </div>
-        </div>        
+        </div>
         """
         prompt = PromptTemplate.from_template(template)
 

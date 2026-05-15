@@ -211,7 +211,7 @@ const normalizeDraftEdge = (draft = {}, generatedNodeIds = []) => {
     return createWorkspaceEdge(source, target, {
         id: draft.id || draft.edge_id,
         type: draft.type,
-        animated: draft.animated
+        animated: draft.animated !== false
     });
 };
 
@@ -238,7 +238,8 @@ export const acceptAIActionPreview = ({ preview = {}, nodes = [], edges = [] }) 
         explicitEdges.length === 0 && sourceNodeId
             ? generatedNodeIds.map((nodeId) =>
                   createWorkspaceEdge(sourceNodeId, nodeId, {
-                      id: `edge_${sourceNodeId}_${nodeId}`
+                      id: `edge_${sourceNodeId}_${nodeId}`,
+                      animated: true
                   })
               )
             : [];

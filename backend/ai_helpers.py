@@ -415,6 +415,7 @@ def generate_ai_action_preview(
     scope: dict[str, Any] | None = None,
     custom_prompt: str | None = None,
     created_by: str = "user",
+    model: str | None = None,
 ) -> dict[str, Any]:
     request = validate_ai_action_request(
         role=role,
@@ -428,6 +429,12 @@ def generate_ai_action_preview(
         scoped_graph = _scope_node_graph(graph, normalized_scope["node_id"])
 
     input_source_refs = _collect_source_refs(scoped_graph)
+    decision = choose_openai_model(
+        requested_model=model,
+        task=f"{request['role_label']} {request['action']}",
+        content=f"{request['custom_prompt'] or ''}\n{json.dumps(scoped_graph)[:4000]}",
+        requires_source_grounding=bool(input_source_refs),
+    )
     workspace = graph.get("workspace", {}) if isinstance(graph, dict) else {}
     action_run = build_ai_action_run(
         workspace_id=workspace_id or workspace.get("id") or "",
@@ -464,6 +471,10 @@ def generate_ai_action_preview(
         "metadata": {
             "ai_action_preview_contract_version": AI_ACTION_PREVIEW_CONTRACT_VERSION,
             "prompt_profile": request["profile"],
+            "preview_mode": "deterministic_draft",
+            "model": decision.model,
+            "model_tier": decision.tier,
+            "model_reason": decision.reason,
         },
     }
     return validate_ai_action_preview(preview)
@@ -1861,28 +1872,35 @@ def _deterministic_ai_action_drafts(
         "export_branch_as_sop_draft",
         "custom_prompt",
     }:
-        node_type = "task" if action == "generate_tasks" else "checklist" if action in {"convert_to_checklist", "generate_checklist"} else "concept"
-        title = _draft_title(action, source_title, action_run.get("custom_prompt"))
-        draft_node = _draft_node(
-            action_run=action_run,
-            order=1,
-            title=title,
-            parent_id=source_node_id,
-            node_type=node_type,
-            source_refs=source_refs[:1],
-            profile=profile,
-        )
-        draft_nodes.append(draft_node)
-        if source_node_id:
-            draft_edges.append(
-                {
-                    "id": f"draft_edge_{action_run['ai_action_id']}_1",
-                    "source_node_id": source_node_id,
-                    "target_node_id": draft_node["id"],
-                    "relationship_type": "contains",
-                    "metadata": {"source": "ai_action_preview", "ai_action_id": action_run["ai_action_id"]},
-                }
+        for order, item in enumerate(
+            _draft_plan_for_action(
+                action=action,
+                source_title=source_title,
+                custom_prompt=action_run.get("custom_prompt"),
+            ),
+            start=1,
+        ):
+            draft_node = _draft_node(
+                action_run=action_run,
+                order=order,
+                title=item["title"],
+                summary=item["summary"],
+                parent_id=source_node_id,
+                node_type=item["node_type"],
+                source_refs=source_refs[:1],
+                profile=profile,
             )
+            draft_nodes.append(draft_node)
+            if source_node_id:
+                draft_edges.append(
+                    {
+                        "id": f"draft_edge_{action_run['ai_action_id']}_{order}",
+                        "source_node_id": source_node_id,
+                        "target_node_id": draft_node["id"],
+                        "relationship_type": "contains",
+                        "metadata": {"source": "ai_action_preview", "ai_action_id": action_run["ai_action_id"]},
+                    }
+                )
 
     if action in {
         "ask_follow_up",
@@ -1927,6 +1945,7 @@ def _draft_node(
     action_run: dict[str, Any],
     order: int,
     title: str,
+    summary: str,
     parent_id: str | None,
     node_type: str,
     source_refs: list[dict[str, Any]],
@@ -1936,7 +1955,7 @@ def _draft_node(
         "id": f"draft_node_{action_run['ai_action_id']}_{order}",
         "title": title,
         "parent_id": parent_id,
-        "summary": f"Preview draft from {action_run['role']} for {action_run['action']}.",
+        "summary": summary,
         "node_type": node_type,
         "status": "ai_generated",
         "priority": "medium" if node_type == "task" else "",
@@ -1953,19 +1972,76 @@ def _draft_node(
     }
 
 
-def _draft_title(action: str, source_title: str, custom_prompt: str | None) -> str:
-    if action == "custom_prompt" and custom_prompt:
-        return custom_prompt.strip()[:80]
-    labels = {
-        "expand_this_node": "Expanded detail",
-        "generate_child_nodes": "Generated child node",
-        "generate_tasks": "Follow-up task",
-        "convert_to_checklist": "Checklist item",
-        "generate_checklist": "Checklist item",
-        "generate_training_outline": "Training outline section",
-        "export_branch_as_sop_draft": "SOP draft section",
+def _draft_plan_for_action(
+    *,
+    action: str,
+    source_title: str,
+    custom_prompt: str | None,
+) -> list[dict[str, str]]:
+    target = source_title or "workspace"
+    prompt = (custom_prompt or "").strip()
+    if action == "custom_prompt" and prompt:
+        return [
+            {
+                "title": prompt[:80],
+                "summary": f"Main draft branch for the instruction: {prompt[:180]}",
+                "node_type": "concept",
+            },
+            {
+                "title": "Supporting branches",
+                "summary": "Add child branches that make the requested structure easier to edit and refine.",
+                "node_type": "category",
+            },
+            {
+                "title": "Review questions",
+                "summary": "List follow-up questions or assumptions before accepting this draft into the graph.",
+                "node_type": "question",
+            },
+        ]
+
+    plans: dict[str, list[tuple[str, str, str]]] = {
+        "expand_this_node": [
+            ("Key details", f"Add the most important details that clarify {target}.", "concept"),
+            ("Related considerations", f"Capture adjacent ideas, risks, or decisions connected to {target}.", "concept"),
+        ],
+        "generate_child_nodes": [
+            ("Main branches", f"Create editable child branches under {target}.", "category"),
+            ("Definitions and references", f"Separate definitions, references, or examples related to {target}.", "reference"),
+            ("Open questions", f"Flag unresolved questions that need user or SME review for {target}.", "question"),
+        ],
+        "generate_tasks": [
+            ("Prepare task breakdown", f"Turn {target} into accountable work items.", "task"),
+            ("Assign review owner", "Identify who should validate or complete this work.", "task"),
+            ("Confirm acceptance criteria", "Define what done means before the branch is accepted.", "task"),
+        ],
+        "convert_to_checklist": [
+            ("Checklist setup", f"Convert {target} into a scannable checklist structure.", "task"),
+            ("Verification step", "Add a check for evidence, owner, and completion status.", "task"),
+            ("Exception handling", "Capture what to do when a checklist item cannot be verified.", "task"),
+        ],
+        "generate_checklist": [
+            ("Checklist setup", f"Create checklist items for {target}.", "task"),
+            ("Evidence check", "Confirm source support or mark the item for review.", "task"),
+            ("Completion check", "Add a clear done/not-done review step.", "task"),
+        ],
+        "generate_training_outline": [
+            ("Learning goals and audience", f"Define who the training is for and what {target} should teach.", "concept"),
+            ("Module sequence", "Draft the section/module flow the learner should follow.", "workflow"),
+            ("Practice and assessment", "Add exercises, checks for understanding, and review prompts.", "task"),
+        ],
+        "export_branch_as_sop_draft": [
+            ("Purpose and scope", f"Describe when the SOP for {target} applies.", "concept"),
+            ("Procedure steps", "Draft ordered steps, decisions, and handoffs.", "workflow"),
+            ("Controls and evidence", "List review checkpoints, source evidence, and exception handling.", "requirement"),
+        ],
     }
-    return f"{labels.get(action, 'AI draft')} for {source_title}"
+    return [
+        {"title": f"{title} for {target}", "summary": summary, "node_type": node_type}
+        for title, summary, node_type in plans.get(
+            action,
+            [("AI draft", f"Create a reviewable draft for {target}.", "concept")],
+        )
+    ]
 
 
 def _annotation_type(action: str) -> str:

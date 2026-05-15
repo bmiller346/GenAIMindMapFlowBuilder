@@ -1,4 +1,7 @@
 import {
+    Background,
+    Controls,
+    MiniMap,
     Panel,
     ReactFlow,
     useNodesInitialized,
@@ -7,7 +10,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import axios from 'axios';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { nodeTypes } from './nodes/nodeTypes.js';
 import { useShallow } from 'zustand/shallow';
 import useStore from './stores/store.js';
@@ -104,6 +107,7 @@ const App = () => {
             (issue) => issue.nodeId === inspectorNodeId
         );
     }, [inspectorNodeId, validationReport]);
+    const lastLayoutTriggerRef = useRef(trigger);
     const closeNodeInspector = useCallback(() => {
         setInspectorNodeId(undefined);
         setNodes(
@@ -210,7 +214,12 @@ const App = () => {
         //     }, 95)
 
         // }
-        if (areNodesIntialised) {
+        if (
+            areNodesIntialised &&
+            trigger !== undefined &&
+            lastLayoutTriggerRef.current !== trigger
+        ) {
+            lastLayoutTriggerRef.current = trigger;
             setTimeout(() => {
                 const data = reactFlow.getNodes();
                 console.log('Problem can be here', data);
@@ -218,15 +227,11 @@ const App = () => {
                     getLayoutedElements(data, edges);
                 setNodes(newNodes);
                 setEdges(newEdges);
-                fitView({ nodes, maxZoom: 1 });
+                fitView({ nodes: newNodes, maxZoom: 1 });
                 popNode();
             }, 1000);
         }
     }, [areNodesIntialised, trigger]);
-
-    useEffect(() => {
-        fitView({ maxZoom: 1 });
-    }, [trigger]);
 
     useEffect(() => {
         setLocalSetting(SETTINGS_KEYS.theme, lightMode ? 'light' : 'dark');
@@ -341,9 +346,37 @@ const App = () => {
                 fitViewOptions={{ maxZoom: 1 }}
                 proOptions={{ hideAttribution: true }}
                 onInit={setRfInstance}
-                minZoom={-1}
-                maxZoom={100}
+                minZoom={0.2}
+                maxZoom={2.5}
             >
+                <Background
+                    gap={28}
+                    size={1}
+                    color={lightMode ? '#d8d8d8' : '#2d2d2d'}
+                />
+                <Controls
+                    position="bottom-right"
+                    fitViewOptions={{ maxZoom: 1 }}
+                    showInteractive={false}
+                />
+                <MiniMap
+                    position="bottom-right"
+                    pannable
+                    zoomable
+                    nodeStrokeWidth={3}
+                    maskColor={
+                        lightMode
+                            ? 'rgba(247, 247, 247, 0.68)'
+                            : 'rgba(10, 10, 10, 0.68)'
+                    }
+                    nodeColor={(node) =>
+                        node.selected
+                            ? '#eece47'
+                            : node.data?.manual
+                              ? '#b77bff'
+                              : '#6ea8fe'
+                    }
+                />
                 <Panel position="bottom-left" style={{ display: 'flex' }}>
                     <div className="workspace-flow-controls">
                         <WorkspaceBriefPanel />

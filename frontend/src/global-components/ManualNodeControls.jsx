@@ -10,8 +10,8 @@ import {
 } from '../utils/flowSnapshots';
 import {
     createWorkspaceNode,
-    getRootFocusViewport,
-    getRootPosition
+    getRootPosition,
+    getViewportRootPosition
 } from '../utils/manualNodes';
 import useActivityStore from '../stores/activityStore';
 import useAutomationStore from '../stores/automationStore';
@@ -19,7 +19,7 @@ import useAutomationStore from '../stores/automationStore';
 const ManualNodeControls = () => {
     const [isPreparingWorkspace, setIsPreparingWorkspace] = useState(false);
     const [workspaceMessage, setWorkspaceMessage] = useState('');
-    const { getViewport, setViewport } = useReactFlow();
+    const { screenToFlowPosition } = useReactFlow();
     const nodes = useStore((state) => state.nodes);
     const edges = useStore((state) => state.edges);
     const setNodes = useStore((state) => state.setNodes);
@@ -131,24 +131,25 @@ const ManualNodeControls = () => {
         return loadOnlyWorkspace();
     };
 
+    const getVisibleRootPosition = (baseNodes) => {
+        if (!screenToFlowPosition || typeof window === 'undefined') {
+            return getRootPosition(baseNodes);
+        }
+
+        const anchor = screenToFlowPosition({
+            x: Math.min(window.innerWidth - 280, Math.max(360, window.innerWidth * 0.52)),
+            y: Math.min(window.innerHeight - 220, Math.max(160, window.innerHeight * 0.42))
+        });
+
+        return getViewportRootPosition({
+            nodes: baseNodes,
+            position: anchor
+        });
+    };
+
     const appendManualNode = (baseNodes, manualNode) => {
         setNodes([...baseNodes, manualNode]);
         setSaveStatus('dirty');
-
-        const focusNewRoot = () => {
-            const currentViewport = getViewport();
-            setViewport(
-                getRootFocusViewport({
-                    position: manualNode.position,
-                    viewport: currentViewport,
-                    width: window.innerWidth,
-                    height: window.innerHeight
-                }),
-                { duration: 240 }
-            );
-        };
-        window.requestAnimationFrame(focusNewRoot);
-        window.setTimeout(focusNewRoot, 120);
     };
 
     const addManualNode = async ({ title, nodeType, df = [] }) => {
@@ -168,7 +169,7 @@ const ManualNodeControls = () => {
             const manualNode = createWorkspaceNode({
                 title,
                 nodeType,
-                position: getRootPosition(baseNodes),
+                position: getVisibleRootPosition(baseNodes),
                 df
             });
             appendManualNode(baseNodes, manualNode);

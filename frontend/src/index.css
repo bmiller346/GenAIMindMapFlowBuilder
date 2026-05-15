@@ -111,6 +111,44 @@
   box-shadow: 0px 0px 0px 8px rgba(238, 206, 71, 0.12);
 }
 
+.react-flow__minimap {
+  width: 12rem;
+  height: 8rem;
+  right: 1rem !important;
+  bottom: 1rem !important;
+  border: 1px solid var(--question-border);
+  border-radius: 0.5rem;
+  background-color: var(--modal-container-color);
+  box-shadow: var(--border-box-shadow);
+  overflow: hidden;
+}
+
+.react-flow__controls {
+  right: 1rem !important;
+  bottom: 9.75rem !important;
+  left: auto !important;
+  border: 1px solid var(--question-border);
+  border-radius: 0.5rem;
+  box-shadow: var(--border-box-shadow);
+  overflow: hidden;
+}
+
+.react-flow__controls-button {
+  width: 2rem;
+  height: 2rem;
+  border-bottom: 1px solid var(--question-border);
+  background-color: var(--modal-container-color);
+  color: var(--font-color);
+}
+
+.react-flow__controls-button:hover {
+  background-color: var(--drawer-flow-hover);
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -824,6 +862,7 @@ input:focus {
 }
 
 .ai-action-grid label,
+.ai-action-model-policy,
 .ai-action-custom {
   display: grid;
   gap: 0.45rem;
@@ -833,6 +872,7 @@ input:focus {
 }
 
 .ai-action-grid select,
+.ai-action-model-policy select,
 .ai-action-custom textarea {
   width: 100%;
   border: 1px solid var(--question-border);
@@ -842,7 +882,8 @@ input:focus {
   outline: none;
 }
 
-.ai-action-grid select {
+.ai-action-grid select,
+.ai-action-model-policy select {
   min-height: 2.7rem;
   padding: 0 0.75rem;
 }
@@ -3871,10 +3912,36 @@ img:hover {
 }
 
 .ai-action-preview-summary small,
-.ai-action-preview-item p {
+.ai-action-preview-item p,
+.ai-action-preview-parent,
+.ai-action-preview-reason,
+.ai-action-preview-impact {
   font-size: 0.76rem;
   line-height: 1.15rem;
   opacity: 0.72;
+}
+
+.ai-action-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.ai-action-preview-meta em,
+.ai-action-preview-parent {
+  border: 1px solid var(--question-border);
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 750;
+  line-height: 1rem;
+  opacity: 0.76;
+  padding: 0.18rem 0.45rem;
+}
+
+.ai-action-preview-reason,
+.ai-action-preview-impact {
+  margin: 0;
 }
 
 .ai-action-preview-list {

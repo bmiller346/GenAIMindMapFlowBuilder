@@ -537,9 +537,31 @@ def test_generate_ai_action_preview_returns_contract_shape_for_node_scope():
     assert preview["metadata"]["ai_action_preview_contract_version"] == (
         AI_ACTION_PREVIEW_CONTRACT_VERSION
     )
+    assert preview["metadata"]["model"] in {"gpt-5.4", "gpt-5.5"}
+    assert preview["metadata"]["preview_mode"] == "deterministic_draft"
     assert preview["draft_nodes"][0]["parent_id"] == "child"
     assert preview["draft_nodes"][0]["status"] == "needs_review"
     assert preview["validation_report"]["issues"][0]["code"] == "missing_source_ref"
+
+
+def test_generate_training_outline_preview_shows_multiple_planned_sections():
+    preview = generate_ai_action_preview(
+        sample_graph(),
+        workspace_id="workspace-1",
+        role="Training Guide Builder",
+        action="generate_training_outline",
+        scope={"type": "workspace"},
+        model="gpt-5.4",
+    )
+
+    assert preview["metadata"]["model"] == "gpt-5.4"
+    assert preview["metadata"]["model_tier"] == "explicit"
+    assert [node["node_type"] for node in preview["draft_nodes"]] == [
+        "concept",
+        "workflow",
+        "task",
+    ]
+    assert "Learning goals" in preview["draft_nodes"][0]["title"]
 
 
 def test_generate_ai_action_preview_preserves_source_refs_for_branch_scope():

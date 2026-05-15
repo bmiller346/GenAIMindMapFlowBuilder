@@ -112,6 +112,50 @@ const citationLocation = (draft) => {
     return parts.join(' | ');
 };
 
+const humanizeId = (value = '') =>
+    String(value || '')
+        .replaceAll('_', ' ')
+        .replaceAll('-', ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/^\w/, (letter) => letter.toUpperCase());
+
+const previewMetadata = (preview = {}) =>
+    preview.metadata && typeof preview.metadata === 'object' ? preview.metadata : {};
+
+const previewModelSummary = (preview = {}) => {
+    const metadata = previewMetadata(preview);
+    const model = metadata.model || preview.model || '';
+    const tier = metadata.model_tier || preview.model_tier || '';
+
+    if (!model && !tier) {
+        return '';
+    }
+
+    return [model || 'auto', tier && tier !== model ? tier : '']
+        .filter(Boolean)
+        .join(' | ');
+};
+
+const previewScopeLabel = (preview = {}) =>
+    typeof preview.scope === 'string'
+        ? preview.scope
+        : preview.scope?.type || 'workspace';
+
+const previewImpactSummary = ({ draftNodes = [], draftEdges = [], outputs = [] }) => {
+    const pieces = [];
+    if (draftNodes.length) {
+        pieces.push(`append ${draftNodes.length} node${draftNodes.length === 1 ? '' : 's'}`);
+    }
+    if (draftEdges.length) {
+        pieces.push(`connect ${draftEdges.length} edge${draftEdges.length === 1 ? '' : 's'}`);
+    }
+    if (outputs.length) {
+        pieces.push(`store ${outputs.length} review output${outputs.length === 1 ? '' : 's'}`);
+    }
+    return pieces.length ? `Accept will ${pieces.join(', ')}.` : 'Accept stores the reviewed AI output.';
+};
+
 const externalRefSummary = (provider, ref) => {
     const details = [
         ref?.board_id ? `Board ${ref.board_id}` : '',
@@ -440,7 +484,9 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                             'AI action'}
                     </span>
                     <strong>
-                        {activeAIActionPreview.action || 'Generated preview'}
+                        {activeAIActionPreview.action_label ||
+                            humanizeId(activeAIActionPreview.action) ||
+                            'Generated preview'}
                     </strong>
                     <small>
                         {[
@@ -449,6 +495,29 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                             `${aiNonNodeOutputs.length} review outputs`
                         ].join(' | ')}
                     </small>
+                    <div className="ai-action-preview-meta">
+                        <em>{previewScopeLabel(activeAIActionPreview)} scope</em>
+                        {previewModelSummary(activeAIActionPreview) ? (
+                            <em>{previewModelSummary(activeAIActionPreview)}</em>
+                        ) : null}
+                        {previewMetadata(activeAIActionPreview).preview_mode ? (
+                            <em>
+                                {humanizeId(previewMetadata(activeAIActionPreview).preview_mode)}
+                            </em>
+                        ) : null}
+                    </div>
+                    {previewMetadata(activeAIActionPreview).model_reason ? (
+                        <p className="ai-action-preview-reason">
+                            {previewMetadata(activeAIActionPreview).model_reason}
+                        </p>
+                    ) : null}
+                    <p className="ai-action-preview-impact">
+                        {previewImpactSummary({
+                            draftNodes: aiDraftNodes,
+                            draftEdges: aiDraftEdges,
+                            outputs: aiNonNodeOutputs
+                        })}
+                    </p>
                 </div>
                 {aiDraftNodes.length > 0 ? (
                     <div className="ai-action-preview-list">
@@ -480,6 +549,11 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                                                 item.rationale}
                                         </p>
                                     ) : null}
+                                    {item.parent_id || item.source_node_id ? (
+                                        <small className="ai-action-preview-parent">
+                                            Parent: {item.parent_id || item.source_node_id}
+                                        </small>
+                                    ) : null}
                                 </article>
                             );
                         })}
@@ -499,11 +573,33 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                                         item.label ||
                                         String(item)}
                                 </strong>
-                                {item.reason || item.note || item.summary ? (
-                                    <p>{item.reason || item.note || item.summary}</p>
+                                {item.reason ||
+                                item.note ||
+                                item.summary ||
+                                item.body ||
+                                item.text ? (
+                                    <p>
+                                        {item.reason ||
+                                            item.note ||
+                                            item.summary ||
+                                            item.body ||
+                                            item.text}
+                                    </p>
                                 ) : null}
                             </article>
                         ))}
+                    </div>
+                ) : null}
+                {Array.isArray(activeAIActionPreview.assumptions) &&
+                activeAIActionPreview.assumptions.length > 0 ? (
+                    <div className="ai-action-preview-list">
+                        <article className="ai-action-preview-item">
+                            <span>Assumptions</span>
+                            <strong>Review before accepting</strong>
+                            {activeAIActionPreview.assumptions.map((assumption, index) => (
+                                <p key={`${assumption}-${index}`}>{assumption}</p>
+                            ))}
+                        </article>
                     </div>
                 ) : null}
                 <div className="ai-action-preview-actions">

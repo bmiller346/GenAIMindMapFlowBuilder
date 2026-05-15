@@ -1,9 +1,12 @@
 import sys
 from pathlib import Path
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi import UploadFile
+from bson import ObjectId
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -36,15 +39,6 @@ def test_docx_intake_rejects_unknown_role():
     assert "Unknown DOCX intake role" in exc_info.value.detail
 
 
-def test_legacy_assistants_paths_are_gated_by_default():
-    with pytest.raises(HTTPException) as exc_info:
-        app.require_legacy_assistants_enabled("component Q&A")
-
-    assert exc_info.value.status_code == 410
-    assert "legacy Assistants API path" in exc_info.value.detail
-    assert "preview-first Ask AI" in exc_info.value.detail
-
-
 def test_legacy_assistants_model_resolver_no_longer_downshifts_to_gpt_4_1():
     assert app.resolve_assistants_model(None) == "gpt-5.5"
     assert app.resolve_assistants_model("gpt-5.4") == "gpt-5.4"
@@ -72,10 +66,156 @@ def test_legacy_assistants_fallback_can_be_enabled(monkeypatch):
     assert app.legacy_assistants_fallback_enabled() is True
 
 
+class FakeComponentCollection:
+    def __init__(self, record):
+        self.record = record
+        self.updates = []
+
+    def find_one(self, query):
+        return self.record
+
+    def update_one(self, query, update):
+        self.updates.append((query, update))
+
+
+def test_component_qa_uses_responses_context_without_assistants(monkeypatch):
+    component_id = "665f1f77bcf86cd799439011"
+    flow_id = "665f1f77bcf86cd799439012"
+    fake_collection = FakeComponentCollection(
+        {
+            "_id": app.ObjectId(component_id),
+            "flow_id": app.ObjectId(flow_id),
+            "type": "docx",
+            "document_chunks": [
+                {
+                    "id": "chunk-1",
+                    "page": 2,
+                    "heading": "Scope",
+                    "text": "Use source-backed requirements.",
+                }
+            ],
+            "persona_name": "Research Assistant",
+            "instructions": "Be concise.",
+        }
+    )
+    calls = []
+
+    def fake_generate_component_answer(**kwargs):
+        calls.append(kwargs)
+        return {"summ": "Use source-backed requirements.", "df": [], "graph": ""}
+
+    monkeypatch.setattr(app, "component_collection", fake_collection)
+    monkeypatch.setattr(app, "generate_component_answer", fake_generate_component_answer)
+
+    response = app.DOCX_QA(
+        app.DOCXNodeQueryRequest(
+            node_id="665f1f77bcf86cd799439013",
+            query="What should we use?",
+            flow_id=flow_id,
+            component_id=component_id,
+            request_type="question",
+            workspace_brief={"goal": "Review source handling"},
+        )
+    )
+
+    assert response[0].data["summ"] == "Use source-backed requirements."
+    assert calls[0]["persona"] == "Research Assistant"
+    assert "Use source-backed requirements." in calls[0]["context"]
+    assert calls[0]["workspace_brief"]["goal"] == "Review source handling"
+
+
+def test_component_follow_up_uses_responses_and_updates_persona(monkeypatch):
+    component_id = "665f1f77bcf86cd799439014"
+    flow_id = "665f1f77bcf86cd799439015"
+    fake_collection = FakeComponentCollection(
+        {
+            "_id": app.ObjectId(component_id),
+            "flow_id": app.ObjectId(flow_id),
+            "type": "pdf",
+            "summary": "The source explains export validation.",
+        }
+    )
+    calls = []
+
+    def fake_follow_ups(**kwargs):
+        calls.append(kwargs)
+        return ["What validation runs before export?"]
+
+    monkeypatch.setattr(app, "component_collection", fake_collection)
+    monkeypatch.setattr(
+        app,
+        "generate_component_follow_up_questions",
+        fake_follow_ups,
+    )
+
+    response = app.create_follow_up_questions(
+        app.ComponentFollowUpQueryRequest(
+            flow_id=flow_id,
+            component_id=component_id,
+            component_type="pdf",
+            persona_name="Strategic Advisor",
+            temperature=0.2,
+            top_p=1,
+            instructions="Find review questions.",
+            model_name="gpt-5.4",
+        )
+    )
+
+    assert response[0].data["question"] == "What validation runs before export?"
+    assert response[-1].type == "question"
+    assert calls[0]["persona"] == "Strategic Advisor"
+    assert calls[0]["model"] == "gpt-5.4"
+    assert fake_collection.updates[0][1]["$set"]["persona_name"] == "Strategic Advisor"
+
+
 def test_docx_intake_brief_is_sanitized_and_limited():
     brief = app.clean_source_intake_value("  one\n\n two\tthree  ", max_length=9)
 
     assert brief == "one two t"
+
+
+def test_prepare_source_upload_reuses_existing_component(monkeypatch):
+    flow_id = ObjectId()
+    source_document = {
+        "id": "doc-existing",
+        "filename": "sample.docx",
+        "original_filename": "sample.docx",
+        "type": "docx",
+        "file_hash": "existing-hash",
+        "version": 1,
+    }
+    existing_component = {
+        "_id": ObjectId(),
+        "source_document": source_document,
+        "source_segments": [{"text": "Install conduit.", "heading": "Scope"}],
+        "document_chunks": [{"id": "chk-1", "document_id": "doc-existing", "text": "Install conduit."}],
+    }
+
+    monkeypatch.setattr(
+        app,
+        "validate_upload_bytes",
+        lambda filename, file_bytes: {
+            "filename": "sample.docx",
+            "original_filename": "sample.docx",
+            "extension": "docx",
+            "file_hash": "existing-hash",
+            "size": len(file_bytes),
+        },
+    )
+    monkeypatch.setattr(app.component_collection, "find_one", lambda query: existing_component)
+    monkeypatch.setattr(app.component_collection, "count_documents", lambda query: 1)
+
+    upload = UploadFile(filename="sample.docx", file=SimpleNamespace(
+        seek=lambda position: None,
+        read=lambda: b"fake-docx",
+    ))
+
+    context = app.prepare_source_upload(upload, str(flow_id), expected_extension="docx")
+
+    assert context["reused_existing_source"] is True
+    assert context["existing_component"] == existing_component
+    assert context["source_document"]["id"] == "doc-existing"
+    assert context["document_chunks"][0]["id"] == "chk-1"
 
 
 def test_flow_snapshot_repair_marks_unsourced_ai_nodes_needs_review_on_save():

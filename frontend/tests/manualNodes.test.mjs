@@ -9,6 +9,7 @@ import {
     getNodeDisplayState,
     getRootFocusViewport,
     getRootPosition,
+    getViewportRootPosition,
     getWorkspaceNodeData,
     layoutDirectChildren,
     normalizeWorkspaceEdges,
@@ -77,6 +78,20 @@ test('getRootFocusViewport keeps newly focused roots away from lower-left contro
             height: 600
         }),
         { x: 299, y: 148, zoom: 0.65 }
+    );
+});
+
+test('getViewportRootPosition keeps manual roots near the current viewport', () => {
+    const nodes = [
+        createWorkspaceNode({ id: 'a', position: { x: 1200, y: 400 } })
+    ];
+
+    assert.deepEqual(
+        getViewportRootPosition({
+            nodes,
+            position: { x: 1200, y: 400 }
+        }),
+        { x: 1200, y: 580 }
     );
 });
 
@@ -230,4 +245,12 @@ test('normalizeWorkspaceEdges applies layout-specific edge style from source nod
 
     assert.equal(edges.find((edge) => edge.id === 'edge-a').type, 'step');
     assert.equal(edges.find((edge) => edge.id === 'edge-b').type, 'smoothstep');
+});
+
+test('createWorkspaceEdge keeps manual links static unless animation is requested', () => {
+    assert.equal(createWorkspaceEdge('parent', 'manual-child').animated, false);
+    assert.equal(
+        createWorkspaceEdge('parent', 'generated-child', { animated: true }).animated,
+        true
+    );
 });

@@ -578,8 +578,7 @@ const ResponseNode = ({ id, data }) => {
             .filter((edge) => idMap.has(edge.source) && idMap.has(edge.target))
             .map((edge) =>
                 createWorkspaceEdge(idMap.get(edge.source), idMap.get(edge.target), {
-                    type: edge.type,
-                    animated: edge.animated
+                    type: edge.type
                 })
             );
 

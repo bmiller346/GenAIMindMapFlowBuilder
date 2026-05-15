@@ -54,6 +54,8 @@ const actionsThatDraftNodes = new Set([
     'custom_prompt'
 ]);
 
+const modelOptions = ['auto', ...supportedOpenAIModels];
+
 const previewEndpoint = ({ flowId, scope, nodeId }) => {
     if (scope === 'workspace') {
         return `http://localhost:8000/api/workspaces/${flowId}/ai/actions/workspace/preview`;
@@ -102,7 +104,7 @@ const PromptModal = ({
         : '';
     const [activeAgent, setActiveAgent] = useState(initialLegacyAgent);
     const [selectedModel, setSelectedModel] = useState(
-        targetNode?.data?.model_name || defaultOpenAIModel
+        targetNode?.data?.model_name || (scope ? 'auto' : defaultOpenAIModel)
     );
     const [selectedRoleId, setSelectedRoleId] = useState(initialRoleId || '');
     const [selectedActionId, setSelectedActionId] = useState(initialActionId || '');
@@ -224,7 +226,16 @@ const PromptModal = ({
             source_refs: sourceRefs,
             assumptions: customPrompt.trim()
                 ? [`User instruction: ${customPrompt.trim()}`]
-                : []
+                : [],
+            metadata: {
+                preview_mode: 'local_fallback',
+                model: selectedModel === 'auto' ? 'auto' : selectedModel,
+                model_tier: selectedModel === 'auto' ? 'auto' : 'explicit',
+                model_reason:
+                    selectedModel === 'auto'
+                        ? 'Backend unavailable; model would be selected by intent.'
+                        : 'User selected the model explicitly.'
+            }
         };
 
         const activatePreview = (preview) => {
@@ -246,7 +257,8 @@ const PromptModal = ({
                 metadata: {
                     scope,
                     role: role.label,
-                    action: selectedAction.id
+                    action: selectedAction.id,
+                    model: selectedModel
                 }
             });
             setStageMessage('Preview generated. Review it in the node inspector before accepting.');
@@ -271,7 +283,8 @@ const PromptModal = ({
                           ...(scope === 'workspace' ? {} : { node_id: targetNodeId })
                       },
                       custom_prompt: customPrompt.trim() || null,
-                      created_by: 'user'
+                      created_by: 'user',
+                      model: selectedModel === 'auto' ? null : selectedModel
                   })
                 : null;
             activatePreview(response?.data || fallbackPreview);
@@ -316,9 +329,11 @@ const PromptModal = ({
                         value={selectedModel}
                         onChange={(e) => setSelectedModel(e.target.value)}
                     >
-                        {supportedOpenAIModels.map((modelName) => (
+                        {modelOptions.map((modelName) => (
                             <option key={modelName} value={modelName}>
-                                {modelName}
+                                {modelName === 'auto'
+                                    ? 'Auto select by intent'
+                                    : modelName}
                             </option>
                         ))}
                     </select>
@@ -391,6 +406,21 @@ const PromptModal = ({
                     </select>
                 </label>
             </div>
+            <label className="ai-action-model-policy">
+                Model policy
+                <select
+                    value={selectedModel}
+                    onChange={(event) => setSelectedModel(event.target.value)}
+                >
+                    {modelOptions.map((modelName) => (
+                        <option key={modelName} value={modelName}>
+                            {modelName === 'auto'
+                                ? 'Auto select by intent'
+                                : modelName}
+                        </option>
+                    ))}
+                </select>
+            </label>
             {role ? (
                 <p className="ai-action-description">{role.description}</p>
             ) : null}

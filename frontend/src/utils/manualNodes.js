@@ -88,6 +88,13 @@ export const getRootPosition = (nodes = []) =>
         spacingY: ROOT_SPACING.y
     });
 
+export const getViewportRootPosition = ({ nodes = [], position = {} } = {}) =>
+    firstOpenPosition({
+        nodes,
+        preferredPosition: normalizePosition(position),
+        spacingY: ROOT_SPACING.y
+    });
+
 export const getRootFocusViewport = ({
     position = {},
     viewport = {},
