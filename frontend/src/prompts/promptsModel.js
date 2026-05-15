@@ -8,7 +8,7 @@ export const AI_ACTION_SCOPES = {
 };
 
 export const nodeAiActions = [
-    { id: 'expand_node', label: 'Expand this node' },
+    { id: 'expand_this_node', label: 'Expand this node' },
     { id: 'ask_follow_up', label: 'Ask follow-up' },
     { id: 'generate_child_nodes', label: 'Generate child nodes' },
     { id: 'convert_to_checklist', label: 'Convert to checklist' },
@@ -22,7 +22,7 @@ export const nodeAiActions = [
 export const branchAiActions = [
     { id: 'summarize_branch', label: 'Summarize branch' },
     { id: 'reorganize_branch', label: 'Reorganize branch' },
-    { id: 'split_branch_categories', label: 'Split branch into categories' },
+    { id: 'split_branch_into_categories', label: 'Split branch into categories' },
     { id: 'generate_tasks', label: 'Generate tasks' },
     { id: 'generate_checklist', label: 'Generate checklist' },
     { id: 'find_gaps', label: 'Find gaps' },
@@ -33,9 +33,9 @@ export const branchAiActions = [
 export const workspaceAiActions = [
     { id: 'suggest_follow_up_questions', label: 'Suggest follow-up questions' },
     { id: 'find_unsupported_assumptions', label: 'Find unsupported assumptions' },
-    { id: 'find_duplicate_nodes', label: 'Find duplicate or overlapping nodes' },
+    { id: 'find_duplicate_overlapping_nodes', label: 'Find duplicate or overlapping nodes' },
     { id: 'generate_training_outline', label: 'Generate training outline' },
-    { id: 'export_sop_draft', label: 'Export branch as SOP draft' }
+    { id: 'export_branch_as_sop_draft', label: 'Export branch as SOP draft' }
 ];
 
 export const docMapPromptProfiles = [
@@ -45,7 +45,16 @@ export const docMapPromptProfiles = [
         group: 'DocMap',
         description: 'Extract requirements, definitions, controls, and cited standard language.',
         scopes: ['node', 'branch', 'workspace'],
-        preferredActions: ['expand_node', 'generate_child_nodes', 'find_missing_source_support']
+        supportedActions: [
+            'expand_this_node',
+            'generate_child_nodes',
+            'find_missing_source_support',
+            'summarize_branch',
+            'find_gaps',
+            'find_unsupported_assumptions',
+            'custom_prompt'
+        ],
+        preferredActions: ['expand_this_node', 'generate_child_nodes', 'find_missing_source_support']
     },
     {
         id: 'workflow-mapper',
@@ -53,15 +62,30 @@ export const docMapPromptProfiles = [
         group: 'DocMap',
         description: 'Turn procedures and branches into workflow steps and dependencies.',
         scopes: ['node', 'branch', 'workspace'],
-        preferredActions: ['generate_child_nodes', 'reorganize_branch', 'split_branch_categories']
+        supportedActions: [
+            'expand_this_node',
+            'generate_child_nodes',
+            'reorganize_branch',
+            'split_branch_into_categories',
+            'find_gaps',
+            'custom_prompt'
+        ],
+        preferredActions: ['generate_child_nodes', 'reorganize_branch', 'split_branch_into_categories']
     },
     {
         id: 'training-guide-builder',
         label: 'Training Guide Builder',
         group: 'DocMap',
         description: 'Draft learning outlines, checklists, and training-friendly branch structure.',
-        scopes: ['branch', 'workspace'],
-        preferredActions: ['generate_checklist', 'generate_training_outline', 'export_sop_draft']
+        scopes: ['node', 'branch', 'workspace'],
+        supportedActions: [
+            'convert_to_checklist',
+            'generate_checklist',
+            'generate_training_outline',
+            'export_branch_as_sop_draft',
+            'custom_prompt'
+        ],
+        preferredActions: ['convert_to_checklist', 'generate_checklist', 'generate_training_outline']
     },
     {
         id: 'sme-question-generator',
@@ -69,6 +93,13 @@ export const docMapPromptProfiles = [
         group: 'DocMap',
         description: 'Create review questions where source support or expert judgment is needed.',
         scopes: ['node', 'branch', 'workspace'],
+        supportedActions: [
+            'ask_follow_up',
+            'create_sme_questions',
+            'find_gaps',
+            'suggest_follow_up_questions',
+            'custom_prompt'
+        ],
         preferredActions: ['create_sme_questions', 'ask_follow_up', 'suggest_follow_up_questions']
     },
     {
@@ -77,6 +108,12 @@ export const docMapPromptProfiles = [
         group: 'DocMap',
         description: 'Convert map structure into accountable tasks and checklists.',
         scopes: ['node', 'branch'],
+        supportedActions: [
+            'generate_tasks',
+            'convert_to_checklist',
+            'generate_checklist',
+            'custom_prompt'
+        ],
         preferredActions: ['generate_tasks', 'convert_to_checklist', 'generate_checklist']
     },
     {
@@ -85,6 +122,7 @@ export const docMapPromptProfiles = [
         group: 'DocMap',
         description: 'Explain table-like node data and surface useful rows, fields, or anomalies.',
         scopes: ['node', 'branch'],
+        supportedActions: ['interpret_table_data', 'generate_tasks', 'custom_prompt'],
         preferredActions: ['interpret_table_data', 'generate_child_nodes']
     },
     {
@@ -93,7 +131,14 @@ export const docMapPromptProfiles = [
         group: 'DocMap',
         description: 'Find missing, duplicate, unsupported, or contradictory graph content.',
         scopes: ['node', 'branch', 'workspace'],
-        preferredActions: ['find_gaps', 'find_unsupported_assumptions', 'find_duplicate_nodes']
+        supportedActions: [
+            'find_missing_source_support',
+            'find_gaps',
+            'find_unsupported_assumptions',
+            'find_duplicate_overlapping_nodes',
+            'custom_prompt'
+        ],
+        preferredActions: ['find_gaps', 'find_unsupported_assumptions', 'find_duplicate_overlapping_nodes']
     },
     {
         id: 'source-ref-repair',
@@ -101,6 +146,11 @@ export const docMapPromptProfiles = [
         group: 'DocMap',
         description: 'Suggest source-reference fixes while keeping node claims intact.',
         scopes: ['node', 'branch', 'workspace'],
+        supportedActions: [
+            'find_missing_source_support',
+            'find_unsupported_assumptions',
+            'custom_prompt'
+        ],
         preferredActions: ['find_missing_source_support', 'find_unsupported_assumptions']
     },
     {
@@ -108,8 +158,14 @@ export const docMapPromptProfiles = [
         label: 'Integration Readiness Reviewer',
         group: 'DocMap',
         description: 'Review whether branch nodes are ready for downstream handoff.',
-        scopes: ['branch', 'workspace'],
-        preferredActions: ['generate_tasks', 'find_gaps', 'export_sop_draft']
+        scopes: ['node', 'branch', 'workspace'],
+        supportedActions: [
+            'generate_tasks',
+            'find_gaps',
+            'find_unsupported_assumptions',
+            'custom_prompt'
+        ],
+        preferredActions: ['generate_tasks', 'find_gaps', 'find_unsupported_assumptions']
     },
     {
         id: 'custom',
@@ -117,6 +173,7 @@ export const docMapPromptProfiles = [
         group: 'DocMap',
         description: 'Use your own instruction while preserving preview-first graph changes.',
         scopes: ['node', 'branch', 'workspace'],
+        supportedActions: ['custom_prompt'],
         preferredActions: ['custom_prompt']
     }
 ];
@@ -127,7 +184,8 @@ export const legacyPromptProfiles = [
         label: 'Strategic Advisor',
         group: 'General',
         description: 'Legacy general-purpose planning and strategy persona.',
-        scopes: ['node', 'branch'],
+        scopes: ['node', 'branch', 'workspace'],
+        supportedActions: ['ask_follow_up', 'summarize_branch', 'suggest_follow_up_questions', 'custom_prompt'],
         legacy: true
     },
     {
@@ -135,7 +193,8 @@ export const legacyPromptProfiles = [
         label: 'Research Assistant',
         group: 'General',
         description: 'Legacy research, learning, writing, and organization persona.',
-        scopes: ['node', 'branch'],
+        scopes: ['node', 'branch', 'workspace'],
+        supportedActions: ['ask_follow_up', 'summarize_branch', 'suggest_follow_up_questions', 'custom_prompt'],
         legacy: true
     },
     {
@@ -143,7 +202,8 @@ export const legacyPromptProfiles = [
         label: 'Productivity Coach',
         group: 'General',
         description: 'Legacy productivity, focus, and prioritization persona.',
-        scopes: ['node', 'branch'],
+        scopes: ['node', 'branch', 'workspace'],
+        supportedActions: ['generate_tasks', 'convert_to_checklist', 'generate_checklist', 'custom_prompt'],
         legacy: true
     },
     {
@@ -151,7 +211,8 @@ export const legacyPromptProfiles = [
         label: 'Data Interpreter',
         group: 'General',
         description: 'Legacy general data interpretation persona.',
-        scopes: ['node', 'branch'],
+        scopes: ['node', 'branch', 'workspace'],
+        supportedActions: ['interpret_table_data', 'find_gaps', 'custom_prompt'],
         legacy: true
     },
     {
@@ -159,7 +220,8 @@ export const legacyPromptProfiles = [
         label: 'Custom Prompts',
         group: 'General',
         description: 'Legacy free-form prompt entry.',
-        scopes: ['node', 'branch'],
+        scopes: ['node', 'branch', 'workspace'],
+        supportedActions: ['custom_prompt'],
         legacy: true
     }
 ];
@@ -181,8 +243,16 @@ export const getActionsForScope = (scope) => {
     return nodeAiActions;
 };
 
+export const getActionsForProfileAndScope = (profile, scope) => {
+    const scopeActions = getActionsForScope(scope);
+    if (!profile?.supportedActions?.length) {
+        return scopeActions;
+    }
+    return scopeActions.filter((action) => profile.supportedActions.includes(action.id));
+};
+
 export const getDefaultActionForProfile = (profile, scope) => {
-    const actions = getActionsForScope(scope);
+    const actions = getActionsForProfileAndScope(profile, scope);
     const preferred = profile?.preferredActions?.find((actionId) =>
         actions.some((action) => action.id === actionId)
     );

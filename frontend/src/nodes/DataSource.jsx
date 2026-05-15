@@ -18,8 +18,8 @@ const DataSource = ({ id, data }) => {
                 </div> */}
             <img src={img} alt="sql svg" />
             <div>
-                <h4>{title}</h4>
-                <p className="values">{content}</p>
+                <h4 title={title}>{title}</h4>
+                <p className="values" title={content}>{content}</p>
             </div>
         </div>
     );

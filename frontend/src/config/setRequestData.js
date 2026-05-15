@@ -64,7 +64,10 @@ const setRequestData = (component_name, flow_id, data) => {
 			return ["component-create-docx", createFormData([
 				["file", data.file],
 				["flow_id", flow_id],
-				["operation_id", data.operationId]
+				["operation_id", data.operationId],
+				["intake_role", data.intakeRole],
+				["intake_model", data.intakeModel],
+				["intake_prompt", data.intakePrompt]
 			]), "multipart/form-data"];
 		case "pptx":
 			return ["component-create-pptx", createFormData([

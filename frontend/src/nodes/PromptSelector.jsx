@@ -4,6 +4,9 @@ import RIGHTArrow from "../assets/right.svg"
 import PromptModal from "../modals/PromptModal";
 import modalStore from "../stores/modalStore"
 const PromptSelector = ({ id, prompt, modelName }) => {
+	const hasPrompt = typeof prompt === 'string' && prompt.trim().length > 0;
+	const displayPrompt = hasPrompt ? prompt.trim() : 'Choose AI role';
+	const displayModel = modelName || (hasPrompt ? '' : 'No prompt applied');
 	const selector = (state) => ({
 		pushNode: state.pushNode,
 		setSourceId: state.setSourceId
@@ -12,7 +15,7 @@ const PromptSelector = ({ id, prompt, modelName }) => {
 
 	const handlePrompts = (e) => {
 		setSourceId(id);
-		pushNode(PromptModal);
+		pushNode(PromptModal, { scope: 'node', nodeId: id });
 	}
 
 	return (
@@ -21,10 +24,10 @@ const PromptSelector = ({ id, prompt, modelName }) => {
 				<img src={PROMPTSvg} alt="Prompt svg" />
 				<div>
 					<h4>
-						Answering as
+						AI role
 					</h4>
-					<p className="values">{prompt}</p>
-					{modelName ? <p className="prompt-model-name">{modelName}</p> : null}
+					<p className="values" title={displayPrompt}>{displayPrompt}</p>
+					{displayModel ? <p className="prompt-model-name" title={displayModel}>{displayModel}</p> : null}
 				</div>
 			</div>
 			<img src={RIGHTArrow} alt="Prompt svg" />

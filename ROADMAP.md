@@ -113,8 +113,10 @@ Known verification gap:
   `Strategic Advisor`, `Research Assistant`, `Productivity Coach`,
   `Data Interpreter`, and `Custom Prompts` still exist behind the legacy
   data-source prompt selector.
-- [ ] Original persona prompts are not yet modernized into DocMap's
-  preview/accept graph mutation model.
+- [x] Node and branch Ask AI actions expose the original personas under a
+  General profile group and use DocMap's preview/accept graph mutation model.
+- [ ] The legacy data-source `PromptModal`/`Prompts` execution path is not yet
+  migrated to preview/accept and can still append graph changes directly.
 
 ### Workspace Brief
 
@@ -223,7 +225,7 @@ These are the features required to call the core MVP functional.
 - [x] Dedicated no-source derivation contract in the frontend creates
   reviewable assumption nodes without fabricated source refs.
 - [ ] `WorkspaceBrief` backend schema validation.
-- [ ] `AIActionRun` schema for node/branch/workspace AI action history,
+- [x] `AIActionRun` schema for node/branch/workspace AI action history,
   previews, accept/reject status, source scope, prompt profile, and generated
   node IDs.
 

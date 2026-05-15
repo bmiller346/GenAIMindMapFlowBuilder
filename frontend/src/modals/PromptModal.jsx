@@ -2,6 +2,7 @@ import PROMPTSvg from "../assets/prompt.svg";
 import CROSSSvg from "../assets/cross.svg";
 import Prompts from "../global-components/Prompts";
 import { useMemo, useState } from "react";
+import axios from "axios";
 import modalStore from "../stores/modalStore";
 import useStore from "../stores/store";
 import useActivityStore from "../stores/activityStore";
@@ -10,7 +11,7 @@ import { useShallow } from "zustand/shallow";
 import {
     defaultOpenAIModel,
     supportedOpenAIModels,
-    getActionsForScope,
+    getActionsForProfileAndScope,
     getDefaultActionForProfile,
     getFollowUpSuggestions,
     getPromptProfilesForScope,
@@ -42,6 +43,27 @@ const legacyAgents = [
     'Custom Prompts'
 ];
 
+const actionsThatDraftNodes = new Set([
+    'expand_this_node',
+    'generate_child_nodes',
+    'convert_to_checklist',
+    'generate_tasks',
+    'generate_checklist',
+    'generate_training_outline',
+    'export_branch_as_sop_draft',
+    'custom_prompt'
+]);
+
+const previewEndpoint = ({ flowId, scope, nodeId }) => {
+    if (scope === 'workspace') {
+        return `http://localhost:8000/api/workspaces/${flowId}/ai/actions/workspace/preview`;
+    }
+    if (scope === 'branch') {
+        return `http://localhost:8000/api/workspaces/${flowId}/ai/actions/branch/${nodeId}/preview`;
+    }
+    return `http://localhost:8000/api/workspaces/${flowId}/ai/actions/node/${nodeId}/preview`;
+};
+
 const PromptModal = ({
     scope,
     nodeId,
@@ -58,27 +80,37 @@ const PromptModal = ({
         edges: state.edges,
         setActiveView: state.setActiveView,
         setSelectedBranchId: state.setSelectedBranchId,
-        setGeneratedHelperPreview: state.setGeneratedHelperPreview
+        setGeneratedHelperPreview: state.setGeneratedHelperPreview,
+        setActiveAIActionPreview: state.setActiveAIActionPreview,
+        setInspectorNodeId: state.setInspectorNodeId
     });
     const {
         nodes,
         edges,
         setActiveView,
         setSelectedBranchId,
-        setGeneratedHelperPreview
+        setGeneratedHelperPreview,
+        setActiveAIActionPreview,
+        setInspectorNodeId
     } = useStore(useShallow(storeSelector));
     const recordActivity = useActivityStore((state) => state.recordActivity);
     const flowId = flowStore((state) => state.flow_id);
-    const [activeAgent, setActiveAgent] = useState('Strategic Advisor');
-    const [selectedModel, setSelectedModel] = useState(defaultOpenAIModel);
+    const targetNodeId = nodeId || sourceId;
+    const targetNode = nodes.find((node) => node.id === targetNodeId);
+    const initialLegacyAgent = legacyAgents.includes(targetNode?.data?.prompt)
+        ? targetNode.data.prompt
+        : '';
+    const [activeAgent, setActiveAgent] = useState(initialLegacyAgent);
+    const [selectedModel, setSelectedModel] = useState(
+        targetNode?.data?.model_name || defaultOpenAIModel
+    );
     const [selectedRoleId, setSelectedRoleId] = useState(initialRoleId || '');
     const [selectedActionId, setSelectedActionId] = useState(initialActionId || '');
     const [customPrompt, setCustomPrompt] = useState('');
     const [stageMessage, setStageMessage] = useState('');
+    const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
 
     const isPreviewFlow = Boolean(scope);
-    const targetNodeId = nodeId || sourceId;
-    const targetNode = nodes.find((node) => node.id === targetNodeId);
     const targetData = targetNode ? getWorkspaceNodeData(targetNode) : {};
     const targetLabel =
         targetData.title ||
@@ -96,7 +128,10 @@ const PromptModal = ({
             profiles[0],
         [profiles, selectedRoleId]
     );
-    const actions = useMemo(() => getActionsForScope(scope || 'node'), [scope]);
+    const actions = useMemo(
+        () => getActionsForProfileAndScope(role, scope || 'node'),
+        [role, scope]
+    );
     const selectedAction = useMemo(
         () =>
             actions.find((action) => action.id === selectedActionId) ||
@@ -115,13 +150,22 @@ const PromptModal = ({
         setSelectedActionId(getDefaultActionForProfile(nextRole, scope || 'node'));
     };
 
-    const stagePreviewRequest = () => {
-        if (!role || !selectedAction) {
+    const stagePreviewRequest = async () => {
+        if (!role || !selectedAction || isGeneratingPreview) {
+            return;
+        }
+        if (selectedAction.id === 'custom_prompt' && !customPrompt.trim()) {
+            setStageMessage('Add a custom instruction before generating this preview.');
             return;
         }
 
+        setIsGeneratingPreview(true);
+        setStageMessage('');
         const childEdges = edges.filter((edge) => edge.source === targetNodeId);
-        const preview = {
+        const sourceRefs = targetData.sourceRefs || [];
+        const shouldDraftNode = actionsThatDraftNodes.has(selectedAction.id);
+        const draftNodeId = `draft-${Date.now()}`;
+        const fallbackPreview = {
             preview_id: `ui-preview-${Date.now()}`,
             ai_action_id: `ui-action-${Date.now()}`,
             workspace_id: flowId || '',
@@ -138,8 +182,36 @@ const PromptModal = ({
                     : targetNodeId
                       ? [targetNodeId]
                       : [],
-            draft_nodes: [],
-            draft_edges: [],
+            draft_nodes: shouldDraftNode
+                ? [
+                      {
+                          id: draftNodeId,
+                          parent_id: targetNodeId,
+                          title: `${selectedAction.label}: ${targetLabel}`,
+                          body:
+                              customPrompt.trim() ||
+                              suggestions[0] ||
+                              `${role.label} draft for ${targetLabel}.`,
+                          node_type: selectedAction.id.includes('checklist')
+                              ? 'task'
+                              : selectedAction.id.includes('question')
+                                ? 'question'
+                                : 'concept',
+                          status: sourceRefs.length ? 'ai_generated' : 'needs_review',
+                          source_refs: sourceRefs
+                      }
+                  ]
+                : [],
+            draft_edges:
+                shouldDraftNode && targetNodeId
+                    ? [
+                          {
+                              id: `draft-edge-${targetNodeId}-${draftNodeId}`,
+                              source: targetNodeId,
+                              target: draftNodeId
+                          }
+                      ]
+                    : [],
             draft_annotations: suggestions.map((suggestion, index) => ({
                 id: `suggestion-${index + 1}`,
                 type: 'follow_up_suggestion',
@@ -149,29 +221,75 @@ const PromptModal = ({
                 status: 'not_run',
                 message: 'Waiting for Agent A/C preview contract integration.'
             },
-            source_refs: targetData.sourceRefs || [],
+            source_refs: sourceRefs,
             assumptions: customPrompt.trim()
                 ? [`User instruction: ${customPrompt.trim()}`]
                 : []
         };
 
-        setGeneratedHelperPreview('nodeAiActionRequest', preview);
-        if (scope === 'branch' || scope === 'node') {
-            setSelectedBranchId(targetNodeId);
-        }
-        setActiveView(viewForAction(selectedAction.id));
-        recordActivity({
-            type: 'ai_preview_requested',
-            title: `${role.label}: ${selectedAction.label}`,
-            summary: `Staged preview-first ${scope} AI action for ${targetLabel}.`,
-            node_ids: targetNodeId ? [targetNodeId] : [],
-            metadata: {
-                scope,
-                role: role.label,
-                action: selectedAction.id
+        const activatePreview = (preview) => {
+            setGeneratedHelperPreview('nodeAiActionRequest', preview);
+            setActiveAIActionPreview(preview);
+            if (scope === 'branch' || scope === 'node') {
+                setSelectedBranchId(targetNodeId);
+                setInspectorNodeId(targetNodeId);
             }
-        });
-        setStageMessage('Preview request staged. Accept/reject rendering belongs to the preview lane.');
+            setActiveView(viewForAction(selectedAction.id));
+            recordActivity({
+                type: 'ai_preview_requested',
+                title: `${role.label}: ${selectedAction.label}`,
+                summary: `Staged preview-first ${scope} AI action for ${targetLabel}.`,
+                node_ids: targetNodeId ? [targetNodeId] : [],
+                metadata: {
+                    scope,
+                    role: role.label,
+                    action: selectedAction.id
+                }
+            });
+            setStageMessage('Preview generated. Review it in the node inspector before accepting.');
+            window.setTimeout(() => popNode(), 150);
+        };
+
+        try {
+            const endpoint = flowId
+                ? previewEndpoint({
+                      flowId,
+                      scope: scope || 'node',
+                      nodeId: targetNodeId
+                  })
+                : '';
+            const response = endpoint
+                ? await axios.post(endpoint, {
+                      role: role.id,
+                      role_id: role.id,
+                      action: selectedAction.id,
+                      scope: {
+                          type: scope || 'node',
+                          ...(scope === 'workspace' ? {} : { node_id: targetNodeId })
+                      },
+                      custom_prompt: customPrompt.trim() || null,
+                      created_by: 'user'
+                  })
+                : null;
+            activatePreview(response?.data || fallbackPreview);
+        } catch (error) {
+            const detail =
+                error.response?.data?.detail?.message ||
+                error.response?.data?.detail ||
+                error.message ||
+                'Unable to generate preview.';
+            activatePreview({
+                ...fallbackPreview,
+                warnings: [String(detail)],
+                validation_report: {
+                    ...fallbackPreview.validation_report,
+                    status: 'fallback',
+                    message: 'Backend preview was unavailable; staged a local preview.'
+                }
+            });
+        } finally {
+            setIsGeneratingPreview(false);
+        }
     };
 
     if (!isPreviewFlow) {
@@ -297,8 +415,12 @@ const PromptModal = ({
                 <button type="button" className="secondary" onClick={() => popNode()}>
                     Cancel
                 </button>
-                <button type="button" onClick={stagePreviewRequest}>
-                    Generate preview
+                <button
+                    type="button"
+                    onClick={stagePreviewRequest}
+                    disabled={isGeneratingPreview}
+                >
+                    {isGeneratingPreview ? 'Generating preview' : 'Generate preview'}
                 </button>
             </div>
         </div>

@@ -29,6 +29,27 @@ import {
     stringifyFlowSnapshot
 } from '../utils/flowSnapshots';
 
+const DOCX_INTAKE_PROFILES = [
+    {
+        id: 'document-structure-extractor',
+        label: 'Document Structure Extractor'
+    },
+    {
+        id: 'source-librarian',
+        label: 'Source Librarian'
+    },
+    {
+        id: 'strategic-advisor',
+        label: 'Strategic Advisor'
+    },
+    {
+        id: 'custom',
+        label: 'Custom Intake Prompt'
+    }
+];
+
+const DOCX_INTAKE_MODELS = ['gpt-4.1'];
+
 const DocxModal = () => {
     const selector = (state) => ({
         trigger: state.trigger,
@@ -52,6 +73,9 @@ const DocxModal = () => {
     const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
     const { fitView, setViewport } = useReactFlow();
     const [file, setFile] = useState();
+    const [intakeProfileId, setIntakeProfileId] = useState('document-structure-extractor');
+    const [intakeModel, setIntakeModel] = useState(DOCX_INTAKE_MODELS[0]);
+    const [intakeBrief, setIntakeBrief] = useState('');
     const fileInputRef = useRef(null);
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
@@ -77,6 +101,18 @@ const DocxModal = () => {
         setStatus(statusCode);
         setMsg(message);
         pushNode(ErrorModal);
+    };
+
+    const selectedIntakeProfile =
+        DOCX_INTAKE_PROFILES.find((profile) => profile.id === intakeProfileId) ||
+        DOCX_INTAKE_PROFILES[0];
+
+    const sourcePromptLabel = () => {
+        const brief = intakeBrief.trim();
+        if (!brief) {
+            return selectedIntakeProfile.label;
+        }
+        return `${selectedIntakeProfile.label}: ${brief}`;
     };
 
     const ensureWorkspace = async () => {
@@ -141,7 +177,10 @@ const DocxModal = () => {
         const operationId = nanoid();
         const data = {
             file: file,
-            operationId
+            operationId,
+            intakeRole: selectedIntakeProfile.label,
+            intakeModel,
+            intakePrompt: intakeBrief.trim()
         };
         const undoSnapshot = createOperationSnapshot({
             nodes,
@@ -234,7 +273,7 @@ const DocxModal = () => {
         const jsonString = JSON.stringify(data.mindmap_json)
         console.log(jsonString, "JSON STRINGGGGGGGGGGGGGG")
         if (jsonString.length > 0) {
-            const flow = JSON.parse(jsonString);
+            const flow = applySourceIntakeMetadata(JSON.parse(jsonString), data);
             console.log('NODEEEEEEEEEE', flow.nodes);
             if (flow.nodes.length === 0 && flow.edges.length === 0) {
                 console.log('not clled');
@@ -299,7 +338,9 @@ const DocxModal = () => {
                 name: data.type,
                 content: file.name,
                 flow_id: flowStore.getState().flow_id || flowId,
-                prompt: 'Research Assistant',
+                prompt: sourcePromptLabel(),
+                model_name: intakeModel,
+                intake_prompt: intakeBrief.trim(),
                 file: file
             }
         };
@@ -317,6 +358,29 @@ const DocxModal = () => {
     const handleFileUpload = (e) => {
         setFile(e.target.files?.[0]);
     };
+
+    const applySourceIntakeMetadata = (flow, data) => ({
+        ...flow,
+        nodes: Array.isArray(flow?.nodes)
+            ? flow.nodes.map((node) => {
+                  if (node.type !== 'dataSource') {
+                      return node;
+                  }
+                  return {
+                      ...node,
+                      data: {
+                          ...(node.data || {}),
+                          name: node.data?.name || data.type || 'docx',
+                          content: node.data?.content || file?.name || 'DOCX source',
+                          flow_id: data.flow_id || flowStore.getState().flow_id || flowId,
+                          prompt: sourcePromptLabel(),
+                          model_name: intakeModel,
+                          intake_prompt: intakeBrief.trim()
+                      }
+                  };
+              })
+            : []
+    });
 
     const openFilePicker = () => {
         fileInputRef.current?.click();
@@ -368,6 +432,39 @@ const DocxModal = () => {
                     accept={docxAccept}
                     style={{ display: 'none' }}
                     onChange={(e) => handleFileUpload(e)}
+                />
+            </div>
+            <div className="source-intake-config">
+                <label>
+                    AI role
+                    <select
+                        value={intakeProfileId}
+                        onChange={(event) => setIntakeProfileId(event.target.value)}
+                    >
+                        {DOCX_INTAKE_PROFILES.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                                {profile.label}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                <label>
+                    Intake model
+                    <select
+                        value={intakeModel}
+                        onChange={(event) => setIntakeModel(event.target.value)}
+                    >
+                        {DOCX_INTAKE_MODELS.map((modelName) => (
+                            <option key={modelName} value={modelName}>
+                                {modelName}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                <textarea
+                    value={intakeBrief}
+                    onChange={(event) => setIntakeBrief(event.target.value)}
+                    placeholder="Optional brief for this source"
                 />
             </div>
             <div className="buttons">

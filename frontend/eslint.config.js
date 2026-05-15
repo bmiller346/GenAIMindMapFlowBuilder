@@ -11,6 +11,8 @@ export default [
       'node_modules',
       'coverage',
       'build',
+      'test-results',
+      'playwright-report',
     ],
   },
   {

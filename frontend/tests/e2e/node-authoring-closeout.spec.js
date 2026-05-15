@@ -259,7 +259,7 @@ test('AI slash preview commands do not structurally mutate nodes or edges', asyn
 
     await page.locator('.node-title-input').first().fill('/ai');
     const beforeCommand = JSON.parse(state.savedFlowJson);
-    await page.locator('.node-slash-menu').getByRole('button', { name: /AI assistant/ }).click();
+    await page.locator('.node-slash-menu').getByRole('button', { name: /^AI helpers/ }).click();
     await expect(page.locator('.local-branch-control')).toContainText('/');
     const afterCommand = JSON.parse(state.savedFlowJson);
 
@@ -313,7 +313,12 @@ test('visual matrix covers themes, narrow viewport, dense graph, long titles, ta
     await expect(page.locator('.summary-block')).toContainText('long summary');
     await page.locator('.node-menu-trigger').first().click({ force: true });
     await expect(page.locator('.node-action-menu')).toBeVisible();
-    await expect(page.locator('.node-action-group')).toHaveCount(4);
+    await expect(page.locator('.node-action-group')).toHaveCount(5);
+    await expect(page.locator('.node-action-menu')).toContainText('Insert');
+    await expect(page.locator('.node-action-menu')).toContainText('AI');
+    await expect(page.locator('.node-action-menu')).toContainText('Branch');
+    await expect(page.locator('.node-action-menu')).toContainText('Review');
+    await expect(page.locator('.node-action-menu')).toContainText('Danger');
     await testInfo.attach('node-authoring-menu-table-details', {
         body: await page.screenshot({ fullPage: true }),
         contentType: 'image/png'

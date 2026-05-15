@@ -399,6 +399,9 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
 
         recordAIActionRun(run);
         clearActiveAIActionPreview();
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
         recordActivity({
             type: 'ai_action_rejected',
             title: 'Rejected AI action preview',

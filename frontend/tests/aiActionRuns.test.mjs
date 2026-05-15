@@ -28,6 +28,67 @@ test('createAIActionRun captures durable preview metadata', () => {
     assert.deepEqual(run.input_source_refs, [{ document_id: 'doc-1' }]);
 });
 
+test('createAIActionRun prefers backend ai_action_run contract fields', () => {
+    const run = createAIActionRun({
+        preview: {
+            ai_action_id: 'client-fallback',
+            role: 'Fallback Role',
+            action: 'fallback_action',
+            ai_action_run: {
+                ai_action_id: 'backend-action',
+                workspace_id: 'workspace-1',
+                source_node_id: 'node-2',
+                scope: 'branch',
+                role: 'Workflow Mapper',
+                action: 'split_branch_into_categories',
+                custom_prompt: null,
+                input_source_refs: [{ document_id: 'doc-2' }],
+                created_at: '2026-05-14T00:00:00.000Z',
+                created_by: 'user',
+                status: 'previewed',
+                generated_node_ids: ['draft-node-1']
+            }
+        },
+        status: 'accepted'
+    });
+
+    assert.equal(run.ai_action_id, 'backend-action');
+    assert.equal(run.role, 'Workflow Mapper');
+    assert.equal(run.action, 'split_branch_into_categories');
+    assert.equal(run.source_node_id, 'node-2');
+    assert.equal(run.status, 'accepted');
+    assert.deepEqual(run.generated_node_ids, ['draft-node-1']);
+});
+
+test('acceptAIActionPreview stamps generated ids onto backend action run', () => {
+    const parent = createWorkspaceNode({ id: 'parent', title: 'Parent' });
+    const result = acceptAIActionPreview({
+        preview: {
+            ai_action_run: {
+                ai_action_id: 'backend-action-2',
+                workspace_id: 'workspace-1',
+                source_node_id: 'parent',
+                scope: 'node',
+                role: 'Task Planner',
+                action: 'generate_tasks',
+                custom_prompt: null,
+                input_source_refs: [],
+                created_at: '2026-05-14T00:00:00.000Z',
+                created_by: 'user',
+                status: 'previewed',
+                generated_node_ids: []
+            },
+            draft_nodes: [{ id: 'draft-backend', title: 'Backend draft' }]
+        },
+        nodes: [parent],
+        edges: []
+    });
+
+    assert.equal(result.run.ai_action_id, 'backend-action-2');
+    assert.equal(result.run.status, 'accepted');
+    assert.deepEqual(result.run.generated_node_ids, ['draft-backend']);
+});
+
 test('acceptAIActionPreview creates canonical nodes only on accept', () => {
     const parent = createWorkspaceNode({
         id: 'parent',

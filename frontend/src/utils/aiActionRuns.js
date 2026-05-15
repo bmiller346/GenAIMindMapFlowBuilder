@@ -19,28 +19,42 @@ export const createAIActionRun = ({
     generatedNodeIds = [],
     createdAt = new Date().toISOString()
 } = {}) => {
+    const contractRun =
+        preview.ai_action_run && typeof preview.ai_action_run === 'object'
+            ? preview.ai_action_run
+            : undefined;
     const sourceNodeId =
+        contractRun?.source_node_id ||
         preview.source_node_id ||
         preview.node_id ||
         preview.scope?.node_id ||
         preview.scope?.source_node_id ||
         '';
+    const nextGeneratedNodeIds =
+        generatedNodeIds.length > 0
+            ? generatedNodeIds
+            : asArray(contractRun?.generated_node_ids);
 
     return {
-        ai_action_id: preview.ai_action_id || `ai_action_${nanoid(10)}`,
-        workspace_id: preview.workspace_id || '',
+        ...(contractRun || {}),
+        ai_action_id:
+            contractRun?.ai_action_id || preview.ai_action_id || `ai_action_${nanoid(10)}`,
+        workspace_id: contractRun?.workspace_id || preview.workspace_id || '',
         source_node_id: sourceNodeId,
-        scope: previewScopeType(preview),
-        role: preview.role || preview.helper_id || 'AI action',
-        action: preview.action || preview.preview_action || '',
-        custom_prompt: preview.custom_prompt || null,
+        scope: contractRun?.scope || previewScopeType(preview),
+        role: contractRun?.role || preview.role || preview.helper_id || 'AI action',
+        action: contractRun?.action || preview.action || preview.preview_action || '',
+        custom_prompt: contractRun?.custom_prompt ?? preview.custom_prompt ?? null,
         input_source_refs: asArray(
-            preview.input_source_refs || preview.source_refs || preview.scope?.source_refs
+            contractRun?.input_source_refs ||
+                preview.input_source_refs ||
+                preview.source_refs ||
+                preview.scope?.source_refs
         ),
-        created_at: preview.created_at || createdAt,
-        created_by: preview.created_by || 'user',
+        created_at: contractRun?.created_at || preview.created_at || createdAt,
+        created_by: contractRun?.created_by || preview.created_by || 'user',
         status,
-        generated_node_ids: asArray(generatedNodeIds)
+        generated_node_ids: asArray(nextGeneratedNodeIds)
     };
 };
 
@@ -211,7 +225,11 @@ export const acceptAIActionPreview = ({ preview = {}, nodes = [], edges = [] }) 
         .filter((node) => !existingNodeIds.has(node.id));
     const generatedNodeIds = generatedNodes.map((node) => node.id);
     const sourceNodeId =
-        preview.source_node_id || preview.node_id || preview.scope?.node_id || '';
+        preview.ai_action_run?.source_node_id ||
+        preview.source_node_id ||
+        preview.node_id ||
+        preview.scope?.node_id ||
+        '';
     const explicitEdges = draftEdges
         .map((draft) => normalizeDraftEdge(draft, generatedNodeIds))
         .filter(Boolean);
@@ -245,7 +263,10 @@ export const acceptAIActionPreview = ({ preview = {}, nodes = [], edges = [] }) 
                                 ai_action_outputs: [
                                     ...asArray(node.data?.ai_action_outputs),
                                     {
-                                        ai_action_id: preview.ai_action_id || '',
+                                        ai_action_id:
+                                            preview.ai_action_run?.ai_action_id ||
+                                            preview.ai_action_id ||
+                                            '',
                                         preview_id: preview.preview_id || '',
                                         accepted_at: acceptedAt,
                                         outputs: nonNodeOutputs

@@ -24,7 +24,7 @@ function shouldCopy(src) {
   const parts = relative.split(path.sep);
   const basename = path.basename(src);
 
-  if (parts.includes('__pycache__') || parts.includes('.pytest_cache')) {
+  if (parts.includes('__pycache__') || parts.includes('.pytest_cache') || parts.includes('.pytest-tmp')) {
     return false;
   }
 
@@ -73,7 +73,7 @@ await fs.mkdir(stagingRoot, { recursive: true });
 
 if (process.platform === 'win32') {
   await fs.mkdir(backendTarget, { recursive: true });
-  const excludedDirs = ['__pycache__', '.pytest_cache', 'venv', 'env'];
+  const excludedDirs = ['__pycache__', '.pytest_cache', '.pytest-tmp', 'venv', 'env'];
   if (!includeVenv) {
     excludedDirs.push('.venv');
   }

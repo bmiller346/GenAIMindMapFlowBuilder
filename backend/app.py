@@ -181,10 +181,50 @@ gcp_service_account_file = os.getenv(
     "gcp_service_account_file", "./ai-interview-poc-2b5cf8540f16.json"
 )
 OPENAI_DEFAULT_MODEL = os.getenv("openai_default_model", "gpt-5.5")
+OPENAI_ASSISTANTS_MODEL = os.getenv("openai_assistants_model", "gpt-4.1")
 OPENAI_REASONING_MODEL = os.getenv("openai_reasoning_model", "gpt-5.4")
 OPENAI_EMBEDDING_MODEL = os.getenv(
     "openai_embedding_model", "text-embedding-3-large"
 )
+UNSUPPORTED_ASSISTANTS_MODELS = {"gpt-5.5"}
+
+
+def clean_source_intake_value(value: str | None, max_length: int = 2000) -> str:
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"\s+", " ", value).strip()[:max_length]
+
+
+def resolve_assistants_model(model_name: str | None = None) -> str:
+    requested_model = clean_source_intake_value(model_name, 120)
+    if not requested_model:
+        return OPENAI_ASSISTANTS_MODEL
+    if requested_model in UNSUPPORTED_ASSISTANTS_MODELS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"The requested model '{requested_model}' cannot be used with the Assistants API. "
+                f"Use openai_assistants_model or an intake model compatible with Assistants."
+            ),
+        )
+    return requested_model
+
+
+def build_source_intake_instruction(
+    intake_role: str | None = None,
+    intake_prompt: str | None = None,
+) -> str:
+    role = clean_source_intake_value(intake_role, 160)
+    prompt = clean_source_intake_value(intake_prompt)
+    if not role and not prompt:
+        return ""
+
+    lines = ["Apply this source-intake configuration while preparing the output."]
+    if role:
+        lines.append(f"Selected intake role: {role}.")
+    if prompt:
+        lines.append(f"User intake brief: {prompt}.")
+    return "\n\n" + "\n".join(lines)
 
 credentials = None
 model_vertexai = None
@@ -1815,6 +1855,15 @@ def get_upload_flow_or_400(flow_id: str) -> dict:
 
     if not flow and local_find_flow(flow_id):
         flow = promote_local_flow_to_mongo(flow_id)
+        if not flow:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "Source uploads need MongoDB so document metadata and source references can be saved. "
+                    "MongoDB is running, but this local workspace could not be promoted for upload. "
+                    "Reopen or create the workspace and try again."
+                ),
+            )
 
     if not flow:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found.")
@@ -2651,6 +2700,9 @@ def get_summary_from_openai(
     flow_id: str,
     flow_type: str,
     operation_id: str | None = None,
+    intake_role: str | None = None,
+    intake_prompt: str | None = None,
+    intake_model: str | None = None,
 ):
     try:
         update_operation_progress(
@@ -2687,6 +2739,9 @@ def get_summary_from_openai(
     if len(file_bytes) == 0:
         raise ValueError("The uploaded file is actually empty!")
 
+    assistant_model = resolve_assistants_model(intake_model)
+    intake_instruction = build_source_intake_instruction(intake_role, intake_prompt)
+
     update_operation_progress(
         operation_id,
         phase="uploading_to_ai",
@@ -2697,7 +2752,7 @@ def get_summary_from_openai(
     assistant = openai.beta.assistants.create(
         name="Summarize agent",
         instructions="Your task is to only summarize the document",
-        model=OPENAI_DEFAULT_MODEL,
+        model=assistant_model,
         tools=[{"type": "file_search"}],
     )
     vector_store = openai.beta.vector_stores.create(name=f"{file_extension}_{flow_id}")
@@ -2764,7 +2819,7 @@ def get_summary_from_openai(
         messages=[
             {
                 "role": "user",
-                "content": "Generate a concise summary of the following document",
+                "content": f"Generate a concise summary of the following document{intake_instruction}",
                 "attachments": [
                     {"file_id": messages_file.id, "tools": [{"type": "file_search"}]}
                 ],
@@ -2832,6 +2887,9 @@ def openai_mindmap_generator(
     flow_id: str,
     flow_type: str,
     operation_id: str | None = None,
+    intake_role: str | None = None,
+    intake_prompt: str | None = None,
+    intake_model: str | None = None,
 ):
     try:
         update_operation_progress(
@@ -2868,6 +2926,16 @@ def openai_mindmap_generator(
     if len(file_bytes) == 0:
         raise ValueError("The uploaded file is actually empty!")
 
+    assistant_model = resolve_assistants_model(intake_model)
+    intake_role_label = clean_source_intake_value(
+        intake_role, 160
+    ) or "Document Structure Extractor"
+    intake_prompt_text = clean_source_intake_value(intake_prompt)
+    intake_instruction = build_source_intake_instruction(
+        intake_role_label,
+        intake_prompt_text,
+    )
+
     update_operation_progress(
         operation_id,
         phase="uploading_to_ai",
@@ -2878,7 +2946,7 @@ def openai_mindmap_generator(
     assistant = openai.beta.assistants.create(
         name="MindMap Builder",
         instructions="Your task is to create the mindmap of the document",
-        model=OPENAI_DEFAULT_MODEL,
+        model=assistant_model,
         tools=[{"type": "file_search"}],
     )
     vector_store = openai.beta.vector_stores.create(name=f"{file_extension}_mindmap_{flow_id}")
@@ -2977,7 +3045,9 @@ def openai_mindmap_generator(
                 - `dataSource` Node:
                     - `data` contains the following properties:
                         {{
-                            "prompt": "<data source description>",
+                            "prompt": {json.dumps(intake_role_label)},
+                            "model_name": {json.dumps(assistant_model)},
+                            "intake_prompt": {json.dumps(intake_prompt_text)},
                             "name": "{file_extension}", !!!DOESN"T CHANGES 
                             "content": "<file name or content>",
                             "flow_id": "{flow_id}",
@@ -3025,6 +3095,7 @@ def openai_mindmap_generator(
                 ### Additional Considerations:
                 - Ensure that the node positions are distributed properly to avoid overlap.
                 - Prioritize connecting `response` nodes where it adds logical structure to the flow.
+                {intake_instruction}
 
                 ### IMPORTANT:
                 - **RETURN ONLY THE VALID JSON OBJECT AND NO ADDITIONAL COMMENTS**.
@@ -4232,6 +4303,9 @@ def create_docx_component(
     file: UploadFile,
     flow_id: str = Form(...),
     operation_id: str | None = Form(None),
+    intake_role: str | None = Form(None),
+    intake_model: str | None = Form(None),
+    intake_prompt: str | None = Form(None),
 ):
     update_operation_progress(
         operation_id,
@@ -4268,9 +4342,25 @@ def create_docx_component(
         try:
             check_page_length = is_within_gpt4o_token_limit(file)
             if check_page_length and flow["flow_type"] == 'manual':
-                return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+                return get_summary_from_openai(
+                    file,
+                    flow_id=flow_id,
+                    flow_type=flow["flow_type"],
+                    operation_id=operation_id,
+                    intake_role=intake_role,
+                    intake_prompt=intake_prompt,
+                    intake_model=intake_model,
+                )
             elif check_page_length and flow["flow_type"] == 'automatic':
-                return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+                return openai_mindmap_generator(
+                    file,
+                    flow_id=flow_id,
+                    flow_type=flow["flow_type"],
+                    operation_id=operation_id,
+                    intake_role=intake_role,
+                    intake_prompt=intake_prompt,
+                    intake_model=intake_model,
+                )
             else:
                 traceback.print_exc()
                 update_operation_progress(
@@ -4570,7 +4660,7 @@ async def create_web_crawler(
             assistant = openai.beta.assistants.create(
                 name="Summarize agent",
                 instructions="Your task is to only summarize the document",
-                model=OPENAI_DEFAULT_MODEL,
+                model=OPENAI_ASSISTANTS_MODEL,
                 tools=[{"type": "file_search"}],
             )
             vector_store = openai.beta.vector_stores.create(name=f"web_{flow_id}")
@@ -4640,7 +4730,7 @@ async def create_web_crawler(
             assistant = openai.beta.assistants.create(
             name="MindMap Builder",
             instructions="Your task is to create the mindmap of the document",
-            model=OPENAI_DEFAULT_MODEL,
+            model=OPENAI_ASSISTANTS_MODEL,
             tools=[{"type": "file_search"}],
             )
             vector_store = openai.beta.vector_stores.create(name=f"web_mindmap_{flow_id}")

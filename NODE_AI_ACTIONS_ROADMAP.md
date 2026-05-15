@@ -30,8 +30,11 @@ group, but DocMap's primary choices should be domain/workflow roles.
 
 ## Current Status
 
-Status: discovered and scoped. The legacy feature is preserved in code but is
-not modernized into DocMap's preview/accept graph mutation model.
+Status: partially implemented and QA-covered for selected-node and
+selected-branch AI actions. Backend preview contracts, prompt profile registry,
+frontend role/action picker, inspector preview rendering, accept/reject,
+`AIActionRun` snapshot persistence, and node/branch browser regression coverage
+exist. Workspace-scope UX and legacy data-source prompt migration remain open.
 
 Preserved legacy surface:
 
@@ -46,12 +49,16 @@ Preserved legacy surface:
 
 Known gaps:
 
-- Legacy persona actions are data-source scoped rather than selected-node,
-  selected-branch, and workspace scoped.
-- Legacy persona actions can append graph changes directly.
-- Legacy persona outputs are not routed through the current validation,
-  preview/accept, source-ref, activity, and save/reopen patterns.
-- Prompt profile roles are generic rather than DocMap/domain oriented.
+- No frontend workspace-level Ask AI entry point is currently exposed, even
+  though the backend workspace preview endpoint and profile/action definitions
+  exist.
+- The legacy data-source `PromptModal`/`Prompts` path remains discoverable and
+  visibly labeled as legacy, but can still append graph changes directly when
+  used through data-source nodes.
+- Legacy data-source persona outputs are not routed through the current
+  validation, preview/accept, source-ref, activity, and save/reopen patterns.
+- Prompt profile roles now include DocMap/domain roles, but the old
+  data-source flow still uses the original generic persona execution path.
 
 ## Product Rules
 
@@ -422,18 +429,18 @@ roadmap.
 - [x] Agent B: Preserve `Strategic Advisor`, `Research Assistant`,
   `Productivity Coach`, `Data Interpreter`, and `Custom Prompts`.
 - [ ] Agent C: Prevent legacy flow from directly appending graph changes.
-- [ ] Agent D: Add regression coverage for legacy persona discoverability.
+- [x] Agent D: Add regression coverage for legacy persona discoverability.
 
 ### Phase 5: QA And Persistence
 
-- [ ] Agent D: Verify preview leaves nodes/edges unchanged before accept.
-- [ ] Agent D: Verify accept creates durable graph changes.
-- [ ] Agent D: Verify reject leaves graph unchanged.
-- [ ] Agent D: Verify save/reopen preserves accepted generated nodes and
+- [x] Agent D: Verify preview leaves nodes/edges unchanged before accept.
+- [x] Agent D: Verify accept creates durable graph changes.
+- [x] Agent D: Verify reject leaves graph unchanged.
+- [x] Agent D: Verify save/reopen preserves accepted generated nodes and
   `AIActionRun` history.
-- [ ] Agent D: Verify source refs and `needs_review` behavior.
+- [x] Agent D: Verify source refs and `needs_review` behavior.
 - [ ] Agent D: Verify node, branch, and workspace scopes.
-- [ ] Agent D: Update pass/fail notes below.
+- [x] Agent D: Update pass/fail notes below.
 
 ## QA Results
 
@@ -448,14 +455,42 @@ Agent B implementation QA:
 
 - Node menu and slash menu now expose Ask AI for selected node and branch
   scopes.
-- The Ask AI modal stages a preview-first request handoff with role, action,
-  custom prompt, and follow-up suggestions; it does not mutate nodes or edges.
+- The Ask AI modal calls Agent A's `/api/workspaces/{flow_id}/ai/actions/.../preview`
+  endpoints when a workspace exists, falls back to a local preview if the
+  endpoint is unavailable, and sets Agent C's `activeAIActionPreview`.
+- The role/action picker uses backend-compatible action IDs and filters actions
+  to combinations supported by the selected role and scope.
 - The legacy Choose Agent modal remains discoverable and is visibly marked as
   the legacy data-source flow.
-- Verification: `npm run build`, `npm run lint`, and `git diff --check`
-  passed for the Agent B frontend changes.
+- Verification: `npm run build`, `npm run lint`, `npm run test:flow-snapshots`,
+  `node --test tests/aiActionRuns.test.mjs`, and `git diff --check` passed.
 
 Full preview/accept/reject and persistence QA still belongs to Agent C/D.
+
+Agent D implementation QA:
+
+- Added `frontend/tests/e2e/node-ai-actions-regression.spec.js` covering node
+  preview without graph mutation, accept-created durable child nodes,
+  save/reopen persistence of accepted `AIActionRun` history, branch reject
+  without graph mutation, and legacy General persona discoverability.
+- Added a narrow handoff fix so `PromptModal` calls the AI action preview
+  endpoint, sets `activeAIActionPreview`, and opens the inspector review path.
+- Rejected AI action previews now mark the workspace dirty so rejected
+  `AIActionRun` history can be persisted.
+- Verification passed in the implementation pass: `npm run lint`,
+  `node --test tests\aiActionRuns.test.mjs tests\flowSnapshots.test.mjs`,
+  `npx playwright test node-ai-actions-regression.spec.js`, and
+  `git diff --check`.
+- Review verification on 2026-05-14 passed:
+  - `python -m poetry run pytest tests\test_ai_helper_previews.py`: 24 passed
+    with local pytest cache permission warnings.
+  - `node --test tests/aiActionRuns.test.mjs`: 6 passed.
+  - `npm run test:flow-snapshots`: 4 passed.
+  - `npx playwright test tests/e2e/node-ai-actions-regression.spec.js`: 3
+    passed.
+- Remaining gap: Agent D has not added browser coverage for workspace-scoped AI
+  actions because no workspace Ask AI entry point is currently exposed in the
+  frontend.
 
 ## Completion Gate
 

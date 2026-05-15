@@ -78,6 +78,7 @@ const Prompts = ({
     };
 
     const getData = () => {
+        setActiveAgent?.(agentName);
         pushNode(LoadingModal);
         const currNode = nodes.filter((node) => node.id === id);
         const editNode = nodes.find((node) => node.id === id);
