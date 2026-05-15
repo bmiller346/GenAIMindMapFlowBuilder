@@ -95,6 +95,8 @@ Known verification gap:
 - [x] Document intake treats role/brief guidance as optional, validates allowed
   intake roles, sanitizes prompt text, and routes PDF/DOCX/Markdown/TXT graph
   generation through Responses with DocMap model policy.
+- [x] Automatic document intake stages generated graph output in a source draft
+  review panel before adopting it into the canonical workspace graph.
 
 ### AI Provider Refactor
 
