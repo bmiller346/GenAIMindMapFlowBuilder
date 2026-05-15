@@ -3,26 +3,15 @@ import re
 from copy import deepcopy
 from typing import Any
 
+from .business_ontology import (
+    BUSINESS_ONTOLOGY_CONTRACT,
+    KNOWLEDGE_GRAPH_RELATIONSHIP_TYPES,
+)
 from .schemas import GraphSchemaError
 
 
 ALLOWED_AI_NODE_TYPES = {"dataSource", "question", "response", "followUp"}
 AI_GRAPH_CONTRACT_VERSION = "1"
-KNOWLEDGE_GRAPH_RELATIONSHIP_TYPES = {
-    "contains",
-    "references",
-    "depends_on",
-    "duplicates",
-    "conflicts_with",
-    "similar_to",
-    "derived_from",
-    "supports",
-    "contradicts",
-    "implements",
-    "owned_by",
-    "requires_review_by",
-    "related_to",
-}
 KNOWLEDGE_GRAPH_SOURCE_SIGNALS = {
     "explicit_text",
     "shared_source",
@@ -44,7 +33,10 @@ Canonical AI graph contract:
 - source_refs, when present, must be an array. Each source ref needs a non-empty document_id.
 - If a generated node has no grounded source reference, set source_refs to [] and status to needs_review.
 - knowledge_graph relationship_edges must follow the TraceSpace relationship contract: source_node_id, target_node_id, relationship_type, source_signal, confidence, rationale, source_refs or assumptions, and review_state.
+- Enterprise business maps should use registered business ontology entity types and relationship types when applicable.
 - Include metadata.ai_graph_contract_version as "{AI_GRAPH_CONTRACT_VERSION}" when possible.
+
+{BUSINESS_ONTOLOGY_CONTRACT.strip()}
 """
 
 

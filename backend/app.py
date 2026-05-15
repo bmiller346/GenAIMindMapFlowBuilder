@@ -56,6 +56,7 @@ from langchain_core.prompts import PromptTemplate
 import datetime
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 import pandas as pd
 import sqlite3
 from vanna.openai import OpenAI_Chat
@@ -104,14 +105,24 @@ from config import (
     reset_request_settings,
     set_request_settings,
 )
+from code_intelligence import (
+    CodeIntelligenceCapabilityError,
+    code_intelligence_capability_contract,
+    resolve_allowed_local_repo_root,
+    scan_local_repo,
+)
 from export.csv_tasks import export_task_rows
 from export.workspace_graph import (
     build_workspace_graph,
+    graph_to_completeness_markdown,
+    graph_to_completeness_review,
     graph_to_markdown,
     graph_to_mermaid,
     graph_to_mmd_json,
     graph_to_opml,
     graph_to_task_rows,
+    graph_to_team_roadmap,
+    graph_to_team_roadmap_markdown,
     select_branch,
 )
 from integrations.miro.client import MiroClient
@@ -139,11 +150,14 @@ from integrations.monday.persistence import (
 from documents.ingestion import (
     ALLOWED_DOCUMENT_EXTENSIONS,
     build_ai_intake_source_document,
+    build_source_set_metadata,
     chunk_source_segments,
     DocumentIngestionError,
     file_sha256,
     ingest_supported_document,
+    normalize_relative_source_path,
     sanitize_filename,
+    source_document_with_source_set_metadata,
     source_document_from_upload,
     validate_ai_intake_bytes,
     validate_upload_bytes,
@@ -241,7 +255,7 @@ def require_legacy_assistants_fallback(source_type: str, *, purpose: str) -> Non
     raise HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail=(
-            f"Responses-based {purpose} could not run for {source_type} because local source chunks "
+            f"Responses-based {purpose} could not run for {source_type} because prepared document sections "
             f"were unavailable. Set {LEGACY_ASSISTANTS_FALLBACK_ENV}=true to allow the temporary "
             "Assistants file-search fallback."
         ),
@@ -459,6 +473,13 @@ csvBot = LazyVannaBot(CSVBot, "./CSVVectorStore", "csv_data.db")
 
 app = FastAPI()
 
+
+class LocalRepoScanRequest(BaseModel):
+    root: str
+    repo_label: str = ""
+    max_file_bytes: int = Field(default=256_000, ge=1, le=2_000_000)
+    large_file_line_threshold: int = Field(default=500, ge=50, le=10_000)
+
 origins = [
     "http://127.0.0.1:5173",
     "http://localhost:5173",
@@ -550,6 +571,29 @@ ai_draft_session_collection = db["ai_draft_sessions"]
 LOCAL_FLOW_STORE_PATH = Path(
     os.getenv("DOCMAP_LOCAL_FLOW_STORE", "docmap_flows.json")
 )
+
+
+@app.get("/api/capabilities")
+def get_capabilities():
+    return code_intelligence_capability_contract()
+
+
+@app.post("/api/code-intelligence/local-repo/scan")
+def scan_local_repo_endpoint(request: LocalRepoScanRequest):
+    try:
+        repo_root = resolve_allowed_local_repo_root(request.root)
+    except CodeIntelligenceCapabilityError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    try:
+        return scan_local_repo(
+            repo_root,
+            repo_label=request.repo_label,
+            max_file_bytes=request.max_file_bytes,
+            large_file_line_threshold=request.large_file_line_threshold,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 LOCAL_AI_DRAFT_SESSION_STORE_PATH = Path(
     os.getenv("DOCMAP_LOCAL_AI_DRAFT_SESSION_STORE", "docmap_ai_draft_sessions.json")
 )
@@ -972,6 +1016,161 @@ def source_metadata_fields(source_context: dict) -> dict:
         "source_document": source_document,
         "source_segments": source_context.get("source_segments", []),
         "document_chunks": source_context["document_chunks"],
+    }
+
+
+def parse_source_set_relative_paths(raw_paths: list[str] | str | None, file_count: int) -> list[str]:
+    if raw_paths is None:
+        return []
+
+    if isinstance(raw_paths, str):
+        candidates = [raw_paths]
+    else:
+        candidates = [str(path) for path in raw_paths]
+
+    if len(candidates) == 1:
+        raw_value = candidates[0].strip()
+        if raw_value.startswith("["):
+            try:
+                decoded = json.loads(raw_value)
+            except json.JSONDecodeError as exc:
+                raise DocumentIngestionError("relative_paths must be valid JSON when sent as an array string.") from exc
+            if not isinstance(decoded, list):
+                raise DocumentIngestionError("relative_paths JSON must be an array.")
+            candidates = [str(path) for path in decoded]
+
+    if candidates and len(candidates) != file_count:
+        raise DocumentIngestionError("relative_paths must contain one path for each uploaded file.")
+
+    return candidates
+
+
+def prepare_source_set_uploads(
+    files: list[UploadFile],
+    *,
+    flow_id: str,
+    relative_paths: list[str] | str | None = None,
+    source_set_id: str | None = None,
+    source_set_label: str | None = None,
+) -> dict:
+    if not files:
+        raise DocumentIngestionError("Upload at least one source document.")
+
+    raw_paths = parse_source_set_relative_paths(relative_paths, len(files))
+    prepared_uploads = []
+    for index, file in enumerate(files):
+        file_bytes = read_upload_bytes(file)
+        upload = validate_upload_bytes(file.filename, file_bytes)
+        relative_path = normalize_relative_source_path(
+            raw_paths[index] if raw_paths else "",
+            fallback_filename=upload["original_filename"] or upload["filename"],
+        )
+        prepared_uploads.append(
+            {
+                "file": file,
+                "file_bytes": file_bytes,
+                "upload": upload,
+                "relative_path": relative_path,
+            }
+        )
+
+    source_set = build_source_set_metadata(
+        [item["relative_path"] for item in prepared_uploads],
+        source_set_id=source_set_id,
+        label=source_set_label,
+    )
+    existing_version_counts: dict[str, int] = {}
+    try:
+        for item in prepared_uploads:
+            filename = item["upload"]["filename"]
+            if filename not in existing_version_counts:
+                existing_version_counts[filename] = component_collection.count_documents(
+                    {
+                        "flow_id": ObjectId(flow_id),
+                        "source_document.filename": filename,
+                    }
+                )
+    except PyMongoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Source-set uploads need MongoDB so document metadata and source references can be saved. "
+                "Start MongoDB, then reopen or create a workspace and try again."
+            ),
+        ) from exc
+
+    batch_version_offsets: dict[str, int] = {}
+    prepared_contexts = []
+    for item in prepared_uploads:
+        filename = item["upload"]["filename"]
+        batch_version_offsets[filename] = batch_version_offsets.get(filename, 0) + 1
+        version = existing_version_counts.get(filename, 0) + batch_version_offsets[filename]
+        context = ingest_supported_document(
+            filename,
+            item["file_bytes"],
+            version=version,
+        )
+        source_document = source_document_with_source_set_metadata(
+            context["source_document"],
+            relative_path=item["relative_path"],
+            source_set=source_set,
+        )
+        context.update(
+            {
+                "source_document": source_document,
+                "relative_path": source_document["relative_path"],
+                "folder": source_document.get("folder", ""),
+                "source_set": source_set,
+            }
+        )
+        prepared_contexts.append(context)
+
+    return {
+        "source_set": source_set,
+        "sources": prepared_contexts,
+    }
+
+
+def source_set_component_metadata(source_context: dict, flow_id: str) -> dict:
+    source_document = source_context["source_document"]
+    return {
+        "flow_id": ObjectId(flow_id),
+        "file_id": "",
+        "assistant_id": "",
+        "vector_store_id": "",
+        "size": source_document["size"],
+        "type": source_document["type"],
+        "status": source_document.get("status", "uploaded"),
+        "processing_type": "source_set_ingestion",
+        "summary": "",
+        "relative_path": source_document.get("relative_path", ""),
+        "path": source_document.get("path", ""),
+        "folder": source_document.get("folder", ""),
+        "source_set_id": source_document.get("source_set_id", ""),
+        "source_set": source_document.get("source_set", {}),
+        **source_metadata_fields(source_context),
+    }
+
+
+def uploaded_source_payload(component_id: Any, source_context: dict) -> dict:
+    source_document = source_context["source_document"]
+    return {
+        "component_id": str(component_id),
+        "name": source_document.get("filename", ""),
+        "original_name": source_document.get("original_filename", ""),
+        "type": source_document.get("type", ""),
+        "status": source_document.get("status", "uploaded"),
+        "file_hash": source_document.get("file_hash", ""),
+        "size": source_document.get("size", 0),
+        "relative_path": source_document.get("relative_path", ""),
+        "path": source_document.get("path", ""),
+        "folder": source_document.get("folder", ""),
+        "source_document_id": source_document.get("id", ""),
+        "source_document": source_document,
+        "source_set_id": source_document.get("source_set_id", ""),
+        "source_set": source_document.get("source_set", {}),
+        "chunk_count": len(source_context.get("document_chunks", [])),
+        "segment_count": len(source_context.get("source_segments", [])),
     }
 
 
@@ -2385,6 +2584,81 @@ def get_workspace_sources(flow_id: str):
     return get_workspace_graph_or_404(flow_id)["source_library"]
 
 
+@app.post("/api/workspaces/{flow_id}/sources/source-set")
+def upload_workspace_source_set(
+    flow_id: str,
+    files: list[UploadFile] = File(...),
+    relative_paths: list[str] | None = Form(None),
+    source_set_id: str | None = Form(None),
+    source_set_label: str | None = Form(None),
+):
+    flow = get_upload_flow_or_400(flow_id)
+    try:
+        prepared = prepare_source_set_uploads(
+            files,
+            flow_id=flow_id,
+            relative_paths=relative_paths,
+            source_set_id=source_set_id,
+            source_set_label=source_set_label,
+        )
+    except DocumentIngestionError as exc:
+        raise ingestion_http_error(exc) from exc
+
+    uploaded_sources = []
+    source_components = []
+    try:
+        for source_context in prepared["sources"]:
+            component_metadata = source_set_component_metadata(source_context, flow_id)
+            component_id = component_collection.insert_one(component_metadata).inserted_id
+            saved_component = {**component_metadata, "_id": component_id}
+            source_components.append(saved_component)
+            uploaded_sources.append(uploaded_source_payload(component_id, source_context))
+    except PyMongoError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Source-set upload could not save document metadata. "
+                "Check MongoDB and try the folder upload again."
+            ),
+        ) from exc
+
+    existing_components = get_source_components(flow_id)
+    existing_ids = {str(component.get("_id")) for component in existing_components}
+    all_source_components = [
+        *existing_components,
+        *[
+            component
+            for component in source_components
+            if str(component.get("_id")) not in existing_ids
+        ],
+    ]
+    source_library = build_workspace_graph(
+        flow,
+        source_components=all_source_components,
+    )["source_library"]
+
+    return {
+        "uploaded_sources": uploaded_sources,
+        "source_set": {
+            **prepared["source_set"],
+            "source_count": len(uploaded_sources),
+        },
+        "source_library": source_library,
+    }
+
+
+@app.get("/api/workspaces/{flow_id}/completeness-review")
+def get_workspace_completeness_review(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    return graph.get("views", {}).get("completeness_review") or graph_to_completeness_review(graph)
+
+
+@app.get("/api/workspaces/{flow_id}/team-roadmap")
+def get_workspace_team_roadmap(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    return graph_to_team_roadmap(graph)
+
+
 @app.post("/api/workspaces/{flow_id}/sources/{source_id}/reconcile/preview")
 def preview_source_reconciliation(flow_id: str, source_id: str, request: dict[str, Any] | None = None):
     graph = get_workspace_graph_or_404(flow_id)
@@ -2410,6 +2684,24 @@ def export_workspace_markdown(flow_id: str):
     graph = get_workspace_graph_or_404(flow_id)
     return Response(
         content=graph_to_markdown(graph),
+        media_type="text/markdown",
+    )
+
+
+@app.get("/api/workspaces/{flow_id}/exports/completeness-review.md")
+def export_workspace_completeness_review_markdown(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    return Response(
+        content=graph_to_completeness_markdown(graph),
+        media_type="text/markdown",
+    )
+
+
+@app.get("/api/workspaces/{flow_id}/exports/team-roadmap.md")
+def export_workspace_team_roadmap_markdown(flow_id: str):
+    graph = get_workspace_graph_or_404(flow_id)
+    return Response(
+        content=graph_to_team_roadmap_markdown(graph),
         media_type="text/markdown",
     )
 
@@ -4200,7 +4492,7 @@ def get_summary_from_openai(
         "ai_provider": {
             "provider": "assistants_legacy_fallback",
             "model": assistant_model,
-            "reason": "Document chunks were unavailable, so source intake used the temporary Assistants file-search fallback.",
+            "reason": "Prepared document sections were unavailable, so source intake used the temporary Assistants file-search fallback.",
         },
         "summary": message_content.value,
         **source_metadata_fields(source_context),
@@ -4557,7 +4849,7 @@ def openai_mindmap_generator(
         "ai_provider": {
             "provider": "assistants_legacy_fallback",
             "model": assistant_model,
-            "reason": "Document chunks were unavailable, so graph generation used the temporary Assistants file-search fallback.",
+            "reason": "Prepared document sections were unavailable, so graph generation used the temporary Assistants file-search fallback.",
         },
         "mindmap_json": response_json,
         **source_metadata_fields(source_context),

@@ -328,11 +328,53 @@ def test_explicit_model_selection_wins_for_draft_generation():
 def test_intent_classification_maps_output_shapes_and_policy():
     table = classify_ai_draft_intent("turn this into a kanban board")
     coverage = classify_ai_draft_intent("review source coverage and citations")
+    plan = classify_ai_draft_intent("create a 30/60/90 day improvement plan")
+    package = classify_ai_draft_intent("create a stakeholder review package")
+    standards = classify_ai_draft_intent("review this Revit standards folder for completeness")
+    roadmap = classify_ai_draft_intent("make this complex issue into a roadmap for my team")
 
     assert table["output_shape"] == "kanban"
     assert table["model_policy"] == "balanced"
     assert coverage["output_shape"] == "source_coverage"
     assert coverage["model_policy"] == "deep_review"
+    assert plan["output_shape"] == "tasks"
+    assert plan["model_policy"] == "deep_review"
+    assert package["output_shape"] == "presentation_sections"
+    assert package["model_policy"] == "deep_review"
+    assert standards["capability"] == "assess_standards_completeness"
+    assert standards["output_shape"] == "completeness_review"
+    assert standards["model_policy"] == "deep_review"
+    assert roadmap["capability"] == "create_team_roadmap"
+    assert roadmap["output_shape"] == "team_roadmap"
+
+
+def test_intent_classification_maps_enterprise_readiness_findings():
+    bottlenecks = classify_ai_draft_intent("find process bottlenecks")
+    duplicate_tools = classify_ai_draft_intent("find duplicate tools")
+    ownership = classify_ai_draft_intent("find ownership gaps")
+    unsupported_systems = classify_ai_draft_intent(
+        "find unsupported business-critical systems"
+    )
+
+    assert bottlenecks["capability"] == "find_process_bottlenecks"
+    assert duplicate_tools["capability"] == "find_duplicate_tools"
+    assert duplicate_tools["output_shape"] == "software_overlap_report"
+    assert ownership["capability"] == "find_ownership_gaps"
+    assert unsupported_systems["capability"] == "find_unsupported_business_critical_systems"
+    assert unsupported_systems["output_shape"] == "source_coverage"
+    assert {bottlenecks["model_policy"], duplicate_tools["model_policy"], ownership["model_policy"]} == {
+        "deep_review"
+    }
+
+
+def test_intent_classification_maps_software_rationalization_to_overlap_report():
+    overlap = classify_ai_draft_intent(
+        "create a software inventory overlap and license rationalization report"
+    )
+
+    assert overlap["capability"] == "find_duplicate_tools"
+    assert overlap["output_shape"] == "software_overlap_report"
+    assert overlap["model_policy"] == "deep_review"
 
 
 def test_source_context_includes_scope_library_gaps_chunks_and_draft_state():

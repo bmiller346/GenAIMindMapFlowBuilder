@@ -21,6 +21,7 @@ from ai.schemas import (
     AI_DRAFT_REVISION_OUTPUT_SCHEMA,
     AI_HELPER_PREVIEW_CONTRACT,
     AI_HELPER_PREVIEW_CONTRACT_VERSION,
+    SOFTWARE_INVENTORY_ENTITY_TYPES,
     json_object_response_format,
 )
 from ai.providers import DocMapAIProvider, DocMapGenerationRequest
@@ -28,6 +29,7 @@ from ai.responses_client import OpenAIResponsesDocMapProvider
 from ai_model_policy import choose_openai_model, normalize_model_policy
 from config import MissingConfigurationError, get_setting
 from graph.ai_contract import validate_knowledge_graph_relationship_edge
+from graph.software_overlap_scoring import enrich_software_overlap_report
 from graph.schemas import GraphSchemaError
 from graph.validation import validate_and_repair_graph
 
@@ -49,6 +51,7 @@ NODE_AI_ACTIONS = {
     "convert_to_checklist",
     "create_sme_questions",
     "find_missing_source_support",
+    "assess_standards_completeness",
     "interpret_table_data",
     "generate_tasks",
     "custom_prompt",
@@ -57,8 +60,16 @@ BRANCH_AI_ACTIONS = {
     "summarize_branch",
     "reorganize_branch",
     "split_branch_into_categories",
+    "assess_standards_completeness",
+    "create_team_roadmap",
+    "find_process_bottlenecks",
+    "find_duplicate_tools",
+    "find_ownership_gaps",
+    "find_unsupported_business_critical_systems",
     "generate_tasks",
     "generate_checklist",
+    "create_30_60_90_day_improvement_plan",
+    "create_stakeholder_review_package",
     "generate_training_outline",
     "export_branch_as_sop_draft",
     "find_gaps",
@@ -70,6 +81,14 @@ WORKSPACE_AI_ACTIONS = {
     "find_missing_source_support",
     "find_unsupported_assumptions",
     "find_duplicate_overlapping_nodes",
+    "assess_standards_completeness",
+    "create_team_roadmap",
+    "find_process_bottlenecks",
+    "find_duplicate_tools",
+    "find_ownership_gaps",
+    "find_unsupported_business_critical_systems",
+    "create_30_60_90_day_improvement_plan",
+    "create_stakeholder_review_package",
     "create_sme_questions",
     "generate_tasks",
     "generate_checklist",
@@ -1333,13 +1352,14 @@ def _knowledge_graph_artifact_edges_for_accept(
 ) -> list[dict[str, Any]]:
     edges: list[dict[str, Any]] = []
     for artifact in artifacts:
-        if artifact.get("artifact_type") != "knowledge_graph":
+        artifact_type = artifact.get("artifact_type")
+        if artifact_type not in {"knowledge_graph", "software_overlap_report"}:
             continue
         data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
         relationship_edges = data.get("relationship_edges", [])
         if not isinstance(relationship_edges, list):
             continue
-        artifact_id = str(artifact.get("id") or "knowledge_graph")
+        artifact_id = str(artifact.get("id") or artifact_type or "knowledge_graph")
         for index, relationship in enumerate(relationship_edges, start=1):
             if not isinstance(relationship, dict):
                 continue
@@ -1366,7 +1386,7 @@ def _knowledge_graph_artifact_edges_for_accept(
                     else [],
                     "metadata": {
                         **deepcopy(metadata),
-                        "source": "knowledge_graph_artifact",
+                        "source": f"{artifact_type}_artifact",
                         "artifact_id": artifact_id,
                         "source_signal": relationship.get("source_signal", ""),
                         "confidence": relationship.get("confidence", ""),
@@ -1711,9 +1731,9 @@ def _accepted_revision_edges(
         used_edge_ids.add(edge["id"])
         edge["relationship_type"] = relationship_type
         edge["metadata"] = deepcopy(edge.get("metadata", {})) if isinstance(edge.get("metadata"), dict) else {}
+        edge["metadata"].setdefault("source", "ai_draft_session")
         edge["metadata"].update(
             {
-                "source": "ai_draft_session",
                 "ai_draft_session_id": session.get("session_id", ""),
                 "ai_draft_revision_id": revision.get("revision_id", ""),
             }
@@ -1800,6 +1820,14 @@ def normalize_requested_artifact_types(values: Any) -> list[str]:
         "handoff_package": "implementation_handoff_package",
         "rendered_chart": "chart",
         "missing_information": "missing_info_report",
+        "standards_completeness": "completeness_review",
+        "folder_review": "completeness_review",
+        "roadmap": "team_roadmap",
+        "team_roadmap": "team_roadmap",
+        "software_overlap": "software_overlap_report",
+        "software_rationalization": "software_overlap_report",
+        "application_rationalization": "software_overlap_report",
+        "tool_rationalization": "software_overlap_report",
         "sme_question": "sme_questions",
         "task": "tasks",
     }
@@ -1878,6 +1906,12 @@ def validate_generated_artifacts(
             _validate_flow_chart_artifact(item, path, errors)
         elif artifact_type == "chart":
             _validate_chart_artifact(item, path, errors)
+        elif artifact_type == "completeness_review":
+            _validate_completeness_review_artifact(item, path, errors)
+        elif artifact_type == "software_overlap_report":
+            _validate_software_overlap_report_artifact(item, path, errors)
+        elif artifact_type == "team_roadmap":
+            _validate_team_roadmap_artifact(item, path, errors)
         elif artifact_type == "implementation_handoff_package":
             _validate_handoff_artifact(item, path, errors)
 
@@ -1972,6 +2006,138 @@ def _validate_handoff_artifact(item: dict[str, Any], path: str, errors: list[str
         errors.append(f"{path}.data.summary: implementation_handoff_package requires a summary")
     if "recommended_next_actions" in data and not isinstance(data.get("recommended_next_actions"), list):
         errors.append(f"{path}.data.recommended_next_actions: must be a list when provided")
+
+
+def _validate_completeness_review_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
+    data = item.get("data", {})
+    review_keys = (
+        "covered_areas",
+        "missing_areas",
+        "partial_areas",
+        "duplicate_conflicting_areas",
+        "stale_deprecated_candidates",
+    )
+    if not any(isinstance(data.get(key), list) and data.get(key) for key in review_keys):
+        errors.append(f"{path}.data: completeness_review requires at least one populated review area")
+    for key in (*review_keys, "recommended_roadmap", "sme_questions"):
+        if key in data and not isinstance(data.get(key), list):
+            errors.append(f"{path}.data.{key}: must be a list when provided")
+
+
+def _validate_software_overlap_report_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
+    data = item.get("data", {})
+    if isinstance(data, dict):
+        data = enrich_software_overlap_report(data)
+        item["data"] = data
+    inventory_items = data.get("inventory_items", [])
+    overlap_candidates = data.get("overlap_candidates", [])
+    rationalization_actions = data.get("rationalization_actions", [])
+
+    if not isinstance(inventory_items, list):
+        errors.append(f"{path}.data.inventory_items: must be a list when provided")
+        inventory_items = []
+    if not isinstance(overlap_candidates, list) or not overlap_candidates:
+        errors.append(f"{path}.data.overlap_candidates: software_overlap_report requires at least one overlap candidate")
+        overlap_candidates = []
+    if not isinstance(rationalization_actions, list):
+        errors.append(f"{path}.data.rationalization_actions: must be a list when provided")
+
+    for index, inventory_item in enumerate(inventory_items):
+        if not isinstance(inventory_item, dict):
+            errors.append(f"{path}.data.inventory_items.{index}: must be an object")
+            continue
+        entity_type = str(inventory_item.get("entity_type") or "").strip()
+        if entity_type and entity_type not in SOFTWARE_INVENTORY_ENTITY_TYPES:
+            errors.append(
+                f"{path}.data.inventory_items.{index}.entity_type: must be a registered software inventory entity type"
+            )
+
+    validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
+    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
+    item_needs_review = False
+
+    for index, candidate in enumerate(overlap_candidates):
+        candidate_path = f"{path}.data.overlap_candidates.{index}"
+        if not isinstance(candidate, dict):
+            errors.append(f"{candidate_path}: must be an object")
+            continue
+        application_ids = candidate.get("application_ids")
+        if not isinstance(application_ids, list):
+            application_ids = [
+                str(application.get("id") or application.get("node_id") or "")
+                for application in candidate.get("applications", [])
+                if isinstance(application, dict)
+            ] if isinstance(candidate.get("applications"), list) else []
+            candidate["application_ids"] = [value for value in application_ids if value]
+        if len([value for value in candidate.get("application_ids", []) if str(value).strip()]) < 2:
+            errors.append(f"{candidate_path}.application_ids: must include at least two application ids")
+        scoring_factors = candidate.get("scoring_factors")
+        if not isinstance(scoring_factors, list) or not scoring_factors:
+            errors.append(f"{candidate_path}.scoring_factors: must include score factor evidence")
+
+        source_refs = candidate.get("source_refs", [])
+        assumptions = candidate.get("assumptions", [])
+        if source_refs is None:
+            source_refs = []
+        if assumptions is None:
+            assumptions = []
+        if not isinstance(source_refs, list):
+            errors.append(f"{candidate_path}.source_refs: must be a list when provided")
+            source_refs = []
+        if not isinstance(assumptions, list) or not all(isinstance(value, str) for value in assumptions):
+            errors.append(f"{candidate_path}.assumptions: must be a list of strings when provided")
+            assumptions = []
+        if not source_refs or str(candidate.get("review_state") or "") in {"", "inferred"}:
+            candidate["review_state"] = "needs_review"
+            item_needs_review = True
+            issues.append(
+                {
+                    "code": "software_overlap_candidate_needs_review",
+                    "severity": "warning",
+                    "message": "Software overlap candidate is inferred or missing source evidence and was marked needs_review.",
+                    "candidate_id": str(candidate.get("id") or ""),
+                    "repaired": True,
+                }
+            )
+        candidate["source_refs"] = source_refs
+        candidate["assumptions"] = assumptions
+
+    if "relationship_edges" in data:
+        data["relationship_edges"] = _normalize_relationship_edges(
+            data.get("relationship_edges", []),
+            path=f"{path}.data.relationship_edges",
+            errors=errors,
+        )
+
+    if item_needs_review:
+        item["status"] = "needs_review"
+        validation["status"] = "needs_review"
+    if issues:
+        validation["issues"] = issues
+    item["validation"] = validation
+
+
+def _validate_team_roadmap_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
+    data = item.get("data", {})
+    if not data.get("context"):
+        errors.append(f"{path}.data.context: team_roadmap requires plain-language context")
+    for key in (
+        "workstreams",
+        "milestones",
+        "dependencies",
+        "risks",
+        "required_decisions",
+        "recommended_next_actions",
+        "source_backed_appendix",
+    ):
+        if key in data and not isinstance(data.get(key), list):
+            errors.append(f"{path}.data.{key}: must be a list when provided")
+    has_action_path = any(
+        isinstance(data.get(key), list) and data.get(key)
+        for key in ("workstreams", "milestones", "recommended_next_actions")
+    )
+    if not has_action_path:
+        errors.append(f"{path}.data: team_roadmap requires workstreams, milestones, or recommended_next_actions")
 
 
 def validate_ai_action_drafts_for_accept(
@@ -3396,6 +3562,9 @@ def _deterministic_ai_action_drafts(
         "generate_checklist",
         "generate_training_outline",
         "export_branch_as_sop_draft",
+        "create_team_roadmap",
+        "create_30_60_90_day_improvement_plan",
+        "create_stakeholder_review_package",
         "custom_prompt",
     }:
         planned_items = _draft_plan_for_action(
@@ -3441,6 +3610,11 @@ def _deterministic_ai_action_drafts(
         "find_gaps",
         "find_unsupported_assumptions",
         "find_duplicate_overlapping_nodes",
+        "assess_standards_completeness",
+        "find_process_bottlenecks",
+        "find_duplicate_tools",
+        "find_ownership_gaps",
+        "find_unsupported_business_critical_systems",
         "interpret_table_data",
         "summarize_branch",
         "reorganize_branch",
@@ -3549,6 +3723,21 @@ def _draft_plan_for_action(
             ("Procedure steps", "Draft ordered steps, decisions, and handoffs.", "workflow"),
             ("Controls and evidence", "List review checkpoints, source evidence, and exception handling.", "requirement"),
         ],
+        "create_team_roadmap": [
+            ("Plain-language context", f"Explain the issue behind {target} in terms the team can use.", "concept"),
+            ("Workstreams and dependencies", "Group the work into practical streams, dependencies, decisions, and risks.", "workflow"),
+            ("Milestones and next actions", "Create a sequenced roadmap with milestones, owner placeholders, and review checkpoints.", "task"),
+        ],
+        "create_30_60_90_day_improvement_plan": [
+            ("30 day stabilization plan", f"Identify urgent fixes, owners, and evidence needed to stabilize {target}.", "task"),
+            ("60 day operating improvements", "Sequence process, tooling, and ownership improvements that reduce repeated friction.", "task"),
+            ("90 day governance checkpoint", "Define durable controls, success measures, and stakeholder review gates.", "task"),
+        ],
+        "create_stakeholder_review_package": [
+            ("Executive summary", f"Summarize the enterprise readiness findings for {target}.", "concept"),
+            ("Decision and risk register", "List decisions needed, open risks, owners, and unsupported assumptions.", "requirement"),
+            ("Review agenda and asks", "Package stakeholder questions, evidence requests, and next actions.", "task"),
+        ],
     }
     return [
         {"title": f"{title} for {target}", "summary": summary, "node_type": node_type}
@@ -3619,10 +3808,18 @@ def _generic_custom_prompt_plan(topic: str) -> list[dict[str, Any]]:
 def _annotation_type(action: str) -> str:
     if "question" in action or action == "ask_follow_up":
         return "sme_question"
+    if action == "assess_standards_completeness":
+        return "completeness_review"
+    if "business_critical" in action:
+        return "business_critical_system_gap"
     if "source" in action or "unsupported" in action:
         return "source_gap"
     if "duplicate" in action:
         return "overlap_review"
+    if "bottleneck" in action:
+        return "process_bottleneck"
+    if "ownership" in action:
+        return "ownership_gap"
     if "table" in action:
         return "table_interpretation"
     return "ai_note"
@@ -3637,6 +3834,11 @@ def _annotation_title(action: str, source_title: str) -> str:
         "find_gaps": "Gap finding",
         "find_unsupported_assumptions": "Unsupported assumption",
         "find_duplicate_overlapping_nodes": "Potential overlap",
+        "assess_standards_completeness": "Standards completeness review",
+        "find_process_bottlenecks": "Process bottleneck",
+        "find_duplicate_tools": "Duplicate tool",
+        "find_ownership_gaps": "Ownership gap",
+        "find_unsupported_business_critical_systems": "Unsupported business-critical system",
         "interpret_table_data": "Table interpretation",
         "summarize_branch": "Branch summary",
         "reorganize_branch": "Branch reorganization note",
@@ -3648,12 +3850,20 @@ def _annotation_title(action: str, source_title: str) -> str:
 def _annotation_body(action: str, source_title: str, role: str, custom_prompt: str | None) -> str:
     if action == "custom_prompt" and custom_prompt:
         return custom_prompt.strip()
+    if action == "assess_standards_completeness":
+        return f"{role} should review {source_title} for documented, missing, partial, stale, duplicate, and conflicting standards coverage, with assumptions separated from source-backed findings."
     if "question" in action or action == "ask_follow_up":
         return f"What decision or source evidence is needed to finalize {source_title}?"
+    if "business_critical" in action:
+        return f"{role} should identify business-critical systems in {source_title} that lack source support, ownership, recovery notes, or integration coverage."
     if "source" in action or "unsupported" in action:
         return f"{role} should verify source support before accepting generated content for {source_title}."
     if "duplicate" in action:
         return f"{role} should compare nearby nodes for overlapping meaning before merging or accepting changes."
+    if "bottleneck" in action:
+        return f"{role} should identify process delays, handoff friction, missing decision gates, and measurable symptoms for {source_title}."
+    if "ownership" in action:
+        return f"{role} should flag systems, tasks, and decisions in {source_title} that lack a clear accountable owner or review cadence."
     if "table" in action:
         return f"{role} should review table-derived claims and mark inferred conclusions for review."
     return f"{role} generated a preview note for {source_title}."
@@ -3982,6 +4192,59 @@ def classify_ai_draft_intent(
     elif any(term in text for term in ("handoff package", "implementation package", "implementation handoff")):
         output_shape = "implementation_handoff_package"
         capability = "draft_implementation_handoff_package"
+    elif any(term in text for term in ("stakeholder review package", "stakeholder package", "review package")):
+        output_shape = "presentation_sections"
+        capability = "draft_stakeholder_review_package"
+        risk = "high"
+        model_policy = "deep_review"
+    elif any(term in text for term in ("standards completeness", "completeness review", "review completeness", "folder review", "revit standards", "bim standards")):
+        output_shape = "completeness_review"
+        capability = "assess_standards_completeness"
+        risk = "high"
+        model_policy = "deep_review"
+    elif any(term in text for term in ("team roadmap", "roadmap for my team", "complex issue into a roadmap", "issue into a roadmap")):
+        output_shape = "team_roadmap"
+        capability = "create_team_roadmap"
+        risk = "medium"
+        model_policy = "balanced"
+    elif any(term in text for term in ("30/60/90", "30 60 90", "30-60-90", "improvement plan")):
+        output_shape = "tasks"
+        capability = "draft_30_60_90_improvement_plan"
+        risk = "high"
+        model_policy = "deep_review"
+    elif any(term in text for term in ("process bottleneck", "process bottlenecks", "bottleneck")):
+        output_shape = "review_annotations"
+        capability = "find_process_bottlenecks"
+        risk = "high"
+        model_policy = "deep_review"
+    elif any(
+        term in text
+        for term in (
+            "duplicate tools",
+            "duplicate tool",
+            "tool overlap",
+            "overlapping tools",
+            "software overlap",
+            "software rationalization",
+            "application rationalization",
+            "license rationalization",
+            "software inventory overlap",
+        )
+    ):
+        output_shape = "software_overlap_report"
+        capability = "find_duplicate_tools"
+        risk = "high"
+        model_policy = "deep_review"
+    elif any(term in text for term in ("ownership gap", "ownership gaps", "missing owner", "unowned")):
+        output_shape = "review_annotations"
+        capability = "find_ownership_gaps"
+        risk = "high"
+        model_policy = "deep_review"
+    elif any(term in text for term in ("unsupported business-critical", "unsupported business critical", "business-critical systems", "business critical systems")):
+        output_shape = "source_coverage"
+        capability = "find_unsupported_business_critical_systems"
+        risk = "high"
+        model_policy = "deep_review"
     elif any(term in text for term in ("diff", "patch", "change", "replace", "merge")):
         output_shape = "patch_diff"
         capability = "propose_graph_patch"
@@ -4431,8 +4694,18 @@ def parse_ai_draft_revision_response(
     draft_items = parsed.get("draft_items")
     if not isinstance(draft_items, list) or not draft_items:
         draft_items = _items_from_model_output(parsed, draft_nodes, draft_annotations, shape)
+    raw_generated_artifacts = parsed.get("generated_artifacts", [])
+    if not isinstance(raw_generated_artifacts, list):
+        raw_generated_artifacts = []
+    projection_artifact = _artifact_from_top_level_projection(parsed, shape)
+    if projection_artifact and not any(
+        isinstance(artifact, dict)
+        and artifact.get("artifact_type") == projection_artifact["artifact_type"]
+        for artifact in raw_generated_artifacts
+    ):
+        raw_generated_artifacts = [*raw_generated_artifacts, projection_artifact]
     generated_artifacts = validate_generated_artifacts(
-        parsed.get("generated_artifacts", []),
+        raw_generated_artifacts,
         scope=scope,
         model_provider="",
         model="",
@@ -4559,7 +4832,7 @@ Output requirements:
 - For broad conceptual, business, operating model, GTM, strategy, or learning-map requests, choose enough nodes for the subject to be genuinely useful, usually 20-40 draft_nodes unless the user asks for a quick/simple sketch.
 - Silently self-review before returning JSON: if the draft only contains generic category labels, is missing obvious domain-standard subtopics, or has fewer than 3 useful child branches under major concepts, revise it internally before finalizing.
 - Use your model knowledge of the requested domain to choose depth and subtopics; do not rely on hardcoded examples or stop at framework headings.
-- Populate generated_artifacts for visual or review outputs such as knowledge_graph, flow_chart, chart, checklist, tasks, source_coverage, and implementation_handoff_package.
+- Populate generated_artifacts for visual or review outputs such as knowledge_graph, flow_chart, chart, checklist, tasks, source_coverage, software_overlap_report, and implementation_handoff_package.
 - Populate the projection matching output_shape and, when graph changes are useful, draft_nodes and draft_edges.
 - Use stable draft IDs prefixed with draft_.
 - Use source_refs only by copying from Allowed source_refs.
@@ -4666,6 +4939,30 @@ def _projection_annotations(parsed: dict[str, Any], shape: str) -> list[dict[str
                 }
             )
     return annotations
+
+
+def _artifact_from_top_level_projection(
+    parsed: dict[str, Any],
+    shape: str,
+) -> dict[str, Any] | None:
+    if shape != "software_overlap_report":
+        return None
+    data = parsed.get("software_overlap_report")
+    if not isinstance(data, dict) or not data:
+        return None
+    return {
+        "id": str(data.get("id") or "artifact-software-overlap-report"),
+        "artifact_type": "software_overlap_report",
+        "title": str(data.get("title") or "Software Overlap Report"),
+        "status": str(data.get("status") or "draft"),
+        "data": deepcopy(data),
+        "source_refs": deepcopy(data.get("source_refs", []))
+        if isinstance(data.get("source_refs"), list)
+        else [],
+        "assumptions": deepcopy(data.get("assumptions", []))
+        if isinstance(data.get("assumptions"), list)
+        else [],
+    }
 
 
 def _items_from_model_output(
@@ -4840,16 +5137,21 @@ def _source_library_document(
     documents = source_library.get("documents", []) if isinstance(source_library, dict) else []
     if not isinstance(documents, list):
         return None
+    requested_source_id = str(source_id)
     for document in documents:
         if not isinstance(document, dict):
             continue
-        document_id = str(
-            document.get("id")
-            or document.get("document_id")
-            or document.get("source_document_id")
-            or ""
-        )
-        if document_id == str(source_id):
+        document_ids = {
+            str(value)
+            for value in (
+                document.get("id"),
+                document.get("document_id"),
+                document.get("source_document_id"),
+                document.get("component_id"),
+            )
+            if value not in (None, "")
+        }
+        if requested_source_id in document_ids:
             return document
     return None
 

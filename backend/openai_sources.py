@@ -27,7 +27,7 @@ except ImportError:
 
 from config import MissingConfigurationError, configuration_http_error, get_setting
 from ai_model_policy import choose_openai_model
-from ai.schemas import json_object_response_format
+from ai.schemas import json_object_response_format, json_schema_response_format
 from graph.ai_contract import append_ai_graph_prompt_contract, parse_ai_mindmap_response
 from graph.schemas import GraphSchemaError
 
@@ -38,6 +38,159 @@ DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
 MAX_VIDEO_FRAMES = 6
 VIDEO_AUDIO_SAMPLE_SECONDS = 600
 MAX_DOCUMENT_CONTEXT_CHARS = 48000
+AI_MINDMAP_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "nodes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "id": {"type": "string"},
+                    "type": {
+                        "type": "string",
+                        "enum": ["dataSource", "question", "response", "followUp"],
+                    },
+                    "position": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "x": {"type": "number"},
+                            "y": {"type": "number"},
+                        },
+                        "required": ["x", "y"],
+                    },
+                    "data": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "content": {"type": ["string", "null"]},
+                            "title": {"type": ["string", "null"]},
+                            "question": {"type": ["string", "null"]},
+                            "summ": {"type": ["string", "null"]},
+                            "summary": {"type": ["string", "null"]},
+                            "component_type": {"type": ["string", "null"]},
+                            "status": {"type": ["string", "null"]},
+                            "source_refs": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "document_id": {"type": "string"},
+                                        "chunk_id": {"type": ["string", "null"]},
+                                        "page": {"type": ["integer", "number", "string", "null"]},
+                                        "section": {"type": ["string", "null"]},
+                                        "quote_snippet": {"type": ["string", "null"]},
+                                        "confidence": {"type": ["number", "string", "null"]},
+                                    },
+                                    "required": [
+                                        "document_id",
+                                        "chunk_id",
+                                        "page",
+                                        "section",
+                                        "quote_snippet",
+                                        "confidence",
+                                    ],
+                                },
+                            },
+                            "data": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "question": {"type": ["string", "null"]},
+                                    "summ": {"type": ["string", "null"]},
+                                    "summary": {"type": ["string", "null"]},
+                                    "status": {"type": ["string", "null"]},
+                                    "source_refs": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "additionalProperties": False,
+                                            "properties": {
+                                                "document_id": {"type": "string"},
+                                                "chunk_id": {"type": ["string", "null"]},
+                                                "page": {"type": ["integer", "number", "string", "null"]},
+                                                "section": {"type": ["string", "null"]},
+                                                "quote_snippet": {"type": ["string", "null"]},
+                                                "confidence": {"type": ["number", "string", "null"]},
+                                            },
+                                            "required": [
+                                                "document_id",
+                                                "chunk_id",
+                                                "page",
+                                                "section",
+                                                "quote_snippet",
+                                                "confidence",
+                                            ],
+                                        },
+                                    },
+                                },
+                                "required": [
+                                    "question",
+                                    "summ",
+                                    "summary",
+                                    "status",
+                                    "source_refs",
+                                ],
+                            },
+                        },
+                        "required": [
+                            "content",
+                            "title",
+                            "question",
+                            "summ",
+                            "summary",
+                            "component_type",
+                            "status",
+                            "source_refs",
+                            "data",
+                        ],
+                    },
+                },
+                "required": ["id", "type", "position", "data"],
+            },
+        },
+        "edges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "id": {"type": ["string", "null"]},
+                    "source": {"type": "string"},
+                    "target": {"type": "string"},
+                    "type": {"type": ["string", "null"]},
+                    "label": {"type": ["string", "null"]},
+                },
+                "required": ["id", "source", "target", "type", "label"],
+            },
+        },
+        "viewport": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "zoom": {"type": "number"},
+            },
+            "required": ["x", "y", "zoom"],
+        },
+        "metadata": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "ai_graph_contract_version": {"type": ["string", "null"]},
+                "source_type": {"type": ["string", "null"]},
+                "source_label": {"type": ["string", "null"]},
+            },
+            "required": ["ai_graph_contract_version", "source_type", "source_label"],
+        },
+    },
+    "required": ["nodes", "edges", "viewport", "metadata"],
+}
 
 
 def generate_document_summary(
@@ -491,7 +644,7 @@ def _responses_json(
         model=decision.model,
         input_items=input_items,
         tools=tools,
-        json_output=True,
+        response_schema=AI_MINDMAP_RESPONSE_SCHEMA,
     )
 
     try:
@@ -513,10 +666,28 @@ def _responses_json(
     try:
         graph = parse_ai_mindmap_response(output_text)
     except GraphSchemaError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"message": "OpenAI source graph failed schema validation.", "errors": exc.errors},
-        ) from exc
+        retry_payload = _responses_payload(
+            model=decision.model,
+            input_items=[
+                *input_items,
+                _text_message(_graph_repair_prompt(output_text, exc.errors)),
+            ],
+            tools=tools,
+            response_schema=AI_MINDMAP_RESPONSE_SCHEMA,
+        )
+        retry_data = _post_openai_json(retry_payload, api_key)
+        retry_output_text = _extract_output_text(retry_data)
+        try:
+            graph = parse_ai_mindmap_response(retry_output_text)
+        except GraphSchemaError as retry_exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "message": "OpenAI source graph failed schema validation.",
+                    "errors": retry_exc.errors,
+                    "initial_errors": exc.errors,
+                },
+            ) from retry_exc
     graph.setdefault("metadata", {})["ai_provider"] = _decision_metadata(decision)
     return graph
 
@@ -527,13 +698,19 @@ def _responses_payload(
     input_items: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
     json_output: bool = False,
+    response_schema: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": model or get_setting("openai_default_model") or DEFAULT_MODEL,
         "input": input_items,
         "store": False,
     }
-    if json_output:
+    if response_schema:
+        payload["text"] = json_schema_response_format(
+            name="tracespace_mindmap",
+            schema=response_schema,
+        )
+    elif json_output:
         payload["text"] = json_object_response_format()
     if tools:
         payload["tools"] = tools
@@ -661,6 +838,24 @@ Rules:
 - Use node data `component_type: "{source_type}"` where relevant.
 """.strip()
     return append_ai_graph_prompt_contract(prompt)
+
+
+def _graph_repair_prompt(output_text: str, errors: list[str]) -> str:
+    return append_ai_graph_prompt_contract(
+        "\n".join(
+            [
+                "The previous response did not satisfy the TraceSpace graph schema.",
+                "Regenerate the mind map as one valid JSON object only.",
+                "Keep the same source-grounded intent, but fix every validation error.",
+                "",
+                "Validation errors:",
+                *[f"- {error}" for error in errors],
+                "",
+                "Previous invalid response:",
+                output_text[:12000],
+            ]
+        )
+    )
 
 
 def _text_message(text: str) -> dict[str, Any]:

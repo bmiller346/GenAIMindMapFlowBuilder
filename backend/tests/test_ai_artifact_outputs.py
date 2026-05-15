@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from ai.schemas import ARTIFACT_REGISTRY
+from ai.schemas import ARTIFACT_REGISTRY, AI_DRAFT_REVISION_OUTPUT_SCHEMA
 from ai.providers import FixtureDocMapAIProvider
 from ai_helpers import (
     accept_ai_draft_revision,
@@ -105,6 +105,25 @@ def _artifact_response(request):
         "source_coverage": {
             "coverage_items": [{"id": "coverage-1", "coverage_status": "covered", "node_id": "root"}],
         },
+        "completeness_review": {
+            "covered_areas": [{"id": "covered-1", "title": "Template standards"}],
+            "missing_areas": [{"id": "missing-1", "title": "Family naming review"}],
+            "partial_areas": [],
+            "duplicate_conflicting_areas": [],
+            "stale_deprecated_candidates": [],
+            "recommended_roadmap": ["Confirm expected Revit standards coverage"],
+            "sme_questions": ["Which team owns the family naming standard?"],
+        },
+        "team_roadmap": {
+            "context": "The team needs to understand the deployment procedure.",
+            "workstreams": [{"id": "workstream-1", "title": "Approval readiness"}],
+            "milestones": [{"id": "milestone-1", "title": "Approval gate confirmed"}],
+            "dependencies": [],
+            "risks": [],
+            "required_decisions": ["Confirm approval owner"],
+            "recommended_next_actions": ["Create implementation tasks"],
+            "source_backed_appendix": [{"id": "appendix-1", "source_refs": [SOURCE_REF]}],
+        },
         "implementation_handoff_package": {
             "summary": "Implementation package for deployment procedure.",
             "accepted_nodes": ["root", "approval"],
@@ -114,6 +133,82 @@ def _artifact_response(request):
             "assumptions": [],
             "risks": [],
             "recommended_next_actions": ["Confirm deployment owner"],
+        },
+        "software_overlap_report": {
+            "summary": "Two approved tools appear to support the same approval workflow.",
+            "inventory_items": [
+                {
+                    "id": "app-approvals",
+                    "name": "Approvals Hub",
+                    "entity_type": "application",
+                    "node_id": "root",
+                    "vendor": "Contoso",
+                    "source_refs": [SOURCE_REF],
+                },
+                {
+                    "id": "app-workflow",
+                    "name": "Workflow Desk",
+                    "entity_type": "application",
+                    "node_id": "approval",
+                    "vendor": "Fabrikam",
+                    "source_refs": [SOURCE_REF],
+                },
+            ],
+            "overlap_candidates": [
+                {
+                    "id": "overlap-approval-workflow",
+                    "title": "Approval workflow overlap",
+                    "application_ids": ["app-approvals", "app-workflow"],
+                    "overlap_dimensions": ["approval workflow", "manager users"],
+                    "score": 0.82,
+                    "scoring_factors": [
+                        {
+                            "factor": "shared_workflow",
+                            "weight": 0.6,
+                            "evidence": "Both tools support approval routing.",
+                            "source_refs": [SOURCE_REF],
+                            "assumptions": [],
+                        }
+                    ],
+                    "recommendation": "Review standard tool decision with the owner.",
+                    "recommended_review_questions": [
+                        "Which application is the approved standard for deployment approvals?"
+                    ],
+                    "confidence": 0.74,
+                    "rationale": "Both tools appear in the approval workflow.",
+                    "source_refs": [SOURCE_REF],
+                    "assumptions": [],
+                    "review_state": "reviewed",
+                }
+            ],
+            "rationalization_actions": [
+                {
+                    "id": "action-standard-review",
+                    "title": "Confirm approval workflow standard",
+                    "action_type": "owner_review",
+                    "target_application_ids": ["app-approvals", "app-workflow"],
+                    "owner_id": "",
+                    "priority": "medium",
+                    "status": "needs_review",
+                    "source_refs": [SOURCE_REF],
+                    "assumptions": [],
+                }
+            ],
+            "relationship_edges": [
+                {
+                    "source_node_id": "root",
+                    "target_node_id": "approval",
+                    "relationship_type": "overlaps_on",
+                    "source_signal": "explicit_text",
+                    "confidence": 0.74,
+                    "rationale": "Both applications support the same approval workflow.",
+                    "source_refs": [SOURCE_REF],
+                    "assumptions": [],
+                    "review_state": "reviewed",
+                }
+            ],
+            "source_refs": [SOURCE_REF],
+            "assumptions": [],
         },
     }
     return json.dumps(
@@ -165,6 +260,9 @@ def test_artifact_registry_contains_required_starter_types():
         "checklist",
         "sme_questions",
         "missing_info_report",
+        "completeness_review",
+        "software_overlap_report",
+        "team_roadmap",
         "source_coverage",
         "source_repair",
         "implementation_handoff_package",
@@ -194,6 +292,9 @@ def test_artifact_registry_contains_required_starter_types():
         "checklist",
         "tasks",
         "source_coverage",
+        "completeness_review",
+        "software_overlap_report",
+        "team_roadmap",
         "implementation_handoff_package",
     ],
 )
@@ -252,6 +353,86 @@ def test_knowledge_graph_relationship_contract_marks_inferred_edges_needs_review
     assert edge["review_state"] == "needs_review"
     assert artifact["status"] == "needs_review"
     assert artifact["provenance"]["validation_status"] == "needs_review"
+
+
+def test_ai_draft_schema_has_first_class_software_overlap_report_output():
+    properties = AI_DRAFT_REVISION_OUTPUT_SCHEMA["properties"]
+
+    assert "software_overlap_report" in properties
+    report_schema = properties["software_overlap_report"]
+    assert set(report_schema["properties"]) >= {
+        "inventory_items",
+        "overlap_candidates",
+        "rationalization_actions",
+        "relationship_edges",
+    }
+    entity_enum = report_schema["properties"]["inventory_items"]["items"]["properties"]["entity_type"]["enum"]
+    assert "software_license" in entity_enum
+    assert "software_use_case" in entity_enum
+
+
+def test_software_overlap_report_validation_marks_inferred_candidates_needs_review():
+    [artifact] = validate_generated_artifacts(
+        [
+            {
+                "id": "software-overlap-1",
+                "artifact_type": "software_overlap_report",
+                "data": {
+                    "inventory_items": [
+                        {"id": "app-a", "name": "Tool A", "entity_type": "application"},
+                        {"id": "app-b", "name": "Tool B", "entity_type": "application"},
+                    ],
+                    "overlap_candidates": [
+                        {
+                            "id": "candidate-1",
+                            "title": "Tool A and Tool B",
+                            "application_ids": ["app-a", "app-b"],
+                            "scoring_factors": [
+                                {
+                                    "factor": "shared_capability",
+                                    "evidence": "Both are tagged as workflow automation.",
+                                }
+                            ],
+                            "assumptions": ["Capability tags were inferred from node titles."],
+                            "review_state": "reviewed",
+                        }
+                    ],
+                    "rationalization_actions": [],
+                    "relationship_edges": [
+                        {
+                            "source_node_id": "app-a",
+                            "target_node_id": "app-b",
+                            "relationship_type": "overlaps_on",
+                            "source_signal": "ai_inferred",
+                            "confidence": 0.62,
+                            "rationale": "Both tools appear to support workflow automation.",
+                            "assumptions": ["No source confirms the preferred standard."],
+                            "review_state": "reviewed",
+                        }
+                    ],
+                },
+                "assumptions": ["Inventory overlap is inferred from draft graph context."],
+            }
+        ],
+        scope={"type": "workspace"},
+        model_provider="fixture",
+        model="gpt-test",
+        ai_role="Enterprise Tool Rationalization",
+        prompt_profile="software_overlap_report",
+        input_source_refs=[],
+    )
+
+    candidate = artifact["data"]["overlap_candidates"][0]
+    edge = artifact["data"]["relationship_edges"][0]
+    factors = {factor["factor"]: factor for factor in candidate["scoring_factors"]}
+    assert candidate["score"] == 0
+    assert candidate["confidence"] == "possible"
+    assert "shared_capability" in factors
+    assert candidate["review_state"] == "needs_review"
+    assert edge["review_state"] == "needs_review"
+    assert artifact["status"] == "needs_review"
+    assert artifact["validation"]["status"] == "needs_review"
+    assert artifact["validation"]["issues"][0]["code"] == "software_overlap_candidate_needs_review"
 
 
 def test_accepting_knowledge_graph_artifact_adds_relationship_edges():
@@ -316,9 +497,106 @@ def test_accepting_knowledge_graph_artifact_adds_relationship_edges():
     assert "item_artifact-knowledge-graph" in result["accepted_item_ids"]
 
 
+def test_accepting_software_overlap_report_adds_relationship_edges():
+    graph = _graph(["software_overlap_report"])
+    session = build_ai_draft_session(
+        workspace_id="workspace-artifacts",
+        prompt="Find software overlap.",
+        scope={"type": "workspace"},
+        role="Enterprise Tool Rationalization",
+        intent="find_duplicate_tools",
+        draft_nodes=[],
+        draft_edges=[],
+        draft_annotations=[],
+        generated_artifacts=[
+            {
+                "id": "artifact-software-overlap",
+                "artifact_type": "software_overlap_report",
+                "title": "Software Overlap Report",
+                "status": "draft",
+                "data": {
+                    "inventory_items": [
+                        {
+                            "id": "root",
+                            "name": "Approvals Hub",
+                            "entity_type": "application",
+                            "category": "workflow",
+                            "business_function": "approval",
+                            "workflow": "deployment approval",
+                            "license_type": "enterprise",
+                            "source_refs": [SOURCE_REF],
+                        },
+                        {
+                            "id": "approval",
+                            "name": "Workflow Desk",
+                            "entity_type": "application",
+                            "category": "workflow",
+                            "business_function": "approval",
+                            "workflow": "deployment approval",
+                            "license_type": "enterprise",
+                            "source_refs": [SOURCE_REF],
+                        },
+                    ],
+                    "overlap_candidates": [
+                        {
+                            "id": "candidate-overlap",
+                            "title": "Potential approval workflow overlap",
+                            "application_ids": ["root", "approval"],
+                            "source_refs": [SOURCE_REF],
+                            "assumptions": [],
+                            "review_state": "reviewed",
+                        }
+                    ],
+                    "rationalization_actions": [],
+                    "relationship_edges": [
+                        {
+                            "source_node_id": "root",
+                            "target_node_id": "approval",
+                            "relationship_type": "overlaps_on",
+                            "source_signal": "explicit_text",
+                            "confidence": 0.73,
+                            "rationale": "Both applications support deployment approvals.",
+                            "source_refs": [SOURCE_REF],
+                            "assumptions": [],
+                            "review_state": "reviewed",
+                        }
+                    ],
+                },
+                "source_refs": [SOURCE_REF],
+                "assumptions": [],
+            }
+        ],
+    )
+
+    accepted_graph, _accepted_session, result = accept_ai_draft_revision(
+        graph,
+        session,
+        accept_mode="append",
+    )
+
+    relationship_edges = [
+        edge
+        for edge in accepted_graph["edges"]
+        if edge["relationship_type"] == "overlaps_on"
+    ]
+    assert len(relationship_edges) == 1
+    edge = relationship_edges[0]
+    assert edge["source_node_id"] == "root"
+    assert edge["target_node_id"] == "approval"
+    assert edge["metadata"]["artifact_id"] == "artifact-software-overlap"
+    assert edge["metadata"]["source"] == "software_overlap_report_artifact"
+    assert result["preview_diff"]["relationship_edges"] == 1
+
+
 def test_unregistered_artifact_types_are_rejected_and_dropped_from_desired_outputs():
     assert normalize_requested_artifact_types(["knowledge_graph", "mystery_box"]) == [
         "knowledge_graph"
+    ]
+
+
+def test_software_overlap_report_is_registered_artifact_type():
+    assert normalize_requested_artifact_types(["software_overlap_report"]) == [
+        "software_overlap_report"
     ]
 
     with pytest.raises(GraphSchemaError) as exc:
@@ -333,3 +611,31 @@ def test_unregistered_artifact_types_are_rejected_and_dropped_from_desired_outpu
         )
 
     assert "generated_artifacts.0.artifact_type: unsupported artifact type 'mystery_box'" in exc.value.errors
+
+
+def test_intent_artifacts_require_minimum_structured_data():
+    with pytest.raises(GraphSchemaError) as exc:
+        validate_generated_artifacts(
+            [{"id": "empty-completeness", "artifact_type": "completeness_review", "data": {}}],
+            scope={"type": "workspace"},
+            model_provider="fixture",
+            model="gpt-test",
+            ai_role="Ask AI",
+            prompt_profile="completeness_review",
+            input_source_refs=[SOURCE_REF],
+        )
+
+    assert "completeness_review requires at least one populated review area" in exc.value.errors[0]
+
+    with pytest.raises(GraphSchemaError) as exc:
+        validate_generated_artifacts(
+            [{"id": "empty-roadmap", "artifact_type": "team_roadmap", "data": {"context": ""}}],
+            scope={"type": "workspace"},
+            model_provider="fixture",
+            model="gpt-test",
+            ai_role="Ask AI",
+            prompt_profile="team_roadmap",
+            input_source_refs=[SOURCE_REF],
+        )
+
+    assert any("team_roadmap requires plain-language context" in error for error in exc.value.errors)

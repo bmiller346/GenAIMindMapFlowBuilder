@@ -3,11 +3,18 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from graph.business_ontology import (
+    BUSINESS_ENTITY_TYPES,
+    BUSINESS_ONTOLOGY_CONTRACT,
+    KNOWLEDGE_GRAPH_RELATIONSHIP_TYPES,
+)
+
 
 AI_HELPER_PREVIEW_CONTRACT_VERSION = "1"
 AI_ACTION_PREVIEW_CONTRACT_VERSION = "1"
 AI_DRAFT_SESSION_CONTRACT_VERSION = "1"
 ARTIFACT_REGISTRY_VERSION = "1"
+EXECUTIVE_OUTPUT_CONTRACT_VERSION = "1"
 AIDRAFT_SCOPE_TYPES = {"workspace", "source", "branch", "node", "nodes"}
 AIDRAFT_ACCEPT_MODES = {
     "append",
@@ -42,23 +49,11 @@ AI_DRAFT_OUTPUT_SHAPES = {
     "review_annotations",
     "sme_questions",
     "missing_info_report",
+    "completeness_review",
+    "software_overlap_report",
+    "team_roadmap",
     "implementation_handoff_package",
-}
-
-KNOWLEDGE_GRAPH_RELATIONSHIP_TYPES = {
-    "contains",
-    "references",
-    "depends_on",
-    "duplicates",
-    "conflicts_with",
-    "similar_to",
-    "derived_from",
-    "supports",
-    "contradicts",
-    "implements",
-    "owned_by",
-    "requires_review_by",
-    "related_to",
+    "executive_output",
 }
 
 KNOWLEDGE_GRAPH_SOURCE_SIGNALS = {
@@ -69,6 +64,24 @@ KNOWLEDGE_GRAPH_SOURCE_SIGNALS = {
     "ai_inferred",
     "external_ref",
 }
+
+SOFTWARE_INVENTORY_ENTITY_TYPES = sorted(
+    {
+        "application",
+        "system",
+        "software_vendor",
+        "software_license",
+        "software_use_case",
+        "integration",
+        "capability",
+        "process",
+        "team",
+        "business_unit",
+        "owner",
+        "cost",
+    }
+    & BUSINESS_ENTITY_TYPES
+)
 
 
 def _artifact_definition(
@@ -468,6 +481,226 @@ CHART_OUTPUT_SCHEMA: dict[str, Any] = {
     ],
 }
 
+SOFTWARE_INVENTORY_ITEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "node_id": {"type": ["string", "null"]},
+        "entity_type": {"type": "string", "enum": SOFTWARE_INVENTORY_ENTITY_TYPES},
+        "vendor": {"type": ["string", "null"]},
+        "owner_id": {"type": ["string", "null"]},
+        "business_unit_id": {"type": ["string", "null"]},
+        "license_type": {"type": ["string", "null"]},
+        "annual_cost": {"type": ["number", "string", "null"]},
+        "user_count": {"type": ["integer", "number", "string", "null"]},
+        "status": {"type": ["string", "null"]},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "id",
+        "name",
+        "node_id",
+        "entity_type",
+        "vendor",
+        "owner_id",
+        "business_unit_id",
+        "license_type",
+        "annual_cost",
+        "user_count",
+        "status",
+        "source_refs",
+        "assumptions",
+    ],
+}
+
+SOFTWARE_OVERLAP_SCORE_FACTOR_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "factor": {"type": "string"},
+        "weight": {"type": ["number", "string", "null"]},
+        "evidence": {"type": ["string", "null"]},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["factor", "weight", "evidence", "source_refs", "assumptions"],
+}
+
+SOFTWARE_OVERLAP_CANDIDATE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "application_ids": {"type": "array", "items": {"type": "string"}},
+        "overlap_dimensions": {"type": "array", "items": {"type": "string"}},
+        "score": {"type": ["number", "string", "null"]},
+        "scoring_factors": {
+            "type": "array",
+            "items": SOFTWARE_OVERLAP_SCORE_FACTOR_SCHEMA,
+        },
+        "recommendation": {"type": ["string", "null"]},
+        "recommended_review_questions": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+        "confidence": {"type": ["number", "string", "null"]},
+        "rationale": {"type": ["string", "null"]},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "review_state": {"type": ["string", "null"]},
+    },
+    "required": [
+        "id",
+        "title",
+        "application_ids",
+        "overlap_dimensions",
+        "score",
+        "scoring_factors",
+        "recommendation",
+        "recommended_review_questions",
+        "confidence",
+        "rationale",
+        "source_refs",
+        "assumptions",
+        "review_state",
+    ],
+}
+
+SOFTWARE_RATIONALIZATION_ACTION_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "action_type": {"type": ["string", "null"]},
+        "target_application_ids": {"type": "array", "items": {"type": "string"}},
+        "owner_id": {"type": ["string", "null"]},
+        "priority": {"type": ["string", "null"]},
+        "status": {"type": ["string", "null"]},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "id",
+        "title",
+        "action_type",
+        "target_application_ids",
+        "owner_id",
+        "priority",
+        "status",
+        "source_refs",
+        "assumptions",
+    ],
+}
+
+SOFTWARE_OVERLAP_REPORT_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "properties": {
+        "summary": {"type": ["string", "null"]},
+        "inventory_items": {"type": "array", "items": SOFTWARE_INVENTORY_ITEM_SCHEMA},
+        "overlap_candidates": {
+            "type": "array",
+            "items": SOFTWARE_OVERLAP_CANDIDATE_SCHEMA,
+        },
+        "rationalization_actions": {
+            "type": "array",
+            "items": SOFTWARE_RATIONALIZATION_ACTION_SCHEMA,
+        },
+        "relationship_edges": {"type": "array", "items": KNOWLEDGE_GRAPH_EDGE_SCHEMA},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "summary",
+        "inventory_items",
+        "overlap_candidates",
+        "rationalization_actions",
+        "relationship_edges",
+        "source_refs",
+        "assumptions",
+    ],
+}
+
+EXECUTIVE_OUTPUT_ITEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": ["string", "null"]},
+        "status": {"type": ["string", "null"]},
+        "priority": {"type": ["string", "null"]},
+        "owner_id": {"type": ["string", "null"]},
+        "due_date": {"type": ["string", "null"]},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "source_backed": {"type": "boolean"},
+        "needs_review": {"type": "boolean"},
+        "metadata": METADATA_OUTPUT_SCHEMA,
+    },
+    "required": [
+        "id",
+        "title",
+        "description",
+        "status",
+        "priority",
+        "owner_id",
+        "due_date",
+        "source_refs",
+        "source_backed",
+        "needs_review",
+        "metadata",
+    ],
+}
+
+EXECUTIVE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "properties": {
+        "contract_version": {"type": "string"},
+        "title": {"type": "string"},
+        "summary": {"type": "string"},
+        "key_findings": {"type": "array", "items": EXECUTIVE_OUTPUT_ITEM_SCHEMA},
+        "recommended_actions": {"type": "array", "items": EXECUTIVE_OUTPUT_ITEM_SCHEMA},
+        "risks": {"type": "array", "items": EXECUTIVE_OUTPUT_ITEM_SCHEMA},
+        "required_decisions": {"type": "array", "items": EXECUTIVE_OUTPUT_ITEM_SCHEMA},
+        "source_backed_appendix": {"type": "array", "items": EXECUTIVE_OUTPUT_ITEM_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "metadata": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "node_count": {"type": "integer"},
+                "source_backed_node_count": {"type": "integer"},
+                "needs_review_count": {"type": "integer"},
+                "task_count": {"type": "integer"},
+            },
+            "required": [
+                "node_count",
+                "source_backed_node_count",
+                "needs_review_count",
+                "task_count",
+            ],
+        },
+    },
+    "required": [
+        "contract_version",
+        "title",
+        "summary",
+        "key_findings",
+        "recommended_actions",
+        "risks",
+        "required_decisions",
+        "source_backed_appendix",
+        "assumptions",
+        "metadata",
+    ],
+}
+
 
 ARTIFACT_REGISTRY: dict[str, dict[str, Any]] = {
     "mind_map": _artifact_definition(
@@ -596,6 +829,89 @@ ARTIFACT_REGISTRY: dict[str, dict[str, Any]] = {
         export_behavior="markdown_report, csv",
         validation_rules=["gap_has_reason", "gap_has_target_or_assumption"],
     ),
+    "completeness_review": _artifact_definition(
+        "completeness_review",
+        requires=["source_library"],
+        optional=["nodes", "source_refs", "domain_profile", "expected_coverage", "folder_inventory"],
+        generated_schema={
+            "covered_areas": "source-backed areas with sufficient coverage",
+            "missing_areas": "expected areas not found in sources",
+            "partial_areas": "areas with incomplete or weak coverage",
+            "duplicate_conflicting_areas": "overlap, version, or guidance conflicts",
+            "stale_deprecated_candidates": "older or superseded guidance needing review",
+            "recommended_roadmap": "ordered completion path",
+            "sme_questions": "review questions tied to source gaps or assumptions",
+        },
+        projection_requirements=["source set or workspace graph exists"],
+        supported_views=["completeness_review", "missing_info_report", "roadmap", "tasks"],
+        preview_component="CompletenessReviewPreview",
+        accept_behavior="attach_review_artifact_and_optionally_generate_tasks_after_preview_acceptance",
+        export_behavior="markdown_report, csv, roadmap_tasks",
+        validation_rules=[
+            "domain_expectations_visible",
+            "missing_items_have_assumption_rationale",
+            "source_backed_findings_include_source_refs",
+            "unsupported_items_marked_needs_review",
+        ],
+    ),
+    "software_overlap_report": _artifact_definition(
+        "software_overlap_report",
+        requires=["nodes"],
+        optional=[
+            "relationship_edges",
+            "source_refs",
+            "software_inventory",
+            "license_data",
+            "usage_data",
+            "service_desk_signals",
+        ],
+        generated_schema={
+            "inventory_items": "software inventory entities using registered business ontology types such as application, system, software_license, software_use_case, software_vendor, and integration",
+            "overlap_candidates": "pairs or groups of applications with shared capabilities, users, workflows, integrations, licensing, score, confidence, rationale, source refs or assumptions, and review state",
+            "rationalization_actions": "reviewable standardize, consolidate, retire, license-rightsize, owner-review, and exception-review action candidates",
+            "relationship_edges": "optional knowledge-graph edges using overlaps_on, duplicates, approved_for, has_license_type, integrates_with, replaces, replaced_by, used_by, owns, or supports",
+        },
+        projection_requirements=[
+            "application, system, or tool nodes exist",
+            "candidate overlaps include evidence, confidence, assumptions, and recommended owner review",
+        ],
+        supported_views=["review", "connections", "tasks", "table"],
+        preview_component="SoftwareOverlapReportPreview",
+        accept_behavior="attach_review_artifact_and_optionally_generate_tasks_after_preview_acceptance",
+        export_behavior="markdown_report, csv, task_candidates",
+        validation_rules=[
+            "overlap_candidates_have_applications",
+            "score_factors_visible",
+            "source_backed_findings_include_source_refs",
+            "inferred_candidates_marked_needs_review",
+        ],
+    ),
+    "team_roadmap": _artifact_definition(
+        "team_roadmap",
+        requires=["source_context"],
+        optional=["nodes", "tasks", "source_refs", "decisions", "risks", "milestones"],
+        generated_schema={
+            "context": "plain-language explanation of the complex issue",
+            "workstreams": "team-facing streams of work",
+            "milestones": "sequenced checkpoints or phases",
+            "dependencies": "prerequisites and blocked work",
+            "risks": "roadmap risks and mitigation notes",
+            "required_decisions": "choices needing stakeholder input",
+            "recommended_next_actions": "ordered action path",
+            "source_backed_appendix": "source refs supporting the roadmap",
+        },
+        projection_requirements=["source context or accepted graph exists"],
+        supported_views=["outline", "tasks", "presentation_sections", "executive_summary"],
+        preview_component="TeamRoadmapPreview",
+        accept_behavior="attach_roadmap_artifact_and_optionally_generate_tasks_after_preview_acceptance",
+        export_behavior="markdown_roadmap, task_candidates, presentation_sections",
+        validation_rules=[
+            "roadmap_separates_facts_from_assumptions",
+            "required_decisions_visible",
+            "source_backed_items_include_source_refs",
+            "unsupported_items_marked_needs_review",
+        ],
+    ),
     "source_coverage": _artifact_definition(
         "source_coverage",
         requires=["nodes"],
@@ -637,6 +953,29 @@ ARTIFACT_REGISTRY: dict[str, dict[str, Any]] = {
         accept_behavior="attach_handoff_artifact_after_preview_acceptance",
         export_behavior="markdown_package, monday_payload_candidates, miro_payload_candidates",
         validation_rules=["handoff_preserves_scope", "handoff_lists_assumptions", "handoff_references_sources"],
+    ),
+    "executive_output": _artifact_definition(
+        "executive_output",
+        requires=["accepted_nodes"],
+        optional=["tasks", "source_refs", "relationship_edges", "review_status"],
+        generated_schema={
+            "summary": "executive-ready workspace summary",
+            "key_findings": "source-backed findings or review-marked inferred findings",
+            "recommended_actions": "ordered action candidates",
+            "risks": "open risks and blockers",
+            "required_decisions": "decision points needing executive input",
+            "source_backed_appendix": "evidence rows tied to source refs",
+        },
+        projection_requirements=["accepted workspace graph exists"],
+        supported_views=["executive_summary", "markdown_export"],
+        preview_component="ExecutiveOutputPreview",
+        accept_behavior="preview_only_export_projection",
+        export_behavior="markdown_executive_package",
+        validation_rules=[
+            "executive_sections_present",
+            "appendix_items_include_source_refs",
+            "unsourced_items_marked_needs_review",
+        ],
     ),
 }
 
@@ -709,6 +1048,8 @@ AI_DRAFT_REVISION_OUTPUT_SCHEMA: dict[str, Any] = {
         "flow_chart": FLOW_CHART_OUTPUT_SCHEMA,
         "knowledge_graph": KNOWLEDGE_GRAPH_OUTPUT_SCHEMA,
         "chart": CHART_OUTPUT_SCHEMA,
+        "software_overlap_report": SOFTWARE_OVERLAP_REPORT_OUTPUT_SCHEMA,
+        "executive_output": EXECUTIVE_OUTPUT_SCHEMA,
         "outline": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
         "table": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
         "kanban": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
@@ -732,6 +1073,8 @@ AI_DRAFT_REVISION_OUTPUT_SCHEMA: dict[str, Any] = {
         "flow_chart",
         "knowledge_graph",
         "chart",
+        "software_overlap_report",
+        "executive_output",
         "outline",
         "table",
         "kanban",
@@ -802,6 +1145,21 @@ Canonical TraceSpace Artifact Registry contract:
 - Visual artifacts must reference canonical nodes, relationship edges, source chunks, or accepted artifact data unless explicitly marked draft or export_only.
 - Charts require chart_spec and source-backed or extracted data rows before rendering.
 - Relationship edges for knowledge_graph artifacts must include source_node_id, target_node_id, relationship_type, source_signal, confidence, rationale, source_refs or assumptions, and review_state.
+- Software overlap reports must include inventory_items, overlap_candidates, rationalization_actions, and optional relationship_edges; every candidate needs at least two applications plus source_refs or assumptions.
+- Enterprise business maps should use the canonical business ontology entity and relationship types when applicable.
 - Unsupported, inferred, or unsourced items must be marked needs_review.
 - Include metadata.artifact_registry_version as "{ARTIFACT_REGISTRY_VERSION}" when returning registry metadata.
+
+{BUSINESS_ONTOLOGY_CONTRACT.strip()}
+"""
+
+
+EXECUTIVE_OUTPUT_CONTRACT = f"""
+Canonical TraceSpace executive output contract:
+- Return exactly one JSON object. Do not wrap it in prose or markdown.
+- Top-level fields: contract_version, title, summary, key_findings, recommended_actions, risks, required_decisions, source_backed_appendix, assumptions, metadata.
+- Each section item must include id, title, description, status, priority, owner_id, due_date, source_refs, source_backed, needs_review, and metadata.
+- key_findings, recommended_actions, risks, and required_decisions may include unsourced items only when source_backed is false and needs_review is true.
+- source_backed_appendix must include only items with at least one source_ref.document_id.
+- Include contract_version as "{EXECUTIVE_OUTPUT_CONTRACT_VERSION}".
 """

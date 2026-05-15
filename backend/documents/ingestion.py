@@ -88,7 +88,7 @@ def validate_upload_bytes(filename: str, file_bytes: bytes) -> dict:
         ALLOWED_DOCUMENT_EXTENSIONS,
         unsupported_message=(
             "This source cannot enter the source-traceable document pipeline. "
-            f"Upload {SOURCE_TRACEABLE_DOCUMENT_LABEL} for chunked citations, "
+            f"Upload {SOURCE_TRACEABLE_DOCUMENT_LABEL} for document-section citations, "
             "or use the matching AI intake option for non-document sources."
         ),
     )
@@ -154,6 +154,73 @@ def source_document_from_upload(upload: dict, version: int = 1) -> dict:
     return asdict(source_document)
 
 
+def normalize_relative_source_path(relative_path: str | None, fallback_filename: str = "") -> str:
+    raw_path = str(relative_path or "").replace("\\", "/").strip()
+    raw_path = re.sub(r"^[A-Za-z]:/+", "", raw_path).lstrip("/")
+    parts = [
+        sanitize_filename(part)
+        for part in raw_path.split("/")
+        if part and part not in {".", ".."}
+    ]
+
+    if not parts and fallback_filename:
+        parts = [sanitize_filename(fallback_filename)]
+
+    return "/".join(part for part in parts if part)
+
+
+def build_source_set_metadata(
+    relative_paths: list[str],
+    *,
+    source_set_id: str | None = None,
+    label: str | None = None,
+) -> dict:
+    normalized_paths = [
+        normalize_relative_source_path(path)
+        for path in relative_paths
+        if normalize_relative_source_path(path)
+    ]
+    digest_input = "|".join(sorted(normalized_paths)) or "source-set"
+    digest = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:12]
+    root_folder = _common_source_root(normalized_paths)
+    clean_id = _stable_source_set_token(source_set_id or f"source_set_{digest}")
+
+    return {
+        "id": clean_id,
+        "label": clean_source_set_label(label) or root_folder or "Uploaded source set",
+        "root_folder": root_folder,
+        "source_count": len(normalized_paths),
+        "upload_mode": "native_folder_upload",
+        "native_folder_upload": True,
+    }
+
+
+def source_document_with_source_set_metadata(
+    source_document: dict,
+    *,
+    relative_path: str,
+    source_set: dict,
+) -> dict:
+    document = dict(source_document)
+    normalized_path = normalize_relative_source_path(
+        relative_path,
+        fallback_filename=document.get("filename", ""),
+    )
+    folder = normalized_path.rsplit("/", 1)[0] if "/" in normalized_path else ""
+    source_set_record = dict(source_set)
+
+    document.update(
+        {
+            "relative_path": normalized_path,
+            "path": normalized_path,
+            "folder": folder,
+            "source_set_id": source_set_record.get("id", ""),
+            "source_set": source_set_record,
+        }
+    )
+    return document
+
+
 def ingest_supported_document(filename: str, file_bytes: bytes, version: int = 1) -> dict:
     upload = validate_upload_bytes(filename, file_bytes)
     source_document = build_source_document(upload["filename"], file_bytes, version=version)
@@ -161,7 +228,7 @@ def ingest_supported_document(filename: str, file_bytes: bytes, version: int = 1
     document_chunks = chunk_source_segments(source_segments, source_document["id"])
 
     if not document_chunks:
-        raise DocumentIngestionError("Document did not produce any source-aware chunks.")
+        raise DocumentIngestionError("Document did not produce any source-aware sections.")
 
     return {
         "upload": upload,
@@ -350,7 +417,7 @@ def extract_source_segments(file_bytes: bytes, extension: str, fallback_text: st
 
     raise DocumentIngestionError(
         f"Unsupported file type '{extension}'. "
-        f"Only {SOURCE_TRACEABLE_DOCUMENT_LABEL} produce source-traceable chunks."
+        f"Only {SOURCE_TRACEABLE_DOCUMENT_LABEL} produce source-traceable document sections."
     )
 
 
@@ -455,6 +522,26 @@ def _heading_from_block(block: str) -> str | None:
 
 def _normalize_text(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text.replace("\r\n", "\n")).strip()
+
+
+def clean_source_set_label(label: str | None) -> str:
+    return re.sub(r"\s+", " ", str(label or "")).strip()[:160]
+
+
+def _common_source_root(paths: list[str]) -> str:
+    roots = {
+        path.split("/", 1)[0]
+        for path in paths
+        if "/" in path and path.split("/", 1)[0]
+    }
+    if len(roots) == 1:
+        return next(iter(roots))
+    return ""
+
+
+def _stable_source_set_token(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9_-]+", "-", str(value or "").strip()).strip("-_")
+    return token[:80] or "source_set"
 
 
 def _bytes_io(file_bytes: bytes):

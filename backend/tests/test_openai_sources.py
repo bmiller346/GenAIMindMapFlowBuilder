@@ -86,7 +86,15 @@ def test_responses_json_posts_to_openai_responses_with_web_search(monkeypatch):
     assert requests[0][1] == "test-key"
     assert requests[0][0]["model"] == "gpt-5.4"
     assert requests[0][0]["tools"] == [{"type": "web_search"}]
-    assert requests[0][0]["text"] == {"format": {"type": "json_object"}}
+    assert requests[0][0]["text"]["format"]["type"] == "json_schema"
+    assert requests[0][0]["text"]["format"]["name"] == "tracespace_mindmap"
+    assert requests[0][0]["text"]["format"]["strict"] is True
+    assert requests[0][0]["text"]["format"]["schema"]["required"] == [
+        "nodes",
+        "edges",
+        "viewport",
+        "metadata",
+    ]
     prompt_text = requests[0][0]["input"][0]["content"][0]["text"]
     assert "Canonical AI graph contract:" in prompt_text
     assert 'metadata.ai_graph_contract_version as "1"' in prompt_text
@@ -127,6 +135,57 @@ def test_extract_output_text_accepts_nested_responses_output():
     )
 
     assert json.loads(output)["nodes"][1]["id"] == "topic-1"
+
+
+def test_source_graph_generation_retries_schema_invalid_output(monkeypatch):
+    requests = []
+
+    monkeypatch.setattr(openai_sources, "_require_openai_api_key", lambda: "test-key")
+
+    def fake_post(payload, api_key):
+        requests.append(payload)
+        if len(requests) == 1:
+            return {
+                "output_text": json.dumps(
+                    {
+                        "nodes": [
+                            {
+                                "id": "",
+                                "type": "response",
+                                "data": {},
+                            }
+                        ],
+                        "edges": [{"source": "missing", "target": ""}],
+                        "viewport": "bad",
+                    }
+                )
+            }
+        return {"output_text": json.dumps(VALID_GRAPH)}
+
+    monkeypatch.setattr(openai_sources, "_post_openai_json", fake_post)
+
+    graph, metadata = openai_sources.generate_document_mindmap(
+        file_name="source.docx",
+        source_type="docx",
+        flow_id="flow-1",
+        chunks=[
+            {
+                "id": "chunk-1",
+                "text": "The portal setup requires a sandbox pilot and stakeholder review.",
+                "heading": "Setup",
+            }
+        ],
+        model="gpt-5.4",
+    )
+
+    assert graph["nodes"][1]["data"]["title"] == "Topic"
+    assert metadata["model"] == "gpt-5.4"
+    assert len(requests) == 2
+    assert requests[1]["text"]["format"]["type"] == "json_schema"
+    repair_prompt = requests[1]["input"][-1]["content"][0]["text"]
+    assert "previous response did not satisfy" in repair_prompt
+    assert "ai_mindmap.viewport: must be an object" in repair_prompt
+    assert "Canonical AI graph contract:" in repair_prompt
 
 
 def test_video_generation_uses_sampled_frames_without_cloud_upload(monkeypatch):

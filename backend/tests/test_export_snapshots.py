@@ -4,10 +4,14 @@ from export.csv_tasks import export_task_rows
 from export.internal_graph_json import export_internal_graph
 from export.workspace_graph import (
     build_workspace_graph,
+    graph_to_executive_markdown,
+    graph_to_executive_output,
     graph_to_markdown,
     graph_to_mermaid,
     graph_to_mmd_json,
     graph_to_opml,
+    graph_to_team_roadmap,
+    graph_to_team_roadmap_markdown,
     graph_to_task_rows,
     select_branch,
 )
@@ -201,6 +205,91 @@ def test_downstream_export_projection_snapshots_use_validated_graph():
         'due_date="2026-06-01" confidence="0.55" source_doc="doc-1" source_page="3"/>'
         '</outline></body></opml>'
     )
+
+
+def test_executive_output_projection_is_source_backed_and_exportable():
+    graph = _validated_export_graph()
+    output = graph_to_executive_output(graph)
+
+    assert output["contract_version"] == "1"
+    assert output["metadata"] == {
+        "node_count": 2,
+        "source_backed_node_count": 2,
+        "needs_review_count": 1,
+        "task_count": 1,
+    }
+    assert [item["title"] for item in output["key_findings"]] == [
+        "Training Rollout",
+        "Draft enablement checklist",
+    ]
+    assert output["recommended_actions"][0] == {
+        "id": "recommended_action-task-1",
+        "title": "Draft enablement checklist",
+        "description": "Create checklist for reviewers",
+        "status": "needs_review",
+        "priority": "high",
+        "owner_id": "team-docs",
+        "due_date": "2026-06-01",
+        "source_refs": [
+            {
+                "document_id": "doc-1",
+                "page": 3,
+                "section": "Tasks",
+                "quote_snippet": "Checklist needs SME review.",
+                "confidence": 0.55,
+            }
+        ],
+        "source_backed": True,
+        "needs_review": True,
+        "metadata": {
+            "source": "workspace_graph_projection",
+            "scope": "workspace",
+            "artifact_type": "executive_output",
+            "layout_hint": "recommended_action",
+            "rationale": "Projected from task as recommended_action. Source-backed. Requires review before external distribution.",
+            "review_reason": "Confirm source support before executive use.",
+            "source_signal": "explicit_source_ref",
+        },
+    }
+    assert "## Source-backed Appendix" in graph_to_executive_markdown(graph)
+    assert "Checklist needs SME review." in graph_to_executive_markdown(graph)
+
+
+def test_team_roadmap_projection_groups_source_backed_graph_for_export():
+    graph = _roadmap_export_graph()
+    roadmap = graph_to_team_roadmap(graph)
+
+    assert roadmap["contract_version"] == "1"
+    assert roadmap["metadata"] == {
+        "node_count": 5,
+        "source_backed_node_count": 5,
+        "workstream_count": 2,
+        "dependency_count": 2,
+        "risk_count": 1,
+        "required_decision_count": 1,
+        "milestone_count": 2,
+        "recommended_next_action_count": 3,
+    }
+    assert [item["title"] for item in roadmap["workstreams"]] == [
+        "Implementation workstream",
+        "Security review task",
+    ]
+    assert roadmap["dependencies"][0]["title"] == "Implementation workstream -> Security review task"
+    assert roadmap["dependencies"][0]["relationship_type"] == "depends_on"
+    assert roadmap["dependencies"][0]["source_backed"] is True
+    assert [item["title"] for item in roadmap["risks"]] == ["Late security review"]
+    assert [item["title"] for item in roadmap["required_decisions"]] == ["Approve rollout window"]
+    assert [item["title"] for item in roadmap["milestones"]] == [
+        "Security review task",
+        "Pilot complete",
+    ]
+    assert roadmap["recommended_next_actions"][0]["title"] == "Security review task"
+    assert roadmap["source_backed_appendix"][0]["metadata"]["artifact_type"] == "team_roadmap"
+
+    markdown = graph_to_team_roadmap_markdown(graph)
+    assert "## Workstreams" in markdown
+    assert "## Source Appendix" in markdown
+    assert "Security review must happen before pilot." in markdown
 
 
 def test_selected_branch_revalidates_report_for_branch_scope():
@@ -497,3 +586,145 @@ def _validated_branch_graph():
     }
 
     return build_workspace_graph(flow)
+
+
+def _roadmap_export_graph():
+    source_ref = {
+        "document_id": "doc-roadmap",
+        "page": 4,
+        "section": "Execution",
+        "quote_snippet": "Security review must happen before pilot.",
+        "confidence": 0.91,
+    }
+    return {
+        "workspace": {
+            "id": "workspace-roadmap",
+            "title": "Roadmap Workspace",
+            "summary": "Coordinate the rollout plan.",
+            "flow_type": "mind_map",
+            "brief": {},
+        },
+        "nodes": [
+            {
+                "id": "workstream-1",
+                "parent_id": None,
+                "title": "Implementation workstream",
+                "summary": "Prepare the team for pilot rollout.",
+                "node_type": "workstream",
+                "status": "ai_generated",
+                "priority": "",
+                "owner_id": "",
+                "due_date": "",
+                "confidence": "",
+                "source_refs": [source_ref],
+                "external_refs": {},
+                "metadata": {},
+            },
+            {
+                "id": "task-1",
+                "parent_id": "workstream-1",
+                "title": "Security review task",
+                "summary": "Complete security review before pilot.",
+                "node_type": "workflow",
+                "status": "ai_generated",
+                "priority": "high",
+                "owner_id": "security",
+                "due_date": "2026-06-01",
+                "confidence": "",
+                "source_refs": [source_ref],
+                "external_refs": {},
+                "metadata": {},
+            },
+            {
+                "id": "risk-1",
+                "parent_id": None,
+                "title": "Late security review",
+                "summary": "Pilot cannot start if security review slips.",
+                "node_type": "risk",
+                "status": "needs_review",
+                "priority": "",
+                "owner_id": "",
+                "due_date": "",
+                "confidence": "",
+                "source_refs": [source_ref],
+                "external_refs": {},
+                "metadata": {},
+            },
+            {
+                "id": "decision-1",
+                "parent_id": "workstream-1",
+                "title": "Approve rollout window",
+                "summary": "Stakeholders must confirm the pilot week.",
+                "node_type": "decision",
+                "status": "ai_generated",
+                "priority": "",
+                "owner_id": "",
+                "due_date": "",
+                "confidence": "",
+                "source_refs": [source_ref],
+                "external_refs": {},
+                "metadata": {},
+            },
+            {
+                "id": "milestone-1",
+                "parent_id": "task-1",
+                "title": "Pilot complete",
+                "summary": "Pilot feedback is ready for team review.",
+                "node_type": "milestone",
+                "status": "ai_generated",
+                "priority": "",
+                "owner_id": "",
+                "due_date": "2026-06-15",
+                "confidence": "",
+                "source_refs": [source_ref],
+                "external_refs": {},
+                "metadata": {},
+            },
+        ],
+        "edges": [
+            {
+                "id": "edge-workstream-task",
+                "source_node_id": "workstream-1",
+                "target_node_id": "task-1",
+                "relationship_type": "depends_on",
+                "metadata": {},
+            },
+            {
+                "id": "edge-task-risk",
+                "source_node_id": "risk-1",
+                "target_node_id": "task-1",
+                "relationship_type": "blocks",
+                "metadata": {},
+            },
+            {
+                "id": "edge-workstream-decision",
+                "source_node_id": "workstream-1",
+                "target_node_id": "decision-1",
+                "relationship_type": "contains",
+                "metadata": {},
+            },
+            {
+                "id": "edge-task-milestone",
+                "source_node_id": "task-1",
+                "target_node_id": "milestone-1",
+                "relationship_type": "contains",
+                "metadata": {},
+            },
+        ],
+        "tasks": [
+            {
+                "id": "task-task-1",
+                "node_id": "task-1",
+                "title": "Security review task",
+                "description": "Complete security review before pilot.",
+                "status": "ai_generated",
+                "priority": "high",
+                "due_date": "2026-06-01",
+                "assignee": "security",
+                "confidence": "",
+                "source_refs": [source_ref],
+                "external_refs": {},
+            }
+        ],
+        "views": {},
+    }

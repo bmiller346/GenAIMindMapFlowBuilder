@@ -1,3 +1,25 @@
+from .business_ontology import (
+    BUSINESS_ENTITY_REGISTRY,
+    BUSINESS_ENTITY_TYPES,
+    BUSINESS_ONTOLOGY_CONTRACT,
+    BUSINESS_ONTOLOGY_VERSION,
+    BUSINESS_RELATIONSHIP_REGISTRY,
+    BUSINESS_RELATIONSHIP_TYPES,
+    KNOWLEDGE_GRAPH_RELATIONSHIP_TYPES,
+    business_ontology_registry,
+    is_business_entity_type,
+    is_business_relationship_type,
+)
+from .domain_profiles import (
+    DOMAIN_PROFILE_IDS,
+    DOMAIN_PROFILE_REGISTRY_VERSION,
+    build_domain_profile_prompt_context,
+    domain_profile_registry,
+    get_domain_profile,
+    is_domain_profile,
+    list_domain_profiles,
+    normalize_domain_profile_id,
+)
 from .schemas import (
     ExternalRef,
     ExportBatch,
@@ -15,6 +37,15 @@ from .schemas import (
 from .validation import validate_and_repair_graph
 
 __all__ = [
+    "BUSINESS_ENTITY_REGISTRY",
+    "BUSINESS_ENTITY_TYPES",
+    "BUSINESS_ONTOLOGY_CONTRACT",
+    "BUSINESS_ONTOLOGY_VERSION",
+    "BUSINESS_RELATIONSHIP_REGISTRY",
+    "BUSINESS_RELATIONSHIP_TYPES",
+    "DOMAIN_PROFILE_IDS",
+    "DOMAIN_PROFILE_REGISTRY_VERSION",
+    "KNOWLEDGE_GRAPH_RELATIONSHIP_TYPES",
     "ExternalRef",
     "ExportBatch",
     "GraphEdge",
@@ -24,6 +55,15 @@ __all__ = [
     "SourceRef",
     "TaskProjection",
     "WorkspaceGraph",
+    "business_ontology_registry",
+    "build_domain_profile_prompt_context",
+    "domain_profile_registry",
+    "get_domain_profile",
+    "is_business_entity_type",
+    "is_business_relationship_type",
+    "is_domain_profile",
+    "list_domain_profiles",
+    "normalize_domain_profile_id",
     "validate_monday_execution_result",
     "validate_monday_export_payload",
     "validate_monday_template",

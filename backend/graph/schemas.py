@@ -241,6 +241,7 @@ class WorkspaceBrief:
     output_style: str = "technical_reference_map"
     node_types: list[str] = field(default_factory=list)
     review_policy: list[str] = field(default_factory=list)
+    expected_artifacts: list[str] = field(default_factory=list)
     review_rules: str = ""
 
     def model_dump(self) -> dict[str, Any]:
@@ -269,7 +270,7 @@ def validate_workspace_brief(payload: dict[str, Any]) -> None:
     ):
         _require_optional_string(payload, key, errors, path="workspace_brief")
 
-    for key in ("desired_outputs", "node_types", "review_policy"):
+    for key in ("desired_outputs", "node_types", "review_policy", "expected_artifacts"):
         _require_optional_string_list(payload, key, errors, path="workspace_brief")
 
     if errors:

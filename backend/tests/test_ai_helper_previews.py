@@ -29,6 +29,8 @@ from ai_helpers import (
     validate_helper_action,
     validate_ai_helper_preview,
 )
+from documents.ingestion import build_source_document, chunk_text
+from export.workspace_graph import build_workspace_graph
 from graph.schemas import GraphSchemaError
 
 
@@ -206,6 +208,112 @@ def test_source_reconciliation_preview_matches_source_chunks_to_graph_nodes():
     assert preview["metadata"]["matched_node_count"] == 1
     assert preview["metadata"]["source_only_chunk_count"] == 1
     assert preview["metadata"]["source_only_chunks"][0]["chunk_id"] == "chunk-finance"
+    assert "not cited" in preview["warnings"][0]
+
+
+def test_source_reconciliation_preview_resolves_component_backed_source_document_by_component_id():
+    document_text = (
+        "Business Plan\n\n"
+        "The project intake workflow validates the project template and client location before setup."
+    )
+    source_document = build_source_document("Business Plan.md", document_text.encode("utf-8"))
+    chunks = chunk_text(document_text, source_document["id"], page=1)
+    component_id = "665f1f77bcf86cd799439011"
+    flow = {
+        "_id": "workspace-component-source",
+        "flow_name": "Component Source Workspace",
+        "flow_json": json.dumps(
+            {
+                "nodes": [
+                    {
+                        "id": "operations",
+                        "type": "response",
+                        "data": {
+                            "title": "Project intake workflow",
+                            "summary": "Intake validates project template and client location.",
+                            "node_type": "workflow",
+                            "status": "needs_review",
+                            "source_refs": [],
+                        },
+                    }
+                ],
+                "edges": [],
+            }
+        ),
+    }
+    graph = build_workspace_graph(
+        flow,
+        source_components=[
+            {
+                "_id": component_id,
+                "source_document_id": source_document["id"],
+                "source_document": source_document,
+                "document_chunks": chunks,
+                "source_segments": [
+                    {
+                        "text": document_text,
+                        "page": 1,
+                        "heading": "Business Plan",
+                        "start_char": 0,
+                        "end_char": len(document_text),
+                    }
+                ],
+            }
+        ],
+    )
+
+    preview = generate_source_reconciliation_preview(graph, source_id=component_id)
+
+    assert graph["source_library"]["documents"][0]["id"] == source_document["id"]
+    assert graph["source_library"]["documents"][0]["component_id"] == component_id
+    assert preview["metadata"]["source_id"] == component_id
+    assert preview["metadata"]["matched_node_count"] == 1
+    assert preview["preview_items"][0]["node_id"] == "operations"
+    assert preview["preview_items"][0]["source_refs"][0]["document_id"] == source_document["id"]
+    assert preview["preview_items"][0]["source_refs"][0]["chunk_id"] == chunks[0]["id"]
+
+
+def test_source_reconciliation_preview_surfaces_source_only_chunks_without_graph_nodes():
+    graph = {
+        "workspace": {"id": "workspace-source-first", "title": "Source First Workspace"},
+        "nodes": [],
+        "edges": [],
+        "tasks": [],
+        "source_library": {
+            "documents": [
+                {
+                    "id": "doc-source-first",
+                    "filename": "BusinessPlan.md",
+                    "chunks": [
+                        {
+                            "id": "chunk-market",
+                            "heading": "Market Positioning",
+                            "snippet": "The plan targets regulated service teams that need source-backed operations maps.",
+                            "cited_by_count": 0,
+                        },
+                        {
+                            "id": "chunk-revenue",
+                            "heading": "Revenue Model",
+                            "snippet": "Revenue depends on onboarding packages and recurring workspace subscriptions.",
+                            "cited_by_count": 0,
+                        },
+                    ],
+                    "cited_node_ids": [],
+                }
+            ]
+        },
+    }
+
+    preview = generate_source_reconciliation_preview(graph, source_id="doc-source-first")
+
+    assert preview["preview_items"] == []
+    assert preview["metadata"]["matched_node_count"] == 0
+    assert preview["metadata"]["source_only_chunk_count"] == 2
+    assert [chunk["chunk_id"] for chunk in preview["metadata"]["source_only_chunks"]] == [
+        "chunk-market",
+        "chunk-revenue",
+    ]
+    assert preview["metadata"]["recommended_modes"][0] == "supplement_graph"
     assert "not cited" in preview["warnings"][0]
 
 
@@ -542,8 +650,13 @@ def test_prompt_profile_registry_includes_docmap_and_legacy_roles():
     assert "Research Assistant" in labels
     assert "Productivity Coach" in labels
     assert "Data Interpreter" in labels
+    assert "Enterprise Process Analyst" in labels
+    assert "Enterprise Tool Rationalization" in labels
+    assert "Enterprise Readiness Planner" in labels
     assert groups["Strategic Advisor"] == "General"
+    assert groups["Enterprise Process Analyst"] == "TraceSpace Enterprise"
     assert get_prompt_profile("Task Planner")["role_id"] == "task_planner"
+    assert get_prompt_profile("Enterprise Readiness Planner")["role_id"] == "enterprise_readiness_planner"
 
 
 def test_validate_ai_action_request_rejects_unsupported_combinations():
@@ -579,6 +692,77 @@ def test_workspace_action_catalog_supports_starter_transformations():
     assert tasks["action"] == "generate_tasks"
     assert sme["action"] == "create_sme_questions"
     assert coverage["action"] == "find_missing_source_support"
+
+
+def test_workspace_action_catalog_supports_enterprise_analysis_packs():
+    bottlenecks = validate_ai_action_request(
+        role="Enterprise Process Analyst",
+        action="find_process_bottlenecks",
+        scope={"type": "workspace"},
+    )
+    duplicate_tools = validate_ai_action_request(
+        role="Enterprise Tool Rationalization",
+        action="find_duplicate_tools",
+        scope={"type": "workspace"},
+    )
+    ownership = validate_ai_action_request(
+        role="Enterprise Process Analyst",
+        action="find_ownership_gaps",
+        scope={"type": "workspace"},
+    )
+    unsupported_systems = validate_ai_action_request(
+        role="Enterprise Tool Rationalization",
+        action="find_unsupported_business_critical_systems",
+        scope={"type": "workspace"},
+    )
+    plan = validate_ai_action_request(
+        role="Enterprise Readiness Planner",
+        action="create_30_60_90_day_improvement_plan",
+        scope={"type": "workspace"},
+    )
+    package = validate_ai_action_request(
+        role="Enterprise Readiness Planner",
+        action="create_stakeholder_review_package",
+        scope={"type": "branch", "node_id": "root"},
+    )
+
+    assert bottlenecks["action"] == "find_process_bottlenecks"
+    assert duplicate_tools["action"] == "find_duplicate_tools"
+    assert ownership["action"] == "find_ownership_gaps"
+    assert unsupported_systems["action"] == "find_unsupported_business_critical_systems"
+    assert plan["action"] == "create_30_60_90_day_improvement_plan"
+    assert package["action"] == "create_stakeholder_review_package"
+
+
+def test_enterprise_analysis_actions_generate_guided_preview_shapes():
+    bottlenecks = generate_ai_action_preview(
+        sample_graph(),
+        workspace_id="workspace-1",
+        role="Enterprise Process Analyst",
+        action="find_process_bottlenecks",
+        scope={"type": "workspace"},
+    )
+    plan = generate_ai_action_preview(
+        sample_graph(),
+        workspace_id="workspace-1",
+        role="Enterprise Readiness Planner",
+        action="create_30_60_90_day_improvement_plan",
+        scope={"type": "workspace"},
+    )
+    unsupported_systems = generate_ai_action_preview(
+        sample_graph(),
+        workspace_id="workspace-1",
+        role="Enterprise Tool Rationalization",
+        action="find_unsupported_business_critical_systems",
+        scope={"type": "workspace"},
+    )
+
+    assert bottlenecks["draft_annotations"][0]["type"] == "process_bottleneck"
+    assert "process delays" in bottlenecks["draft_annotations"][0]["body"]
+    assert unsupported_systems["draft_annotations"][0]["type"] == "business_critical_system_gap"
+    assert "business-critical systems" in unsupported_systems["draft_annotations"][0]["body"]
+    assert [node["node_type"] for node in plan["draft_nodes"]] == ["task", "task", "task"]
+    assert "30 day" in plan["draft_nodes"][0]["title"]
 
 
 def test_build_and_validate_ai_action_run_shape():
