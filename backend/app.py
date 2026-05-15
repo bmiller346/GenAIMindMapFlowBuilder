@@ -60,6 +60,7 @@ import sqlite3
 from vanna.openai import OpenAI_Chat
 from vanna.chromadb import ChromaDB_VectorStore
 from typing import List
+from copy import deepcopy
 from crawl4ai import *
 import os
 import base64
@@ -147,6 +148,12 @@ from documents.ingestion import (
     validate_upload_bytes,
 )
 from documents.source_refs import attach_source_refs_to_mindmap
+from ai.roles import (
+    UnknownSourceIntakeRole,
+    build_source_intake_instruction as build_role_source_intake_instruction,
+    clean_source_intake_value as clean_role_source_intake_value,
+    resolve_source_intake_role_label,
+)
 from ai_helpers import (
     generate_ai_action_preview,
     generate_helper_preview,
@@ -158,8 +165,10 @@ from graph.ai_contract import (
     parse_ai_mindmap_response,
     validate_ai_mindmap_contract,
 )
-from graph.schemas import GraphSchemaError
+from graph.schemas import GraphSchemaError, validate_workspace_brief
 from openai_sources import (
+    generate_document_mindmap,
+    generate_document_summary,
     generate_audio_mindmap,
     generate_image_mindmap,
     generate_video_mindmap,
@@ -181,50 +190,143 @@ gcp_service_account_file = os.getenv(
     "gcp_service_account_file", "./ai-interview-poc-2b5cf8540f16.json"
 )
 OPENAI_DEFAULT_MODEL = os.getenv("openai_default_model", "gpt-5.5")
-OPENAI_ASSISTANTS_MODEL = os.getenv("openai_assistants_model", "gpt-4.1")
 OPENAI_REASONING_MODEL = os.getenv("openai_reasoning_model", "gpt-5.4")
 OPENAI_EMBEDDING_MODEL = os.getenv(
     "openai_embedding_model", "text-embedding-3-large"
 )
-UNSUPPORTED_ASSISTANTS_MODELS = {"gpt-5.5"}
+ALLOW_LEGACY_ASSISTANTS = os.getenv("DOCMAP_ALLOW_LEGACY_ASSISTANTS", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
 
 
 def clean_source_intake_value(value: str | None, max_length: int = 2000) -> str:
-    if not isinstance(value, str):
-        return ""
-    return re.sub(r"\s+", " ", value).strip()[:max_length]
+    return clean_role_source_intake_value(value, max_length)
 
 
 def resolve_assistants_model(model_name: str | None = None) -> str:
     requested_model = clean_source_intake_value(model_name, 120)
     if not requested_model:
-        return OPENAI_ASSISTANTS_MODEL
-    if requested_model in UNSUPPORTED_ASSISTANTS_MODELS:
+        return OPENAI_DEFAULT_MODEL
+    return requested_model
+
+
+def resolve_source_intake_role(intake_role: str | None = None) -> str:
+    try:
+        return resolve_source_intake_role_label(intake_role)
+    except UnknownSourceIntakeRole as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"The requested model '{requested_model}' cannot be used with the Assistants API. "
-                f"Use openai_assistants_model or an intake model compatible with Assistants."
-            ),
-        )
-    return requested_model
+            detail="Unknown DOCX intake role.",
+        ) from exc
 
 
 def build_source_intake_instruction(
     intake_role: str | None = None,
     intake_prompt: str | None = None,
 ) -> str:
-    role = clean_source_intake_value(intake_role, 160)
-    prompt = clean_source_intake_value(intake_prompt)
-    if not role and not prompt:
-        return ""
+    try:
+        return build_role_source_intake_instruction(intake_role, intake_prompt)
+    except UnknownSourceIntakeRole as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unknown DOCX intake role.",
+        ) from exc
 
-    lines = ["Apply this source-intake configuration while preparing the output."]
-    if role:
-        lines.append(f"Selected intake role: {role}.")
-    if prompt:
-        lines.append(f"User intake brief: {prompt}.")
-    return "\n\n" + "\n".join(lines)
+
+def require_legacy_assistants_enabled(feature: str) -> None:
+    if ALLOW_LEGACY_ASSISTANTS:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            f"{feature} used the legacy Assistants API path and is disabled. "
+            "Use preview-first Ask AI, Source Librarian, Reviewer, Project Planner, "
+            "or a Responses-backed source workflow instead. Set "
+            "DOCMAP_ALLOW_LEGACY_ASSISTANTS=true only as a temporary migration fallback."
+        ),
+    )
+
+
+def repair_flow_snapshot_for_persistence(
+    flow_json: str,
+    *,
+    flow_id: str = "",
+    flow_name: str = "Untitled Workspace",
+    flow_type: str = "",
+    summary: str = "",
+) -> str:
+    try:
+        snapshot = json.loads(flow_json or "{}")
+    except json.JSONDecodeError:
+        return flow_json
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("nodes"), list):
+        return flow_json
+    workspace_brief = snapshot.get("workspace_brief")
+    if workspace_brief is not None:
+        validate_workspace_brief(workspace_brief)
+
+    graph = build_workspace_graph(
+        {
+            "_id": flow_id,
+            "flow_name": flow_name,
+            "summary": summary,
+            "flow_type": flow_type,
+            "flow_json": json.dumps(snapshot),
+        }
+    )
+    graph_nodes_by_id = {node.get("id"): node for node in graph.get("nodes", [])}
+
+    changed = False
+    next_nodes = []
+    for raw_node in snapshot.get("nodes", []):
+        graph_node = graph_nodes_by_id.get(raw_node.get("id"))
+        if not graph_node:
+            next_nodes.append(raw_node)
+            continue
+
+        next_node = _apply_graph_review_state_to_react_node(raw_node, graph_node)
+        changed = changed or next_node != raw_node
+        next_nodes.append(next_node)
+
+    if not changed:
+        return flow_json
+
+    snapshot["nodes"] = next_nodes
+    return json.dumps(snapshot)
+
+
+def _apply_graph_review_state_to_react_node(raw_node: dict, graph_node: dict) -> dict:
+    if not isinstance(raw_node, dict):
+        return raw_node
+
+    status_value = graph_node.get("status")
+    source_refs = graph_node.get("source_refs")
+    if not status_value and not source_refs:
+        return raw_node
+
+    next_node = deepcopy(raw_node)
+    data = next_node.setdefault("data", {})
+    if not isinstance(data, dict):
+        next_node["data"] = {}
+        data = next_node["data"]
+
+    nested_data = data.get("data")
+    if not isinstance(nested_data, dict):
+        nested_data = None
+
+    if status_value:
+        data["status"] = status_value
+        if nested_data is not None:
+            nested_data["status"] = status_value
+
+    if isinstance(source_refs, list) and source_refs:
+        data["source_refs"] = source_refs
+        if nested_data is not None:
+            nested_data["source_refs"] = source_refs
+
+    return next_node
 
 credentials = None
 model_vertexai = None
@@ -1736,9 +1838,16 @@ def get_flow(flow_id: str):
 def update_flow(update_data: Flow):
     try:
         print(update_data)
+        repaired_flow_json = repair_flow_snapshot_for_persistence(
+            update_data.flow_json,
+            flow_id=update_data.flow_id,
+            flow_name=update_data.flow_name,
+            flow_type=update_data.flow_type,
+            summary=update_data.summary,
+        )
         updates = {
             "flow_name": update_data.flow_name,
-            "flow_json": update_data.flow_json,
+            "flow_json": repaired_flow_json,
             "flow_type": update_data.flow_type,
             "summary": update_data.summary,
         }
@@ -1780,6 +1889,11 @@ def update_flow(update_data: Flow):
             "message": "Flow updated successfully",
         }
 
+    except GraphSchemaError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"message": "Flow snapshot schema validation failed.", "errors": e.errors},
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -2739,6 +2853,46 @@ def get_summary_from_openai(
     if len(file_bytes) == 0:
         raise ValueError("The uploaded file is actually empty!")
 
+    if source_context.get("document_chunks"):
+        intake_instruction = build_source_intake_instruction(intake_role, intake_prompt)
+        update_operation_progress(
+            operation_id,
+            phase="ai_reading",
+            message="AI is reading source chunks",
+            detail="The model is summarizing locally extracted document chunks.",
+            progress=62,
+        )
+        summary_text, ai_metadata = generate_document_summary(
+            file_name=source_document["filename"],
+            source_type=file_extension,
+            chunks=source_context["document_chunks"],
+            role_instruction=intake_instruction,
+            model=intake_model,
+        )
+        component_metadata = {
+            "flow_id": ObjectId(flow_id),
+            "file_id": "",
+            "assistant_id": "",
+            "vector_store_id": "",
+            "size": len(file_bytes),
+            "type": file_extension,
+            "processing_type": "responses",
+            "summary": summary_text,
+            "ai_provider": ai_metadata,
+            **source_metadata_fields(source_context),
+        }
+        component_id = component_collection.insert_one(component_metadata).inserted_id
+        update_operation_progress(
+            operation_id,
+            phase="complete",
+            message="Source summary is ready",
+            detail="The source component was saved to the workspace.",
+            progress=100,
+            status_value="completed",
+        )
+        return {"component_id": str(component_id), "type": file_extension, flow_type: flow_type}
+
+    require_legacy_assistants_enabled(f"{file_extension.upper()} source summary")
     assistant_model = resolve_assistants_model(intake_model)
     intake_instruction = build_source_intake_instruction(intake_role, intake_prompt)
 
@@ -2863,7 +3017,12 @@ def get_summary_from_openai(
         "vector_store_id": vector_store.id,
         "size": len(file_bytes),
         "type": file_extension,
-        "processing_type": "gpt",
+        "processing_type": "legacy_assistants",
+        "ai_provider": {
+            "provider": "assistants_legacy_fallback",
+            "model": assistant_model,
+            "reason": "Document chunks were unavailable, so source intake used the temporary Assistants file-search fallback.",
+        },
         "summary": message_content.value,
         **source_metadata_fields(source_context),
     }
@@ -2926,10 +3085,63 @@ def openai_mindmap_generator(
     if len(file_bytes) == 0:
         raise ValueError("The uploaded file is actually empty!")
 
+    if source_context.get("document_chunks"):
+        intake_role_label = resolve_source_intake_role(intake_role)
+        intake_prompt_text = clean_source_intake_value(intake_prompt)
+        intake_instruction = build_source_intake_instruction(
+            intake_role_label,
+            intake_prompt_text,
+        )
+        update_operation_progress(
+            operation_id,
+            phase="ai_deriving",
+            message="AI is deriving workspace nodes",
+            detail="The model is generating a source-grounded DocMap draft from local chunks.",
+            progress=64,
+        )
+        response_json, ai_metadata = generate_document_mindmap(
+            file_name=source_document["filename"],
+            source_type=file_extension,
+            flow_id=flow_id,
+            chunks=source_context["document_chunks"],
+            role_instruction=intake_instruction,
+            model=intake_model,
+        )
+        response_json = ground_mindmap_with_source_refs(response_json, source_context)
+        component_metadata = {
+            "flow_id": ObjectId(flow_id),
+            "file_id": "",
+            "assistant_id": "",
+            "vector_store_id": "",
+            "size": len(file_bytes),
+            "type": file_extension,
+            "processing_type": "responses",
+            "mindmap_json": response_json,
+            "ai_provider": ai_metadata,
+            **source_metadata_fields(source_context),
+        }
+        component_id = component_collection.insert_one(component_metadata).inserted_id
+        flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
+        update_operation_progress(
+            operation_id,
+            phase="complete",
+            message="Workspace structure is ready",
+            detail="The generated mind map was saved to the workspace.",
+            progress=100,
+            status_value="completed",
+        )
+        return {
+            "flow_id": flow_id,
+            "flow_name": flow["flow_name"],
+            "component_id": str(component_id),
+            "type": file_extension,
+            "mindmap_json": response_json,
+            "flow_type": flow_type,
+        }
+
+    require_legacy_assistants_enabled(f"{file_extension.upper()} source graph generation")
     assistant_model = resolve_assistants_model(intake_model)
-    intake_role_label = clean_source_intake_value(
-        intake_role, 160
-    ) or "Document Structure Extractor"
+    intake_role_label = resolve_source_intake_role(intake_role)
     intake_prompt_text = clean_source_intake_value(intake_prompt)
     intake_instruction = build_source_intake_instruction(
         intake_role_label,
@@ -3046,7 +3258,8 @@ def openai_mindmap_generator(
                     - `data` contains the following properties:
                         {{
                             "prompt": {json.dumps(intake_role_label)},
-                            "model_name": {json.dumps(assistant_model)},
+                            "model_name": {json.dumps(assistant_model if intake_role_label or intake_prompt_text else "")},
+                            "intake_model": {json.dumps(assistant_model)},
                             "intake_prompt": {json.dumps(intake_prompt_text)},
                             "name": "{file_extension}", !!!DOESN"T CHANGES 
                             "content": "<file name or content>",
@@ -3147,7 +3360,12 @@ def openai_mindmap_generator(
         "vector_store_id": vector_store.id,
         "size": len(file_bytes),
         "type": file_extension,
-        "processing_type": "gpt",
+        "processing_type": "legacy_assistants",
+        "ai_provider": {
+            "provider": "assistants_legacy_fallback",
+            "model": assistant_model,
+            "reason": "Document chunks were unavailable, so graph generation used the temporary Assistants file-search fallback.",
+        },
         "mindmap_json": response_json,
         **source_metadata_fields(source_context),
     }
@@ -3173,6 +3391,7 @@ def openai_mindmap_generator(
 
     
 def one_shot_openai(query, vector_store_id, file_id, assistant_id):
+    require_legacy_assistants_enabled("component Q&A")
     try:
         template = f"""
         You are an AI assistant tasked with answering the user’s question based on the provided conversation history. Return the results in **JSON format** with the structure below:  
@@ -3253,6 +3472,8 @@ def one_shot_openai(query, vector_store_id, file_id, assistant_id):
         response = message_content.value.replace("```json", "").replace("```", "").strip().replace("\n", "") 
         print(response)
         return response
+    except HTTPException:
+        raise
     except Exception as e:
         print(e.with_traceback())
         raise HTTPException(status_code=500)
@@ -4660,7 +4881,7 @@ async def create_web_crawler(
             assistant = openai.beta.assistants.create(
                 name="Summarize agent",
                 instructions="Your task is to only summarize the document",
-                model=OPENAI_ASSISTANTS_MODEL,
+                model=OPENAI_DEFAULT_MODEL,
                 tools=[{"type": "file_search"}],
             )
             vector_store = openai.beta.vector_stores.create(name=f"web_{flow_id}")
@@ -4730,7 +4951,7 @@ async def create_web_crawler(
             assistant = openai.beta.assistants.create(
             name="MindMap Builder",
             instructions="Your task is to create the mindmap of the document",
-            model=OPENAI_ASSISTANTS_MODEL,
+            model=OPENAI_DEFAULT_MODEL,
             tools=[{"type": "file_search"}],
             )
             vector_store = openai.beta.vector_stores.create(name=f"web_mindmap_{flow_id}")
@@ -4912,6 +5133,7 @@ async def create_web_crawler(
 
 @app.post("/pdf-component-qa", response_model=List[PDFNodeQueryResponse])
 def PDF_QA(request: PDFNodeQueryRequest):
+    require_legacy_assistants_enabled("PDF component Q&A")
     try:
         record = component_collection.find_one(
             {
@@ -5130,6 +5352,7 @@ def PDF_QA(request: PDFNodeQueryRequest):
 
 @app.post("/txt-component-qa", response_model=List[TXTNodeQueryResponse])
 def TXT_QA(request: TXTNodeQueryRequest):
+    require_legacy_assistants_enabled("TXT component Q&A")
     try:
         record = component_collection.find_one(
             {
@@ -5206,6 +5429,7 @@ def TXT_QA(request: TXTNodeQueryRequest):
 
 @app.post("/md-component-qa", response_model=List[MDNodeQueryResponse])
 def MD_QA(request: MDNodeQueryRequest):
+    require_legacy_assistants_enabled("Markdown component Q&A")
     try:
         record = component_collection.find_one(
             {
@@ -5284,6 +5508,7 @@ def MD_QA(request: MDNodeQueryRequest):
 
 @app.post("/html-component-qa", response_model=List[HTMLNodeQueryResponse])
 def HTML_QA(request: HTMLNodeQueryRequest):
+    require_legacy_assistants_enabled("HTML component Q&A")
     try:
         record = component_collection.find_one(
             {
@@ -5362,6 +5587,7 @@ def HTML_QA(request: HTMLNodeQueryRequest):
 
 @app.post("/docx-component-qa", response_model=List[DOCXNodeQueryResponse])
 def DOCX_QA(request: DOCXNodeQueryRequest):
+    require_legacy_assistants_enabled("DOCX component Q&A")
     try:
         record = component_collection.find_one(
             {
@@ -5440,6 +5666,7 @@ def DOCX_QA(request: DOCXNodeQueryRequest):
 
 @app.post("/pptx-component-qa", response_model=List[PPTXNodeQueryResponse])
 def PPTX_QA(request: PPTXNodeQueryRequest):
+    require_legacy_assistants_enabled("PPTX component Q&A")
     try:
         record = component_collection.find_one(
             {
@@ -5651,6 +5878,7 @@ def CSV_QA(request: CSVNodeQueryRequest):
 
 @app.post("/web-component-qa", response_model=List[WebNodeQueryResponse])
 def WEB_QA(request: WebNodeQueryRequest):
+    require_legacy_assistants_enabled("Web component Q&A")
     try:
         record = component_collection.find_one(
             {
@@ -6451,6 +6679,8 @@ def create_sql_component(request: SQLComponentRequest):
 
 @app.post("/components-follow-up-questions", response_model=List[ComponentFollowUpQueryResponse])
 def create_follow_up_questions(request: ComponentFollowUpQueryRequest):
+    if request.component_type not in {"sql", "csv"}:
+        require_legacy_assistants_enabled("component follow-up questions")
     try:
         if request.component_type == "pdf":
             record = component_collection.find_one(

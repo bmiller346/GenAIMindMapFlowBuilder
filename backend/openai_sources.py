@@ -26,6 +26,8 @@ except ImportError:
         HTTP_503_SERVICE_UNAVAILABLE = 503
 
 from config import MissingConfigurationError, configuration_http_error, get_setting
+from ai_model_policy import choose_openai_model
+from ai.schemas import json_object_response_format
 from graph.ai_contract import append_ai_graph_prompt_contract, parse_ai_mindmap_response
 from graph.schemas import GraphSchemaError
 
@@ -35,6 +37,74 @@ DEFAULT_MODEL = "gpt-5.5"
 DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
 MAX_VIDEO_FRAMES = 6
 VIDEO_AUDIO_SAMPLE_SECONDS = 600
+MAX_DOCUMENT_CONTEXT_CHARS = 48000
+
+
+def generate_document_summary(
+    *,
+    file_name: str,
+    source_type: str,
+    chunks: list[dict[str, Any]],
+    role_instruction: str = "",
+    model: str | None = None,
+) -> tuple[str, dict[str, Any]]:
+    context = _chunk_context(chunks)
+    decision = choose_openai_model(
+        requested_model=model,
+        task=f"summarize {source_type} source document",
+        content=context,
+        source_chunks=chunks,
+        requires_source_grounding=True,
+    )
+    prompt = (
+        f"Source: {file_name}\n"
+        f"Type: {source_type}\n\n"
+        "Create a concise, source-grounded summary of this document. "
+        "Use only the provided chunks. If the chunks are insufficient, say what is missing."
+        f"{role_instruction}\n\n"
+        f"Chunks:\n{context}"
+    )
+    data = _post_openai_json(
+        _responses_payload(model=decision.model, input_items=[_text_message(prompt)]),
+        _require_openai_api_key(),
+    )
+    return _extract_output_text(data).strip(), _decision_metadata(decision)
+
+
+def generate_document_mindmap(
+    *,
+    file_name: str,
+    source_type: str,
+    flow_id: str,
+    chunks: list[dict[str, Any]],
+    role_instruction: str = "",
+    model: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    context = _chunk_context(chunks)
+    decision = choose_openai_model(
+        requested_model=model,
+        task=f"generate source-grounded DocMap graph from {source_type}",
+        content=context,
+        source_chunks=chunks,
+        requires_source_grounding=True,
+    )
+    prompt = _graph_prompt(
+        source_type=source_type,
+        source_label=file_name,
+        flow_id=flow_id,
+        source_instruction=(
+            "Use only the provided source chunks. Prefer source-backed structure over "
+            "speculation. Every non-source node should either include source_refs with "
+            "document_id/chunk_id or be clearly reviewable as needs_review."
+        ),
+    )
+    graph = _responses_json(
+        model=decision.model,
+        input_items=[_text_message(f"{prompt}{role_instruction}\n\nSource chunks:\n{context}")],
+        requires_source_grounding=True,
+        source_chunks=chunks,
+    )
+    return graph, _decision_metadata(decision)
 
 
 def generate_web_mindmap(*, url: str, flow_id: str, model: str | None = None) -> dict[str, Any]:
@@ -313,16 +383,24 @@ def _responses_json(
     input_items: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
     model: str | None = None,
+    requires_source_grounding: bool = False,
+    source_chunks: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     api_key = _require_openai_api_key()
-    payload: dict[str, Any] = {
-        "model": model or get_setting("openai_default_model") or DEFAULT_MODEL,
-        "input": input_items,
-        "store": False,
-        "text": {"format": {"type": "json_object"}},
-    }
-    if tools:
-        payload["tools"] = tools
+    decision = choose_openai_model(
+        requested_model=model,
+        task="source mind map generation",
+        content=_input_text_for_policy(input_items),
+        source_chunks=source_chunks,
+        requires_source_grounding=requires_source_grounding,
+        requires_tools=bool(tools),
+    )
+    payload = _responses_payload(
+        model=decision.model,
+        input_items=input_items,
+        tools=tools,
+        json_output=True,
+    )
 
     try:
         data = _post_openai_json(payload, api_key)
@@ -347,6 +425,25 @@ def _responses_json(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"message": "OpenAI source graph failed schema validation.", "errors": exc.errors},
         ) from exc
+
+
+def _responses_payload(
+    *,
+    model: str,
+    input_items: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+    json_output: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": model or get_setting("openai_default_model") or DEFAULT_MODEL,
+        "input": input_items,
+        "store": False,
+    }
+    if json_output:
+        payload["text"] = json_object_response_format()
+    if tools:
+        payload["tools"] = tools
+    return payload
 
 
 def _post_openai_json(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
@@ -392,6 +489,54 @@ def _extract_output_text(response: dict[str, Any]) -> str:
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail="OpenAI response did not include text output.",
     )
+
+
+def _input_text_for_policy(input_items: list[dict[str, Any]]) -> str:
+    text_parts: list[str] = []
+    for item in input_items:
+        if not isinstance(item, dict):
+            continue
+        content = item.get("content")
+        if isinstance(content, str):
+            text_parts.append(content)
+            continue
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    text_parts.append(part["text"])
+    return "\n".join(text_parts)
+
+
+def _chunk_context(chunks: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    total = 0
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            continue
+        text = str(chunk.get("text") or "").strip()
+        if not text:
+            continue
+        label = (
+            f"[chunk_id={chunk.get('id', '')}; "
+            f"page={chunk.get('page') or ''}; "
+            f"section={chunk.get('heading') or ''}]"
+        )
+        block = f"{label}\n{text}"
+        if total + len(block) > MAX_DOCUMENT_CONTEXT_CHARS:
+            break
+        parts.append(block)
+        total += len(block)
+    return "\n\n".join(parts)
+
+
+def _decision_metadata(decision: Any) -> dict[str, Any]:
+    return {
+        "provider": "responses",
+        "model": decision.model,
+        "model_tier": decision.tier,
+        "model_reason": decision.reason,
+        "tool_policy": decision.tool_policy,
+    }
 
 
 def _graph_prompt(

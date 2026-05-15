@@ -945,6 +945,15 @@ input:focus {
   opacity: 0.65;
 }
 
+.legacy-prompt-inline-note {
+  color: var(--input-color);
+  font-size: 0.76rem;
+  font-weight: 750;
+  line-height: 1.05rem;
+  margin: 0;
+  max-width: 24rem;
+}
+
 .prompt-container:hover {
   background-color: rgba(26, 26, 26, 1);
   color: white;
@@ -3556,7 +3565,8 @@ img:hover {
 
 .node-inspector {
   width: min(22rem, calc(100vw - 2rem));
-  max-height: calc(100vh - 5rem);
+  max-height: calc(100vh - 9rem);
+  margin-top: 4rem;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -4567,6 +4577,7 @@ img:hover {
   .node-inspector {
     width: calc(100vw - 1rem);
     max-height: 45vh;
+    margin-top: 3.5rem;
   }
 
   .graph-validation-panel {

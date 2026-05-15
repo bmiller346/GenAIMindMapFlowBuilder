@@ -22,9 +22,24 @@ def get_setting(name):
     return ""
 
 
+def require_settings(*names):
+    return True
+
+
+def reset_request_settings():
+    return None
+
+
+def set_request_settings(*args, **kwargs):
+    return None
+
+
 config_stub.MissingConfigurationError = MissingConfigurationError
 config_stub.configuration_http_error = configuration_http_error
 config_stub.get_setting = get_setting
+config_stub.require_settings = require_settings
+config_stub.reset_request_settings = reset_request_settings
+config_stub.set_request_settings = set_request_settings
 sys.modules.setdefault("config", config_stub)
 
 import openai_sources
@@ -62,12 +77,12 @@ def test_responses_json_posts_to_openai_responses_with_web_search(monkeypatch):
     graph = openai_sources.generate_web_mindmap(
         url="https://example.com/docs",
         flow_id="flow-1",
-        model="gpt-test",
+        model="gpt-5.4",
     )
 
     assert graph["nodes"][0]["data"]["content"] == "source"
     assert requests[0][1] == "test-key"
-    assert requests[0][0]["model"] == "gpt-test"
+    assert requests[0][0]["model"] == "gpt-5.4"
     assert requests[0][0]["tools"] == [{"type": "web_search"}]
     assert requests[0][0]["text"] == {"format": {"type": "json_object"}}
     prompt_text = requests[0][0]["input"][0]["content"][0]["text"]
@@ -117,7 +132,7 @@ def test_video_generation_uses_sampled_frames_without_cloud_upload(monkeypatch):
         mime_type="video/mp4",
         contents=b"not-a-real-video",
         flow_id="flow-1",
-        model="gpt-test",
+        model="gpt-5.4",
     )
 
     content = requests[0]["input"][0]["content"]

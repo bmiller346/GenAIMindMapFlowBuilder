@@ -8,13 +8,19 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from ai.roles import get_prompt_profile, list_prompt_profiles
+from ai.schemas import (
+    AI_ACTION_PREVIEW_CONTRACT_VERSION,
+    AI_HELPER_PREVIEW_CONTRACT,
+    AI_HELPER_PREVIEW_CONTRACT_VERSION,
+    json_object_response_format,
+)
+from ai_model_policy import choose_openai_model
 from config import MissingConfigurationError, get_setting
 from graph.schemas import GraphSchemaError
 
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
-AI_HELPER_PREVIEW_CONTRACT_VERSION = "1"
-AI_ACTION_PREVIEW_CONTRACT_VERSION = "1"
 HELPER_ACTIONS: dict[str, set[str]] = {
     "source_librarian": {"source_repair", "source_coverage"},
     "reviewer": {"missing_information", "sme_questions", "contradictions"},
@@ -57,227 +63,6 @@ AI_ACTIONS_BY_SCOPE = {
     "branch": BRANCH_AI_ACTIONS,
     "workspace": WORKSPACE_AI_ACTIONS,
 }
-PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
-    "standards_extractor": {
-        "role_id": "standards_extractor",
-        "label": "Standards Extractor",
-        "group": "DocMap",
-        "description": "Extracts requirements, controls, and compliance-ready statements from source-backed workspace context.",
-        "supported_scopes": ["node", "branch", "workspace"],
-        "supported_actions": [
-            "expand_this_node",
-            "generate_child_nodes",
-            "find_missing_source_support",
-            "summarize_branch",
-            "find_gaps",
-            "find_unsupported_assumptions",
-            "custom_prompt",
-        ],
-        "system_instructions": "Produce precise DocMap draft nodes and review annotations. Preserve source refs; do not invent citations.",
-        "default_output_shape": "draft_nodes",
-        "source_strictness": "strict",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "workflow_mapper": {
-        "role_id": "workflow_mapper",
-        "label": "Workflow Mapper",
-        "group": "DocMap",
-        "description": "Turns process context into workflow steps, branches, handoffs, and gaps.",
-        "supported_scopes": ["node", "branch", "workspace"],
-        "supported_actions": [
-            "expand_this_node",
-            "generate_child_nodes",
-            "reorganize_branch",
-            "split_branch_into_categories",
-            "find_gaps",
-            "custom_prompt",
-        ],
-        "system_instructions": "Represent workflow changes as preview-only draft graph changes with clear parentage.",
-        "default_output_shape": "draft_nodes",
-        "source_strictness": "prefer_source_refs",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "training_guide_builder": {
-        "role_id": "training_guide_builder",
-        "label": "Training Guide Builder",
-        "group": "DocMap",
-        "description": "Builds training outlines, checklists, and learner-facing guide structure from DocMap graph context.",
-        "supported_scopes": ["node", "branch", "workspace"],
-        "supported_actions": [
-            "convert_to_checklist",
-            "generate_checklist",
-            "generate_training_outline",
-            "export_branch_as_sop_draft",
-            "custom_prompt",
-        ],
-        "system_instructions": "Draft instructional structure without mutating the canonical graph before accept.",
-        "default_output_shape": "draft_nodes",
-        "source_strictness": "prefer_source_refs",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "sme_question_generator": {
-        "role_id": "sme_question_generator",
-        "label": "SME Question Generator",
-        "group": "DocMap",
-        "description": "Creates targeted reviewer and subject-matter-expert questions for unresolved graph context.",
-        "supported_scopes": ["node", "branch", "workspace"],
-        "supported_actions": [
-            "ask_follow_up",
-            "create_sme_questions",
-            "find_gaps",
-            "suggest_follow_up_questions",
-            "custom_prompt",
-        ],
-        "system_instructions": "Prefer concise questions tied to the selected context and source gaps.",
-        "default_output_shape": "draft_annotations",
-        "source_strictness": "allow_assumptions",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "task_planner": {
-        "role_id": "task_planner",
-        "label": "Task Planner",
-        "group": "DocMap",
-        "description": "Turns selected context into tasks, priorities, checklist items, and execution follow-up.",
-        "supported_scopes": ["node", "branch"],
-        "supported_actions": [
-            "generate_tasks",
-            "convert_to_checklist",
-            "generate_checklist",
-            "custom_prompt",
-        ],
-        "system_instructions": "Draft execution-ready task nodes and checklist annotations with review state explicit.",
-        "default_output_shape": "draft_nodes",
-        "source_strictness": "prefer_source_refs",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "data_table_interpreter": {
-        "role_id": "data_table_interpreter",
-        "label": "Data/Table Interpreter",
-        "group": "DocMap",
-        "description": "Interprets table-like or data-source context into conclusions, caveats, and follow-up tasks.",
-        "supported_scopes": ["node", "branch"],
-        "supported_actions": ["interpret_table_data", "generate_tasks", "custom_prompt"],
-        "system_instructions": "State data caveats and keep inferred conclusions marked for review unless cited.",
-        "default_output_shape": "draft_annotations",
-        "source_strictness": "prefer_source_refs",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "gap_analyst": {
-        "role_id": "gap_analyst",
-        "label": "Gap Analyst",
-        "group": "DocMap",
-        "description": "Finds missing details, unsupported assumptions, duplication, and overlapping nodes.",
-        "supported_scopes": ["node", "branch", "workspace"],
-        "supported_actions": [
-            "find_missing_source_support",
-            "find_gaps",
-            "find_unsupported_assumptions",
-            "find_duplicate_overlapping_nodes",
-            "custom_prompt",
-        ],
-        "system_instructions": "Create preview findings with clear rationale and no direct graph mutation.",
-        "default_output_shape": "draft_annotations",
-        "source_strictness": "strict",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "source_ref_repair": {
-        "role_id": "source_ref_repair",
-        "label": "Source Ref Repair",
-        "group": "DocMap",
-        "description": "Inspects source coverage and proposes source-reference repair work.",
-        "supported_scopes": ["node", "branch", "workspace"],
-        "supported_actions": [
-            "find_missing_source_support",
-            "find_unsupported_assumptions",
-            "custom_prompt",
-        ],
-        "system_instructions": "Only propose grounded source refs when context contains evidence; otherwise mark assumptions.",
-        "default_output_shape": "draft_annotations",
-        "source_strictness": "strict",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "integration_readiness_reviewer": {
-        "role_id": "integration_readiness_reviewer",
-        "label": "Integration Readiness Reviewer",
-        "group": "DocMap",
-        "description": "Reviews nodes and branches for handoff readiness before Miro, monday, or later integrations.",
-        "supported_scopes": ["node", "branch", "workspace"],
-        "supported_actions": ["generate_tasks", "find_gaps", "find_unsupported_assumptions", "custom_prompt"],
-        "system_instructions": "Focus on durable handoff metadata and reviewable missing integration details.",
-        "default_output_shape": "draft_annotations",
-        "source_strictness": "prefer_source_refs",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "custom": {
-        "role_id": "custom",
-        "label": "Custom",
-        "group": "DocMap",
-        "description": "Uses a user-provided instruction while preserving DocMap preview and validation rules.",
-        "supported_scopes": ["node", "branch", "workspace"],
-        "supported_actions": ["custom_prompt"],
-        "system_instructions": "Follow the custom instruction, but return preview-only DocMap draft changes.",
-        "default_output_shape": "draft_nodes",
-        "source_strictness": "prefer_source_refs",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "strategic_advisor": {
-        "role_id": "strategic_advisor",
-        "label": "Strategic Advisor",
-        "group": "General",
-        "description": "Legacy persona for strategic framing and decision support.",
-        "supported_scopes": ["node", "branch", "workspace"],
-        "supported_actions": ["ask_follow_up", "summarize_branch", "suggest_follow_up_questions", "custom_prompt"],
-        "system_instructions": "Provide strategic guidance as reviewable DocMap preview output.",
-        "default_output_shape": "draft_annotations",
-        "source_strictness": "allow_assumptions",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "research_assistant": {
-        "role_id": "research_assistant",
-        "label": "Research Assistant",
-        "group": "General",
-        "description": "Legacy persona for research questions, synthesis, and next-step discovery.",
-        "supported_scopes": ["node", "branch", "workspace"],
-        "supported_actions": ["ask_follow_up", "create_sme_questions", "find_gaps", "suggest_follow_up_questions", "custom_prompt"],
-        "system_instructions": "Summarize research gaps and questions without fabricating source refs.",
-        "default_output_shape": "draft_annotations",
-        "source_strictness": "allow_assumptions",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "productivity_coach": {
-        "role_id": "productivity_coach",
-        "label": "Productivity Coach",
-        "group": "General",
-        "description": "Legacy persona for tasks, prioritization, and productivity-oriented suggestions.",
-        "supported_scopes": ["node", "branch"],
-        "supported_actions": ["generate_tasks", "convert_to_checklist", "generate_checklist", "custom_prompt"],
-        "system_instructions": "Draft productivity suggestions as tasks or checklist previews.",
-        "default_output_shape": "draft_nodes",
-        "source_strictness": "allow_assumptions",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-    "data_interpreter": {
-        "role_id": "data_interpreter",
-        "label": "Data Interpreter",
-        "group": "General",
-        "description": "Legacy persona for interpreting data-source content.",
-        "supported_scopes": ["node", "branch"],
-        "supported_actions": ["interpret_table_data", "ask_follow_up", "custom_prompt"],
-        "system_instructions": "Explain data interpretations and caveats as preview-only annotations.",
-        "default_output_shape": "draft_annotations",
-        "source_strictness": "allow_assumptions",
-        "default_review_status": "needs_review_when_unsourced",
-    },
-}
-AI_HELPER_PREVIEW_CONTRACT = f"""
-Canonical AI helper preview contract:
-- Return exactly one JSON object. Do not wrap it in prose or markdown.
-- Top-level fields: preview_id, helper_id, action, scope, generated_by, preview_items, warnings, metadata.
-- preview_items must be an array. Each item must include id, preview_type, node_id, title, rationale, confidence, source_refs, assumptions, and proposed_mutation.
-- source_refs must be an array. If a proposed item is not source-backed, return source_refs: [] and add a plain-language assumption.
-- proposed_mutation must be an object describing changes only. Do not rewrite the entire graph.
-- Include metadata.ai_helper_preview_contract_version as "{AI_HELPER_PREVIEW_CONTRACT_VERSION}".
-"""
 
 
 def generate_source_librarian_preview(
@@ -509,18 +294,6 @@ def generate_helper_preview(
         warnings=warnings,
         metadata={"node_count": len(graph.get("nodes", [])) if isinstance(graph, dict) else 0},
     )
-
-
-def list_prompt_profiles() -> list[dict[str, Any]]:
-    return [deepcopy(profile) for profile in PROMPT_PROFILE_REGISTRY.values()]
-
-
-def get_prompt_profile(role: str) -> dict[str, Any]:
-    role_id = _profile_id(role)
-    profile = PROMPT_PROFILE_REGISTRY.get(role_id)
-    if not profile:
-        raise GraphSchemaError([f"ai_action.role: unsupported role '{role}'"])
-    return deepcopy(profile)
 
 
 def validate_ai_action_request(
@@ -1028,8 +801,14 @@ def build_openai_helper_preview_payload(
 ) -> dict[str, Any]:
     validate_helper_action(helper_id, action)
     normalized_scope = normalize_helper_scope(scope)
+    decision = choose_openai_model(
+        requested_model=model,
+        task=f"{helper_id} {action}",
+        content=f"{system_prompt}\n{task_prompt}",
+        requires_source_grounding=helper_id in {"source_librarian", "reviewer"},
+    )
     return {
-        "model": model or get_setting("openai_default_model") or "gpt-5.5",
+        "model": decision.model,
         "input": [
             {
                 "role": "system",
@@ -1046,12 +825,14 @@ def build_openai_helper_preview_payload(
                 ),
             },
         ],
-        "text": {"format": {"type": "json_object"}},
+        "text": json_object_response_format(),
         "metadata": {
             "helper_id": helper_id,
             "action": action,
             "scope_type": normalized_scope.get("type", "workspace"),
             "node_count": len(graph.get("nodes", [])) if isinstance(graph, dict) else 0,
+            "model_tier": decision.tier,
+            "model_reason": decision.reason,
         },
     }
 

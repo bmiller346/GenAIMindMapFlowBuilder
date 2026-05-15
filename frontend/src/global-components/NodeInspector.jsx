@@ -238,10 +238,6 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
         });
     }, [activeAIActionPreview, aiPreviewAppliesHere, recordActivity]);
 
-    if (!selectedNode) {
-        return null;
-    }
-
     const updateDraft = (key, value) => {
         setDraft((current) => ({ ...current, [key]: value }));
         setApplyMessage('');
@@ -419,6 +415,127 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
             status: 'completed'
         });
     };
+
+    const closeWorkspacePreview = () => {
+        clearActiveAIActionPreview();
+        onClose();
+    };
+
+    const renderAIActionPreview = () =>
+        aiPreviewAppliesHere ? (
+            <div className="node-inspector-section ai-action-preview-card">
+                <p>AI action preview</p>
+                <div className="ai-action-preview-summary">
+                    <span>
+                        {activeAIActionPreview.role ||
+                            activeAIActionPreview.helper_id ||
+                            'AI action'}
+                    </span>
+                    <strong>
+                        {activeAIActionPreview.action || 'Generated preview'}
+                    </strong>
+                    <small>
+                        {[
+                            `${aiDraftNodes.length} draft nodes`,
+                            `${aiDraftEdges.length} draft edges`,
+                            `${aiNonNodeOutputs.length} review outputs`
+                        ].join(' | ')}
+                    </small>
+                </div>
+                {aiDraftNodes.length > 0 ? (
+                    <div className="ai-action-preview-list">
+                        {aiDraftNodes.map((item, index) => {
+                            const sourceRefs = Array.isArray(item.source_refs)
+                                ? item.source_refs
+                                : [];
+                            return (
+                                <article
+                                    key={item.id || item.node_id || index}
+                                    className="ai-action-preview-item"
+                                >
+                                    <span>
+                                        {item.node_type || item.type || 'node'}
+                                        {sourceRefs.length === 0
+                                            ? ' | needs review'
+                                            : ' | source cited'}
+                                    </span>
+                                    <strong>
+                                        {item.title ||
+                                            item.label ||
+                                            item.question ||
+                                            'AI draft'}
+                                    </strong>
+                                    {item.body || item.summary || item.rationale ? (
+                                        <p>
+                                            {item.body ||
+                                                item.summary ||
+                                                item.rationale}
+                                        </p>
+                                    ) : null}
+                                </article>
+                            );
+                        })}
+                    </div>
+                ) : null}
+                {aiNonNodeOutputs.length > 0 ? (
+                    <div className="ai-action-preview-list">
+                        {aiNonNodeOutputs.map(({ type, item }, index) => (
+                            <article
+                                key={`${type}-${item.id || index}`}
+                                className="ai-action-preview-item"
+                            >
+                                <span>{type.replaceAll('_', ' ')}</span>
+                                <strong>
+                                    {item.title ||
+                                        item.question ||
+                                        item.label ||
+                                        String(item)}
+                                </strong>
+                                {item.reason || item.note || item.summary ? (
+                                    <p>{item.reason || item.note || item.summary}</p>
+                                ) : null}
+                            </article>
+                        ))}
+                    </div>
+                ) : null}
+                <div className="ai-action-preview-actions">
+                    <button type="button" onClick={rejectAIAction}>
+                        Reject
+                    </button>
+                    <button type="button" onClick={acceptAIAction}>
+                        Accept
+                    </button>
+                </div>
+            </div>
+        ) : null;
+
+    if (!selectedNode) {
+        if (!aiPreviewAppliesHere) {
+            return null;
+        }
+
+        return (
+            <aside className="node-inspector">
+                <div className="node-inspector-header">
+                    <div>
+                        <p className="node-inspector-kicker">Workspace AI</p>
+                        <h2>Workspace preview</h2>
+                    </div>
+                    <button
+                        type="button"
+                        className="node-inspector-icon-button"
+                        onClick={closeWorkspacePreview}
+                        aria-label="Close workspace AI preview"
+                    >
+                        x
+                    </button>
+                </div>
+                <div className="node-inspector-body">
+                    {renderAIActionPreview()}
+                </div>
+            </aside>
+        );
+    }
 
     const isSourceBacked = hasCitation(draft);
     const citationSummary = citationLocation(draft);
@@ -650,92 +767,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                     </label>
                 </div>
 
-                {aiPreviewAppliesHere ? (
-                    <div className="node-inspector-section ai-action-preview-card">
-                        <p>AI action preview</p>
-                        <div className="ai-action-preview-summary">
-                            <span>
-                                {activeAIActionPreview.role ||
-                                    activeAIActionPreview.helper_id ||
-                                    'AI action'}
-                            </span>
-                            <strong>
-                                {activeAIActionPreview.action || 'Generated preview'}
-                            </strong>
-                            <small>
-                                {[
-                                    `${aiDraftNodes.length} draft nodes`,
-                                    `${aiDraftEdges.length} draft edges`,
-                                    `${aiNonNodeOutputs.length} review outputs`
-                                ].join(' | ')}
-                            </small>
-                        </div>
-                        {aiDraftNodes.length > 0 ? (
-                            <div className="ai-action-preview-list">
-                                {aiDraftNodes.map((item, index) => {
-                                    const sourceRefs = Array.isArray(item.source_refs)
-                                        ? item.source_refs
-                                        : [];
-                                    return (
-                                        <article
-                                            key={item.id || item.node_id || index}
-                                            className="ai-action-preview-item"
-                                        >
-                                            <span>
-                                                {item.node_type || item.type || 'node'}
-                                                {sourceRefs.length === 0
-                                                    ? ' | needs review'
-                                                    : ' | source cited'}
-                                            </span>
-                                            <strong>
-                                                {item.title ||
-                                                    item.label ||
-                                                    item.question ||
-                                                    'AI draft'}
-                                            </strong>
-                                            {item.body || item.summary || item.rationale ? (
-                                                <p>
-                                                    {item.body ||
-                                                        item.summary ||
-                                                        item.rationale}
-                                                </p>
-                                            ) : null}
-                                        </article>
-                                    );
-                                })}
-                            </div>
-                        ) : null}
-                        {aiNonNodeOutputs.length > 0 ? (
-                            <div className="ai-action-preview-list">
-                                {aiNonNodeOutputs.map(({ type, item }, index) => (
-                                    <article
-                                        key={`${type}-${item.id || index}`}
-                                        className="ai-action-preview-item"
-                                    >
-                                        <span>{type.replaceAll('_', ' ')}</span>
-                                        <strong>
-                                            {item.title ||
-                                                item.question ||
-                                                item.label ||
-                                                String(item)}
-                                        </strong>
-                                        {item.reason || item.note || item.summary ? (
-                                            <p>{item.reason || item.note || item.summary}</p>
-                                        ) : null}
-                                    </article>
-                                ))}
-                            </div>
-                        ) : null}
-                        <div className="ai-action-preview-actions">
-                            <button type="button" onClick={rejectAIAction}>
-                                Reject
-                            </button>
-                            <button type="button" onClick={acceptAIAction}>
-                                Accept
-                            </button>
-                        </div>
-                    </div>
-                ) : null}
+                {renderAIActionPreview()}
 
                 <div className="node-inspector-section">
                     <p>External refs</p>

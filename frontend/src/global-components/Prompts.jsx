@@ -2,16 +2,7 @@
 import overLayStore from '../stores/modalStore';
 import TICKSvg from "../assets/tick.svg";
 import { useShallow } from 'zustand/shallow';
-import LoadingModal from '../modals/LoadingModal';
-import useStore from '../stores/store';
-import useCreateEdges from '../hooks/useCreateEdges';
-import axios from 'axios';
-import setFollowUp from '../config/setFollowUp';
-import flowStore from '../stores/flowStore';
-import getPrompts from '../prompts/promptsModel';
 import { useState } from 'react';
-import ErrorModal from '../modals/ErrorModal';
-import errorStore from '../stores/errorStore';
 
 const Prompts = ({
     agentName,
@@ -20,94 +11,16 @@ const Prompts = ({
     id,
     selectedModel
 }) => {
-    const selector = (s) => ({ pushNode: s.pushNode, popNode: s.popNode });
-    const selector2 = (state) => ({
-        trigger: state.trigger,
-        setTrigger: state.setTrigger,
-        nodes: state.nodes,
-        edges: state.edges,
-        setNodes: state.setNodes,
-        setEdges: state.setEdges
-    });
-    const flowId = flowStore((s) => s.flow_id);
-    const { pushNode, popNode } = overLayStore(useShallow(selector));
-    const { trigger, setTrigger, nodes, edges, setNodes, setEdges } = useStore(
-        useShallow(selector2)
-    );
+    const selector = (s) => ({ popNode: s.popNode });
+    const { popNode } = overLayStore(useShallow(selector));
     const [customPrompt, setCustomPrompt] = useState();
-
-    const makeApiRequest = (data) => {
-        const prompts = getPrompts(agentName, customPrompt, selectedModel);
-        const dataWithNode = {
-            component_id: id,
-            component_type: data.name,
-            flow_id: data.flow_id,
-            ...prompts
-        };
-
-        const [url, body, headerConfig] = setFollowUp(
-            data.name,
-            flowId,
-            dataWithNode
-        );
-
-        axios
-            .post(`http://localhost:8000/${url}`, body, {
-                headers: {
-                    'Content-Type': headerConfig
-                }
-            })
-            .then((res) => manageNodes(res.data))
-            .catch((err) => manageErrors(err));
-    };
-
-    const selector3 = (state) => ({
-        setStatus: state.setStatus,
-        setMsg: state.setMsg
-    });
-    const { setStatus, setMsg } = errorStore(useShallow(selector3));
-
-    const manageErrors = (err) => {
-        console.log(err);
-        console.log("Errroro", err.status);
-        console.log("Errroross", err.response.statusText);
-        setStatus(err.status);
-        setMsg(err.response.statusText);
-        popNode();
-        pushNode(ErrorModal);
-    };
+    const [legacyMessage, setLegacyMessage] = useState('');
 
     const getData = () => {
         setActiveAgent?.(agentName);
-        pushNode(LoadingModal);
-        const currNode = nodes.filter((node) => node.id === id);
-        const editNode = nodes.find((node) => node.id === id);
-
-        editNode.data.prompt = agentName;
-        editNode.data.model_name = selectedModel;
-
-        makeApiRequest(currNode[0].data);
-    };
-
-    const manageNodes = (data) => {
-        const currentNode = nodes.find((node) => node.id === id);
-        currentNode.data = {
-            prompt: agentName,
-            model_name: selectedModel,
-            ...currentNode.data
-        };
-
-        setNodes([...nodes, ...data]);
-
-        const newEdges = [];
-        data.forEach((element) => {
-            const edge = useCreateEdges(id, element.id);
-            newEdges.push(edge);
-        });
-
-        const updEdges = edges.concat(newEdges);
-        setEdges(updEdges);
-        setTrigger(!trigger);
+        setLegacyMessage(
+            'Legacy direct generation is disabled. Use Ask AI on a node, branch, or workspace to preview changes before accepting them.'
+        );
     };
 
     const handleInput = (e) => {
@@ -158,7 +71,12 @@ const Prompts = ({
                             />
                         </div>
                     ) : (
-                        <p className='agent-name'>{agentName}</p>
+                        <>
+                            <p className='agent-name'>{agentName}</p>
+                            {legacyMessage ? (
+                                <p className="legacy-prompt-inline-note">{legacyMessage}</p>
+                            ) : null}
+                        </>
                     )}
                 </div>
             ) : (
@@ -169,6 +87,13 @@ const Prompts = ({
                             : 'prompt-container'
                     }
                     onClick={() => getData()}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            getData();
+                        }
+                    }}
                 >
                     <img
                         src={TICKSvg}
@@ -182,6 +107,9 @@ const Prompts = ({
                     <div className="prompt-card-copy">
                         <p className='agent-name'>{agentName}</p>
                         <p className="prompt-card-model">{selectedModel}</p>
+                        {legacyMessage ? (
+                            <p className="legacy-prompt-inline-note">{legacyMessage}</p>
+                        ) : null}
                     </div>
                 </div>
             )}

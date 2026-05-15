@@ -13,6 +13,7 @@ import {
 import errorStore from '../stores/errorStore';
 import ErrorModal from '../modals/ErrorModal';
 import SettingsModal from '../modals/SettingsModal';
+import PromptModal from '../modals/PromptModal';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -69,6 +70,8 @@ const Header = ({
         setViewPort: s.setViewPort,
         setWorkspaceBrief: s.setWorkspaceBrief,
         setSourceLibrary: s.setSourceLibrary,
+        setSelectedBranchId: s.setSelectedBranchId,
+        setInspectorNodeId: s.setInspectorNodeId,
         viewport: s.viewport,
         workspaceBrief: s.workspaceBrief,
         sourceLibrary: s.sourceLibrary,
@@ -87,6 +90,8 @@ const Header = ({
         setViewPort,
         setWorkspaceBrief,
         setSourceLibrary,
+        setSelectedBranchId,
+        setInspectorNodeId,
         viewport,
         workspaceBrief,
         sourceLibrary,
@@ -1085,6 +1090,21 @@ const Header = ({
         pushNode(SettingsModal);
     };
 
+    const openWorkspaceAskAi = () => {
+        setIsExportMenuOpen(false);
+        setSelectedBranchId(undefined);
+        setInspectorNodeId(undefined);
+        pushNode(PromptModal, { scope: 'workspace' });
+        recordActivity({
+            type: 'ai_action_picker_opened',
+            title: 'Workspace Ask AI opened',
+            summary: 'Opened preview-first AI actions for the whole workspace.',
+            metadata: {
+                scope: 'workspace'
+            }
+        });
+    };
+
     const toggleExportMenu = () => {
         setIsExportMenuOpen((prev) => !prev);
     };
@@ -1178,6 +1198,13 @@ const Header = ({
                 </div>
                 {canSave ? (
                     <>
+                        <button
+                            type="button"
+                            className="header-action header-action-secondary workspace-ask-ai"
+                            onClick={openWorkspaceAskAi}
+                        >
+                            Ask AI
+                        </button>
                         <button
                             type="button"
                             className={`header-action save-now ${saveStatus}`}

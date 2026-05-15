@@ -92,6 +92,28 @@ Known verification gap:
 - [x] Ungrounded generated nodes default to empty `source_refs` and
   `needs_review`.
 - [x] Validation reports are available to the UI.
+- [x] Document intake treats role/brief guidance as optional, validates allowed
+  intake roles, sanitizes prompt text, and routes PDF/DOCX/Markdown/TXT graph
+  generation through Responses with DocMap model policy.
+
+### AI Provider Refactor
+
+Goal: remove the Assistants API dependency from DocMap generation paths.
+OpenAI lists Assistants API removal for 2026-08-26, so remaining Assistants
+paths are temporary legacy paths, not the product architecture.
+
+- [x] Add `backend/ai/responses_client.py`.
+- [x] Add a provider-neutral DocMap AI adapter interface.
+- [x] Move role/persona prompts into backend AI role modules.
+- [x] Move JSON output schemas into backend AI schema modules.
+- [x] Refactor PDF/DOCX/Markdown/TXT draft generation from Assistants API to
+  Responses API.
+- [x] Keep Assistants API as temporary legacy fallback only, gated by
+  `DOCMAP_ALLOW_LEGACY_ASSISTANTS`.
+- [x] Add tests for Responses API request construction.
+- [x] Add fixture/mock provider for offline graph-generation tests.
+- [ ] Remove remaining legacy Assistants source/persona paths after each has a
+  Responses equivalent; no workflow should silently downshift to a legacy model.
 
 ### Workspace Graph And Local Views
 
@@ -113,10 +135,12 @@ Known verification gap:
   `Strategic Advisor`, `Research Assistant`, `Productivity Coach`,
   `Data Interpreter`, and `Custom Prompts` still exist behind the legacy
   data-source prompt selector.
-- [x] Node and branch Ask AI actions expose the original personas under a
-  General profile group and use DocMap's preview/accept graph mutation model.
-- [ ] The legacy data-source `PromptModal`/`Prompts` execution path is not yet
-  migrated to preview/accept and can still append graph changes directly.
+- [x] Node, branch, and workspace Ask AI actions expose the original personas
+  under a General profile group and use DocMap's preview/accept graph mutation
+  model.
+- [x] The legacy data-source `PromptModal`/`Prompts` execution path is gated so
+  it remains discoverable but cannot directly append graph changes outside
+  preview/accept.
 
 ### Workspace Brief
 
@@ -224,7 +248,7 @@ These are the features required to call the core MVP functional.
 - [x] `WorkspaceBrief` frontend/persistence shape
 - [x] Dedicated no-source derivation contract in the frontend creates
   reviewable assumption nodes without fabricated source refs.
-- [ ] `WorkspaceBrief` backend schema validation.
+- [x] `WorkspaceBrief` backend schema validation.
 - [x] `AIActionRun` schema for node/branch/workspace AI action history,
   previews, accept/reject status, source scope, prompt profile, and generated
   node IDs.

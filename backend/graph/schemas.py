@@ -203,6 +203,54 @@ class WorkspaceGraph:
             raise GraphSchemaError(errors)
 
 
+@dataclass(slots=True)
+class WorkspaceBrief:
+    configured: bool = False
+    preset: str = "custom"
+    goal: str = ""
+    audience: str = ""
+    domain_context: str = ""
+    desired_outputs: list[str] = field(default_factory=lambda: ["mind_map"])
+    source_mode: str = "source_plus_context"
+    assumptions_allowed: bool = False
+    output_style: str = "technical_reference_map"
+    node_types: list[str] = field(default_factory=list)
+    review_policy: list[str] = field(default_factory=list)
+    review_rules: str = ""
+
+    def model_dump(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def model_validate(cls, payload: dict[str, Any]) -> None:
+        validate_workspace_brief(payload)
+
+
+def validate_workspace_brief(payload: dict[str, Any]) -> None:
+    errors: list[str] = []
+    if not isinstance(payload, dict):
+        raise GraphSchemaError(["workspace_brief: must be an object"])
+
+    _require_optional_bool(payload, "configured", errors, path="workspace_brief")
+    _require_optional_bool(payload, "assumptions_allowed", errors, path="workspace_brief")
+    for key in (
+        "preset",
+        "goal",
+        "audience",
+        "domain_context",
+        "source_mode",
+        "output_style",
+        "review_rules",
+    ):
+        _require_optional_string(payload, key, errors, path="workspace_brief")
+
+    for key in ("desired_outputs", "node_types", "review_policy"):
+        _require_optional_string_list(payload, key, errors, path="workspace_brief")
+
+    if errors:
+        raise GraphSchemaError(errors)
+
+
 def validate_export_batch(payload: dict[str, Any]) -> None:
     errors: list[str] = []
     _require_nonempty_string(payload, "id", "export_batch", errors)
@@ -353,6 +401,45 @@ def _require_nonempty_string(
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         errors.append(f"{_field_path(path, key)}: must be a non-empty string")
+
+
+def _require_optional_string(
+    payload: dict[str, Any],
+    key: str,
+    errors: list[str],
+    path: str = "",
+) -> None:
+    value = payload.get(key)
+    if value is not None and not isinstance(value, str):
+        errors.append(f"{_field_path(path, key)}: must be a string")
+
+
+def _require_optional_bool(
+    payload: dict[str, Any],
+    key: str,
+    errors: list[str],
+    path: str = "",
+) -> None:
+    value = payload.get(key)
+    if value is not None and not isinstance(value, bool):
+        errors.append(f"{_field_path(path, key)}: must be a boolean")
+
+
+def _require_optional_string_list(
+    payload: dict[str, Any],
+    key: str,
+    errors: list[str],
+    path: str = "",
+) -> None:
+    value = payload.get(key)
+    if value is None:
+        return
+    if not isinstance(value, list):
+        errors.append(f"{_field_path(path, key)}: must be a list")
+        return
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            errors.append(f"{_field_path(path, key)}.{index}: must be a string")
 
 
 def _field_path(path: str, key: str) -> str:

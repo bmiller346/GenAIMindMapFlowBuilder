@@ -30,35 +30,34 @@ group, but DocMap's primary choices should be domain/workflow roles.
 
 ## Current Status
 
-Status: partially implemented and QA-covered for selected-node and
-selected-branch AI actions. Backend preview contracts, prompt profile registry,
-frontend role/action picker, inspector preview rendering, accept/reject,
-`AIActionRun` snapshot persistence, and node/branch browser regression coverage
-exist. Workspace-scope UX and legacy data-source prompt migration remain open.
+Status: complete for the current Node AI Actions scope. Backend preview
+contracts, prompt profile registry, frontend role/action picker, workspace/node/
+branch entry points, inspector preview rendering, accept/reject, `AIActionRun`
+snapshot persistence, and browser regression coverage exist. The legacy
+data-source persona surface remains discoverable but no longer performs direct
+graph mutation.
 
 Preserved legacy surface:
 
-- `frontend/src/modals/PromptModal.jsx` exposes the original Choose Agent modal.
+- `frontend/src/modals/PromptModal.jsx` preserves the original General persona
+  options inside the preview-first Ask AI modal.
 - `frontend/src/prompts/promptsModel.js` defines `Strategic Advisor`,
   `Research Assistant`, `Productivity Coach`, `Data Interpreter`, and
   `Custom Prompts`.
-- `frontend/src/global-components/Prompts.jsx` calls the follow-up API and can
-  append returned nodes/edges for data-source nodes.
-- `frontend/src/nodes/PromptSelector.jsx` exposes "Answering as" on data-source
-  nodes.
+- `frontend/src/global-components/Prompts.jsx` still exists for legacy
+  compatibility but is no longer the source-card entry point.
+- `frontend/src/nodes/PromptSelector.jsx` opens the preview-first Ask AI modal
+  for data-source nodes.
 
-Known gaps:
+Known notes:
 
-- No frontend workspace-level Ask AI entry point is currently exposed, even
-  though the backend workspace preview endpoint and profile/action definitions
-  exist.
-- The legacy data-source `PromptModal`/`Prompts` path remains discoverable and
-  visibly labeled as legacy, but can still append graph changes directly when
-  used through data-source nodes.
-- Legacy data-source persona outputs are not routed through the current
-  validation, preview/accept, source-ref, activity, and save/reopen patterns.
-- Prompt profile roles now include DocMap/domain roles, but the old
-  data-source flow still uses the original generic persona execution path.
+- Workspace-level Ask AI is exposed from the header for opened workspaces.
+- Legacy `Prompts.jsx` remains in the codebase for compatibility, but direct
+  generation is disabled there so it cannot append graph changes outside
+  preview/accept.
+- Prompt profile roles include DocMap/domain roles and legacy General personas,
+  but the UI should continue to prioritize DocMap roles and treat General
+  personas as secondary/advanced options.
 
 ## Product Rules
 
@@ -425,10 +424,11 @@ roadmap.
 
 ### Phase 4: Legacy Migration
 
-- [ ] Agent B + C: Route `PromptModal`/`Prompts` through preview/accept.
+- [x] Agent B + C: Gate `PromptModal`/`Prompts` so the legacy data-source flow
+  cannot directly append graph changes outside preview/accept.
 - [x] Agent B: Preserve `Strategic Advisor`, `Research Assistant`,
   `Productivity Coach`, `Data Interpreter`, and `Custom Prompts`.
-- [ ] Agent C: Prevent legacy flow from directly appending graph changes.
+- [x] Agent C: Prevent legacy flow from directly appending graph changes.
 - [x] Agent D: Add regression coverage for legacy persona discoverability.
 
 ### Phase 5: QA And Persistence
@@ -439,7 +439,7 @@ roadmap.
 - [x] Agent D: Verify save/reopen preserves accepted generated nodes and
   `AIActionRun` history.
 - [x] Agent D: Verify source refs and `needs_review` behavior.
-- [ ] Agent D: Verify node, branch, and workspace scopes.
+- [x] Agent D: Verify node, branch, and workspace scopes.
 - [x] Agent D: Update pass/fail notes below.
 
 ## QA Results
@@ -465,14 +465,16 @@ Agent B implementation QA:
 - Verification: `npm run build`, `npm run lint`, `npm run test:flow-snapshots`,
   `node --test tests/aiActionRuns.test.mjs`, and `git diff --check` passed.
 
-Full preview/accept/reject and persistence QA still belongs to Agent C/D.
+Preview/accept/reject and persistence QA is now covered for node, branch, and
+workspace scopes.
 
 Agent D implementation QA:
 
 - Added `frontend/tests/e2e/node-ai-actions-regression.spec.js` covering node
   preview without graph mutation, accept-created durable child nodes,
   save/reopen persistence of accepted `AIActionRun` history, branch reject
-  without graph mutation, and legacy General persona discoverability.
+  without graph mutation, workspace preview/accept from the header, and legacy
+  General persona discoverability.
 - Added a narrow handoff fix so `PromptModal` calls the AI action preview
   endpoint, sets `activeAIActionPreview`, and opens the inspector review path.
 - Rejected AI action previews now mark the workspace dirty so rejected
@@ -486,11 +488,23 @@ Agent D implementation QA:
     with local pytest cache permission warnings.
   - `node --test tests/aiActionRuns.test.mjs`: 6 passed.
   - `npm run test:flow-snapshots`: 4 passed.
-  - `npx playwright test tests/e2e/node-ai-actions-regression.spec.js`: 3
+  - `npx playwright test tests/e2e/node-ai-actions-regression.spec.js`: 4
     passed.
-- Remaining gap: Agent D has not added browser coverage for workspace-scoped AI
-  actions because no workspace Ask AI entry point is currently exposed in the
-  frontend.
+
+Cleanup completion QA:
+
+- Added a workspace-level Ask AI entry in the header for opened workspaces.
+- Workspace Ask AI opens the same role/action picker with `scope: workspace`,
+  generates a preview through the workspace preview endpoint, and displays it in
+  the inspector preview surface.
+- Legacy `Prompts` cards remain visible but show a migration message instead of
+  calling the old follow-up API and directly appending nodes/edges.
+- Verification passed:
+  - `npm run lint`
+  - `node --test tests/aiActionRuns.test.mjs`
+  - `npm run test:flow-snapshots`
+  - `npx playwright test tests/e2e/node-ai-actions-regression.spec.js`: 4
+    passed.
 
 ## Completion Gate
 

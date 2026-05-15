@@ -31,6 +31,10 @@ import {
 
 const DOCX_INTAKE_PROFILES = [
     {
+        id: '',
+        label: 'No intake role'
+    },
+    {
         id: 'document-structure-extractor',
         label: 'Document Structure Extractor'
     },
@@ -48,7 +52,7 @@ const DOCX_INTAKE_PROFILES = [
     }
 ];
 
-const DOCX_INTAKE_MODELS = ['gpt-4.1'];
+const DOCX_INTAKE_MODELS = ['auto', 'gpt-5.5', 'gpt-5.4'];
 
 const DocxModal = () => {
     const selector = (state) => ({
@@ -73,7 +77,7 @@ const DocxModal = () => {
     const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
     const { fitView, setViewport } = useReactFlow();
     const [file, setFile] = useState();
-    const [intakeProfileId, setIntakeProfileId] = useState('document-structure-extractor');
+    const [intakeProfileId, setIntakeProfileId] = useState('');
     const [intakeModel, setIntakeModel] = useState(DOCX_INTAKE_MODELS[0]);
     const [intakeBrief, setIntakeBrief] = useState('');
     const fileInputRef = useRef(null);
@@ -109,10 +113,13 @@ const DocxModal = () => {
 
     const sourcePromptLabel = () => {
         const brief = intakeBrief.trim();
+        if (!selectedIntakeProfile?.id && !brief) {
+            return '';
+        }
         if (!brief) {
             return selectedIntakeProfile.label;
         }
-        return `${selectedIntakeProfile.label}: ${brief}`;
+        return `${selectedIntakeProfile?.label || 'Custom intake brief'}: ${brief}`;
     };
 
     const ensureWorkspace = async () => {
@@ -178,8 +185,8 @@ const DocxModal = () => {
         const data = {
             file: file,
             operationId,
-            intakeRole: selectedIntakeProfile.label,
-            intakeModel,
+            intakeRole: intakeProfileId,
+            intakeModel: intakeModel === 'auto' ? '' : intakeModel,
             intakePrompt: intakeBrief.trim()
         };
         const undoSnapshot = createOperationSnapshot({
@@ -339,7 +346,8 @@ const DocxModal = () => {
                 content: file.name,
                 flow_id: flowStore.getState().flow_id || flowId,
                 prompt: sourcePromptLabel(),
-                model_name: intakeModel,
+                model_name: sourcePromptLabel() && intakeModel !== 'auto' ? intakeModel : '',
+                intake_model: intakeModel,
                 intake_prompt: intakeBrief.trim(),
                 file: file
             }
@@ -374,7 +382,8 @@ const DocxModal = () => {
                           content: node.data?.content || file?.name || 'DOCX source',
                           flow_id: data.flow_id || flowStore.getState().flow_id || flowId,
                           prompt: sourcePromptLabel(),
-                          model_name: intakeModel,
+                          model_name: sourcePromptLabel() && intakeModel !== 'auto' ? intakeModel : '',
+                          intake_model: intakeModel,
                           intake_prompt: intakeBrief.trim()
                       }
                   };
@@ -436,7 +445,7 @@ const DocxModal = () => {
             </div>
             <div className="source-intake-config">
                 <label>
-                    AI role
+                    Optional intake role
                     <select
                         value={intakeProfileId}
                         onChange={(event) => setIntakeProfileId(event.target.value)}
@@ -449,7 +458,7 @@ const DocxModal = () => {
                     </select>
                 </label>
                 <label>
-                    Intake model
+                    DOCX intake model
                     <select
                         value={intakeModel}
                         onChange={(event) => setIntakeModel(event.target.value)}

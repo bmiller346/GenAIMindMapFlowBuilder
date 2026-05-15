@@ -6,6 +6,7 @@ import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
 import useStore from '../stores/store';
 import useWorkspacePanelStore from '../stores/workspacePanelStore';
+import { summarizeProvider } from '../utils/integrationSummary';
 
 const providerLabels = {
     miro: 'Miro',
@@ -14,59 +15,6 @@ const providerLabels = {
 
 const nowTime = () =>
     new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-
-const getProviderRef = (node, provider) =>
-    node?.data?.external_refs?.[provider] || {};
-
-const getLastDate = (refs, fields) => {
-    const dates = refs
-        .flatMap((ref) => fields.map((field) => ref[field]))
-        .filter(Boolean)
-        .map((value) => Date.parse(value))
-        .filter((value) => Number.isFinite(value));
-
-    if (dates.length === 0) {
-        return '';
-    }
-
-    return new Date(Math.max(...dates)).toLocaleString([], {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit'
-    });
-};
-
-const summarizeProvider = (nodes, provider, hasCredential, validationIssues) => {
-    const refs = nodes
-        .map((node) => getProviderRef(node, provider))
-        .filter((ref) => Object.keys(ref).length > 0);
-    const mappedNodes = refs.filter((ref) => ref.item_id || ref.board_id).length;
-    const completeRefs = refs.filter((ref) => ref.board_id && ref.item_id).length;
-    const lastPush = getLastDate(refs, ['last_pushed_at']);
-    const lastPull = getLastDate(refs, ['last_pulled_at']);
-    const exportBatches = new Set(refs.map((ref) => ref.export_batch_id).filter(Boolean));
-    const warnings = validationIssues.filter((issue) => {
-        const text = [
-            issue.code,
-            issue.label,
-            issue.detail,
-            issue.integration
-        ].filter(Boolean).join(' ').toLowerCase();
-        return text.includes(provider);
-    });
-
-    return {
-        provider,
-        hasCredential,
-        mappedNodes,
-        completeRefs,
-        lastPush,
-        lastPull,
-        lastExportBatch: [...exportBatches].at(-1) || '',
-        warnings
-    };
-};
 
 const downloadJson = (payload, fileName) => {
     const blob = new Blob([JSON.stringify(payload, null, 2)], {

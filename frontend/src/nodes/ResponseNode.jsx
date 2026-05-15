@@ -712,8 +712,8 @@ const ResponseNode = ({ id, data }) => {
         {
             id: 'assistant',
             group: 'AI',
-            label: 'AI helpers',
-            description: 'Open review helpers for this branch',
+            label: 'Review branch',
+            description: 'Route branch review through preview-first AI',
             previewOnly: true,
             action: (baseNodes) =>
                 openPreviewCommand(

@@ -91,14 +91,15 @@ const setupMockBackend = async (page) => {
     });
 
     await page.route(
-        /http:\/\/localhost:8000\/api\/workspaces\/[^/]+\/ai\/actions\/(node|branch)\/[^/]+\/preview/,
+        /http:\/\/localhost:8000\/api\/workspaces\/[^/]+\/ai\/actions\/(node|branch|workspace)(\/[^/]+)?\/preview/,
         async (route) => {
             const request = route.request();
             const requestBody = request.postDataJSON();
             const url = new URL(request.url());
             const parts = url.pathname.split('/');
-            const scope = parts.at(-3);
-            const nodeId = parts.at(-2);
+            const isWorkspaceScope = parts.at(-2) === 'workspace';
+            const scope = isWorkspaceScope ? 'workspace' : parts.at(-3);
+            const nodeId = isWorkspaceScope ? '' : parts.at(-2);
             const action = requestBody.action || 'generate_child_nodes';
             previewRequests.push({ scope, nodeId, requestBody });
             await route.fulfill({
@@ -109,7 +110,7 @@ const setupMockBackend = async (page) => {
                     ai_action_id: `action-${scope}-${previewRequests.length}`,
                     workspace_id: flowId,
                     scope,
-                    source_node_id: nodeId,
+                    source_node_id: nodeId || null,
                     role: requestBody.role || 'Task Planner',
                     action,
                     custom_prompt: requestBody.custom_prompt || null,
@@ -275,6 +276,47 @@ test('branch AI reject leaves graph unchanged and records rejected action', asyn
                 generated_node_ids: []
             })
         ])
+    );
+});
+
+test('workspace AI preview is available from the header and accepts through AIActionRun', async ({
+    page
+}) => {
+    const { previewRequests, savedRequests } = await setupMockBackend(page);
+    await createRoot(page, savedRequests, 'Workspace root');
+
+    const beforePreview = latestSnapshot(savedRequests);
+    await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
+    await expect(page.locator('.ai-action-modal')).toBeVisible();
+    await expect(page.locator('.ai-action-scope')).toContainText('Whole workspace');
+
+    await page.getByRole('button', { name: 'Generate preview' }).click();
+    await expect(page.locator('.node-inspector')).toBeVisible();
+    await expect(page.locator('.ai-action-preview-card')).toContainText('workspace generated child');
+    expect(previewRequests.at(-1).scope).toBe('workspace');
+    expect(structuralNodes(latestSnapshot(savedRequests))).toEqual(
+        structuralNodes(beforePreview)
+    );
+
+    await page.getByRole('button', { name: 'Close workspace AI preview' }).click();
+    await expect(page.locator('.node-inspector')).toHaveCount(0);
+    expect(structuralNodes(latestSnapshot(savedRequests))).toEqual(
+        structuralNodes(beforePreview)
+    );
+
+    await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
+    await page.getByRole('button', { name: 'Generate preview' }).click();
+    await expect(page.locator('.ai-action-preview-card')).toContainText('workspace generated child');
+
+    await page.locator('.ai-action-preview-actions').getByRole('button', { name: 'Accept' }).click();
+    await waitForSavedSnapshot(savedRequests, (snapshot) =>
+        snapshot.nodes.some((node) => node.id === 'generated-workspace-2') &&
+        snapshot.ai_action_runs.some(
+            (run) =>
+                run.ai_action_id === 'action-workspace-2' &&
+                run.status === 'accepted' &&
+                run.generated_node_ids.includes('generated-workspace-2')
+        )
     );
 });
 

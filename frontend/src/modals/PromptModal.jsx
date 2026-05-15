@@ -233,6 +233,9 @@ const PromptModal = ({
             if (scope === 'branch' || scope === 'node') {
                 setSelectedBranchId(targetNodeId);
                 setInspectorNodeId(targetNodeId);
+            } else if (scope === 'workspace') {
+                setSelectedBranchId(undefined);
+                setInspectorNodeId(undefined);
             }
             setActiveView(viewForAction(selectedAction.id));
             recordActivity({
@@ -298,13 +301,13 @@ const PromptModal = ({
                 <div className="title">
                     <div>
                         <img src={PROMPTSvg} alt="Prompts Svg" />
-                        <p>Choose Agent</p>
+                        <p>Legacy Personas</p>
                     </div>
                     <img src={CROSSSvg} alt="Cross Svg" onClick={() => popNode()} />
                 </div>
                 <div className="legacy-prompt-banner">
-                    Legacy data-source flow. These personas stay discoverable while node and
-                    branch actions move to preview-first Ask AI.
+                    Legacy data-source flow is read-only. Use Ask AI on a node, branch,
+                    or workspace to route an intent through the right preview-first role.
                 </div>
                 <div className="prompt-model-selector">
                     <label htmlFor="model-select">OpenAI model</label>
@@ -351,12 +354,18 @@ const PromptModal = ({
                 <img src={CROSSSvg} alt="Cross Svg" onClick={() => popNode()} />
             </div>
             <div className="ai-action-scope">
-                <span>{scope === 'branch' ? 'Selected branch' : 'Selected node'}</span>
+                <span>
+                    {scope === 'workspace'
+                        ? 'Whole workspace'
+                        : scope === 'branch'
+                          ? 'Selected branch'
+                          : 'Selected node'}
+                </span>
                 <strong>{targetLabel}</strong>
             </div>
             <div className="ai-action-grid">
                 <label>
-                    Role
+                    Advanced role
                     <select
                         value={role?.id || ''}
                         onChange={(event) => updateRole(event.target.value)}
@@ -369,7 +378,7 @@ const PromptModal = ({
                     </select>
                 </label>
                 <label>
-                    Action
+                    What do you want?
                     <select
                         value={selectedAction?.id || ''}
                         onChange={(event) => setSelectedActionId(event.target.value)}

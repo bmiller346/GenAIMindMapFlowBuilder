@@ -99,3 +99,54 @@ test('flow snapshots preserve AI action run history', () => {
     assert.equal(snapshot.ai_action_runs[0].ai_action_id, 'action-1');
     assert.deepEqual(snapshot.ai_action_runs[0].generated_node_ids, ['node-2']);
 });
+
+test('flow snapshots preserve automation definitions and run history', () => {
+    const serialized = stringifyFlowSnapshot({
+        nodes: [createWorkspaceNode({ id: 'node-1' })],
+        edges: [],
+        automations: [
+            {
+                id: 'auto-review',
+                name: 'Review needs_review nodes',
+                trigger: 'manual',
+                scope: 'workspace',
+                status: 'active',
+                action: { type: 'needs_review_report', params: { limit: 10 } },
+                last_run_at: '2026-05-14T15:00:00.000Z',
+                run_history: [
+                    {
+                        id: 'run-1',
+                        status: 'completed',
+                        detail: 'Found two review items.',
+                        started_at: '2026-05-14T14:59:00.000Z',
+                        finished_at: '2026-05-14T15:00:00.000Z'
+                    }
+                ]
+            }
+        ]
+    });
+    const snapshot = parseFlowSnapshot(serialized);
+
+    assert.equal(snapshot.automations.length, 1);
+    assert.equal(snapshot.automations[0].id, 'auto-review');
+    assert.equal(snapshot.automations[0].action.type, 'needs_review_report');
+    assert.equal(snapshot.automations[0].run_history[0].id, 'run-1');
+});
+
+test('stringifyFlowSnapshot normalizes missing automation run history', () => {
+    const parsed = JSON.parse(
+        stringifyFlowSnapshot({
+            nodes: [],
+            edges: [],
+            automations: [
+                {
+                    id: 'auto-source',
+                    name: 'Regenerate source coverage',
+                    action: { type: 'source_coverage_report', params: {} }
+                }
+            ]
+        })
+    );
+
+    assert.deepEqual(parsed.automations[0].run_history, []);
+});

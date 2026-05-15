@@ -354,10 +354,10 @@ def test_build_openai_helper_preview_payload_includes_contract_and_metadata():
         scope={"type": "branch", "node_id": "root"},
         system_prompt="You plan work.",
         task_prompt="Create task preview items.",
-        model="gpt-test",
+        model="gpt-5.4",
     )
 
-    assert payload["model"] == "gpt-test"
+    assert payload["model"] == "gpt-5.4"
     assert payload["input"][0]["content"] == "You plan work."
     user_content = payload["input"][1]["content"]
     assert "Helper: project_planner" in user_content
@@ -368,6 +368,8 @@ def test_build_openai_helper_preview_payload_includes_contract_and_metadata():
         "action": "task_projection",
         "scope_type": "branch",
         "node_count": 2,
+        "model_tier": "explicit",
+        "model_reason": "User or workflow selected the model explicitly.",
     }
 
 

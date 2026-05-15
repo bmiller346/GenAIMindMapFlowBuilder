@@ -238,7 +238,7 @@ Remaining Agent C follow-up:
 
 - Extract shared Miro/monday action helpers so Header exports and the
   Integrations panel do not drift.
-- Add focused tests for integration summary projection, snapshot automation
+- Added focused tests for integration summary projection, snapshot automation
   persistence, and automation run history.
 - Consider backend-owned automation storage if automations need to be queried
   outside the saved workspace JSON.
