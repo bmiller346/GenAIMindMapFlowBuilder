@@ -670,6 +670,34 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
         ([, ref]) => ref && typeof ref === 'object'
     );
 
+    if (aiDraftSessionAppliesHere) {
+        return (
+            <aside className="node-inspector node-inspector-draft-mode">
+                <div className="node-inspector-header">
+                    <div>
+                        <p className="node-inspector-kicker">Draft table</p>
+                        <h2>{draft.title || selectedNode.id}</h2>
+                    </div>
+                    <button
+                        type="button"
+                        className="node-inspector-icon-button"
+                        onClick={onClose}
+                        aria-label="Close AI draft"
+                    >
+                        x
+                    </button>
+                </div>
+
+                <div className="node-inspector-body">
+                    <AiDraftSessionPanel
+                        session={activeAIDraftSession}
+                        onClose={onClose}
+                    />
+                </div>
+            </aside>
+        );
+    }
+
     return (
         <aside className="node-inspector">
             <div className="node-inspector-header">

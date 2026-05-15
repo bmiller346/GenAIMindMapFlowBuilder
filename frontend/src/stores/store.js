@@ -19,6 +19,8 @@ import {
     saveNudgePreferences
 } from '../config/localSettings';
 
+const CANVAS_VIEW_IDS = new Set(['mindmap', 'knowledgeGraph', 'outline', 'tasks', 'table']);
+
 // Sample
 const data = {
     "_id": {
@@ -215,6 +217,7 @@ const useStore = create((set, get) => ({
     ],
     edges: [],
     activeView: 'mindmap',
+    activeCanvasView: 'mindmap',
     activeGraphFilters: getLastUsedGraphFilters(),
     nudgePreferences: getNudgePreferences(),
     selectedBranchId: undefined,
@@ -291,7 +294,18 @@ const useStore = create((set, get) => ({
         return edge;
     },
     setActiveView: (activeView) => {
-        set({ activeView });
+        set({
+            activeView,
+            ...(CANVAS_VIEW_IDS.has(activeView)
+                ? { activeCanvasView: activeView }
+                : {})
+        });
+    },
+    setActiveCanvasView: (activeCanvasView) => {
+        set({
+            activeCanvasView,
+            activeView: activeCanvasView
+        });
     },
     setActiveGraphFilters: (filters = []) => {
         set({ activeGraphFilters: saveLastUsedGraphFilters(filters) });

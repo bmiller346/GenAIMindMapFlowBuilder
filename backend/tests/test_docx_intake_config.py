@@ -227,6 +227,29 @@ def test_prepare_source_upload_reuses_existing_component(monkeypatch):
     assert context["document_chunks"][0]["id"] == "chk-1"
 
 
+def test_docx_component_rejects_pdf_before_processing(monkeypatch):
+    token_checks = []
+
+    monkeypatch.setattr(app, "get_upload_flow_or_400", lambda flow_id: {"flow_type": "manual"})
+    monkeypatch.setattr(
+        app,
+        "is_within_gpt4o_token_limit",
+        lambda file: token_checks.append(file) or True,
+    )
+
+    upload = UploadFile(filename="sample.pdf", file=SimpleNamespace(
+        seek=lambda position: None,
+        read=lambda: b"%PDF-1.4",
+    ))
+
+    with pytest.raises(HTTPException) as exc_info:
+        app.create_docx_component(upload, flow_id=str(ObjectId()))
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Only DOCX files are allowed."
+    assert token_checks == []
+
+
 def test_flow_snapshot_repair_marks_unsourced_ai_nodes_needs_review_on_save():
     snapshot = {
         "nodes": [

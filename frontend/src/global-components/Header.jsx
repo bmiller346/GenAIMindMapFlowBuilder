@@ -14,6 +14,8 @@ import errorStore from '../stores/errorStore';
 import ErrorModal from '../modals/ErrorModal';
 import SettingsModal from '../modals/SettingsModal';
 import PromptModal from '../modals/PromptModal';
+import HelpModal from '../modals/HelpModal';
+import DevDebugModal from '../modals/DevDebugModal';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1131,6 +1133,16 @@ const Header = ({
         pushNode(SettingsModal);
     };
 
+    const openHelp = () => {
+        setIsExportMenuOpen(false);
+        pushNode(HelpModal);
+    };
+
+    const openDebug = () => {
+        setIsExportMenuOpen(false);
+        pushNode(DevDebugModal);
+    };
+
     const openWorkspaceAskAi = () => {
         setIsExportMenuOpen(false);
         setSelectedBranchId(undefined);
@@ -1245,6 +1257,21 @@ const Header = ({
                             onClick={openWorkspaceAskAi}
                         >
                             Ask AI
+                        </button>
+                        <button
+                            type="button"
+                            className="header-action header-action-secondary"
+                            onClick={openHelp}
+                        >
+                            Help
+                        </button>
+                        <button
+                            type="button"
+                            className="header-action header-action-secondary dev-debug-trigger"
+                            onClick={openDebug}
+                            title="Open temporary developer debug panel"
+                        >
+                            Debug
                         </button>
                         <button
                             type="button"

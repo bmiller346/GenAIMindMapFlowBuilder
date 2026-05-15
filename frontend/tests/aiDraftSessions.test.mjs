@@ -4,6 +4,7 @@ import {
     acceptAIDraftSession,
     buildAIDraftSessionRequestPayload,
     buildSelectedSourceDraftPayload,
+    buildSelectedSourcesDraftPayload,
     buildAIDraftPreviewDiff,
     createAIDraftSession,
     formatAIDraftPreviewDiffSummary,
@@ -304,4 +305,54 @@ test('source scoped draft request sends selected source chunks to backend', () =
         request.metadata.source_context.selected_source_title,
         'General Mills source'
     );
+});
+
+test('draft request carries visual routing metadata and desired outputs', () => {
+    const request = buildAIDraftSessionRequestPayload({
+        role: { id: 'task-planner', label: 'Task Planner' },
+        action: { id: 'generate_checklist', label: 'Generate checklist' },
+        scope: { type: 'workspace' },
+        prompt: 'how do I make a grilled cheese?',
+        desiredOutputs: ['checklist'],
+        metadata: {
+            requested_visual: 'auto',
+            output_shape: 'checklist',
+            routed_role_id: 'task-planner'
+        }
+    });
+
+    assert.deepEqual(request.desired_outputs, ['checklist']);
+    assert.equal(request.metadata.requested_visual, 'auto');
+    assert.equal(request.metadata.output_shape, 'checklist');
+    assert.equal(request.action, 'generate_checklist');
+});
+
+test('multi-source draft payload bounds workspace request to selected chunks', () => {
+    const selectedSourcePayload = buildSelectedSourcesDraftPayload([
+        {
+            id: 'doc-general-mills',
+            title: 'General Mills source',
+            chunks: [{ id: 'gm-1', snippet: 'General Mills makes Cheerios.' }]
+        },
+        {
+            id: 'doc-kellogg',
+            title: 'Kellogg source',
+            chunks: [{ id: 'kg-1', snippet: "Kellogg's makes Corn Flakes." }]
+        }
+    ]);
+    const request = buildAIDraftSessionRequestPayload({
+        role: { id: 'source-librarian', label: 'Source Librarian' },
+        action: { id: 'custom_prompt', label: 'Compare sources' },
+        scope: selectedSourcePayload.scope,
+        prompt: 'Compare cereal manufacturers',
+        selectedSourcePayload
+    });
+
+    assert.deepEqual(request.scope, { type: 'workspace' });
+    assert.equal(request.source_chunks.length, 2);
+    assert.deepEqual(request.metadata.source_context.selected_source_ids, [
+        'doc-general-mills',
+        'doc-kellogg'
+    ]);
+    assert.equal(request.metadata.source_context.source_context_mode, 'bounded_multi_source');
 });

@@ -69,6 +69,7 @@ WORKSPACE_AI_ACTIONS = {
     "find_duplicate_overlapping_nodes",
     "generate_training_outline",
     "export_branch_as_sop_draft",
+    "custom_prompt",
 }
 AI_ACTIONS_BY_SCOPE = {
     "node": NODE_AI_ACTIONS,
@@ -3175,30 +3176,35 @@ def _deterministic_ai_action_drafts(
         "export_branch_as_sop_draft",
         "custom_prompt",
     }:
-        for order, item in enumerate(
-            _draft_plan_for_action(
-                action=action,
-                source_title=source_title,
-                custom_prompt=action_run.get("custom_prompt"),
-            ),
-            start=1,
-        ):
+        planned_items = _draft_plan_for_action(
+            action=action,
+            source_title=source_title,
+            custom_prompt=action_run.get("custom_prompt"),
+        )
+        for order, item in enumerate(planned_items, start=1):
+            parent_order = item.get("parent_order")
+            parent_node = (
+                draft_nodes[int(parent_order) - 1]
+                if isinstance(parent_order, int) and 0 < parent_order <= len(draft_nodes)
+                else None
+            )
+            parent_id = parent_node.get("id") if parent_node else source_node_id
             draft_node = _draft_node(
                 action_run=action_run,
                 order=order,
                 title=item["title"],
                 summary=item["summary"],
-                parent_id=source_node_id,
+                parent_id=parent_id,
                 node_type=item["node_type"],
                 source_refs=source_refs[:1],
                 profile=profile,
             )
             draft_nodes.append(draft_node)
-            if source_node_id:
+            if parent_id:
                 draft_edges.append(
                     {
                         "id": f"draft_edge_{action_run['ai_action_id']}_{order}",
-                        "source_node_id": source_node_id,
+                        "source_node_id": parent_id,
                         "target_node_id": draft_node["id"],
                         "relationship_type": "contains",
                         "metadata": {"source": "ai_action_preview", "ai_action_id": action_run["ai_action_id"]},
@@ -3280,27 +3286,11 @@ def _draft_plan_for_action(
     action: str,
     source_title: str,
     custom_prompt: str | None,
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     target = source_title or "workspace"
     prompt = (custom_prompt or "").strip()
     if action == "custom_prompt" and prompt:
-        return [
-            {
-                "title": prompt[:80],
-                "summary": f"Main draft branch for the instruction: {prompt[:180]}",
-                "node_type": "concept",
-            },
-            {
-                "title": "Supporting branches",
-                "summary": "Add child branches that make the requested structure easier to edit and refine.",
-                "node_type": "category",
-            },
-            {
-                "title": "Review questions",
-                "summary": "List follow-up questions or assumptions before accepting this draft into the graph.",
-                "node_type": "question",
-            },
-        ]
+        return _custom_prompt_draft_plan(prompt)
 
     plans: dict[str, list[tuple[str, str, str]]] = {
         "expand_this_node": [
@@ -3344,6 +3334,123 @@ def _draft_plan_for_action(
             action,
             [("AI draft", f"Create a reviewable draft for {target}.", "concept")],
         )
+    ]
+
+
+def _custom_prompt_draft_plan(prompt: str) -> list[dict[str, Any]]:
+    normalized_prompt = prompt.rstrip(".?!").strip()
+    topic = _topic_from_custom_prompt(normalized_prompt)
+    lower = normalized_prompt.lower()
+    if re.search(r"\b(saas|software as a service|subscription software)\b", lower) and re.search(
+        r"\b(model|business|revenue|go[- ]to[- ]market|gtm)\b", lower
+    ):
+        return _saas_business_model_plan(topic)
+    return _generic_custom_prompt_plan(topic or normalized_prompt or "AI draft")
+
+
+def _topic_from_custom_prompt(prompt: str) -> str:
+    cleaned = re.sub(r"\s+", " ", prompt).strip(" .?!")
+    patterns = [
+        r"^(?:please\s+)?(?:show|map|layout|lay out|create|build|draft|make|generate|outline)\s+(?:me\s+)?(?:a|an|the|typical\s+)?(.+)$",
+        r"^(?:what\s+is|explain|describe)\s+(?:a|an|the\s+)?(.+)$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, cleaned, flags=re.IGNORECASE)
+        if match:
+            cleaned = match.group(1).strip(" .?!")
+            break
+    cleaned = re.sub(r"^(?:typical|standard|basic)\s+", "", cleaned, flags=re.IGNORECASE)
+    if re.search(r"\bsaas\b", cleaned, flags=re.IGNORECASE):
+        cleaned = re.sub(r"\bSAAS\b", "SaaS", cleaned, flags=re.IGNORECASE)
+    return cleaned[:96].replace("business model model", "business model")
+
+
+def _saas_business_model_plan(topic: str) -> list[dict[str, Any]]:
+    root_title = "SaaS business model"
+    if topic and "saas" not in topic.lower():
+        root_title = f"SaaS business model for {topic}"
+    return [
+        {
+            "title": root_title,
+            "summary": "Subscription software model linking customer value, acquisition, pricing, retention, and unit economics.",
+            "node_type": "concept",
+        },
+        {
+            "title": "Target customers",
+            "summary": "Define ICP segments, buyer personas, urgent pain points, and willingness to pay.",
+            "node_type": "category",
+            "parent_order": 1,
+        },
+        {
+            "title": "Value proposition",
+            "summary": "Connect the product promise to measurable outcomes such as time saved, revenue lift, risk reduction, or workflow quality.",
+            "node_type": "category",
+            "parent_order": 1,
+        },
+        {
+            "title": "Acquisition channels",
+            "summary": "Map inbound, outbound, partner, product-led, and paid channels with CAC and sales-cycle assumptions.",
+            "node_type": "category",
+            "parent_order": 1,
+        },
+        {
+            "title": "Pricing and packaging",
+            "summary": "Set free trial or freemium entry, tiered plans, usage limits, add-ons, annual discounts, and expansion paths.",
+            "node_type": "category",
+            "parent_order": 1,
+        },
+        {
+            "title": "Revenue engine",
+            "summary": "Track MRR, ARR, ARPA, gross margin, expansion revenue, churn, and net revenue retention.",
+            "node_type": "category",
+            "parent_order": 1,
+        },
+        {
+            "title": "Product and operations",
+            "summary": "Cover onboarding, activation, support, reliability, security, integrations, roadmap, and customer success motions.",
+            "node_type": "category",
+            "parent_order": 1,
+        },
+        {
+            "title": "Risks and assumptions",
+            "summary": "Validate market demand, competitive differentiation, CAC payback, churn drivers, compliance needs, and funding runway.",
+            "node_type": "question",
+            "parent_order": 1,
+        },
+    ]
+
+
+def _generic_custom_prompt_plan(topic: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "title": topic[:80],
+            "summary": f"Draft a reviewable structure for: {topic[:180]}",
+            "node_type": "concept",
+        },
+        {
+            "title": "Core components",
+            "summary": f"Break {topic[:140] or 'the request'} into its main parts, decisions, and dependencies.",
+            "node_type": "category",
+            "parent_order": 1,
+        },
+        {
+            "title": "Workflow or sequence",
+            "summary": "Show the practical order of operations, handoffs, or lifecycle stages.",
+            "node_type": "category",
+            "parent_order": 1,
+        },
+        {
+            "title": "Metrics and evidence",
+            "summary": "Identify the signals, examples, or source support needed to validate the draft.",
+            "node_type": "reference",
+            "parent_order": 1,
+        },
+        {
+            "title": "Open questions",
+            "summary": "Flag assumptions, missing context, risks, and choices to confirm before accepting.",
+            "node_type": "question",
+            "parent_order": 1,
+        },
     ]
 
 

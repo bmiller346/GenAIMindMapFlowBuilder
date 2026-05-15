@@ -2595,12 +2595,19 @@ def _draft_revision_from_request(
         draft_nodes=preview.get("draft_nodes", []),
         draft_edges=preview.get("draft_edges", []),
         draft_annotations=preview.get("draft_annotations", []),
+        generated_artifacts=preview.get("generated_artifacts", []),
         model=preview.get("metadata", {}).get("model", ""),
         validation_report=preview.get("validation_report"),
         metadata={
             "ai_action_id": preview.get("ai_action_id", ""),
             "model_reason": preview.get("metadata", {}).get("model_reason", ""),
             "preview_mode": preview.get("metadata", {}).get("preview_mode", ""),
+            "output_shape": (request.get("metadata") or {}).get("output_shape", "")
+            if isinstance(request.get("metadata"), dict)
+            else "",
+            "requested_visual": (request.get("metadata") or {}).get("requested_visual", "")
+            if isinstance(request.get("metadata"), dict)
+            else "",
         },
     )
 
@@ -4169,6 +4176,7 @@ def create_pdf_component(
     file: UploadFile,
     flow_id: str = Form(...),
     processing_type: str = Form(...),
+    source_intent: str | None = Form(None),
     operation_id: str | None = Form(None),
 ):
     update_operation_progress(
@@ -4192,12 +4200,20 @@ def create_pdf_component(
         )
         raise ingestion_http_error(exc) from exc
 
+    processing_flow_type = (
+        "automatic"
+        if source_intent == "mindmap"
+        else "manual"
+        if source_intent == "context"
+        else flow["flow_type"]
+    )
+
     if upload["extension"] == "pdf":
         print(get_page_len(file))
         check_page_length = get_page_len(file)
-        if processing_type == "gpt" and not check_page_length and flow["flow_type"] == 'manual':
+        if processing_type == "gpt" and not check_page_length and processing_flow_type == 'manual':
             return get_summary_from_openai(file, flow_id=flow_id, flow_type='manual', operation_id=operation_id)
-        elif processing_type == "aws" and flow["flow_type"] == 'manual':
+        elif processing_type == "aws" and processing_flow_type == 'manual':
             update_operation_progress(
                 operation_id,
                 phase="extracting",
@@ -4215,7 +4231,7 @@ def create_pdf_component(
                 status_value="completed",
             )
             return result
-        elif processing_type == "custom" and flow["flow_type"] == 'manual':
+        elif processing_type == "custom" and processing_flow_type == 'manual':
             update_operation_progress(
                 operation_id,
                 phase="extracting",
@@ -4233,9 +4249,9 @@ def create_pdf_component(
                 status_value="completed",
             )
             return result
-        elif processing_type == "gpt" and not check_page_length and flow["flow_type"] == 'automatic':
+        elif processing_type == "gpt" and not check_page_length and processing_flow_type == 'automatic':
             return openai_mindmap_generator(file, flow_id=flow_id, flow_type='automatic', operation_id=operation_id)
-        elif processing_type == "aws" and flow["flow_type"] == 'automatic':
+        elif processing_type == "aws" and processing_flow_type == 'automatic':
             update_operation_progress(
                 operation_id,
                 phase="extracting",
@@ -4253,7 +4269,7 @@ def create_pdf_component(
                 status_value="completed",
             )
             return result
-        elif processing_type == "custom" and flow["flow_type"] == 'automatic':
+        elif processing_type == "custom" and processing_flow_type == 'automatic':
             update_operation_progress(
                 operation_id,
                 phase="extracting",
@@ -5197,6 +5213,7 @@ def create_docx_component(
     file: UploadFile,
     flow_id: str = Form(...),
     operation_id: str | None = Form(None),
+    source_intent: str | None = Form(None),
     intake_role: str | None = Form(None),
     intake_model: str | None = Form(None),
     intake_prompt: str | None = Form(None),
@@ -5211,6 +5228,8 @@ def create_docx_component(
     try:
         flow = get_upload_flow_or_400(flow_id)
         upload = validate_upload_bytes(file.filename, read_upload_bytes(file))
+        if upload["extension"] != "docx":
+            raise DocumentIngestionError("Only DOCX files are allowed.")
     except DocumentIngestionError as exc:
         update_operation_progress(
             operation_id,
@@ -5232,80 +5251,75 @@ def create_docx_component(
         )
         raise
 
-    if upload["extension"] == "docx":
-        try:
-            check_page_length = is_within_gpt4o_token_limit(file)
-            if check_page_length and flow["flow_type"] == 'manual':
-                return get_summary_from_openai(
-                    file,
-                    flow_id=flow_id,
-                    flow_type=flow["flow_type"],
-                    operation_id=operation_id,
-                    intake_role=intake_role,
-                    intake_prompt=intake_prompt,
-                    intake_model=intake_model,
-                )
-            elif check_page_length and flow["flow_type"] == 'automatic':
-                return openai_mindmap_generator(
-                    file,
-                    flow_id=flow_id,
-                    flow_type=flow["flow_type"],
-                    operation_id=operation_id,
-                    intake_role=intake_role,
-                    intake_prompt=intake_prompt,
-                    intake_model=intake_model,
-                )
-            else:
-                traceback.print_exc()
-                update_operation_progress(
-                    operation_id,
-                    phase="failed",
-                    message="DOCX source exceeds AI token limit",
-                    detail="Split the file into smaller sources and try again.",
-                    progress=100,
-                    status_value="failed",
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                    detail="DOCX is too large for OpenAI processing. Split it into smaller source files and try again.",
-                )
-        except HTTPException:
-            raise
-        except MissingConfigurationError as exc:
-            update_operation_progress(
-                operation_id,
-                phase="failed",
-                message="Missing AI settings",
-                detail=str(exc),
-                progress=100,
-                status_value="failed",
+    try:
+        processing_flow_type = (
+            "automatic"
+            if source_intent == "mindmap"
+            else "manual"
+            if source_intent == "context"
+            else flow["flow_type"]
+        )
+        check_page_length = is_within_gpt4o_token_limit(file)
+        if check_page_length and processing_flow_type == 'manual':
+            return get_summary_from_openai(
+                file,
+                flow_id=flow_id,
+                flow_type='manual',
+                operation_id=operation_id,
+                intake_role=intake_role,
+                intake_prompt=intake_prompt,
+                intake_model=intake_model,
             )
-            raise configuration_http_error(exc) from exc
-        except Exception as exc:
+        elif check_page_length and processing_flow_type == 'automatic':
+            return openai_mindmap_generator(
+                file,
+                flow_id=flow_id,
+                flow_type='automatic',
+                operation_id=operation_id,
+                intake_role=intake_role,
+                intake_prompt=intake_prompt,
+                intake_model=intake_model,
+            )
+        else:
             traceback.print_exc()
             update_operation_progress(
                 operation_id,
                 phase="failed",
-                message="DOCX processing failed",
-                detail=str(exc),
+                message="DOCX source exceeds AI token limit",
+                detail="Split the file into smaller sources and try again.",
                 progress=100,
                 status_value="failed",
             )
             raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"DOCX processing failed: {str(exc)}",
-            ) from exc
-    else:
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="DOCX is too large for OpenAI processing. Split it into smaller source files and try again.",
+            )
+    except HTTPException:
+        raise
+    except MissingConfigurationError as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="Missing AI settings",
+            detail=str(exc),
+            progress=100,
+            status_value="failed",
+        )
+        raise configuration_http_error(exc) from exc
+    except Exception as exc:
         traceback.print_exc()
         update_operation_progress(
             operation_id,
             phase="failed",
-            message="DOCX validation failed",
-            detail="Only DOCX files are allowed.",
+            message="DOCX processing failed",
+            detail=str(exc),
             progress=100,
             status_value="failed",
         )
-        raise HTTPException(status_code=400, detail="Only DOCX files are allowed.")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"DOCX processing failed: {str(exc)}",
+        ) from exc
 
 
 @app.post("/component-create-csv")

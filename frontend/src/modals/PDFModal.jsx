@@ -29,7 +29,83 @@ import {
     stringifyFlowSnapshot
 } from '../utils/flowSnapshots';
 
-const PDFModal = () => {
+const parseMindmapJson = (mindmapJson) => {
+    if (!mindmapJson) {
+        return {};
+    }
+    if (typeof mindmapJson === 'string') {
+        try {
+            return JSON.parse(mindmapJson);
+        } catch (error) {
+            return {};
+        }
+    }
+    return mindmapJson;
+};
+
+const hasGraphDraft = (data) => {
+    const flow = parseMindmapJson(data?.mindmap_json);
+    return (flow.nodes || []).length > 0 || (flow.edges || []).length > 0;
+};
+
+const sourceRecordFromUpload = (data, file, flowId) => {
+    const flow = parseMindmapJson(data?.mindmap_json);
+    const sourceLibrary = Array.isArray(flow.source_library) ? flow.source_library : [];
+    const fromGraph =
+        sourceLibrary.find((source) => source.component_id === data.component_id) ||
+        sourceLibrary.find((source) => source.title === file?.name) ||
+        sourceLibrary[0] ||
+        {};
+
+    return {
+        id:
+            fromGraph.id ||
+            data.normalized_document_id ||
+            data.source_document_id ||
+            data.document_id ||
+            data.component_id ||
+            file?.name ||
+            nanoid(),
+        title: fromGraph.title || file?.name || data.filename || 'PDF source',
+        type: fromGraph.type || data.type || 'pdf',
+        type_label: fromGraph.type_label || 'PDF',
+        status: fromGraph.status || 'parsed',
+        node_id: fromGraph.node_id || '',
+        component_id: fromGraph.component_id || data.component_id || '',
+        flow_id: fromGraph.flow_id || data.flow_id || flowId || '',
+        file_hash: fromGraph.file_hash || data.file_hash || '',
+        size: fromGraph.size || file?.size || 0,
+        version: fromGraph.version || '',
+        metadata: {
+            ...(fromGraph.metadata || {}),
+            original_filename: file?.name || fromGraph.title || data.filename || ''
+        },
+        chunks: Array.isArray(fromGraph.chunks) ? fromGraph.chunks : [],
+        segments: Array.isArray(fromGraph.segments) ? fromGraph.segments : [],
+        normalized_document_id:
+            fromGraph.normalized_document_id ||
+            data.normalized_document_id ||
+            data.source_document_id ||
+            ''
+    };
+};
+
+const upsertSource = (sources = [], source = {}) => {
+    if (!source.id) {
+        return sources;
+    }
+    const existingIndex = sources.findIndex((item) => item.id === source.id);
+    if (existingIndex < 0) {
+        return [...sources, source];
+    }
+    return sources.map((item, index) => (index === existingIndex ? { ...item, ...source } : item));
+};
+
+const PDFModal = ({
+    sourcePickerMode = 'workspace_intake',
+    returnModal,
+    returnProps = {}
+}) => {
     const flowId = flowStore((s) => s.flow_id);
     const [file, setFile] = useState();
     const pushNode = modalStore((s) => s.pushNode);
@@ -45,6 +121,7 @@ const PDFModal = () => {
     const flowType = flowStore((s) => s.flow_type);
     const setFlowType = flowStore((s) => s.setFlowType);
     const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
     const { fitView, setViewport } = useReactFlow();
     const selector = (state) => ({
         trigger: state.trigger,
@@ -56,7 +133,9 @@ const PDFModal = () => {
         setViewPort: state.setViewPort,
         workspaceBrief: state.workspaceBrief,
         setWorkspaceBrief: state.setWorkspaceBrief,
-        viewport: state.viewport
+        viewport: state.viewport,
+        sourceLibrary: state.sourceLibrary,
+        setSourceLibrary: state.setSourceLibrary
     });
 
     const {
@@ -69,10 +148,13 @@ const PDFModal = () => {
         setViewPort,
         workspaceBrief,
         setWorkspaceBrief,
-        viewport
+        viewport,
+        sourceLibrary,
+        setSourceLibrary
     } = useStore(useShallow(selector));
     const pdfAccept = '.pdf,application/pdf';
     const [processingType, setProcessingType] = useState('gpt');
+    const isAskAIContextMode = sourcePickerMode === 'ask_ai_context';
 
     const ensureWorkspace = async () => {
         const currentFlow = flowStore.getState();
@@ -137,6 +219,7 @@ const PDFModal = () => {
         const data = {
             file: file,
             processing_type: processingType,
+            sourceIntent: isAskAIContextMode ? 'context' : 'mindmap',
             operationId
         };
         const undoSnapshot = createOperationSnapshot({
@@ -192,11 +275,17 @@ const PDFModal = () => {
                 updateActivity(activityId, {
                     type: 'source_upload_completed',
                     status: 'completed',
-                    context: 'PDF source was added to the workspace.',
+                    context: isAskAIContextMode
+                        ? 'PDF source was attached to Ask AI context.'
+                        : 'PDF source was added to the workspace.',
                     source_ids: [file?.name],
-                    undo: undoSourceAdd
+                    undo: isAskAIContextMode ? undefined : undoSourceAdd
                 });
-                setupNodes(res.data);
+                if (isAskAIContextMode) {
+                    attachSourceToAskAI(res.data, currentFlowId);
+                } else {
+                    setupNodes(res.data);
+                }
             })
             .catch((err) => {
                 if (isCanceledRequest(err)) {
@@ -212,12 +301,35 @@ const PDFModal = () => {
     };
     
     const setupNodes = (data) => {
-        if (data.flow_type === 'automatic') {
+        if (hasGraphDraft(data) || data.flow_type === 'automatic') {
             manageAutomaticNode(data)
         } else {
             manageNodes(data)
         }
     }
+
+    const attachSourceToAskAI = (data, currentFlowId) => {
+        const uploadedSource = sourceRecordFromUpload(data, file, currentFlowId);
+        const nextSelectedSourceIds = Array.from(
+            new Set([
+                ...(Array.isArray(returnProps.selectedSourceIds)
+                    ? returnProps.selectedSourceIds
+                    : []),
+                uploadedSource.id
+            ].filter(Boolean))
+        );
+        setSourceLibrary(upsertSource(sourceLibrary, uploadedSource));
+        setSaveStatus('dirty');
+        pushNode(returnModal || DataSourceSelect, returnModal
+            ? {
+                  ...returnProps,
+                  selectedSourceIds: nextSelectedSourceIds,
+                  uploadedSourceId: uploadedSource.id,
+                  initialContextSourceIds: nextSelectedSourceIds,
+                  initialContextSourceId: uploadedSource.id
+              }
+            : {});
+    };
 
     const manageAutomaticNode = (data) => {
         setupFlow(data)
@@ -227,12 +339,12 @@ const PDFModal = () => {
         setFlowId(data.flow_id);
         console.log('DEDEDE', data);
         setFlowName(data.flow_name);
-        const jsonString = JSON.stringify(data.mindmap_json)
+        const flow = parseMindmapJson(data.mindmap_json);
+        const jsonString = JSON.stringify(flow)
         console.log(jsonString, "JSON STRINGGGGGGGGGGGGGG")
-        if (jsonString.length > 0) {
-            const flow = JSON.parse(jsonString);
+        if (Object.keys(flow || {}).length > 0) {
             console.log('NODEEEEEEEEEE', flow.nodes);
-            if (flow.nodes.length === 0 && flow.edges.length === 0) {
+            if ((flow.nodes || []).length === 0 && (flow.edges || []).length === 0) {
                 console.log('not clled');
                 setTrigger(!trigger);
                 setViewPort(0, 0, 1);
@@ -291,6 +403,7 @@ const PDFModal = () => {
     }
 
     const manageNodes = (data) => {
+        const sourceRecord = sourceRecordFromUpload(data, file, flowStore.getState().flow_id || flowId);
         const node = {
             id: data.component_id,
             position: { x: 0, y: 0 },
@@ -301,9 +414,15 @@ const PDFModal = () => {
                 flow_id: flowStore.getState().flow_id || flowId,
                 prompt: 'Research Assistant',
                 file: file,
-                processing_type: processingType
+                processing_type: processingType,
+                component_id: data.component_id,
+                source_document_id: sourceRecord.id,
+                source_document: sourceRecord.metadata,
+                document_chunks: sourceRecord.chunks,
+                source_segments: sourceRecord.segments
             }
         };
+        setSourceLibrary(upsertSource(sourceLibrary, sourceRecord));
         if (nodes.length === 0) {
             setNodes([node]);
         } else {
@@ -378,7 +497,13 @@ const PDFModal = () => {
             <div className="buttons">
                 <button
                     id="cancel"
-                    onClick={(e) => pushNode(DataSourceSelect)}
+                    onClick={() =>
+                        pushNode(DataSourceSelect, {
+                            mode: sourcePickerMode,
+                            returnModal,
+                            returnProps
+                        })
+                    }
                 >
                     Back
                 </button>

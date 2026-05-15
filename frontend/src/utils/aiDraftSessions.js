@@ -118,6 +118,37 @@ export const buildSelectedSourceDraftPayload = (source = {}) => {
     };
 };
 
+export const buildSelectedSourcesDraftPayload = (sources = []) => {
+    const normalizedSources = asArray(sources);
+    if (normalizedSources.length === 1) {
+        return buildSelectedSourceDraftPayload(normalizedSources[0]);
+    }
+    const chunks = normalizedSources.flatMap((source) =>
+        asArray(source.chunks).map((chunk) => normalizeAIDraftSourceChunk(chunk, source))
+    );
+    const sourceRefs = mergeSourceRefs(
+        normalizedSources.flatMap((source) => asArray(source.source_refs)),
+        chunks.flatMap((chunk) => asArray(chunk.source_refs))
+    );
+    const sourceIds = normalizedSources
+        .map((source) => firstText(source.id, source.document_id, source.source_id))
+        .filter(Boolean);
+    return {
+        scope: { type: 'workspace' },
+        source_chunks: chunks,
+        source_refs: sourceRefs,
+        metadata: {
+            selected_source_ids: sourceIds,
+            selected_source_titles: normalizedSources.map((source) =>
+                firstText(source.title, source.filename, source.name)
+            ),
+            selected_source_count: sourceIds.length,
+            selected_source_chunk_count: chunks.length,
+            source_context_mode: 'bounded_multi_source'
+        }
+    };
+};
+
 export const buildAIDraftSessionRequestPayload = ({
     role = {},
     action = {},
@@ -125,7 +156,10 @@ export const buildAIDraftSessionRequestPayload = ({
     prompt = '',
     createdBy = 'user',
     selectedModel = 'auto',
-    selectedSourcePayload = null
+    selectedSourcePayload = null,
+    desiredOutputs = [],
+    workspaceBrief = {},
+    metadata = {}
 } = {}) => ({
     role: role.id || role.role_id || role.label || 'ask-ai',
     role_id: role.id || role.role_id || '',
@@ -138,7 +172,11 @@ export const buildAIDraftSessionRequestPayload = ({
     model_policy: selectedModel === 'auto' ? 'balanced' : 'explicit',
     model: selectedModel === 'auto' ? null : selectedModel,
     source_chunks: selectedSourcePayload?.source_chunks || [],
+    desired_outputs: Array.isArray(desiredOutputs) ? desiredOutputs.filter(Boolean) : [],
+    workspace_brief: workspaceBrief && typeof workspaceBrief === 'object' ? workspaceBrief : {},
     metadata: {
+        ...metadata,
+        workspace_brief: workspaceBrief && typeof workspaceBrief === 'object' ? workspaceBrief : {},
         source_context: selectedSourcePayload?.metadata
     }
 });

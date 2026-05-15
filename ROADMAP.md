@@ -42,8 +42,8 @@ Recently verified:
   chunks to the draft-session endpoint.
 - Backend draft sessions can already carry prior draft state and source
   context. The server also exposes a source-reconciliation endpoint for adding
-  source chunks to an active draft; the remaining gap is wiring that capability
-  into a polished multi-source frontend workflow.
+  source chunks to an active draft; the draft panel now exposes that
+  reconciliation path for loaded sources.
 - Real-file backend upload smoke passed for `examples/gpt4all.pdf` and
   `examples/Project-Management-Plan-1.docx` using the real upload, extraction,
   chunking, source metadata, source draft review, save/reopen, JSON export, and
@@ -373,8 +373,8 @@ Core product rules:
   cited items", or "compare this to the new document".
 - [ ] Users can add sources mid-session; the draft session can re-run coverage,
   citation repair, contradiction checks, and append proposals against the new
-  context. Backend helper, endpoint, and tests exist for this; frontend
-  selection/reconcile UI is still incomplete.
+  context. Backend helper, endpoint, tests, and draft-panel source
+  reconciliation UI exist; browser save/reload verification remains open.
 - [x] Accepting a draft supports explicit modes: append to selected scope,
   replace selected branch, merge into matching nodes, accept selected items,
   accept cited-only, or store as review notes.
@@ -451,12 +451,11 @@ Frontend UX:
   and conflict badges directly in the draft panel.
 - [x] Support conversational refinement against the current draft without
   closing the panel.
-- [ ] Support "add another source" from inside the draft session and re-run
-  coverage against the new source. Backend/provider integration exists; the UI
-  hook currently opens the existing source picker but still needs to pass the
-  selected source/chunks to the draft-session `/sources` endpoint and refresh
-  the active draft revision.
-- [ ] Support explicit multi-source Ask AI selection in the UI. Users should be
+- [x] Support "add another source" from inside the draft session and re-run
+  coverage against the new source. The draft panel can choose a loaded source,
+  post its chunks to the draft-session `/sources` endpoint, and refresh the
+  active draft revision.
+- [x] Support explicit multi-source Ask AI selection in the UI. Users should be
   able to choose multiple loaded documents/sources, ask one prompt against that
   bounded source set, and see which sources/chunks were used in the draft.
 - [ ] Preserve keyboard-friendly controls and predictable focus behavior for
@@ -480,8 +479,8 @@ Acceptance criteria:
 - [x] User can accept only selected manufacturers into the graph.
 - [x] User can accept all, accept selected, append, replace, or merge.
 - [ ] User can add a source document mid-session and ask the system to reconcile
-  the draft against it. Backend endpoint/helper coverage exists; browser UI
-  flow and save/reload verification remain open.
+  the draft against it. Implementation and focused contract coverage exist;
+  browser save/reload verification remains open.
 - [x] Accepted changes run through canonical graph validation before persistence.
 - [x] Source-backed accepted nodes retain citations after save/reload/export.
 - [x] Unsourced accepted nodes are persisted as `needs_review`.

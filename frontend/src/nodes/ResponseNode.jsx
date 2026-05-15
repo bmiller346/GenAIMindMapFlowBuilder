@@ -1,4 +1,5 @@
 import { Handle } from '@xyflow/react';
+import axios from 'axios';
 import { lazy, Suspense, useMemo, useState } from 'react';
 import {
     FiCalendar,
@@ -7,10 +8,12 @@ import {
     FiCopy,
     FiFileText,
     FiGitBranch,
+    FiMaximize2,
     FiMessageSquare,
     FiMoreHorizontal,
     FiPlus,
     FiScissors,
+    FiSend,
     FiTrash2,
     FiUser
 } from 'react-icons/fi';
@@ -24,6 +27,16 @@ import modalStore from '../stores/modalStore';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
 import {
+    getActionsForProfileAndScope,
+    getDefaultActionForProfile,
+    getFollowUpSuggestions,
+    getPromptProfilesForScope
+} from '../prompts/promptsModel';
+import {
+    buildAIDraftSessionRequestPayload,
+    createAIDraftSession
+} from '../utils/aiDraftSessions';
+import {
     createWorkspaceEdge,
     createWorkspaceNode,
     getChildPosition,
@@ -36,11 +49,228 @@ import {
 const Graph = lazy(() => import('../global-components/Graph'));
 const TableComponent = lazy(() => import('../global-components/TableComponent'));
 
+const INLINE_AI_DRAFT_NODE_ACTIONS = new Set([
+    'expand_this_node',
+    'ask_follow_up',
+    'generate_child_nodes',
+    'convert_to_checklist',
+    'create_sme_questions',
+    'find_missing_source_support',
+    'generate_tasks',
+    'generate_checklist',
+    'custom_prompt'
+]);
+
+const draftSessionEndpoint = ({ flowId }) =>
+    `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions`;
+
+const inferInlineAIIntent = (prompt, profiles) => {
+    const normalizedPrompt = prompt.toLowerCase();
+    const rules = [
+        {
+            match: /(task|todo|to-do|owner|due|action item)/,
+            profileId: 'task-planner',
+            actionId: 'generate_tasks'
+        },
+        {
+            match: /(source|citation|cite|unsupported|evidence|reference)/,
+            profileId: 'source-ref-repair',
+            actionId: 'find_missing_source_support'
+        },
+        {
+            match: /(question|follow.?up|sme|ask)/,
+            profileId: 'sme-question-generator',
+            actionId: 'create_sme_questions'
+        },
+        {
+            match: /(checklist|check list)/,
+            profileId: 'training-guide-builder',
+            actionId: 'convert_to_checklist'
+        },
+        {
+            match: /(how\s+(to|do i)|recipe|cook|make|build|create|procedure|process|workflow|step|steps)/,
+            profileId: 'workflow-mapper',
+            actionId: 'generate_child_nodes'
+        },
+        {
+            match: /(expand|child|children|break down|branch|brainstorm|generate)/,
+            profileId: 'workflow-mapper',
+            actionId: 'generate_child_nodes'
+        }
+    ];
+    const rule = rules.find((candidate) => candidate.match.test(normalizedPrompt));
+    const role =
+        profiles.find((profile) => profile.id === rule?.profileId) ||
+        profiles.find((profile) => profile.id === 'custom') ||
+        profiles[0];
+    const actions = getActionsForProfileAndScope(role, 'node');
+    const action =
+        actions.find((candidate) => candidate.id === rule?.actionId) ||
+        actions.find((candidate) => candidate.id === getDefaultActionForProfile(role, 'node')) ||
+        actions.find((candidate) => candidate.id === 'custom_prompt') ||
+        actions[0] ||
+        { id: 'custom_prompt', label: 'Custom prompt' };
+
+    return { role, action };
+};
+
+const draftNodeTypeForAction = (actionId = '') => {
+    if (actionId.includes('task') || actionId.includes('checklist')) {
+        return 'task';
+    }
+    if (actionId.includes('question') || actionId.includes('follow')) {
+        return 'question';
+    }
+    if (actionId.includes('source') || actionId.includes('gap') || actionId.includes('unsupported')) {
+        return 'needs_review';
+    }
+    if (actionId.includes('child') || actionId.includes('expand')) {
+        return 'step';
+    }
+    return 'concept';
+};
+
+const titleFromPrompt = (prompt = '') => {
+    const cleaned = String(prompt || '')
+        .replace(/[?!.\s]+$/g, '')
+        .replace(/^(please\s+)?(show me\s+)?(how\s+(to|do i)\s+|can you\s+|could you\s+|make\s+|create\s+|build\s+)/i, '')
+        .trim();
+    if (!cleaned) {
+        return 'AI draft';
+    }
+    return cleaned.length > 80 ? `${cleaned.slice(0, 77).trim()}...` : cleaned;
+};
+
+const shouldAttachInlineSourceRefs = (prompt = '') =>
+    /\b(from this|from the|based on|according to|source|citation|cite|evidence|document|docx|pdf|reference)\b/i.test(
+        prompt
+    );
+
+const buildInlineDraftSteps = ({ prompt = '', actionId = '' }) => {
+    const normalizedPrompt = prompt.toLowerCase();
+    const subject = titleFromPrompt(prompt);
+
+    if (/grilled\s+cheese|cheese\s+sandwich/.test(normalizedPrompt)) {
+        return [
+            {
+                title: 'Gather bread, cheese, and butter',
+                summary: 'Set out two slices of bread, cheese that melts well, softened butter, and a skillet.'
+            },
+            {
+                title: 'Butter the outside of the bread',
+                summary: 'Spread a thin, even layer of butter on the two sides that will touch the pan.'
+            },
+            {
+                title: 'Assemble the sandwich',
+                summary: 'Place cheese between the unbuttered sides so the buttered faces stay outside.'
+            },
+            {
+                title: 'Toast the first side',
+                summary: 'Cook over medium-low heat until the bottom is golden and the cheese starts melting.'
+            },
+            {
+                title: 'Flip and finish',
+                summary: 'Turn the sandwich carefully and cook until the second side is golden and the cheese is fully melted.'
+            },
+            {
+                title: 'Rest, slice, and serve',
+                summary: 'Let it sit briefly, then cut and serve while the center is still warm and melted.'
+            }
+        ];
+    }
+
+    if (actionId.includes('question') || actionId.includes('follow')) {
+        return [
+            {
+                title: `Clarify the goal for ${subject}`,
+                summary: `Ask what outcome, constraints, or audience should shape ${subject}.`,
+                node_type: 'question'
+            },
+            {
+                title: `Confirm missing inputs for ${subject}`,
+                summary: `Identify any information needed before turning ${subject} into map nodes.`,
+                node_type: 'question'
+            }
+        ];
+    }
+
+    if (actionId.includes('source') || actionId.includes('gap') || actionId.includes('unsupported')) {
+        return [
+            {
+                title: `Check source support for ${subject}`,
+                summary: `Review which claims in ${subject} need citations, quotes, or confirmation.`,
+                node_type: 'needs_review'
+            },
+            {
+                title: `Mark unsupported assumptions for ${subject}`,
+                summary: `Separate inferred content from source-backed content so it can be reviewed.`,
+                node_type: 'needs_review'
+            }
+        ];
+    }
+
+    if (actionId.includes('task')) {
+        return [
+            {
+                title: `Define outcome for ${subject}`,
+                summary: `State what done looks like for ${subject}.`,
+                node_type: 'task'
+            },
+            {
+                title: `Prepare inputs for ${subject}`,
+                summary: `Gather the materials, references, people, or context needed to start.`,
+                node_type: 'task'
+            },
+            {
+                title: `Execute ${subject}`,
+                summary: `Complete the core work and record any blockers or decisions.`,
+                node_type: 'task'
+            },
+            {
+                title: `Review ${subject}`,
+                summary: `Check the result, capture changes, and decide what should happen next.`,
+                node_type: 'task'
+            }
+        ];
+    }
+
+    return [
+        {
+            title: `Start ${subject}`,
+            summary: `Define the goal and collect what is needed for ${subject}.`
+        },
+        {
+            title: `Prepare ${subject}`,
+            summary: `Set up the inputs, environment, and constraints before doing the work.`
+        },
+        {
+            title: `Do ${subject}`,
+            summary: `Work through the main action in a clear sequence.`
+        },
+        {
+            title: `Check ${subject}`,
+            summary: `Review the result against the goal and note anything that needs another pass.`
+        }
+    ];
+};
+
+const sessionFromResponse = (responseData, fallbackSession) =>
+    responseData?.session_id
+        ? responseData
+        : responseData?.draft_session?.session_id
+          ? responseData.draft_session
+          : responseData?.session?.session_id
+            ? responseData.session
+            : fallbackSession;
+
 const ResponseNode = ({ id, data }) => {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isSlashOpen, setIsSlashOpen] = useState(false);
     const [slashQuery, setSlashQuery] = useState('');
     const [activeSlashIndex, setActiveSlashIndex] = useState(0);
+    const [inlineAiPrompt, setInlineAiPrompt] = useState('');
+    const [inlineAiStatus, setInlineAiStatus] = useState('');
+    const [isInlineAiGenerating, setIsInlineAiGenerating] = useState(false);
     const [isTableExpanded, setIsTableExpanded] = useState(false);
     const [areDetailsExpanded, setAreDetailsExpanded] = useState(false);
     const nodes = useStore((state) => state.nodes);
@@ -50,13 +280,18 @@ const ResponseNode = ({ id, data }) => {
     const setInspectorNodeId = useStore((state) => state.setInspectorNodeId);
     const setActiveView = useStore((state) => state.setActiveView);
     const setSelectedBranchId = useStore((state) => state.setSelectedBranchId);
+    const setGeneratedHelperPreview = useStore((state) => state.setGeneratedHelperPreview);
+    const setActiveAIActionPreview = useStore((state) => state.setActiveAIActionPreview);
+    const setActiveAIDraftSession = useStore((state) => state.setActiveAIDraftSession);
     const pushModal = modalStore((state) => state.pushNode);
     const setSaveStatus = flowStore((state) => state.setSaveStatus);
+    const flowId = flowStore((state) => state.flow_id);
     const recordActivity = useActivityStore((state) => state.recordActivity);
     const workspaceData = useMemo(
         () => getWorkspaceNodeData({ id, type: 'response', data }),
         [data, id]
     );
+    const inlineAIProfiles = useMemo(() => getPromptProfilesForScope('node'), []);
     const responseData = data.data || {};
     const displayTitle = workspaceData.title || '';
     const summary = workspaceData.body || '';
@@ -624,6 +859,212 @@ const ResponseNode = ({ id, data }) => {
         setActiveSlashIndex(0);
     };
 
+    const stageInlineAiDraft = async (event) => {
+        event.preventDefault();
+        const localPrompt = inlineAiPrompt.trim();
+
+        if (!localPrompt || isInlineAiGenerating) {
+            if (!localPrompt) {
+                setInlineAiStatus('Type a request, or open advanced.');
+            }
+            return;
+        }
+
+        const { role, action: selectedAction } = inferInlineAIIntent(
+            localPrompt,
+            inlineAIProfiles
+        );
+        const targetLabel = displayTitle || summary || id;
+        const normalizedScope = { type: 'node', node_id: id };
+        const sourceRefs = shouldAttachInlineSourceRefs(localPrompt)
+            ? workspaceData.sourceRefs || []
+            : [];
+        const childEdges = edges.filter((edge) => edge.source === id);
+        const suggestions = getFollowUpSuggestions(
+            role,
+            selectedAction,
+            targetLabel,
+            'node'
+        ).slice(0, 3);
+        const shouldDraftNode = INLINE_AI_DRAFT_NODE_ACTIONS.has(selectedAction.id);
+        const draftPrefix = `draft-${Date.now()}`;
+        const defaultNodeType = draftNodeTypeForAction(selectedAction.id);
+        const inlineDraftSteps = buildInlineDraftSteps({
+            prompt: localPrompt,
+            actionId: selectedAction.id
+        });
+        const draftNodes = shouldDraftNode
+            ? inlineDraftSteps.map((step, index) => ({
+                  id: `${draftPrefix}-${index + 1}`,
+                  parent_id: id,
+                  title: step.title,
+                  summary: step.summary || localPrompt,
+                  node_type: step.node_type || defaultNodeType,
+                  status: sourceRefs.length ? 'ai_generated' : 'needs_review',
+                  source_refs: sourceRefs,
+                  assumptions: sourceRefs.length ? [] : [`User instruction: ${localPrompt}`],
+                  metadata: {
+                      inline_prompt: localPrompt,
+                      inline_prompt_step: index + 1,
+                      action_id: selectedAction.id,
+                      role_id: role.id
+                  }
+              }))
+            : [];
+        const draftEdges = shouldDraftNode
+            ? draftNodes.map((node) => ({
+                  id: `draft-edge-${id}-${node.id}`,
+                  source_node_id: id,
+                  target_node_id: node.id,
+                  relationship_type: 'contains',
+                  metadata: {
+                      inline_prompt: localPrompt
+                  }
+              }))
+            : [];
+        const draftAnnotations =
+            selectedAction.id === 'custom_prompt'
+                ? []
+                : suggestions.map((suggestion, index) => ({
+                      id: `inline-suggestion-${index + 1}`,
+                      type: 'follow_up_suggestion',
+                      title: suggestion,
+                      body: suggestion
+                  }));
+        const fallbackSession = createAIDraftSession({
+            workspaceId: flowId || '',
+            scope: normalizedScope,
+            role: role.label,
+            intent: selectedAction.id,
+            prompt: localPrompt,
+            draftNodes,
+            draftEdges,
+            draftAnnotations,
+            modelPolicy: 'balanced',
+            selectedModel: 'auto',
+            modelReason: 'Inline node prompt uses automatic model selection.',
+            metadata: {
+                role_id: role.id,
+                action_label: selectedAction.label,
+                preview_mode: 'inline_node_prompt',
+                source_node_id: id
+            }
+        });
+        const legacyPreview = {
+            preview_id: fallbackSession.session_id,
+            ai_action_id: fallbackSession.session_id,
+            workspace_id: flowId || '',
+            scope: normalizedScope,
+            source_node_id: id,
+            role: role.label,
+            role_id: role.id,
+            action: selectedAction.id,
+            action_label: selectedAction.label,
+            custom_prompt: localPrompt,
+            input_node_ids: [id, ...childEdges.map((edge) => edge.target)],
+            draft_nodes: draftNodes,
+            draft_edges: draftEdges,
+            draft_annotations: draftAnnotations,
+            validation_report: {
+                status: 'not_run',
+                message: 'Inline draft preview is waiting for review.'
+            },
+            source_refs: sourceRefs,
+            assumptions: [`User instruction: ${localPrompt}`],
+            metadata: {
+                preview_mode: 'inline_node_prompt',
+                model: 'auto',
+                model_tier: 'auto',
+                model_reason: 'Inline node prompt uses automatic model selection.'
+            }
+        };
+
+        const activateSession = (session) => {
+            const nextSession = sessionFromResponse(session, fallbackSession);
+            setGeneratedHelperPreview('nodeAiActionRequest', legacyPreview);
+            setActiveAIActionPreview(undefined);
+            setActiveAIDraftSession(nextSession);
+            setSelectedBranchId(id);
+            setInspectorNodeId(id);
+            setActiveView('mindmap');
+            recordActivity({
+                type: 'inline_ai_prompt_submitted',
+                title: `${role.label}: ${selectedAction.label}`,
+                summary: localPrompt,
+                node_ids: [id],
+                metadata: {
+                    scope: 'node',
+                    role: role.label,
+                    action: selectedAction.id,
+                    model: 'auto'
+                }
+            });
+            setInlineAiPrompt('');
+            setInlineAiStatus('Draft ready. Review and accept it in the node panel.');
+            setIsMenuOpen(false);
+            setIsSlashOpen(false);
+        };
+
+        setIsInlineAiGenerating(true);
+        setInlineAiStatus('Drafting from this node...');
+
+        try {
+            const baseRequestPayload = buildAIDraftSessionRequestPayload({
+                role,
+                action: selectedAction,
+                scope: normalizedScope,
+                prompt: localPrompt,
+                selectedModel: 'auto'
+            });
+            const response = flowId
+                ? await axios.post(
+                      draftSessionEndpoint({ flowId }),
+                      {
+                          ...baseRequestPayload,
+                          draft_nodes: draftNodes,
+                          draft_edges: draftEdges,
+                          draft_annotations: draftAnnotations,
+                          source_refs: sourceRefs,
+                          assumptions: [`User instruction: ${localPrompt}`],
+                          metadata: {
+                              ...(baseRequestPayload.metadata || {}),
+                              role_id: role.id,
+                              action_label: selectedAction.label,
+                              preview_mode: 'inline_node_prompt',
+                              source_node_id: id,
+                              source_context_attached: sourceRefs.length > 0
+                          }
+                      }
+                  )
+                : null;
+            activateSession(response?.data || fallbackSession);
+        } catch (error) {
+            const detail =
+                error.response?.data?.detail?.message ||
+                error.response?.data?.detail ||
+                error.message ||
+                'Unable to generate inline draft.';
+            activateSession({
+                ...fallbackSession,
+                warnings: [String(detail)],
+                revisions: fallbackSession.revisions.map((revision) => ({
+                    ...revision,
+                    validation_report: {
+                        ...revision.validation_report,
+                        status: 'fallback',
+                        message: 'Backend draft session was unavailable; staged a local inline draft.'
+                    }
+                })),
+                metadata: {
+                    ...fallbackSession.metadata,
+                    backend_warning: String(detail)
+                }
+            });
+        } finally {
+            setIsInlineAiGenerating(false);
+        }
+    };
+
     const deleteNode = () => {
         const descendantIds = getDescendantIds(id);
 
@@ -695,16 +1136,16 @@ const ResponseNode = ({ id, data }) => {
         {
             id: 'ask-ai',
             group: 'AI',
-            label: 'Ask AI',
-            description: 'Choose a role and preview action',
+            label: 'Advanced Ask AI',
+            description: 'Open the full role/action picker',
             previewOnly: true,
             action: () => openAskAi('node')
         },
         {
             id: 'branch-ai',
             group: 'AI',
-            label: 'Ask AI about branch',
-            description: 'Choose a role for this branch',
+            label: 'Advanced branch AI',
+            description: 'Open the full branch role picker',
             previewOnly: true,
             action: () => openAskAi('branch')
         },
@@ -920,8 +1361,20 @@ const ResponseNode = ({ id, data }) => {
         );
     };
 
+    const initialSeedVisual =
+        data.metadata?.initial_seed_visual || data.data?.metadata?.initial_seed_visual || '';
+    const nodeClassName = [
+        'node-response',
+        `node-response-status-${nodeStatus}`,
+        workspaceData.nodeType ? `node-response-type-${workspaceData.nodeType}` : '',
+        initialSeedVisual ? 'node-response-initial-seed' : '',
+        initialSeedVisual ? `node-response-initial-seed-${initialSeedVisual}` : ''
+    ]
+        .filter(Boolean)
+        .join(' ');
+
     return (
-        <div className={`node-response node-response-status-${nodeStatus}`}>
+        <div className={nodeClassName}>
             <button
                 type="button"
                 className="node-quick-add"
@@ -958,6 +1411,51 @@ const ResponseNode = ({ id, data }) => {
                         <FiMoreHorizontal />
                     </button>
                 </div>
+                <form
+                    className={`node-inline-ai-composer nodrag${
+                        isInlineAiGenerating ? ' generating' : ''
+                    }${inlineAiStatus ? ' has-status' : ''}`}
+                    onSubmit={stageInlineAiDraft}
+                >
+                    <FiMessageSquare aria-hidden="true" />
+                    <input
+                        type="text"
+                        value={inlineAiPrompt}
+                        aria-label="Ask AI from this node"
+                        placeholder={
+                            isInlineAiGenerating
+                                ? 'Drafting...'
+                                : 'Ask AI from this node'
+                        }
+                        disabled={isInlineAiGenerating}
+                        onChange={(event) => {
+                            setInlineAiPrompt(event.target.value);
+                            if (inlineAiStatus) {
+                                setInlineAiStatus('');
+                            }
+                        }}
+                        onFocus={() => setIsMenuOpen(false)}
+                    />
+                    <button
+                        type="submit"
+                        className="node-inline-ai-send"
+                        disabled={isInlineAiGenerating || !inlineAiPrompt.trim()}
+                        title="Generate a draft from this node"
+                    >
+                        <FiSend />
+                    </button>
+                    <button
+                        type="button"
+                        className="node-inline-ai-advanced"
+                        onClick={() => openAskAi('node')}
+                        title="Advanced Ask AI"
+                    >
+                        <FiMaximize2 />
+                    </button>
+                    {inlineAiStatus ? (
+                        <span className="node-inline-ai-status">{inlineAiStatus}</span>
+                    ) : null}
+                </form>
                 {isSlashOpen ? (
                     <div className="node-slash-menu nodrag">
                         {filteredSlashCommands.length ? (
@@ -1040,11 +1538,11 @@ const ResponseNode = ({ id, data }) => {
                             <p>AI</p>
                             <button type="button" onClick={() => openAskAi('node')}>
                                 <FiMessageSquare />
-                                Ask AI about node
+                                Advanced Ask AI
                             </button>
                             <button type="button" onClick={() => openAskAi('branch')}>
                                 <FiGitBranch />
-                                Ask AI about branch
+                                Advanced branch AI
                             </button>
                         </div>
                         <div className="node-action-group">

@@ -28,6 +28,7 @@ const setRequestData = (component_name, flow_id, data) => {
 				["file", data.file],
 				["flow_id", flow_id],
 				["processing_type", data.processing_type],
+				["source_intent", data.sourceIntent],
 				["operation_id", data.operationId]
 			]), "multipart/form-data"];
 		case "web":
@@ -65,6 +66,7 @@ const setRequestData = (component_name, flow_id, data) => {
 				["file", data.file],
 				["flow_id", flow_id],
 				["operation_id", data.operationId],
+				["source_intent", data.sourceIntent],
 				["intake_role", data.intakeRole],
 				["intake_model", data.intakeModel],
 				["intake_prompt", data.intakePrompt]

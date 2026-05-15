@@ -211,11 +211,14 @@ const ManualNodeControls = () => {
     return (
         <div className="manual-node-controls">
             <button type="button" onClick={addNode} disabled={isPreparingWorkspace}>
-                {isPreparingWorkspace ? 'Preparing...' : 'Add root'}
+                {isPreparingWorkspace ? 'Preparing...' : 'Add node'}
             </button>
-            <button type="button" onClick={addTable} disabled={isPreparingWorkspace}>
-                Add root table
-            </button>
+            <details className="manual-node-more">
+                <summary>More</summary>
+                <button type="button" onClick={addTable} disabled={isPreparingWorkspace}>
+                    Add table root
+                </button>
+            </details>
             {workspaceMessage ? (
                 <span className="manual-node-status" aria-live="polite">
                     {workspaceMessage}

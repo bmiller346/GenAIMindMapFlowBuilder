@@ -11,7 +11,7 @@ import flowStore from '../stores/flowStore';
 import errorStore from '../stores/errorStore';
 import ErrorModal from '../modals/ErrorModal';
 
-const DataSourceSet = ({ data }) => {
+const DataSourceSet = ({ data, modalProps = {} }) => {
     // Used when to set Data Source
     const pushNode = modalStore((s) => s.pushNode);
     const flowId = flowStore((s) => s.flow_id);
@@ -114,7 +114,7 @@ const DataSourceSet = ({ data }) => {
     //         </div>
     //     );
     // } else {
-    const openSourceModal = () => setDataSourceModal(data.name, pushNode);
+    const openSourceModal = () => setDataSourceModal(data.name, pushNode, modalProps);
 
     return (
         <button

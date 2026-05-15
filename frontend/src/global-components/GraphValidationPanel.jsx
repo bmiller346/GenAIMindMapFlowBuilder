@@ -378,9 +378,10 @@ const GraphValidationPanel = ({
     nodes,
     edges,
     onSelectNode,
-    onReportChange
+    onReportChange,
+    defaultExpanded = false
 }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(defaultExpanded);
     const [backendReport, setBackendReport] = useState();
     const [backendStatus, setBackendStatus] = useState('idle');
     const [backendError, setBackendError] = useState('');
@@ -538,8 +539,8 @@ const GraphValidationPanel = ({
                 onClick={() => setIsExpanded((current) => !current)}
                 aria-expanded={isExpanded}
             >
-                <span>Graph validation</span>
-                <strong>{totalIssues === 0 ? 'Clear' : `${totalIssues} issues`}</strong>
+                <span>Workspace health</span>
+                <strong>{totalIssues === 0 ? 'Clear' : `${totalIssues} to review`}</strong>
             </button>
 
             {isExpanded ? (
@@ -615,7 +616,7 @@ const GraphValidationPanel = ({
                     ) : null}
                     {totalIssues === 0 ? (
                         <p className="graph-validation-empty">
-                            No graph structure or trust-signal issues detected.
+                            No workspace health issues detected.
                         </p>
                     ) : filteredIssues.length === 0 ? (
                         <p className="graph-validation-empty">

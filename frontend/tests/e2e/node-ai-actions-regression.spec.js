@@ -510,10 +510,10 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
     await openAskAi(page);
     await page.getByRole('button', { name: 'Generate preview' }).click();
     await expect(page.locator('.node-inspector')).toBeVisible();
-    await expect(page.locator('.ai-draft-session-panel')).toContainText('AI drafting table');
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
     await expect(page.locator('.ai-draft-session-panel')).toContainText('General Mills');
     await expect(page.locator('.ai-draft-session-panel')).toContainText('Uncited cereal branch');
-    await expect(page.locator('.ai-draft-session-panel')).toContainText('!1 needs_review items');
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('2 items · 1 needs review');
     const citedDraftItem = page.locator('.ai-draft-item').filter({ hasText: 'General Mills' });
     const reviewDraftItem = page.locator('.ai-draft-item').filter({ hasText: 'Uncited cereal branch' });
     await expect(citedDraftItem).toContainText('Source-backed');
@@ -612,7 +612,7 @@ test('branch Ask AI discard leaves graph unchanged', async ({ page }) => {
     await openAskAi(page, 'Ask AI about branch');
     await page.getByRole('button', { name: 'Generate preview' }).click();
     await expect(page.locator('.ai-draft-session-panel')).toContainText('branch generated child');
-    await expect(page.locator('.ai-draft-session-panel')).toContainText('1/2 cited');
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('1 item · all cited');
     expect(draftSessionRequests[0].scope).toBe('branch');
 
     await page.getByRole('button', { name: 'Close AI draft session' }).click();
@@ -654,7 +654,7 @@ test('workspace Ask AI draft is available from the header and accepts all throug
 
     await page
         .locator('.node-inspector .ai-draft-accept')
-        .getByRole('button', { name: 'Accept all' })
+        .getByRole('button', { name: 'Accept 1 item' })
         .click();
     await expect.poll(() => draftAcceptRequests.length, { timeout: 7000 }).toBe(1);
     await waitForSavedSnapshot(savedRequests, (snapshot) =>

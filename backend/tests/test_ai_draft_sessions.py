@@ -302,6 +302,46 @@ def test_accept_endpoint_save_reload_preserves_source_refs_needs_review_and_audi
     assert accept_response["graph"]["nodes"][1]["data"]["source_refs"] == [{"document_id": "doc-1"}]
 
 
+def test_workspace_custom_prompt_draft_session_uses_backend_preview(monkeypatch):
+    graph = sample_graph()
+    persisted = {}
+
+    def fake_save(session):
+        persisted[session["session_id"]] = copy.deepcopy(session)
+        return session
+
+    monkeypatch.setattr(app, "get_workspace_graph_or_404", lambda flow_id: copy.deepcopy(graph))
+    monkeypatch.setattr(app, "save_ai_draft_session", fake_save)
+
+    session = app.create_ai_draft_session(
+        "workspace-1",
+        {
+            "role": "workflow_mapper",
+            "action": "custom_prompt",
+            "intent": "custom_prompt",
+            "prompt": "show a SAAS business model",
+            "custom_prompt": "show a SAAS business model",
+            "scope": {"type": "workspace"},
+        },
+    )
+
+    revision = session["revisions"][0]
+    titles = [node["title"] for node in revision["draft_nodes"]]
+    child_edges = [
+        edge
+        for edge in revision["draft_edges"]
+        if edge["source_node_id"] == revision["draft_nodes"][0]["id"]
+    ]
+    assert session["status"] == "drafting"
+    assert session["selected_model"]
+    assert revision["draft_nodes"][0]["title"] == "SaaS business model"
+    assert "Pricing and packaging" in titles
+    assert "Revenue engine" in titles
+    assert len(revision["draft_nodes"]) >= 7
+    assert len(child_edges) >= 6
+    assert revision["metadata"]["preview_mode"] == "deterministic_draft"
+
+
 def test_discard_endpoint_persists_rejection_without_graph_mutation(monkeypatch):
     persisted = {}
     flow = react_root_flow()

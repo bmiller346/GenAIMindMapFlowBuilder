@@ -50,7 +50,83 @@ const DOCX_INTAKE_PROFILES = [
 
 const DOCX_INTAKE_MODELS = ['auto', 'gpt-5.5', 'gpt-5.4'];
 
-const DocxModal = () => {
+const parseMindmapJson = (mindmapJson) => {
+    if (!mindmapJson) {
+        return {};
+    }
+    if (typeof mindmapJson === 'string') {
+        try {
+            return JSON.parse(mindmapJson);
+        } catch (error) {
+            return {};
+        }
+    }
+    return mindmapJson;
+};
+
+const hasGraphDraft = (data) => {
+    const flow = parseMindmapJson(data?.mindmap_json);
+    return (flow.nodes || []).length > 0 || (flow.edges || []).length > 0;
+};
+
+const sourceRecordFromUpload = (data, file, flowId) => {
+    const flow = parseMindmapJson(data?.mindmap_json);
+    const sourceLibrary = Array.isArray(flow.source_library) ? flow.source_library : [];
+    const fromGraph =
+        sourceLibrary.find((source) => source.component_id === data.component_id) ||
+        sourceLibrary.find((source) => source.title === file?.name) ||
+        sourceLibrary[0] ||
+        {};
+
+    return {
+        id:
+            fromGraph.id ||
+            data.normalized_document_id ||
+            data.source_document_id ||
+            data.document_id ||
+            data.component_id ||
+            file?.name ||
+            nanoid(),
+        title: fromGraph.title || file?.name || data.filename || 'DOCX source',
+        type: fromGraph.type || data.type || 'docx',
+        type_label: fromGraph.type_label || 'DOCX',
+        status: fromGraph.status || 'parsed',
+        node_id: fromGraph.node_id || '',
+        component_id: fromGraph.component_id || data.component_id || '',
+        flow_id: fromGraph.flow_id || data.flow_id || flowId || '',
+        file_hash: fromGraph.file_hash || data.file_hash || '',
+        size: fromGraph.size || file?.size || 0,
+        version: fromGraph.version || '',
+        metadata: {
+            ...(fromGraph.metadata || {}),
+            original_filename: file?.name || fromGraph.title || data.filename || ''
+        },
+        chunks: Array.isArray(fromGraph.chunks) ? fromGraph.chunks : [],
+        segments: Array.isArray(fromGraph.segments) ? fromGraph.segments : [],
+        normalized_document_id:
+            fromGraph.normalized_document_id ||
+            data.normalized_document_id ||
+            data.source_document_id ||
+            ''
+    };
+};
+
+const upsertSource = (sources = [], source = {}) => {
+    if (!source.id) {
+        return sources;
+    }
+    const existingIndex = sources.findIndex((item) => item.id === source.id);
+    if (existingIndex < 0) {
+        return [...sources, source];
+    }
+    return sources.map((item, index) => (index === existingIndex ? { ...item, ...source } : item));
+};
+
+const DocxModal = ({
+    sourcePickerMode = 'workspace_intake',
+    returnModal,
+    returnProps = {}
+}) => {
     const selector = (state) => ({
         trigger: state.trigger,
         setTrigger: state.setTrigger,
@@ -61,7 +137,9 @@ const DocxModal = () => {
         setViewPort: state.setViewPort,
         workspaceBrief: state.workspaceBrief,
         viewport: state.viewport,
-        setPendingSourceDraft: state.setPendingSourceDraft
+        setPendingSourceDraft: state.setPendingSourceDraft,
+        sourceLibrary: state.sourceLibrary,
+        setSourceLibrary: state.setSourceLibrary
     });
     const flowId = flowStore((s) => s.flow_id);
     const setFlowId = flowStore((s) => s.setFlow);
@@ -70,6 +148,7 @@ const DocxModal = () => {
     const flowType = flowStore((s) => s.flow_type);
     const setFlowType = flowStore((s) => s.setFlowType);
     const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
+    const setSaveStatus = flowStore((s) => s.setSaveStatus);
     const { fitView } = useReactFlow();
     const [file, setFile] = useState();
     const [intakeProfileId, setIntakeProfileId] = useState('');
@@ -81,7 +160,7 @@ const DocxModal = () => {
     const addActivity = useActivityStore((s) => s.addActivity);
     const updateActivity = useActivityStore((s) => s.updateActivity);
     // const csvAccept = ".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
-    const docxAccept = '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const docxAccept = '.docx';
 
     const {
         trigger,
@@ -93,8 +172,11 @@ const DocxModal = () => {
         setViewPort,
         workspaceBrief,
         viewport,
-        setPendingSourceDraft
+        setPendingSourceDraft,
+        sourceLibrary,
+        setSourceLibrary
     } = useStore(useShallow(selector));
+    const isAskAIContextMode = sourcePickerMode === 'ask_ai_context';
 
     const showError = (statusCode, message) => {
         setStatus(statusCode);
@@ -180,6 +262,7 @@ const DocxModal = () => {
         const data = {
             file: file,
             operationId,
+            sourceIntent: isAskAIContextMode ? 'context' : 'mindmap',
             intakeRole: intakeProfileId,
             intakeModel: intakeModel === 'auto' ? '' : intakeModel,
             intakePrompt: intakeBrief.trim()
@@ -217,9 +300,15 @@ const DocxModal = () => {
                     type: 'source_upload_completed',
                     status: 'completed',
                     source_ids: [file?.name],
-                    context: 'DOCX source draft is ready for review.'
+                    context: isAskAIContextMode
+                        ? 'DOCX source was attached to Ask AI context.'
+                        : 'DOCX source draft is ready for review.'
                 });
-                setupNodes(res.data);
+                if (isAskAIContextMode) {
+                    attachSourceToAskAI(res.data, currentFlowId);
+                } else {
+                    setupNodes(res.data);
+                }
             })
             .catch((err) => {
                 if (isCanceledRequest(err)) {
@@ -235,20 +324,43 @@ const DocxModal = () => {
     };
 
     const setupNodes = (data) => {
-        if (data.flow_type === 'automatic') {
+        if (hasGraphDraft(data) || data.flow_type === 'automatic') {
             manageAutomaticNode(data)
         } else {
             manageNodes(data)
         }
     }
 
+    const attachSourceToAskAI = (data, currentFlowId) => {
+        const uploadedSource = sourceRecordFromUpload(data, file, currentFlowId);
+        const nextSelectedSourceIds = Array.from(
+            new Set([
+                ...(Array.isArray(returnProps.selectedSourceIds)
+                    ? returnProps.selectedSourceIds
+                    : []),
+                uploadedSource.id
+            ].filter(Boolean))
+        );
+        setSourceLibrary(upsertSource(sourceLibrary, uploadedSource));
+        setSaveStatus('dirty');
+        pushNode(returnModal || DataSourceSelect, returnModal
+            ? {
+                  ...returnProps,
+                  selectedSourceIds: nextSelectedSourceIds,
+                  uploadedSourceId: uploadedSource.id,
+                  initialContextSourceIds: nextSelectedSourceIds,
+                  initialContextSourceId: uploadedSource.id
+              }
+            : {});
+    };
+
     const manageAutomaticNode = (data) => {
         setupFlow(data)
     }
     const setupFlow = (data) => {
-        const jsonString = JSON.stringify(data.mindmap_json || {});
-        if (jsonString.length > 0) {
-            const flow = applySourceIntakeMetadata(JSON.parse(jsonString), data);
+        const parsedFlow = parseMindmapJson(data.mindmap_json);
+        if (Object.keys(parsedFlow || {}).length > 0) {
+            const flow = applySourceIntakeMetadata(parsedFlow, data);
             if ((flow.nodes || []).length === 0 && (flow.edges || []).length === 0) {
                 setTrigger(!trigger);
                 setViewPort(0, 0, 1);
@@ -260,7 +372,7 @@ const DocxModal = () => {
                     id: `source_draft_${data.component_id || data.flow_id || nanoid()}`,
                     flowId: data.flow_id,
                     flowName: data.flow_name,
-                    flowType: data.flow_type || 'automatic',
+                    flowType: data.flow_type || flowType || 'manual',
                     componentId: data.component_id,
                     sourceType: data.type || 'docx',
                     sourceName: file?.name || data.type || 'DOCX source',
@@ -304,6 +416,7 @@ const DocxModal = () => {
     };
 
     const manageNodes = (data) => {
+        const sourceRecord = sourceRecordFromUpload(data, file, flowStore.getState().flow_id || flowId);
         const node = {
             id: data.component_id,
             position: { x: 0, y: 0 },
@@ -316,9 +429,15 @@ const DocxModal = () => {
                 model_name: sourcePromptLabel() && intakeModel !== 'auto' ? intakeModel : '',
                 intake_model: intakeModel,
                 intake_prompt: intakeBrief.trim(),
-                file: file
+                file: file,
+                component_id: data.component_id,
+                source_document_id: sourceRecord.id,
+                source_document: sourceRecord.metadata,
+                document_chunks: sourceRecord.chunks,
+                source_segments: sourceRecord.segments
             }
         };
+        setSourceLibrary(upsertSource(sourceLibrary, sourceRecord));
         if (nodes.length === 0) {
             setNodes([node]);
         } else {
@@ -331,7 +450,20 @@ const DocxModal = () => {
     };
 
     const handleFileUpload = (e) => {
-        setFile(e.target.files?.[0]);
+        const selectedFile = e.target.files?.[0];
+        if (!selectedFile) {
+            setFile(undefined);
+            return;
+        }
+
+        if (!selectedFile.name.toLowerCase().endsWith('.docx')) {
+            setFile(undefined);
+            e.target.value = '';
+            showError(400, 'Choose a DOCX file. PDFs should be uploaded from the PDF source option.');
+            return;
+        }
+
+        setFile(selectedFile);
     };
 
     const applySourceIntakeMetadata = (flow, data) => ({
@@ -446,7 +578,13 @@ const DocxModal = () => {
             <div className="buttons">
                 <button
                     id="cancel"
-                    onClick={(e) => pushNode(DataSourceSelect)}
+                    onClick={() =>
+                        pushNode(DataSourceSelect, {
+                            mode: sourcePickerMode,
+                            returnModal,
+                            returnProps
+                        })
+                    }
                 >
                     Back
                 </button>

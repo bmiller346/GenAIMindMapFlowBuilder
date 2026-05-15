@@ -2,36 +2,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useShallow } from 'zustand/shallow';
-import modalStore from '../stores/modalStore';
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
-import DataSourceSelect from './DataSourceSelect';
 import {
     AI_DRAFT_ACCEPT_MODES,
     acceptAIDraftSession,
     buildAIDraftPreviewDiff,
-    formatAIDraftPreviewDiffSummary,
+    buildSelectedSourceDraftPayload,
     getAIDraftItemBadges,
     getAIDraftModelMetadata,
     latestAIDraftRevision,
     rejectAIDraftSession,
     reviseAIDraftSession
 } from '../utils/aiDraftSessions';
-import {
-    previewDiffToChanges,
-    PreviewDiffSummary
-} from '../views/previewDiffSummary';
-
-const PROJECTIONS = [
-    { id: 'mind_map', label: 'Mind map' },
-    { id: 'outline', label: 'Outline' },
-    { id: 'checklist', label: 'Checklist' },
-    { id: 'tasks', label: 'Tasks' },
-    { id: 'table', label: 'Table' },
-    { id: 'kanban', label: 'Kanban' },
-    { id: 'presentation', label: 'Slides' }
-];
+import { buildSourceLibraryProjection } from '../views/graphProjection';
 
 const ACCEPT_MODE_LABELS = {
     append: 'Append',
@@ -73,8 +58,70 @@ const itemText = (item = {}) =>
 
 const nodeText = (node = {}) => node.summary || node.body || node.rationale || node.title || '';
 
-const extractRevisionItems = (revision = {}) => [
-    ...asArray(revision.draft_nodes).map((node) => ({
+const draftItemKey = (item = {}) =>
+    item.metadata?.draft_node_id ||
+    item.metadata?.node_id ||
+    item.metadata?.draft_annotation_id ||
+    item.metadata?.annotation_id ||
+    item.metadata?.draft_edge_id ||
+    item.metadata?.edge_id ||
+    item.node_id ||
+    item.id ||
+    '';
+
+const uniqueByDraftIdentity = (items = []) => {
+    const seen = new Set();
+    return items.filter((item) => {
+        const key = draftItemKey(item);
+        if (!key || seen.has(key)) {
+            return false;
+        }
+        seen.add(key);
+        return true;
+    });
+};
+
+const reviewLikeTypes = new Set([
+    'annotation',
+    'follow_up_suggestion',
+    'review_output',
+    'revision_note',
+    'source_context_added',
+    'sme_question',
+    'source_gap',
+    'ai_note'
+]);
+
+const isReviewLikeItem = (item = {}) =>
+    reviewLikeTypes.has(item.item_type || item.type) || Boolean(item.metadata?.draft_annotation_id);
+
+const isEdgeLikeItem = (item = {}) => {
+    const type = String(item.item_type || item.type || '').toLowerCase();
+    const id = String(item.id || item.edge_id || item.item_id || '').toLowerCase();
+    const title = String(item.title || item.label || '').trim().toLowerCase();
+    const content = String(item.content || item.body || item.summary || item.text || '').trim().toLowerCase();
+    return (
+        type === 'edge' ||
+        type === 'relationship' ||
+        type === 'draft_edge' ||
+        id.startsWith('draft_edge') ||
+        id.startsWith('draft-edge') ||
+        Boolean(
+            item.edge_id ||
+                item.source_node_id ||
+                item.target_node_id ||
+                item.relationship_type ||
+                item.metadata?.edge_id ||
+                item.metadata?.draft_edge_id ||
+                item.metadata?.source_node_id ||
+                item.metadata?.target_node_id
+        ) ||
+        (title.startsWith('draft_edge') && ['contains', 'relates_to', 'supports'].includes(content))
+    );
+};
+
+const extractRevisionItems = (revision = {}) => {
+    const nodeItems = asArray(revision.draft_nodes).map((node) => ({
         id: node.id || node.node_id,
         item_type: 'node',
         title: node.title || node.label || 'AI draft',
@@ -88,23 +135,125 @@ const extractRevisionItems = (revision = {}) => [
             draft_node_id: node.id || node.node_id,
             node_type: node.node_type || node.type
         }
-    })),
-    ...asArray(revision.draft_items).map((item) => ({
-        ...item,
-        id: item.id || item.node_id,
-        title: item.title || item.label || itemText(item) || 'AI draft item',
-        content: itemText(item),
-        source_refs: asArray(item.source_refs)
-    })),
-    ...asArray(revision.draft_annotations).map((annotation, index) => ({
-        id: annotation.id || `annotation-${index}`,
-        item_type: annotation.type || 'annotation',
-        title: annotation.title || annotation.label || annotation.type || 'Review output',
-        content: itemText(annotation),
-        source_refs: asArray(annotation.source_refs),
-        metadata: { draft_annotation_id: annotation.id }
-    }))
-].filter((item, index, items) => item.id && items.findIndex((candidate) => candidate.id === item.id) === index);
+    }));
+    const nodeIds = new Set(nodeItems.map((item) => item.metadata.draft_node_id).filter(Boolean));
+    const draftItems = asArray(revision.draft_items)
+        .filter((item) => !isReviewLikeItem(item) && !isEdgeLikeItem(item))
+        .filter((item) => {
+            const nodeId = item.metadata?.draft_node_id || item.metadata?.node_id || item.node_id;
+            return !nodeId || !nodeIds.has(nodeId);
+        })
+        .map((item) => ({
+            ...item,
+            id: item.id || item.node_id,
+            title: item.title || item.label || itemText(item) || 'AI draft item',
+            content: itemText(item),
+            source_refs: asArray(item.source_refs)
+        }));
+    return uniqueByDraftIdentity([...nodeItems, ...draftItems]);
+};
+
+const extractRevisionNotes = (revision = {}) =>
+    uniqueByDraftIdentity([
+        ...asArray(revision.draft_items)
+            .filter(isReviewLikeItem)
+            .map((item) => ({
+                ...item,
+                id: item.id || item.node_id,
+                title: item.title || item.label || itemText(item) || 'Review note',
+                content: itemText(item),
+                source_refs: asArray(item.source_refs)
+            })),
+        ...asArray(revision.draft_annotations).map((annotation, index) => ({
+            id: annotation.id || `annotation-${index}`,
+            item_type: annotation.type || 'annotation',
+            title: annotation.title || annotation.label || annotation.type || 'Review note',
+            content: itemText(annotation),
+            source_refs: asArray(annotation.source_refs),
+            metadata: { draft_annotation_id: annotation.id }
+        }))
+    ]);
+
+const primaryActionLabel = (itemCount = 0) =>
+    itemCount === 1 ? 'Accept 1 item' : `Accept ${itemCount} items`;
+
+const GRAPH_FILTER_LABELS = {
+    'source-backed': 'Source-backed',
+    'needs-review': 'Needs review',
+    manual: 'Manual',
+    'ai-generated': 'AI-generated',
+    'tasks-only': 'Tasks only',
+    unassigned: 'Unassigned',
+    'missing-due-date': 'Missing due',
+    'missing-source': 'Missing source',
+    'low-confidence': 'Low confidence',
+    'hidden-from-export': 'Hidden export'
+};
+
+const CANVAS_LABELS = {
+    mindmap: 'Mind Map',
+    knowledgeGraph: 'Knowledge Graph',
+    outline: 'Outline',
+    tasks: 'Tasks',
+    table: 'Table'
+};
+
+const canvasForDraft = (session = {}, revision = {}, fallback = 'mindmap') => {
+    const metadata = {
+        ...(session.metadata || {}),
+        ...(revision.metadata || {})
+    };
+    const shape = String(
+        metadata.output_shape ||
+            metadata.requested_visual ||
+            session.intent ||
+            ''
+    ).toLowerCase();
+
+    if (shape.includes('task') || shape.includes('checklist')) {
+        return 'tasks';
+    }
+    if (shape.includes('table') || shape.includes('chart')) {
+        return 'table';
+    }
+    if (shape.includes('outline')) {
+        return 'outline';
+    }
+    if (shape.includes('knowledge')) {
+        return 'knowledgeGraph';
+    }
+    if (shape.includes('mind') || shape.includes('flow') || shape.includes('graph')) {
+        return 'mindmap';
+    }
+    if (shape.includes('no_visual')) {
+        return fallback;
+    }
+    return fallback || 'mindmap';
+};
+
+const reviewSummary = (coverage = { cited: 0, uncited: 0, total: 0 }, noteCount = 0) => {
+    if (!coverage.total && !noteCount) {
+        return 'No draft items yet';
+    }
+    const parts = [];
+    if (coverage.total) {
+        parts.push(`${coverage.total} ${coverage.total === 1 ? 'item' : 'items'}`);
+        parts.push(coverage.uncited ? `${coverage.uncited} needs review` : 'all cited');
+    }
+    if (noteCount) {
+        parts.push(`${noteCount} ${noteCount === 1 ? 'note' : 'notes'}`);
+    }
+    return parts.join(' · ');
+};
+
+const compactPromptHistory = (history = []) =>
+    asArray(history)
+        .filter((entry) => itemText(entry))
+        .filter((entry, index, list) => {
+            const previous = list[index - 1];
+            return !previous || previous.role !== entry.role || itemText(previous) !== itemText(entry);
+        })
+        .slice(-3);
 
 const sourceCoverage = (items = []) => {
     const cited = items.filter((item) => asArray(item.source_refs).length > 0).length;
@@ -115,21 +264,14 @@ const sourceCoverage = (items = []) => {
     };
 };
 
-const projectionHints = {
-    mind_map: 'Draft branches and child nodes will appear here before they touch the graph.',
-    outline: 'Ask AI for an outline or accept graph nodes to project a hierarchy here.',
-    checklist: 'Checklist items appear when the draft includes tasks, checks, or review steps.',
-    tasks: 'Task drafts appear when Ask AI generates owner-ready work items.',
-    table: 'Table rows appear when Ask AI returns structured comparison or matrix data.',
-    kanban: 'Kanban cards appear when Ask AI groups draft work by status.',
-    presentation: 'Presentation sections appear when the draft includes slide-ready structure.'
-};
-
 const revisionEndpoint = ({ flowId, sessionId }) =>
     `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions/${sessionId}/revisions`;
 
 const acceptEndpoint = ({ flowId, sessionId }) =>
     `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions/${sessionId}/accept`;
+
+const sourceEndpoint = ({ flowId, sessionId }) =>
+    `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions/${sessionId}/sources`;
 
 const requestImmediateWorkspaceSave = () => {
     window.setTimeout(() => {
@@ -141,61 +283,97 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
+        workspaceBrief: state.workspaceBrief,
+        sourceLibrary: state.sourceLibrary,
+        activeCanvasView: state.activeCanvasView,
+        activeGraphFilters: state.activeGraphFilters,
         setNodes: state.setNodes,
         setEdges: state.setEdges,
+        setActiveView: state.setActiveView,
+        clearGeneratedHelperPreview: state.clearGeneratedHelperPreview,
         updateActiveAIDraftSession: state.updateActiveAIDraftSession,
         clearActiveAIDraftSession: state.clearActiveAIDraftSession
     });
     const {
         nodes,
         edges,
+        workspaceBrief,
+        sourceLibrary,
+        activeCanvasView,
+        activeGraphFilters,
         setNodes,
         setEdges,
+        setActiveView,
+        clearGeneratedHelperPreview,
         updateActiveAIDraftSession,
         clearActiveAIDraftSession
     } = useStore(useShallow(selector));
-    const pushNode = modalStore((state) => state.pushNode);
     const flowId = flowStore((state) => state.flow_id);
     const setSaveStatus = flowStore((state) => state.setSaveStatus);
     const recordActivity = useActivityStore((state) => state.recordActivity);
     const [prompt, setPrompt] = useState('');
-    const [projection, setProjection] = useState('mind_map');
     const [acceptMode, setAcceptMode] = useState('append');
     const [selectedItemIds, setSelectedItemIds] = useState([]);
     const [message, setMessage] = useState('');
     const [isRevising, setIsRevising] = useState(false);
     const [isAccepting, setIsAccepting] = useState(false);
+    const [isAddingSource, setIsAddingSource] = useState(false);
+    const [sourceToAddId, setSourceToAddId] = useState('');
     const promptRef = useRef(null);
     const revision = useMemo(() => latestAIDraftRevision(session), [session]);
     const items = useMemo(() => extractRevisionItems(revision), [revision]);
+    const reviewNotes = useMemo(() => extractRevisionNotes(revision), [revision]);
     const coverage = useMemo(() => sourceCoverage(items), [items]);
-    const previewDiff = useMemo(
-        () =>
-            buildAIDraftPreviewDiff(session, {
-                mode: acceptMode,
-                selectedItemIds: acceptMode === 'selected' ? selectedItemIds : []
-            }),
-        [acceptMode, selectedItemIds, session]
-    );
-    const diffSummary = useMemo(() => formatAIDraftPreviewDiffSummary(previewDiff), [previewDiff]);
-    const sharedDiffSummary = useMemo(
-        () => previewDiffToChanges(previewDiff),
-        [previewDiff]
-    );
-
     const selectedSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
     const modelMeta = useMemo(() => getAIDraftModelMetadata(session, revision), [revision, session]);
+    const acceptImpact = useMemo(
+        () => {
+            const diff = buildAIDraftPreviewDiff(session, {
+                mode: acceptMode,
+                selectedItemIds: acceptMode === 'selected' ? selectedItemIds : []
+            });
+            const nextCanvas = canvasForDraft(session, revision, activeCanvasView);
+            return {
+                diff,
+                nextCanvas,
+                canvasChanged: nextCanvas !== activeCanvasView,
+                activeFilters: asArray(activeGraphFilters)
+            };
+        },
+        [acceptMode, activeCanvasView, activeGraphFilters, revision, selectedItemIds, session]
+    );
+    const primaryAcceptText =
+        acceptMode === 'selected'
+            ? primaryActionLabel(selectedItemIds.length)
+            : primaryActionLabel(items.length);
+    const promptHistory = useMemo(
+        () => compactPromptHistory(session.prompt_history),
+        [session.prompt_history]
+    );
+    const sourceProjection = useMemo(
+        () => buildSourceLibraryProjection(nodes, edges, workspaceBrief, sourceLibrary),
+        [edges, nodes, sourceLibrary, workspaceBrief]
+    );
+    const availableSources = sourceProjection.sources;
+    const sourceToAdd = availableSources.find((source) => source.id === sourceToAddId);
 
     useEffect(() => {
         promptRef.current?.focus();
     }, [session?.session_id]);
 
     const toggleItem = (itemId) => {
-        setSelectedItemIds((current) =>
-            current.includes(itemId)
+        setSelectedItemIds((current) => {
+            const next = current.includes(itemId)
                 ? current.filter((selectedId) => selectedId !== itemId)
-                : [...current, itemId]
-        );
+                : [...current, itemId];
+            if (next.length > 0 && acceptMode === 'append') {
+                setAcceptMode('selected');
+            }
+            if (next.length === 0 && acceptMode === 'selected') {
+                setAcceptMode('append');
+            }
+            return next;
+        });
     };
 
     const submitRevision = async () => {
@@ -333,6 +511,8 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
                 status: 'completed'
             });
             clearActiveAIDraftSession();
+            clearGeneratedHelperPreview('nodeAiActionRequest');
+            setActiveView(canvasForDraft(session, revision, activeCanvasView));
             onClose?.();
         } catch (error) {
             const fallback = acceptAIDraftSession({
@@ -358,6 +538,8 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
                 status: 'completed'
             });
             clearActiveAIDraftSession();
+            clearGeneratedHelperPreview('nodeAiActionRequest');
+            setActiveView(canvasForDraft(session, revision, activeCanvasView));
             onClose?.();
         } finally {
             setIsAccepting(false);
@@ -380,86 +562,132 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
                 revision_id: revision.revision_id
             }
         });
+        setActiveView(activeCanvasView || 'mindmap');
+        clearGeneratedHelperPreview('nodeAiActionRequest');
         onClose?.();
     };
 
+    const addSourceToDraft = async () => {
+        if (!sourceToAdd || isAddingSource) {
+            setMessage('Choose a loaded source before reconciling the draft.');
+            return;
+        }
+        setIsAddingSource(true);
+        setMessage('');
+        const sourcePayload = buildSelectedSourceDraftPayload(sourceToAdd);
+        try {
+            const response =
+                flowId && session.session_id
+                    ? await axios.post(sourceEndpoint({ flowId, sessionId: session.session_id }), {
+                          source_id: sourceToAdd.id,
+                          source_chunks: sourcePayload.source_chunks,
+                          prompt: `Reconcile this draft against ${sourceToAdd.title || sourceToAdd.id}.`,
+                          model_policy: session.model_policy,
+                          model: session.selected_model || null
+                      })
+                    : null;
+            const nextSession =
+                response?.data?.session ||
+                response?.data?.draft_session ||
+                response?.data ||
+                reviseAIDraftSession(session, {
+                    prompt: `Add source context: ${sourceToAdd.title || sourceToAdd.id}`,
+                    draftNodes: revision.draft_nodes || [],
+                    draftEdges: revision.draft_edges || [],
+                    draftAnnotations: [
+                        ...asArray(revision.draft_annotations),
+                        {
+                            id: `source-context-${Date.now()}`,
+                            type: 'source_context_added',
+                            title: sourceToAdd.title || sourceToAdd.id,
+                            body: `Source context was attached locally for ${sourceToAdd.title || sourceToAdd.id}.`,
+                            source_refs: sourcePayload.source_refs
+                        }
+                    ],
+                    model: session.selected_model || revision.model || 'auto',
+                    metadata: {
+                        source_context: sourcePayload.metadata,
+                        model_reason: 'Local source reconciliation staged while backend generation is unavailable.'
+                    }
+                });
+            updateActiveAIDraftSession(nextSession);
+            setSourceToAddId('');
+            recordActivity({
+                type: 'ai_draft_source_reconciled',
+                title: 'Reconciled source into AI draft',
+                summary: `Added ${sourceToAdd.title || sourceToAdd.id} to the active draft session.`,
+                source_ids: [sourceToAdd.id],
+                metadata: {
+                    session_id: session.session_id,
+                    source_id: sourceToAdd.id,
+                    revision_id: latestAIDraftRevision(nextSession).revision_id
+                },
+                status: 'completed'
+            });
+            setMessage('Source reconciled into the draft. Review the new revision before accepting.');
+        } catch (error) {
+            const nextSession = reviseAIDraftSession(session, {
+                prompt: `Add source context: ${sourceToAdd.title || sourceToAdd.id}`,
+                draftNodes: revision.draft_nodes || [],
+                draftEdges: revision.draft_edges || [],
+                draftAnnotations: [
+                    ...asArray(revision.draft_annotations),
+                    {
+                        id: `source-context-${Date.now()}`,
+                        type: 'source_context_added',
+                        title: sourceToAdd.title || sourceToAdd.id,
+                        body: error.message || 'Backend source reconciliation was unavailable.',
+                        source_refs: sourcePayload.source_refs
+                    }
+                ],
+                model: session.selected_model || revision.model || 'auto',
+                metadata: {
+                    source_context: sourcePayload.metadata,
+                    model_reason: 'Backend source reconciliation was unavailable; preserved source context locally.'
+                }
+            });
+            updateActiveAIDraftSession(nextSession);
+            setMessage('Backend source reconciliation is unavailable, so the source context was preserved locally.');
+        } finally {
+            setIsAddingSource(false);
+        }
+    };
+
     const openSourceModal = () => {
-        pushNode(DataSourceSelect);
         recordActivity({
             type: 'ai_draft_add_source_opened',
-            title: 'Opened source picker from AI draft',
-            summary: 'Source picker opened from the active draft session.',
+            title: 'Prepared source reconciliation from AI draft',
+            summary: 'Source reconciliation controls were used from the active draft session.',
             metadata: {
                 session_id: session.session_id
             }
         });
+        addSourceToDraft();
     };
 
     const renderProjection = () => {
         if (items.length === 0) {
             return (
                 <div className="ai-draft-empty" role="status">
-                    <strong>{projectionHints[projection]}</strong>
+                    <strong>No draft items yet</strong>
                     <span>
-                        Refine the prompt to generate proposed nodes, review notes, source coverage,
-                        or projection rows. Nothing changes in the graph until an accept action runs.
+                        Ask for a concrete structure or more detail. Nothing changes in the graph
+                        until you accept the draft.
                     </span>
                 </div>
             );
         }
-        if (projection === 'table') {
-            return (
-                <div className="ai-draft-table" role="table">
-                    <div role="row">
-                        <span role="columnheader">Item</span>
-                        <span role="columnheader">Type</span>
-                        <span role="columnheader">Source</span>
-                    </div>
-                    {items.map((item) => (
-                        <div key={`table-${item.id}`} role="row">
-                            <strong role="cell">{item.title}</strong>
-                            <span role="cell">{humanizeId(item.item_type || item.metadata?.node_type)}</span>
-                            <span role="cell">
-                                <DraftBadges item={item} compact />
-                            </span>
-                        </div>
-                    ))}
-                </div>
-            );
-        }
-        if (projection === 'kanban') {
-            const columns = ['draft', 'needs_review', 'cited'];
-            return (
-                <div className="ai-draft-kanban">
-                    {columns.map((column) => (
-                        <section key={column}>
-                            <strong>{humanizeId(column)}</strong>
-                            {items
-                                .filter((item) =>
-                                    column === 'cited'
-                                        ? asArray(item.source_refs).length > 0
-                                        : (item.status || 'draft') === column ||
-                                          (column === 'needs_review' && asArray(item.source_refs).length === 0)
-                                )
-                                .map((item) => (
-                                    <span key={`${column}-${item.id}`}>{item.title}</span>
-                                ))}
-                        </section>
-                    ))}
-                </div>
-            );
-        }
         return (
-            <div className={`ai-draft-projection ai-draft-projection-${projection}`}>
+            <div className="ai-draft-projection">
                 {items.map((item) => (
-                    <article key={`${projection}-${item.id}`} className="ai-draft-item">
+                    <article key={`draft-${item.id}`} className="ai-draft-item">
                         <label>
                             <input
                                 type="checkbox"
                                 checked={selectedSet.has(item.id)}
                                 onChange={() => toggleItem(item.id)}
                             />
-                            <span>{humanizeId(item.item_type || item.metadata?.node_type || 'item')}</span>
+                            <span>{selectedSet.has(item.id) ? 'Selected' : 'Select'}</span>
                         </label>
                         <strong>{item.title}</strong>
                         {item.content ? (
@@ -481,50 +709,21 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
         <div className="ai-draft-session-panel">
             <div className="ai-draft-session-toolbar">
                 <div>
-                    <p>AI drafting table</p>
-                    <strong>{session.role || 'Ask AI'}</strong>
-                    <span>{scopeLabel(session.scope)}</span>
+                    <p>Draft preview</p>
+                    <strong>{asArray(session.prompt_history).at(-1)?.content || session.role || 'Ask AI'}</strong>
+                    <span>{scopeLabel(session.scope)} · {reviewSummary(coverage, reviewNotes.length)}</span>
                 </div>
                 <button type="button" onClick={discardDraft} aria-label="Close AI draft session">
                     x
                 </button>
             </div>
 
-            <div className="ai-draft-meta-grid">
-                <div>
-                    <span>Actual model</span>
-                    <strong>{modelMeta.model}</strong>
-                    {modelMeta.reason ? <small>{modelMeta.reason}</small> : null}
-                    {modelMeta.policy ? <small>Policy: {humanizeId(modelMeta.policy)}</small> : null}
-                </div>
-                <div>
-                    <span>Risk / cost</span>
-                    <strong>{modelMeta.riskTier ? humanizeId(modelMeta.riskTier) : 'Not estimated'}</strong>
-                    <small>
-                        {modelMeta.tokenEstimate ? `${modelMeta.tokenEstimate} tokens` : 'Token estimate pending'}
-                        {modelMeta.costEstimate ? ` / ${modelMeta.costEstimate}` : ''}
-                    </small>
-                </div>
-                <div>
-                    <span>Source coverage</span>
-                    <strong>
-                        {coverage.cited}/{coverage.total} cited
-                    </strong>
-                    <small>{coverage.uncited} needs review</small>
-                </div>
-                <div>
-                    <span>Preview diff</span>
-                    <strong>{diffSummary.text}</strong>
-                    <small>{previewDiff.review_outputs} review outputs</small>
-                </div>
-            </div>
-
-            <div className="ai-draft-conversation">
+            <div className="ai-draft-conversation" aria-label="Refine draft">
                 <div className="ai-draft-history">
-                    {asArray(session.prompt_history).map((entry, index) => (
+                    {promptHistory.map((entry, index) => (
                         <p key={`${entry.revision_id || index}-${entry.created_at}`}>
                             <span>{entry.role || 'user'}</span>
-                            {entry.content}
+                            {itemText(entry)}
                         </p>
                     ))}
                 </div>
@@ -547,64 +746,120 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
                 </button>
             </div>
 
-            <div className="ai-draft-tabs" role="tablist" aria-label="Draft projections">
-                {PROJECTIONS.map((tab) => (
-                    <button
-                        key={tab.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={projection === tab.id}
-                        className={projection === tab.id ? 'active' : ''}
-                        onClick={() => setProjection(tab.id)}
-                        onKeyDown={(event) => {
-                            if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) {
-                                return;
-                            }
-                            event.preventDefault();
-                            const currentIndex = PROJECTIONS.findIndex((candidate) => candidate.id === projection);
-                            const delta = event.key === 'ArrowRight' ? 1 : -1;
-                            const next = PROJECTIONS[(currentIndex + delta + PROJECTIONS.length) % PROJECTIONS.length];
-                            setProjection(next.id);
-                        }}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
-
             {renderProjection()}
 
-            <PreviewDiffSummary changes={sharedDiffSummary} />
+            {reviewNotes.length ? (
+                <details className="ai-draft-details">
+                    <summary>{reviewNotes.length} review {reviewNotes.length === 1 ? 'note' : 'notes'}</summary>
+                    <div className="ai-draft-note-list">
+                        {reviewNotes.map((note) => (
+                            <article key={`note-${note.id}`}>
+                                <strong>{note.title}</strong>
+                                {note.content ? <p>{note.content}</p> : null}
+                            </article>
+                        ))}
+                    </div>
+                </details>
+            ) : null}
+
+            <details className="ai-draft-details">
+                <summary>Options</summary>
+                <div className="ai-draft-meta-grid">
+                    <div>
+                        <span>Model</span>
+                        <strong>{modelMeta.model}</strong>
+                        {modelMeta.reason ? <small>{modelMeta.reason}</small> : null}
+                    </div>
+                    <div>
+                        <span>Sources</span>
+                        <strong>{coverage.total ? `${coverage.cited}/${coverage.total} cited` : 'No items'}</strong>
+                        <small>{coverage.uncited ? `${coverage.uncited} needs review` : 'Ready for review'}</small>
+                    </div>
+                </div>
+                <div className="ai-draft-source-tools">
+                    <label>
+                        Add source
+                        <select
+                            value={sourceToAddId}
+                            onChange={(event) => setSourceToAddId(event.target.value)}
+                        >
+                            <option value="">Choose loaded source</option>
+                            {availableSources.map((source) => (
+                                <option key={source.id} value={source.id}>
+                                    {source.title || source.id}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <button
+                        type="button"
+                        className="secondary"
+                        onClick={openSourceModal}
+                        disabled={isAddingSource || !sourceToAddId}
+                    >
+                        {isAddingSource ? 'Reconciling' : 'Reconcile source'}
+                    </button>
+                    <label>
+                        Accept mode
+                        <select
+                            value={acceptMode}
+                            onChange={(event) => setAcceptMode(event.target.value)}
+                        >
+                            {AI_DRAFT_ACCEPT_MODES.map((mode) => (
+                                <option key={mode} value={mode}>
+                                    {ACCEPT_MODE_LABELS[mode] || humanizeId(mode)}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                </div>
+            </details>
+
+            <div className="ai-draft-impact" aria-label="Accept impact">
+                <span>After accept</span>
+                <div>
+                    <strong>Structure</strong>
+                    <p>
+                        +{acceptImpact.diff.added_nodes || 0} nodes · +{acceptImpact.diff.added_edges || 0} edges
+                        {acceptImpact.diff.updated_nodes
+                            ? ` · ~${acceptImpact.diff.updated_nodes} updates`
+                            : ''}
+                        {acceptImpact.diff.needs_review_repairs
+                            ? ` · ${acceptImpact.diff.needs_review_repairs} needs review`
+                            : ''}
+                    </p>
+                </div>
+                <div>
+                    <strong>Canvas</strong>
+                    <p>
+                        {acceptImpact.canvasChanged ? 'Switch to ' : 'Stay on '}
+                        {CANVAS_LABELS[acceptImpact.nextCanvas] || humanizeId(acceptImpact.nextCanvas)}
+                    </p>
+                </div>
+                <div>
+                    <strong>Filters</strong>
+                    <p>
+                        Unchanged
+                        {acceptImpact.activeFilters.length
+                            ? ` (${acceptImpact.activeFilters
+                                  .map((filterId) => GRAPH_FILTER_LABELS[filterId] || humanizeId(filterId))
+                                  .join(', ')})`
+                            : ' (none active)'}
+                    </p>
+                </div>
+            </div>
 
             <div className="ai-draft-accept">
-                <label>
-                    Accept mode
-                    <select
-                        value={acceptMode}
-                        onChange={(event) => setAcceptMode(event.target.value)}
-                    >
-                        {AI_DRAFT_ACCEPT_MODES.map((mode) => (
-                            <option key={mode} value={mode}>
-                                {ACCEPT_MODE_LABELS[mode] || humanizeId(mode)}
-                            </option>
-                        ))}
-                    </select>
-                </label>
-                <button type="button" className="secondary" onClick={openSourceModal}>
-                    Add source
+                <button type="button" className="secondary" onClick={discardDraft}>
+                    Discard
                 </button>
-                <button type="button" onClick={() => acceptDraft('append')} disabled={isAccepting}>
-                    Accept all
-                </button>
-                <button
-                    type="button"
-                    onClick={() => acceptDraft('selected')}
-                    disabled={isAccepting || selectedItemIds.length === 0}
-                >
-                    Accept selected
-                </button>
-                <button type="button" onClick={() => acceptDraft()} disabled={isAccepting}>
-                    {isAccepting ? 'Accepting' : 'Accept mode'}
+                {selectedItemIds.length ? (
+                    <button type="button" onClick={() => acceptDraft('selected')} disabled={isAccepting}>
+                        Accept selected
+                    </button>
+                ) : null}
+                <button type="button" onClick={() => acceptDraft()} disabled={isAccepting || items.length === 0}>
+                    {isAccepting ? 'Accepting' : primaryAcceptText}
                 </button>
             </div>
             {message ? <p className="ai-draft-message">{message}</p> : null}

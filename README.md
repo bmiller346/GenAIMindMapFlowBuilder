@@ -28,10 +28,10 @@ The source picker is organized by intake mode rather than by old/new status: wor
 
 Ask AI uses draft sessions for graph-changing work: model output is staged as a
 reviewable draft, can be revised conversationally, and only mutates the
-canonical graph after explicit acceptance. Source-scoped Ask AI can send the
-selected source chunks to the backend today. The backend also supports
-reconciling an active draft session with added source chunks, but the polished
-multi-source and add-source-mid-session frontend flow is still roadmap work.
+canonical graph after explicit acceptance. Source-scoped Ask AI can send one
+selected source, multiple selected sources, or an added source's chunks to the
+backend draft-session path. Added sources reconcile into the active draft
+before the user accepts anything into the canonical graph.
 
 ## Repository Layout
 

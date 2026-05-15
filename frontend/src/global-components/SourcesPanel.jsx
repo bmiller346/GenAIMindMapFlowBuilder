@@ -82,6 +82,7 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
     const activities = useActivityStore((state) => state.activities);
     const recordActivity = useActivityStore((state) => state.recordActivity);
     const [selectedSourceId, setSelectedSourceId] = useState('');
+    const [checkedSourceIds, setCheckedSourceIds] = useState([]);
 
     const projection = useMemo(
         () =>
@@ -108,6 +109,37 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
     const selectedSource =
         projection.sources.find((source) => source.id === selectedSourceId) ||
         projection.sources[0];
+    const checkedSources = projection.sources.filter((source) =>
+        checkedSourceIds.includes(source.id)
+    );
+    const aiSources = checkedSources.length > 0 ? checkedSources : selectedSource ? [selectedSource] : [];
+
+    const openAskAIForSources = (sources) => {
+        if (sources.length === 0) {
+            return;
+        }
+        pushNode(PromptModal, {
+            scope: 'source',
+            sourceId: sources[0].id,
+            source: sources[0],
+            sources,
+            initialRoleId: 'source-ref-repair',
+            initialActionId: 'find_missing_source_support'
+        });
+        recordActivity({
+            type: sources.length > 1 ? 'ai_multi_source_draft_requested' : 'ai_source_draft_requested',
+            title: sources.length > 1 ? 'Multi-source Ask AI opened' : 'Source Ask AI opened',
+            summary:
+                sources.length > 1
+                    ? `Opened Ask AI for ${sources.length} selected sources.`
+                    : `Opened Ask AI for ${sources[0].title}.`,
+            source_ids: sources.map((source) => source.id),
+            metadata: {
+                scope: sources.length > 1 ? 'bounded_sources' : 'source',
+                source_ids: sources.map((source) => source.id)
+            }
+        });
+    };
 
     if (!isOpen) {
         return null;
@@ -143,22 +175,36 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                         <p className="sources-empty">No sources found in this workspace.</p>
                     ) : null}
                     {projection.sources.map((source) => (
-                        <button
+                        <article
                             key={source.id}
-                            type="button"
                             className={
                                 source.id === selectedSource?.id
                                     ? 'sources-list-item active'
                                     : 'sources-list-item'
                             }
-                            onClick={() => setSelectedSourceId(source.id)}
                         >
-                            <span>{source.type_label}</span>
-                            <strong>{source.title}</strong>
-                            <small>
-                                {sourceStatusLabel(source.status)} | {source.coverage_count} nodes
-                            </small>
-                        </button>
+                            <label className="sources-list-check">
+                                <input
+                                    type="checkbox"
+                                    checked={checkedSourceIds.includes(source.id)}
+                                    onChange={(event) => {
+                                        setCheckedSourceIds((current) =>
+                                            event.target.checked
+                                                ? Array.from(new Set([...current, source.id]))
+                                                : current.filter((id) => id !== source.id)
+                                        );
+                                    }}
+                                />
+                                Compare
+                            </label>
+                            <button type="button" onClick={() => setSelectedSourceId(source.id)}>
+                                <span>{source.type_label}</span>
+                                <strong>{source.title}</strong>
+                                <small>
+                                    {sourceStatusLabel(source.status)} | {source.coverage_count} nodes
+                                </small>
+                            </button>
+                        </article>
                     ))}
                 </div>
 
@@ -203,27 +249,11 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                                 <p>{sourceRepairText(projection, selectedSource)}</p>
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        pushNode(PromptModal, {
-                                            scope: 'source',
-                                            sourceId: selectedSource.id,
-                                            source: selectedSource,
-                                            initialRoleId: 'source-ref-repair',
-                                            initialActionId: 'find_missing_source_support'
-                                        });
-                                        recordActivity({
-                                            type: 'ai_source_draft_requested',
-                                            title: 'Source Ask AI opened',
-                                            summary: `Opened Ask AI for ${selectedSource.title}.`,
-                                            source_ids: [selectedSource.id],
-                                            metadata: {
-                                                scope: 'source',
-                                                source_id: selectedSource.id
-                                            }
-                                        });
-                                    }}
+                                    onClick={() => openAskAIForSources(aiSources)}
                                 >
-                                    Ask AI about source
+                                    {aiSources.length > 1
+                                        ? `Ask AI about ${aiSources.length} sources`
+                                        : 'Ask AI about source'}
                                 </button>
                                 <button
                                     type="button"

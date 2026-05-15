@@ -24,22 +24,6 @@ const CATEGORY_TO_SETTING = {
     [NUDGE_CATEGORIES.INTEGRATION_READINESS]: 'integrations'
 };
 
-const CATEGORY_LABELS = {
-    canvas: 'Canvas',
-    knowledge_graph: 'Knowledge graph',
-    sources: 'Sources',
-    review: 'Review',
-    tasks: 'Tasks',
-    ai_outputs: 'AI output',
-    integrations: 'Integration'
-};
-
-const DENSITY_LIMITS = {
-    quiet: 2,
-    normal: 4,
-    assertive: 7
-};
-
 const severityRank = {
     high: 0,
     medium: 1,
@@ -120,8 +104,6 @@ const WorkspaceNudgeSurface = ({
             validationIssues
         });
         const dismissed = new Set(dismissedKeys);
-        const densityLimit = DENSITY_LIMITS[nudgePreferences.density] || DENSITY_LIMITS.normal;
-
         return projection.nudges
             .filter((nudge) => {
                 const settingKey = CATEGORY_TO_SETTING[nudge.category];
@@ -137,7 +119,7 @@ const WorkspaceNudgeSurface = ({
                         (severityRank[right.severity] ?? 3) ||
                     left.title.localeCompare(right.title)
             )
-            .slice(0, densityLimit);
+            .slice(0, 1);
     }, [
         activeGraphFilters,
         dismissedKeys,
@@ -195,51 +177,42 @@ const WorkspaceNudgeSurface = ({
             className={`workspace-nudge-surface workspace-nudge-density-${nudgePreferences.density}`}
             aria-label="Workspace nudges"
         >
-            <div className="workspace-nudge-header">
-                <div>
-                    <span>Guidance</span>
-                    <strong>{visibleNudges.length}</strong>
-                </div>
-                <button
-                    type="button"
-                    className="workspace-nudge-settings"
-                    onClick={() => pushNode(SettingsModal)}
-                >
-                    Settings
-                </button>
-            </div>
-            <ol className="workspace-nudge-list">
-                {visibleNudges.map((nudge) => {
-                    const settingKey = CATEGORY_TO_SETTING[nudge.category];
-                    return (
-                        <li
-                            key={nudge.id}
-                            className={`workspace-nudge workspace-nudge-${nudge.severity}`}
-                            data-nudge-category={settingKey}
-                        >
-                            <div className="workspace-nudge-copy">
-                                <span>{CATEGORY_LABELS[settingKey]}</span>
-                                <strong>{nudge.title}</strong>
-                                <small>{nudge.detail}</small>
-                            </div>
-                            <div className="workspace-nudge-actions">
-                                <button type="button" onClick={() => runNudgeAction(nudge)}>
-                                    {nudge.action_label || 'Review'}
-                                </button>
-                                <button
-                                    type="button"
-                                    className="workspace-nudge-dismiss"
-                                    aria-label={`Dismiss ${nudge.title}`}
-                                    title="Dismiss this nudge"
-                                    onClick={() => dismiss(nudge)}
-                                >
-                                    x
-                                </button>
-                            </div>
-                        </li>
-                    );
-                })}
-            </ol>
+            {visibleNudges.map((nudge) => {
+                const settingKey = CATEGORY_TO_SETTING[nudge.category];
+                return (
+                    <article
+                        key={nudge.id}
+                        className={`workspace-nudge workspace-nudge-${nudge.severity}`}
+                        data-nudge-category={settingKey}
+                    >
+                        <div className="workspace-nudge-copy">
+                            <span>Suggestion</span>
+                            <strong>{nudge.title}</strong>
+                        </div>
+                        <div className="workspace-nudge-actions">
+                            <button type="button" onClick={() => runNudgeAction(nudge)}>
+                                {nudge.action_label || 'Review'}
+                            </button>
+                            <button
+                                type="button"
+                                className="workspace-nudge-settings"
+                                onClick={() => pushNode(SettingsModal)}
+                            >
+                                Tune
+                            </button>
+                            <button
+                                type="button"
+                                className="workspace-nudge-dismiss"
+                                aria-label={`Dismiss ${nudge.title}`}
+                                title="Dismiss this nudge"
+                                onClick={() => dismiss(nudge)}
+                            >
+                                x
+                            </button>
+                        </div>
+                    </article>
+                );
+            })}
         </section>
     );
 };

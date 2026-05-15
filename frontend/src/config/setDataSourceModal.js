@@ -13,49 +13,49 @@ import TextModal from '../modals/TextModal.jsx';
 import VideoModal from '../modals/VideoModal.jsx';
 import WorkspaceBriefModal from '../modals/WorkspaceBriefModal.jsx';
 
-const setDataSourceModal = (name, pushNode) => {
+const setDataSourceModal = (name, pushNode, props = {}) => {
     switch (name) {
         case 'pdf':
-            pushNode(PDFModal);
+            pushNode(PDFModal, props);
             break;
         case 'md':
-            pushNode(MDModal);
+            pushNode(MDModal, props);
             break;
         case 'docx':
-            pushNode(DocxModal);
+            pushNode(DocxModal, props);
             break;
         case 'txt':
-            pushNode(TextModal);
+            pushNode(TextModal, props);
             break;
         case 'brief':
-            pushNode(WorkspaceBriefModal);
+            pushNode(WorkspaceBriefModal, props);
             break;
         case 'sql':
-            pushNode(SQLModal);
+            pushNode(SQLModal, props);
             break;
         case 'csv':
-            pushNode(CSVModal);
+            pushNode(CSVModal, props);
             break;
         case 'web':
-            pushNode(WEBModal);
+            pushNode(WEBModal, props);
             break;
         case 'audio':
-            pushNode(AudioModal);
+            pushNode(AudioModal, props);
             break;
         case 'youtube':
-            pushNode(YTModal);
+            pushNode(YTModal, props);
             break;
         case 'img':
-            pushNode(ImgModal);
+            pushNode(ImgModal, props);
             break;
         case 'pptx':
-            pushNode(PPTXModal);
+            pushNode(PPTXModal, props);
             break;
         case 'html':
-            pushNode(HTMLModal);
+            pushNode(HTMLModal, props);
             break;
         case 'video':
-            pushNode(VideoModal);
+            pushNode(VideoModal, props);
             break;
         default:
             console.warn(`Unsupported TraceSpace source type: ${name}`);

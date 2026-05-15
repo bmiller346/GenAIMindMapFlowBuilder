@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import modalStore from '../stores/modalStore';
@@ -36,6 +36,8 @@ const CORE_VIEWS = [
     { id: 'tasks', label: 'Tasks', detail: 'Accepted task fields' },
     { id: 'table', label: 'Table', detail: 'Accepted node fields' }
 ];
+
+const CANVAS_VIEW_IDS = new Set(CORE_VIEWS.map((view) => view.id));
 
 const REVIEW_VIEWS = [
     { id: 'preview', label: 'Task preview' },
@@ -105,6 +107,14 @@ const HANDOFF_VIEWS = [
     { id: 'mondayStatus', label: 'Status review' }
 ];
 
+const WORKSPACE_OUTPUT_GROUPS = [
+    { label: 'Generate', views: AI_OUTPUT_VIEWS },
+    { label: 'Review', views: REVIEW_VIEWS.filter((view) => view.id !== 'preview') },
+    { label: 'Handoff', views: HANDOFF_VIEWS }
+];
+
+const WORKSPACE_OUTPUT_OPTIONS = WORKSPACE_OUTPUT_GROUPS.flatMap((group) => group.views);
+
 const GRAPH_FILTERS = [
     { id: 'source-backed', label: 'Source-backed' },
     { id: 'needs-review', label: 'Needs review' },
@@ -157,9 +167,16 @@ const outputState = (row) => {
     return 'Locally projected';
 };
 
+const OUTPUT_STATE_LABELS = {
+    'Locally projected': 'Current workspace',
+    'AI-generated': 'AI preview',
+    Accepted: 'Accepted',
+    'Applied/exported': 'Applied'
+};
+
 const OutputStatePill = ({ state }) => (
     <span className={`output-state-pill output-state-${state.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
-        {state}
+        {OUTPUT_STATE_LABELS[state] || state}
     </span>
 );
 
@@ -309,7 +326,9 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
         edges: state.edges,
         setNodes: state.setNodes,
         activeView: state.activeView,
+        activeCanvasView: state.activeCanvasView,
         setActiveView: state.setActiveView,
+        setActiveCanvasView: state.setActiveCanvasView,
         selectedBranchId: state.selectedBranchId,
         setSelectedBranchId: state.setSelectedBranchId,
         generatedHelperPreviews: state.generatedHelperPreviews,
@@ -323,7 +342,9 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
         edges,
         setNodes,
         activeView,
+        activeCanvasView,
         setActiveView,
+        setActiveCanvasView,
         selectedBranchId,
         setSelectedBranchId,
         generatedHelperPreviews,
@@ -333,6 +354,9 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
         nudgePreferences
     } = useStore(useShallow(selector));
     const [acceptedPreviewIds, setAcceptedPreviewIds] = useState(new Set());
+    const [filtersOpen, setFiltersOpen] = useState(false);
+    const [outputMenuOpen, setOutputMenuOpen] = useState(false);
+    const panelRef = useRef(null);
     const addActivity = useActivityStore((s) => s.addActivity);
     const recordActivity = useActivityStore((s) => s.recordActivity);
     const flowId = flowStore((s) => s.flow_id);
@@ -386,14 +410,31 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
     const selectedRoot = projection.nodes.find((node) => node.id === selectedBranchId);
     const activePreviewIds =
         acceptedPreviewIds.size > 0 ? acceptedPreviewIds : allPreviewIds;
-    const activeReviewView = REVIEW_VIEWS.some((view) => view.id === activeView)
+    const outputModeValue = WORKSPACE_OUTPUT_OPTIONS.some((view) => view.id === activeView)
         ? activeView
         : '';
-    const activeHandoffView = HANDOFF_VIEWS.some((view) => view.id === activeView)
-        ? activeView
-        : '';
+    const activeOutputOption = WORKSPACE_OUTPUT_OPTIONS.find((view) => view.id === outputModeValue);
+    const isCanvasView = CANVAS_VIEW_IDS.has(activeView);
+    const activeCanvasOption = CORE_VIEWS.find((view) => view.id === activeCanvasView);
     const showCanvasNudges = isNudgeCategoryEnabled(nudgePreferences, 'canvas');
     const showTaskNudges = isNudgeCategoryEnabled(nudgePreferences, 'tasks');
+
+    useEffect(() => {
+        if (!filtersOpen && !outputMenuOpen) {
+            return undefined;
+        }
+
+        const handlePointerDown = (event) => {
+            if (panelRef.current?.contains(event.target)) {
+                return;
+            }
+            setFiltersOpen(false);
+            setOutputMenuOpen(false);
+        };
+
+        document.addEventListener('pointerdown', handlePointerDown);
+        return () => document.removeEventListener('pointerdown', handlePointerDown);
+    }, [filtersOpen, outputMenuOpen]);
 
     const toggleGraphFilter = (filterId) => {
         const nextFilters = activeFilterSet.has(filterId)
@@ -561,136 +602,187 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
     }
 
     return (
-        <section className="local-views-panel">
+        <section
+            ref={panelRef}
+            className={`local-views-panel ${
+                isCanvasView
+                    ? 'local-views-panel-compact'
+                    : ''
+            }`}
+        >
             <div className="local-views-toolbar">
                 <div className="local-view-taxonomy" role="navigation" aria-label="Workspace lenses and outputs">
-                    <div className="local-view-section">
-                        <span>Views</span>
-                        <div className="local-view-tabs" role="tablist" aria-label="Accepted workspace views">
-                            {CORE_VIEWS.map((view) => (
+                    <div className="local-view-primary-row">
+                        <div className="local-view-section local-view-section-views">
+                            <span>Canvas</span>
+                            <div className="local-view-tabs" role="tablist" aria-label="Canvas views">
+                                {CORE_VIEWS.map((view) => (
+                                    <button
+                                        key={view.id}
+                                        type="button"
+                                        title={view.detail}
+                                        className={activeCanvasView === view.id ? 'active' : ''}
+                                        onClick={() => setActiveCanvasView(view.id)}
+                                    >
+                                        {view.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="local-view-section local-view-section-scope">
+                            <span>Scope</span>
+                            <div className="local-filter-chips">
                                 <button
-                                    key={view.id}
                                     type="button"
-                                    title={view.detail}
-                                    className={activeView === view.id ? 'active' : ''}
-                                    onClick={() => setActiveView(view.id)}
+                                    className={!selectedBranchId ? 'active' : ''}
+                                    onClick={() => setSelectedBranchId(undefined)}
                                 >
-                                    {view.label}
+                                    Whole workspace
                                 </button>
-                            ))}
+                                <button
+                                    type="button"
+                                    className={selectedBranchId ? 'active' : ''}
+                                    disabled={!selectedRoot}
+                                    onClick={() => selectedRoot && setSelectedBranchId(selectedRoot.id)}
+                                >
+                                    Selected branch
+                                </button>
+                            </div>
+                            <div className="local-scope-context">
+                                <span>{selectedRoot ? selectedRoot.title : 'Whole graph'}</span>
+                                {selectedBranchId ? (
+                                    <button type="button" onClick={() => setSelectedBranchId(undefined)}>
+                                        Clear
+                                    </button>
+                                ) : null}
+                            </div>
                         </div>
                     </div>
-                    <div className="local-view-section">
-                        <span>Filters</span>
-                        <div className="local-filter-chips">
+                    <div className="local-view-output-row">
+                        <div className="local-view-section local-view-section-output">
+                            <span>{outputModeValue ? 'Review surface' : 'Create / Review'}</span>
                             <button
                                 type="button"
-                                className={!selectedBranchId ? 'active' : ''}
-                                onClick={() => setSelectedBranchId(undefined)}
+                                className={`local-output-menu-button ${outputMenuOpen || outputModeValue ? 'active' : ''}`}
+                                onClick={() => setOutputMenuOpen((open) => !open)}
+                                aria-expanded={outputMenuOpen}
                             >
-                                Whole workspace
-                            </button>
-                            <button
-                                type="button"
-                                className={selectedBranchId ? 'active' : ''}
-                                disabled={!selectedRoot}
-                                onClick={() => selectedRoot && setSelectedBranchId(selectedRoot.id)}
-                            >
-                                Selected branch
+                                <span>{activeOutputOption?.label || `Use ${activeCanvasOption?.label || 'canvas'}`}</span>
+                                <span className="local-filter-menu-caret" aria-hidden="true">
+                                    {outputMenuOpen ? '^' : 'v'}
+                                </span>
                             </button>
                         </div>
-                    </div>
-                    <div className="local-view-section">
-                        <span>AI Outputs</span>
-                        <select
-                            value={AI_OUTPUT_VIEWS.some((view) => view.id === activeView) ? activeView : ''}
-                            onChange={(event) => {
-                                if (event.target.value) {
-                                    setActiveView(event.target.value);
-                                }
-                            }}
-                            aria-label="AI output previews"
-                        >
-                            <option value="">Choose output</option>
-                            {AI_OUTPUT_VIEWS.map((view) => (
-                                <option key={view.id} value={view.id}>
-                                    {view.label}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="local-view-section">
-                        <span>Review</span>
-                        <select
-                            className={activeReviewView ? 'active' : ''}
-                            value={activeReviewView}
-                            onChange={(event) => {
-                                if (event.target.value) {
-                                    setActiveView(event.target.value);
-                                }
-                            }}
-                            aria-label="Review outputs"
-                        >
-                            <option value="">Choose review</option>
-                            {REVIEW_VIEWS.map((view) => (
-                                <option key={view.id} value={view.id}>
-                                    {view.label}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="local-view-section">
-                        <span>Handoff</span>
-                        <select
-                            className={activeHandoffView ? 'active' : ''}
-                            value={activeHandoffView}
-                            onChange={(event) => {
-                                if (event.target.value) {
-                                    setActiveView(event.target.value);
-                                }
-                            }}
-                            aria-label="Handoff outputs"
-                        >
-                            <option value="">Choose handoff</option>
-                            {HANDOFF_VIEWS.map((view) => (
-                                <option key={view.id} value={view.id}>
-                                    {view.label}
-                                </option>
-                            ))}
-                        </select>
+                        <div className="local-view-section local-view-section-filters">
+                            <span>Filters</span>
+                            <button
+                                type="button"
+                                className={`local-filter-menu-button ${filtersOpen ? 'active' : ''}`}
+                                onClick={() => setFiltersOpen((open) => !open)}
+                                aria-expanded={filtersOpen}
+                            >
+                                <span>{filtersOpen ? 'Hide filters' : 'Node filters'}</span>
+                                {activeGraphFilters.length > 0 ? (
+                                    <small>{activeGraphFilters.length}</small>
+                                ) : null}
+                                <span className="local-filter-menu-caret" aria-hidden="true">
+                                    {filtersOpen ? '^' : 'v'}
+                                </span>
+                            </button>
+                        </div>
+                        {!isCanvasView ? (
+                            <button
+                                type="button"
+                                className="local-back-to-map"
+                                onClick={() => setActiveCanvasView(activeCanvasView || 'mindmap')}
+                            >
+                                Back to canvas
+                            </button>
+                        ) : null}
                     </div>
                 </div>
-                <div className="local-branch-control">
-                    <span>{selectedRoot ? selectedRoot.title : 'Whole graph'}</span>
-                    {selectedBranchId ? (
-                        <button type="button" onClick={() => setSelectedBranchId(undefined)}>
-                            Clear branch
+            </div>
+            {filtersOpen ? (
+                <div className="local-filter-popover" aria-label="Persisted graph filters">
+                    <div className="local-filter-popover-header">
+                        <span>Node filters</span>
+                        <button type="button" onClick={() => setFiltersOpen(false)}>
+                            Done
                         </button>
-                    ) : null}
+                        {activeGraphFilters.length > 0 ? (
+                            <button type="button" onClick={() => setActiveGraphFilters([])}>
+                                Reset
+                            </button>
+                        ) : null}
+                    </div>
+                    <div className="local-filter-popover-chips">
+                        {GRAPH_FILTERS.map((filter) => (
+                            <button
+                                key={filter.id}
+                                type="button"
+                                className={activeFilterSet.has(filter.id) ? 'active' : ''}
+                                onClick={() => toggleGraphFilter(filter.id)}
+                            >
+                                {filter.label}
+                            </button>
+                        ))}
+                    </div>
                 </div>
-            </div>
-            <div className="local-filter-bar" aria-label="Persisted graph filters">
-                {GRAPH_FILTERS.map((filter) => (
-                    <button
-                        key={filter.id}
-                        type="button"
-                        className={activeFilterSet.has(filter.id) ? 'active' : ''}
-                        onClick={() => toggleGraphFilter(filter.id)}
-                    >
-                        {filter.label}
-                    </button>
-                ))}
-                {activeGraphFilters.length > 0 ? (
-                    <button
-                        type="button"
-                        className="local-filter-reset"
-                        onClick={() => setActiveGraphFilters([])}
-                    >
-                        Reset
-                    </button>
-                ) : null}
-            </div>
+            ) : null}
 
+            {outputMenuOpen ? (
+                <div className="local-output-popover" aria-label="Workspace actions">
+                    <div className="local-output-popover-header">
+                        <span>Choose what to do next</span>
+                        <button type="button" onClick={() => setOutputMenuOpen(false)}>
+                            Done
+                        </button>
+                    </div>
+                    <div className="local-output-groups">
+                        {WORKSPACE_OUTPUT_GROUPS.map((group) => (
+                            <div key={group.label} className="local-output-group">
+                                <strong>{group.label}</strong>
+                                <div>
+                                    {group.views.map((view) => (
+                                        <button
+                                            key={view.id}
+                                            type="button"
+                                            className={activeView === view.id ? 'active' : ''}
+                                            onClick={() => {
+                                                setActiveView(view.id);
+                                                setOutputMenuOpen(false);
+                                            }}
+                                        >
+                                            {view.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ) : null}
+
+            {activeGraphFilters.length > 0 && !filtersOpen ? (
+                <div className="local-active-filter-strip" aria-label="Active graph filters">
+                    {activeGraphFilters.map((filterId) => {
+                        const filter = GRAPH_FILTERS.find((item) => item.id === filterId);
+                        return (
+                        <button
+                            key={filterId}
+                            type="button"
+                            onClick={() => toggleGraphFilter(filterId)}
+                            title="Remove filter"
+                        >
+                            {filter?.label || filterId}
+                        </button>
+                        );
+                    })}
+                </div>
+            ) : null}
+
+            {!isCanvasView ? (
+                <div className="local-view-content-surface">
             {nodes.length === 0 ? (
                 <EmptyState
                     activeView={activeView}
@@ -702,22 +794,6 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                     onSetView={setActiveView}
                     showCanvasNudges={showCanvasNudges}
                 />
-            ) : null}
-
-            {activeView === 'mindmap' && nodes.length > 0 ? (
-                <div className="local-lens-summary">
-                    <OutputStatePill state="Locally projected" />
-                    <div>
-                        <strong>Mind Map</strong>
-                        <span>
-                            Hierarchical lens on accepted workspace nodes. Changing this view does
-                            not ask AI to create a new artifact.
-                        </span>
-                    </div>
-                    <button type="button" onClick={() => openAiPreset('knowledgeGraph')} disabled={!flowId}>
-                        Ask AI to enrich graph links
-                    </button>
-                </div>
             ) : null}
 
             {activeView === 'knowledgeGraph' && nodes.length > 0 ? (
@@ -1148,6 +1224,8 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                         clearGeneratedHelperPreview('integrationOperatorSync')
                     }
                 />
+            ) : null}
+                </div>
             ) : null}
         </section>
     );
