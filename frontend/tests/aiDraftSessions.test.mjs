@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     acceptAIDraftSession,
+    buildAIDraftMemoryContext,
     buildAIDraftSessionRequestPayload,
     buildSelectedSourceDraftPayload,
     buildSelectedSourcesDraftPayload,
@@ -10,6 +11,7 @@ import {
     formatAIDraftPreviewDiffSummary,
     getAIDraftItemBadges,
     getAIDraftModelMetadata,
+    inferAIDraftChangeIntent,
     rejectAIDraftSession,
     reviseAIDraftSession
 } from '../src/utils/aiDraftSessions.js';
@@ -151,8 +153,13 @@ test('getAIDraftModelMetadata prefers actual model and exposes risk cost fields'
         metadata: {
             actual_model: 'gpt-5.5',
             risk: 'deep_review',
-            estimated_tokens: 1400,
-            estimated_cost_usd: '$0.02'
+            usage: {
+                input_tokens: 900,
+                output_tokens: 500,
+                total_tokens: 1400,
+                estimated_cost_usd: '$0.02',
+                cost_source: 'OPENAI_PRICING_PER_1M_JSON'
+            }
         }
     });
 
@@ -163,6 +170,10 @@ test('getAIDraftModelMetadata prefers actual model and exposes risk cost fields'
     assert.equal(metadata.riskTier, 'deep_review');
     assert.equal(metadata.tokenEstimate, 1400);
     assert.equal(metadata.costEstimate, '$0.02');
+    assert.equal(metadata.inputTokens, 900);
+    assert.equal(metadata.outputTokens, 500);
+    assert.equal(metadata.totalTokens, 1400);
+    assert.equal(metadata.usageCostSource, 'OPENAI_PRICING_PER_1M_JSON');
 });
 
 test('acceptAIDraftSession creates canonical nodes only on explicit accept', () => {
@@ -328,16 +339,80 @@ test('draft request carries visual routing metadata and desired outputs', () => 
     assert.equal(request.action, 'generate_checklist');
 });
 
+test('follow-up memory captures scoped graph context and update intent', () => {
+    const nodes = [
+        createWorkspaceNode({
+            id: 'aec-root',
+            title: 'Consulting Offer',
+            body: 'Generic consulting business plan',
+            sourceRefs: [{ document_id: 'doc-aec', chunk_id: 'chunk-1' }]
+        }),
+        createWorkspaceNode({
+            id: 'aec-child',
+            title: 'Delivery Model',
+            body: 'How the consulting team delivers engagements'
+        })
+    ];
+    const edges = [
+        {
+            id: 'edge-aec-child',
+            source: 'aec-root',
+            target: 'aec-child',
+            type: 'step',
+            metadata: {
+                relationship_type: 'contains',
+                rationale: 'Delivery model is part of the offer.'
+            }
+        }
+    ];
+    const session = createAIDraftSession({
+        sessionId: 'session-aec',
+        revisionId: 'revision-aec-1',
+        scope: { type: 'branch', node_id: 'aec-root' },
+        prompt: 'Create a consulting business plan',
+        draftNodes: draftNodes().slice(0, 1),
+        draftEdges: draftEdges().slice(0, 1)
+    });
+    const prompt = 'make this specific to AEC consulting';
+    const changeIntent = inferAIDraftChangeIntent(prompt);
+    const memoryContext = buildAIDraftMemoryContext({
+        nodes,
+        edges,
+        scope: { type: 'branch', node_id: 'aec-root' },
+        activeDraftSession: session,
+        prompt,
+        changeIntent
+    });
+
+    const request = buildAIDraftSessionRequestPayload({
+        role: { id: 'workflow-mapper', label: 'Workflow Mapper' },
+        action: { id: 'custom_prompt', label: 'Custom prompt' },
+        scope: { type: 'branch', node_id: 'aec-root' },
+        prompt,
+        memoryContext,
+        changeIntent
+    });
+
+    assert.equal(changeIntent, 'update');
+    assert.equal(request.change_intent, 'update');
+    assert.equal(request.memory_context.scope.node_id, 'aec-root');
+    assert.equal(request.memory_context.graph_context.scoped_node_count, 2);
+    assert.equal(request.memory_context.prior_draft_session.session_id, 'session-aec');
+    assert.equal(request.metadata.follow_up_memory.change_intent, 'update');
+});
+
 test('starter transformation catalog includes operational prompt defaults', () => {
     const ids = new Set(starterTransformations.map((starter) => starter.id));
 
-    assert.equal(starterTransformations.length, 12);
+    assert.equal(starterTransformations.length, 14);
     assert.ok(ids.has('sop_to_checklist'));
     assert.ok(ids.has('pdf_to_training_outline'));
     assert.ok(ids.has('requirements_to_tasks'));
     assert.ok(ids.has('source_coverage_report'));
     assert.ok(ids.has('sme_review_packet'));
     assert.ok(ids.has('implementation_handoff_package'));
+    assert.ok(ids.has('reconcile_source_with_workspace'));
+    assert.ok(ids.has('specialize_branch'));
     assert.ok(
         starterTransformations.every(
             (starter) =>

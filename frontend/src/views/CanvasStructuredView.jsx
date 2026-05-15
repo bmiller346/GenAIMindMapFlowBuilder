@@ -24,6 +24,18 @@ const TASK_STATUS_OPTIONS = [
 ];
 
 const TASK_PRIORITY_OPTIONS = ['', 'low', 'medium', 'high', 'critical'];
+const FILTER_LABELS = {
+    'source-backed': 'Source-backed',
+    'needs-review': 'Needs review',
+    manual: 'Manual',
+    'ai-generated': 'AI-generated',
+    'tasks-only': 'Tasks only',
+    unassigned: 'Unassigned',
+    'missing-due-date': 'Missing due date',
+    'missing-source': 'Missing source',
+    'low-confidence': 'Low confidence',
+    'hidden-from-export': 'Hidden'
+};
 
 const sourceLabel = (node) => {
     const ref = node.source_ref || {};
@@ -94,6 +106,27 @@ const EmptyStructuredView = ({ label }) => (
         <span>{label} will populate after you accept or create nodes in the workspace.</span>
     </div>
 );
+
+const EmptyFilteredView = ({ label }) => (
+    <div className="canvas-structured-empty inline">
+        <strong>No rows match this view</strong>
+        <span>{label} is a live projection of the graph. Clear filters or select a broader branch to see rows.</span>
+    </div>
+);
+
+const ActiveFilterChips = ({ filters = [] }) => {
+    const activeFilters = Array.isArray(filters) ? filters.filter(Boolean) : [];
+    if (!activeFilters.length) {
+        return null;
+    }
+    return (
+        <div className="canvas-structured-filter-chips" aria-label="Active graph filters">
+            {activeFilters.map((filterId) => (
+                <span key={filterId}>{FILTER_LABELS[filterId] || filterId}</span>
+            ))}
+        </div>
+    );
+};
 
 const CanvasStructuredView = ({
     view,
@@ -245,6 +278,7 @@ const CanvasStructuredView = ({
                     {projection.nodes.length} nodes, {projection.edges.length} links
                     {activeGraphFilters.length ? `, ${activeGraphFilters.length} filters` : ''}
                 </p>
+                <ActiveFilterChips filters={activeGraphFilters} />
                 {view === 'table' ? (
                     <button
                         type="button"
@@ -257,17 +291,21 @@ const CanvasStructuredView = ({
             </header>
 
             {view === 'outline' ? (
-                <ol className="canvas-structured-outline">
-                    {projection.roots.map((root) => (
-                        <OutlineItem
-                            key={root.id}
-                            node={root}
-                            projection={projection}
-                            depth={0}
-                            onOpenNode={onOpenNode}
-                        />
-                    ))}
-                </ol>
+                projection.roots.length > 0 ? (
+                    <ol className="canvas-structured-outline">
+                        {projection.roots.map((root) => (
+                            <OutlineItem
+                                key={root.id}
+                                node={root}
+                                projection={projection}
+                                depth={0}
+                                onOpenNode={onOpenNode}
+                            />
+                        ))}
+                    </ol>
+                ) : (
+                    <EmptyFilteredView label={label} />
+                )
             ) : null}
 
             {view === 'tasks' ? (
@@ -416,36 +454,40 @@ const CanvasStructuredView = ({
             ) : null}
 
             {view === 'table' ? (
-                <div className="canvas-structured-table-wrap">
-                    <table className="canvas-structured-table">
-                        <thead>
-                            <tr>
-                                <th>Title</th>
-                                <th>Type</th>
-                                <th>Status</th>
-                                <th>Summary</th>
-                                <th>Table</th>
-                                <th>Source</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {projection.nodes.map((row) => (
-                                <tr key={row.id}>
-                                    <td>
-                                        <button type="button" onClick={() => onOpenNode?.(row.id)}>
-                                            {row.title}
-                                        </button>
-                                    </td>
-                                    <td>{rowTypeLabel(row)}</td>
-                                    <td>{row.status || '-'}</td>
-                                    <td>{summaryText(row) || '-'}</td>
-                                    <td>{tableShapeLabel(row)}</td>
-                                    <td>{sourceLabel(row)}</td>
+                projection.nodes.length > 0 ? (
+                    <div className="canvas-structured-table-wrap">
+                        <table className="canvas-structured-table">
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Summary</th>
+                                    <th>Table</th>
+                                    <th>Source</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                            </thead>
+                            <tbody>
+                                {projection.nodes.map((row) => (
+                                    <tr key={row.id}>
+                                        <td>
+                                            <button type="button" onClick={() => onOpenNode?.(row.id)}>
+                                                {row.title}
+                                            </button>
+                                        </td>
+                                        <td>{rowTypeLabel(row)}</td>
+                                        <td>{row.status || '-'}</td>
+                                        <td>{summaryText(row) || '-'}</td>
+                                        <td>{tableShapeLabel(row)}</td>
+                                        <td>{sourceLabel(row)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <EmptyFilteredView label={label} />
+                )
             ) : null}
         </section>
     );

@@ -36,6 +36,288 @@ const numericConfidence = (value) => {
     return Number.isFinite(parsed) ? parsed : null;
 };
 
+const AI_DRAFT_MEMORY_NODE_LIMIT = 24;
+const AI_DRAFT_MEMORY_EDGE_LIMIT = 40;
+const AI_DRAFT_MEMORY_SOURCE_REF_LIMIT = 30;
+const AI_DRAFT_MEMORY_PROMPT_LIMIT = 3;
+
+const truncateMemoryText = (value, limit = 480) => {
+    const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+    if (!text || text.length <= limit) {
+        return text;
+    }
+    return `${text.slice(0, Math.max(0, limit - 3))}...`;
+};
+
+const edgeSourceId = (edge = {}) => firstText(edge.source, edge.source_node_id, edge.parent_id);
+const edgeTargetId = (edge = {}) => firstText(edge.target, edge.target_node_id, edge.child_id);
+
+const sourceRefsFromNode = (node = {}) => {
+    const data = node.data || {};
+    const nestedData = data.data || {};
+    return mergeSourceRefs(
+        mergeSourceRefs(asArray(data.source_refs), asArray(data.sourceRefs)),
+        mergeSourceRefs(asArray(nestedData.source_refs), asArray(nestedData.sourceRefs))
+    );
+};
+
+const normalizeMemorySourceRef = (ref = {}) => {
+    if (!ref || typeof ref !== 'object') {
+        return {};
+    }
+    return {
+        document_id: firstText(ref.document_id, ref.documentId, ref.source_id),
+        chunk_id: firstText(ref.chunk_id, ref.chunkId, ref.id),
+        page: ref.page ?? ref.page_number ?? '',
+        section: firstText(ref.section, ref.heading),
+        quote_snippet: truncateMemoryText(firstText(ref.quote_snippet, ref.snippet, ref.text), 240),
+        confidence: firstText(ref.confidence)
+    };
+};
+
+const normalizeMemorySourceRefs = (...refLists) => {
+    const refs = mergeSourceRefs(
+        mergeSourceRefs(refLists[0] || [], refLists[1] || []),
+        refLists.slice(2).flatMap((refsForList) => asArray(refsForList))
+    );
+    return refs
+        .map(normalizeMemorySourceRef)
+        .filter((ref) => ref.document_id || ref.chunk_id || ref.quote_snippet)
+        .slice(0, AI_DRAFT_MEMORY_SOURCE_REF_LIMIT);
+};
+
+const sourceRefMatchesSourceId = (ref = {}, sourceId = '') => {
+    const normalizedSourceId = String(sourceId || '').trim();
+    if (!normalizedSourceId) {
+        return false;
+    }
+    return [
+        ref.document_id,
+        ref.documentId,
+        ref.source_id,
+        ref.sourceId,
+        ref.normalized_document_id
+    ].some((value) => String(value || '').trim() === normalizedSourceId);
+};
+
+const collectBranchNodeIds = (edges = [], rootId = '') => {
+    const root = String(rootId || '').trim();
+    if (!root) {
+        return new Set();
+    }
+    const childIdsByParent = new Map();
+    asArray(edges).forEach((edge) => {
+        const source = edgeSourceId(edge);
+        const target = edgeTargetId(edge);
+        if (!source || !target) {
+            return;
+        }
+        childIdsByParent.set(source, [...(childIdsByParent.get(source) || []), target]);
+    });
+
+    const ids = new Set([root]);
+    const queue = [root];
+    while (queue.length) {
+        const parentId = queue.shift();
+        asArray(childIdsByParent.get(parentId)).forEach((childId) => {
+            if (ids.has(childId)) {
+                return;
+            }
+            ids.add(childId);
+            queue.push(childId);
+        });
+    }
+    return ids;
+};
+
+const collectScopedNodeIds = ({ nodes = [], edges = [], scope = {} } = {}) => {
+    const normalizedScope = normalizeAIDraftScope(scope);
+    if (normalizedScope.type === 'branch' && normalizedScope.node_id) {
+        return collectBranchNodeIds(edges, normalizedScope.node_id);
+    }
+    if (normalizedScope.type === 'node' && normalizedScope.node_id) {
+        return new Set([normalizedScope.node_id]);
+    }
+    if (normalizedScope.type === 'nodes') {
+        return new Set(asArray(normalizedScope.node_ids));
+    }
+    if (normalizedScope.type === 'source' && normalizedScope.source_id) {
+        const sourceMatchedIds = asArray(nodes)
+            .filter((node) =>
+                sourceRefsFromNode(node).some((ref) =>
+                    sourceRefMatchesSourceId(ref, normalizedScope.source_id)
+                )
+            )
+            .map((node) => node.id)
+            .filter(Boolean);
+        return new Set(sourceMatchedIds.length ? sourceMatchedIds : asArray(nodes).map((node) => node.id));
+    }
+    return new Set(asArray(nodes).map((node) => node.id).filter(Boolean));
+};
+
+const memoryNodeRecord = (node = {}) => {
+    const data = node.data || {};
+    const nestedData = data.data || {};
+    const sourceRefs = sourceRefsFromNode(node);
+    return {
+        id: String(node.id || ''),
+        title: truncateMemoryText(
+            firstText(data.title, data.label, data.content, data.body, data.summ, nestedData.summ, node.id),
+            180
+        ),
+        node_type: firstText(data.node_type, data.nodeType, data.type, node.type, 'concept'),
+        status: firstText(data.status, nestedData.status),
+        summary: truncateMemoryText(
+            firstText(
+                data.summary,
+                data.summ,
+                data.body,
+                data.content,
+                nestedData.summary,
+                nestedData.summ
+            ),
+            520
+        ),
+        source_ref_count: sourceRefs.length
+    };
+};
+
+const memoryEdgeRecord = (edge = {}) => {
+    const metadata = edge.metadata || edge.data?.metadata || {};
+    const relationshipType = firstText(
+        edge.relationship_type,
+        edge.type,
+        edge.data?.relationship_type,
+        metadata.relationship_type,
+        metadata.kind,
+        'contains'
+    );
+    return {
+        id: firstText(edge.id, `${edgeSourceId(edge)}-${edgeTargetId(edge)}`),
+        source: edgeSourceId(edge),
+        target: edgeTargetId(edge),
+        relationship_type: relationshipType,
+        confidence: metadata.confidence ?? edge.confidence ?? '',
+        rationale: truncateMemoryText(firstText(metadata.rationale, edge.rationale, edge.label), 320)
+    };
+};
+
+const draftNodeMemoryRecord = (node = {}) => ({
+    id: firstText(node.id, node.node_id),
+    title: truncateMemoryText(firstText(node.title, node.label), 160),
+    node_type: firstText(node.node_type, node.type, 'concept'),
+    status: firstText(node.status),
+    summary: truncateMemoryText(firstText(node.summary, node.body, node.rationale), 400),
+    source_ref_count: asArray(node.source_refs).length
+});
+
+export const normalizeAIDraftChangeIntent = (intent = '', fallback = 'supplement') => {
+    const normalized = String(intent || '').trim().toLowerCase();
+    if (['update', 'supplement', 'compare'].includes(normalized)) {
+        return normalized;
+    }
+    const normalizedFallback = String(fallback || '').trim().toLowerCase();
+    return ['update', 'supplement', 'compare'].includes(normalizedFallback)
+        ? normalizedFallback
+        : 'supplement';
+};
+
+export const inferAIDraftChangeIntent = (prompt = '', fallback = 'supplement') => {
+    const text = String(prompt || '').toLowerCase();
+    if (/\b(compare|contrast|versus|vs\.?|difference|differences|tradeoff|trade-off)\b/.test(text)) {
+        return 'compare';
+    }
+    if (
+        /\b(make|revise|rewrite|update|change|tailor|adapt|speciali[sz]e|refine|convert|turn)\b/.test(text) ||
+        /\b(specific to|more specific|instead of|replace|swap)\b/.test(text)
+    ) {
+        return 'update';
+    }
+    if (/\b(add|include|also|expand|extend|more|what about|supplement|another|additional)\b/.test(text)) {
+        return 'supplement';
+    }
+    return normalizeAIDraftChangeIntent(fallback);
+};
+
+export const buildAIDraftMemoryContext = ({
+    nodes = [],
+    edges = [],
+    scope = { type: 'workspace' },
+    sourceRefs = [],
+    selectedSourcePayload = null,
+    activeDraftSession = null,
+    prompt = '',
+    changeIntent = '',
+    outputMode = 'draft'
+} = {}) => {
+    const normalizedScope = normalizeAIDraftScope(scope);
+    const scopedIds = collectScopedNodeIds({ nodes, edges, scope: normalizedScope });
+    const scopedNodes = asArray(nodes).filter((node) => scopedIds.has(node.id));
+    const scopedEdges = asArray(edges).filter((edge) => {
+        const sourceId = edgeSourceId(edge);
+        const targetId = edgeTargetId(edge);
+        return scopedIds.has(sourceId) && scopedIds.has(targetId);
+    });
+    const activeRevision = asArray(activeDraftSession?.revisions).at(-1) || {};
+    const priorPromptHistory = asArray(activeDraftSession?.prompt_history)
+        .filter((entry) => firstText(entry.content, entry.prompt, entry.text))
+        .slice(-AI_DRAFT_MEMORY_PROMPT_LIMIT)
+        .map((entry) => ({
+            role: firstText(entry.role, 'user'),
+            content: truncateMemoryText(firstText(entry.content, entry.prompt, entry.text), 320)
+        }));
+    const nodeSourceRefs = scopedNodes.flatMap(sourceRefsFromNode);
+    const revisionSourceRefs = [
+        ...asArray(activeRevision.draft_items).flatMap((item) => asArray(item.source_refs)),
+        ...asArray(activeRevision.draft_nodes).flatMap((node) => asArray(node.source_refs)),
+        ...asArray(activeRevision.draft_annotations).flatMap((annotation) => asArray(annotation.source_refs))
+    ];
+    const normalizedChangeIntent = normalizeAIDraftChangeIntent(
+        changeIntent || inferAIDraftChangeIntent(prompt)
+    );
+
+    return {
+        schema_version: '1',
+        change_intent: normalizedChangeIntent,
+        output_mode: outputMode || 'draft',
+        scope: normalizedScope,
+        current_prompt: truncateMemoryText(prompt, 640),
+        graph_context: {
+            total_nodes: asArray(nodes).length,
+            total_edges: asArray(edges).length,
+            scoped_node_count: scopedNodes.length,
+            scoped_edge_count: scopedEdges.length,
+            nodes_truncated: scopedNodes.length > AI_DRAFT_MEMORY_NODE_LIMIT,
+            edges_truncated: scopedEdges.length > AI_DRAFT_MEMORY_EDGE_LIMIT,
+            nodes: scopedNodes.slice(0, AI_DRAFT_MEMORY_NODE_LIMIT).map(memoryNodeRecord),
+            edges: scopedEdges.slice(0, AI_DRAFT_MEMORY_EDGE_LIMIT).map(memoryEdgeRecord)
+        },
+        source_refs: normalizeMemorySourceRefs(
+            sourceRefs,
+            selectedSourcePayload?.source_refs,
+            nodeSourceRefs,
+            revisionSourceRefs
+        ),
+        source_context: selectedSourcePayload?.metadata || null,
+        prior_draft_session: activeDraftSession?.session_id
+            ? {
+                  session_id: activeDraftSession.session_id,
+                  status: activeDraftSession.status || '',
+                  role: activeDraftSession.role || '',
+                  intent: activeDraftSession.intent || activeDraftSession.action || '',
+                  latest_revision_id: activeRevision.revision_id || '',
+                  latest_revision_prompt: truncateMemoryText(activeRevision.prompt, 420),
+                  prompt_history: priorPromptHistory,
+                  draft_node_count: asArray(activeRevision.draft_nodes).length,
+                  draft_edge_count: asArray(activeRevision.draft_edges).length,
+                  draft_nodes: asArray(activeRevision.draft_nodes)
+                      .slice(0, 12)
+                      .map(draftNodeMemoryRecord)
+              }
+            : null
+    };
+};
+
 export const normalizeAIDraftScope = (scope = {}) => {
     const type = ['workspace', 'source', 'branch', 'node', 'nodes'].includes(scope.type)
         ? scope.type
@@ -159,27 +441,44 @@ export const buildAIDraftSessionRequestPayload = ({
     selectedSourcePayload = null,
     desiredOutputs = [],
     workspaceBrief = {},
-    metadata = {}
-} = {}) => ({
-    role: role.id || role.role_id || role.label || 'ask-ai',
-    role_id: role.id || role.role_id || '',
-    action: action.id || action.action || 'custom_prompt',
-    intent: action.id || action.action || 'custom_prompt',
-    scope: normalizeAIDraftScope(scope),
-    custom_prompt: prompt.trim() || null,
-    prompt: prompt.trim() || action.label || action.id || 'Ask AI',
-    created_by: createdBy,
-    model_policy: selectedModel === 'auto' ? 'balanced' : 'explicit',
-    model: selectedModel === 'auto' ? null : selectedModel,
-    source_chunks: selectedSourcePayload?.source_chunks || [],
-    desired_outputs: Array.isArray(desiredOutputs) ? desiredOutputs.filter(Boolean) : [],
-    workspace_brief: workspaceBrief && typeof workspaceBrief === 'object' ? workspaceBrief : {},
-    metadata: {
-        ...metadata,
+    metadata = {},
+    memoryContext = null,
+    changeIntent = ''
+} = {}) => {
+    const normalizedMemory =
+        memoryContext && typeof memoryContext === 'object' && Object.keys(memoryContext).length
+            ? memoryContext
+            : null;
+    const normalizedChangeIntent = normalizeAIDraftChangeIntent(
+        changeIntent || normalizedMemory?.change_intent || metadata.change_intent,
+        inferAIDraftChangeIntent(prompt, 'supplement')
+    );
+    return {
+        role: role.id || role.role_id || role.label || 'ask-ai',
+        role_id: role.id || role.role_id || '',
+        action: action.id || action.action || 'custom_prompt',
+        intent: action.id || action.action || 'custom_prompt',
+        scope: normalizeAIDraftScope(scope),
+        custom_prompt: prompt.trim() || null,
+        prompt: prompt.trim() || action.label || action.id || 'Ask AI',
+        created_by: createdBy,
+        model_policy: selectedModel === 'auto' ? 'balanced' : 'explicit',
+        model: selectedModel === 'auto' ? null : selectedModel,
+        source_chunks: selectedSourcePayload?.source_chunks || [],
+        desired_outputs: Array.isArray(desiredOutputs) ? desiredOutputs.filter(Boolean) : [],
         workspace_brief: workspaceBrief && typeof workspaceBrief === 'object' ? workspaceBrief : {},
-        source_context: selectedSourcePayload?.metadata
-    }
-});
+        change_intent: normalizedChangeIntent,
+        memory_context: normalizedMemory || undefined,
+        source_refs: normalizedMemory?.source_refs || normalizeMemorySourceRefs(selectedSourcePayload?.source_refs),
+        metadata: {
+            ...metadata,
+            change_intent: normalizedChangeIntent,
+            follow_up_memory: normalizedMemory || metadata.follow_up_memory,
+            workspace_brief: workspaceBrief && typeof workspaceBrief === 'object' ? workspaceBrief : {},
+            source_context: selectedSourcePayload?.metadata
+        }
+    };
+};
 
 export const normalizeAIDraftItem = (item = {}) => {
     const title = firstText(item.title, item.label, 'AI draft item');
@@ -372,6 +671,12 @@ export const getAIDraftModelMetadata = (session = {}, revision = latestAIDraftRe
         ...(session.metadata || {}),
         ...(revision.metadata || {})
     };
+    const usage =
+        metadata.usage && typeof metadata.usage === 'object'
+            ? metadata.usage
+            : session.usage && typeof session.usage === 'object'
+              ? session.usage
+              : {};
     const policy =
         typeof session.model_policy === 'string'
             ? session.model_policy
@@ -384,9 +689,18 @@ export const getAIDraftModelMetadata = (session = {}, revision = latestAIDraftRe
         metadata.token_cost_tier
     );
     const tokenEstimate =
-        metadata.token_estimate ?? metadata.estimated_tokens ?? metadata.input_tokens ?? metadata.tokens;
+        usage.total_tokens ??
+        metadata.total_tokens ??
+        metadata.token_estimate ??
+        metadata.estimated_tokens ??
+        metadata.input_tokens ??
+        metadata.tokens;
     const costEstimate =
-        metadata.estimated_cost_usd ?? metadata.estimated_cost ?? metadata.cost_estimate ?? metadata.cost;
+        usage.estimated_cost_usd ??
+        metadata.estimated_cost_usd ??
+        metadata.estimated_cost ??
+        metadata.cost_estimate ??
+        metadata.cost;
     return {
         model: firstText(
             metadata.actual_model,
@@ -404,7 +718,11 @@ export const getAIDraftModelMetadata = (session = {}, revision = latestAIDraftRe
         policy,
         riskTier,
         tokenEstimate,
-        costEstimate
+        costEstimate,
+        inputTokens: usage.input_tokens ?? metadata.input_tokens,
+        outputTokens: usage.output_tokens ?? metadata.output_tokens,
+        totalTokens: usage.total_tokens ?? metadata.total_tokens ?? tokenEstimate,
+        usageCostSource: usage.cost_source ?? metadata.usage_cost_source
     };
 };
 

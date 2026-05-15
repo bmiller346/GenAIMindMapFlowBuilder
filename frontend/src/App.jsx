@@ -1,9 +1,13 @@
 import {
     Background,
+    BaseEdge,
     Controls,
+    EdgeLabelRenderer,
     MiniMap,
     Panel,
     ReactFlow,
+    getBezierPath,
+    getSmoothStepPath,
     useNodesInitialized,
     useOnSelectionChange,
     useReactFlow
@@ -68,6 +72,18 @@ const TASK_CANVAS_TYPES = new Set([
     'requirement',
     'needs_review'
 ]);
+const HIERARCHY_EDGE_TYPES = new Set([
+    '',
+    'contains',
+    'parent_child',
+    'parent-child',
+    'child',
+    'section',
+    'subtopic',
+    'branch',
+    'step',
+    'smoothstep'
+]);
 
 const nodeData = (node) => node?.data || {};
 
@@ -83,6 +99,144 @@ const nodeSourceRefs = (node) => {
 const nodeTypeValue = (node) => {
     const data = nodeData(node);
     return data.node_type || node.type || '';
+};
+
+const humanizeRelationship = (value = '') =>
+    String(value || 'relationship')
+        .replaceAll('_', ' ')
+        .replaceAll('-', ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const edgeRelationshipType = (edge = {}) =>
+    String(
+        edge.relationship_type ||
+            edge.data?.relationship_type ||
+            edge.data?.relationshipType ||
+            edge.metadata?.relationship_type ||
+            edge.type ||
+            ''
+    )
+        .trim()
+        .toLowerCase();
+
+const formatEdgeConfidence = (confidence) => {
+    if (confidence === undefined || confidence === null || confidence === '') {
+        return '';
+    }
+    const numeric = Number(confidence);
+    if (Number.isFinite(numeric)) {
+        const normalized = numeric > 1 ? numeric : numeric * 100;
+        return `${Math.round(normalized)}%`;
+    }
+    return String(confidence);
+};
+
+const edgeSemanticTone = (relationshipType = '') => {
+    if (/conflict|contradict|risk|block/.test(relationshipType)) {
+        return 'conflict';
+    }
+    if (/depend|requires|prerequisite|blocked_by|blocks/.test(relationshipType)) {
+        return 'dependency';
+    }
+    if (/support|evidence|source|proves|validates|cites/.test(relationshipType)) {
+        return 'evidence';
+    }
+    if (/duplicate|overlap|similar|same/.test(relationshipType)) {
+        return 'overlap';
+    }
+    return 'related';
+};
+
+const edgeSemanticInfo = (edge = {}) => {
+    const relationshipType = edgeRelationshipType(edge);
+    const isHierarchy = HIERARCHY_EDGE_TYPES.has(relationshipType);
+    const confidence = formatEdgeConfidence(
+        edge.confidence || edge.data?.confidence || edge.metadata?.confidence
+    );
+    const rationale =
+        edge.data?.rationale ||
+        edge.metadata?.rationale ||
+        edge.rationale ||
+        edge.data?.source_signal ||
+        '';
+    const label = isHierarchy
+        ? 'Structure'
+        : [humanizeRelationship(relationshipType), confidence].filter(Boolean).join(' / ');
+    return {
+        relationship_type: relationshipType || 'contains',
+        kind: isHierarchy ? 'hierarchy' : 'relationship',
+        tone: isHierarchy ? 'hierarchy' : edgeSemanticTone(relationshipType),
+        label,
+        confidence,
+        rationale,
+        tooltip: [
+            isHierarchy ? 'Hierarchy edge: structure' : `Relationship edge: ${humanizeRelationship(relationshipType)}`,
+            confidence ? `Confidence: ${confidence}` : '',
+            rationale ? `Rationale: ${rationale}` : ''
+        ]
+            .filter(Boolean)
+            .join('\n')
+    };
+};
+
+const SemanticEdge = ({
+    id,
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+    markerEnd,
+    style,
+    data
+}) => {
+    const semantic = data?.semantic_edge || {};
+    const pathArgs = {
+        sourceX,
+        sourceY,
+        sourcePosition,
+        targetX,
+        targetY,
+        targetPosition
+    };
+    const [edgePath, labelX, labelY] =
+        semantic.kind === 'hierarchy'
+            ? getSmoothStepPath(pathArgs)
+            : getBezierPath(pathArgs);
+    const labelClassName = [
+        'semantic-edge-label',
+        semantic.kind === 'hierarchy'
+            ? 'semantic-edge-label--hierarchy'
+            : 'semantic-edge-label--relationship',
+        semantic.tone ? `semantic-edge-label--${semantic.tone}` : ''
+    ]
+        .filter(Boolean)
+        .join(' ');
+
+    return (
+        <>
+            <g className="semantic-edge-hit-area">
+                <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+                <path d={edgePath} fill="none" stroke="transparent" strokeWidth={18}>
+                    <title>{semantic.tooltip || semantic.label || 'Graph edge'}</title>
+                </path>
+            </g>
+            <EdgeLabelRenderer>
+                <div
+                    className={labelClassName}
+                    style={{
+                        transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`
+                    }}
+                    title={semantic.tooltip || semantic.label || 'Graph edge'}
+                >
+                    {semantic.label || 'Relationship'}
+                </div>
+            </EdgeLabelRenderer>
+        </>
+    );
 };
 
 const nodeMatchesCanvasLens = (node, activeCanvasView) => {
@@ -167,6 +321,14 @@ const collectVisibleBranchIds = (nodes, edges, selectedBranchId) => {
 const CANVAS_OUT_OF_SCOPE_NODE_CLASS = 'canvas-node-out-of-scope';
 const CANVAS_OUT_OF_SCOPE_EDGE_CLASS = 'canvas-edge-out-of-scope';
 
+const formatUsageNumber = (value) => {
+    const count = Number(value || 0);
+    if (!Number.isFinite(count) || count <= 0) {
+        return '0';
+    }
+    return count.toLocaleString();
+};
+
 const scopedClassName = (className = '', scopeClass, isActive) => {
     const classes = String(className || '')
         .split(/\s+/)
@@ -178,6 +340,36 @@ const scopedClassName = (className = '', scopeClass, isActive) => {
         );
     if (isActive) {
         classes.push(scopeClass);
+    }
+    return classes.join(' ') || undefined;
+};
+
+const canvasEdgeClassName = ({
+    className = '',
+    isOutOfScope = false,
+    semantic,
+    activeCanvasView
+}) => {
+    const classes = String(className || '')
+        .split(/\s+/)
+        .filter(
+            (value) =>
+                value &&
+                value !== CANVAS_OUT_OF_SCOPE_EDGE_CLASS &&
+                !value.startsWith('semantic-edge-') &&
+                value !== 'semantic-edge'
+        );
+    if (isOutOfScope) {
+        classes.push(CANVAS_OUT_OF_SCOPE_EDGE_CLASS);
+    }
+    if (activeCanvasView === 'knowledgeGraph' && semantic) {
+        classes.push('semantic-edge');
+        classes.push(
+            semantic.kind === 'hierarchy'
+                ? 'semantic-edge-hierarchy'
+                : 'semantic-edge-relationship'
+        );
+        classes.push(`semantic-edge-${semantic.tone || 'related'}`);
     }
     return classes.join(' ') || undefined;
 };
@@ -211,14 +403,23 @@ const projectCanvasGraph = ({ nodes, edges, activeCanvasView, activeGraphFilters
             const isProjected = projectedIds.has(edge.source) && projectedIds.has(edge.target);
             const isOutOfScope =
                 hasBranchScope && (!branchIds.has(edge.source) || !branchIds.has(edge.target));
+            const semantic = edgeSemanticInfo(edge);
+            const isKnowledgeGraph = activeCanvasView === 'knowledgeGraph';
             return {
                 ...edge,
+                type: isKnowledgeGraph ? 'semantic' : edge.type,
+                label: isKnowledgeGraph ? semantic.label : edge.label,
+                data: {
+                    ...(edge.data || {}),
+                    semantic_edge: isKnowledgeGraph ? semantic : undefined
+                },
                 hidden: !isProjected,
-                className: scopedClassName(
-                    edge.className,
-                    CANVAS_OUT_OF_SCOPE_EDGE_CLASS,
-                    isProjected && isOutOfScope
-                )
+                className: canvasEdgeClassName({
+                    className: edge.className,
+                    isOutOfScope: isProjected && isOutOfScope,
+                    semantic,
+                    activeCanvasView
+                })
             };
         })
     };
@@ -238,6 +439,7 @@ const isEditableEventTarget = (target) => {
 
 const App = () => {
     const nodeType = useMemo(() => nodeTypes, []);
+    const edgeType = useMemo(() => ({ semantic: SemanticEdge }), []);
     const selector = (state) => ({
         trigger: state.trigger,
         nodes: state.nodes,
@@ -294,6 +496,8 @@ const App = () => {
     const [selectedCanvasNodes, setSelectedCanvasNodes] = useState([]);
     const [validationReport, setValidationReport] = useState();
     const [workspaceDockTab, setWorkspaceDockTab] = useState('sources');
+    const [aiUsage, setAIUsage] = useState();
+    const [aiUsageStatus, setAIUsageStatus] = useState('');
     const [nextStepsOpenToken, setNextStepsOpenToken] = useState(0);
     const reactFlow = useReactFlow();
     const { fitView } = useReactFlow();
@@ -306,6 +510,29 @@ const App = () => {
         () => getLocalSetting(SETTINGS_KEYS.theme) === 'light'
     );
     const flow_id = flowStore((s) => s.flow_id);
+    const refreshAIUsage = useCallback(async () => {
+        if (!flow_id) {
+            setAIUsage(undefined);
+            return;
+        }
+        setAIUsageStatus('Loading usage...');
+        try {
+            const response = await axios.get(
+                `http://localhost:8000/api/workspaces/${flow_id}/ai/usage`
+            );
+            setAIUsage(response.data || {});
+            setAIUsageStatus('');
+        } catch (error) {
+            setAIUsageStatus('Usage unavailable');
+        }
+    }, [flow_id]);
+
+    useEffect(() => {
+        if (workspaceDockTab === 'health') {
+            refreshAIUsage();
+        }
+    }, [refreshAIUsage, workspaceDockTab]);
+
     const selectedNodeIssues = useMemo(() => {
         if (!inspectorNodeId || !validationReport?.issues) {
             return [];
@@ -737,6 +964,7 @@ const App = () => {
             <AutomationsPanel validationReport={validationReport} />
             <ReactFlow
                 nodeTypes={nodeType}
+                edgeTypes={edgeType}
                 nodes={renderedCanvasGraph.nodes}
                 edges={renderedCanvasGraph.edges}
                 onNodesChange={onNodesChange}
@@ -827,14 +1055,34 @@ const App = () => {
                                 </div>
                             ) : null}
                             {workspaceDockTab === 'health' ? (
-                                <GraphValidationPanel
-                                    flowId={flow_id}
-                                    nodes={nodes}
-                                    edges={edges}
-                                    onSelectNode={focusNodeForReview}
-                                    onReportChange={setValidationReport}
-                                    defaultExpanded
-                                />
+                                <div className="workspace-dock-section">
+                                    <GraphValidationPanel
+                                        flowId={flow_id}
+                                        nodes={nodes}
+                                        edges={edges}
+                                        onSelectNode={focusNodeForReview}
+                                        onReportChange={setValidationReport}
+                                        defaultExpanded
+                                    />
+                                    <section className="workspace-ai-usage" aria-label="Workspace AI usage">
+                                        <div>
+                                            <strong>AI usage</strong>
+                                            <button type="button" onClick={refreshAIUsage}>
+                                                Refresh
+                                            </button>
+                                        </div>
+                                        <p>
+                                            {formatUsageNumber(aiUsage?.total_tokens)} tokens
+                                            {aiUsage?.estimated_cost_usd
+                                                ? ` · ${aiUsage.estimated_cost_usd} est.`
+                                                : ''}
+                                        </p>
+                                        <span>
+                                            {aiUsageStatus ||
+                                                `${formatUsageNumber(aiUsage?.session_count)} draft sessions tracked`}
+                                        </span>
+                                    </section>
+                                </div>
                             ) : null}
                             {workspaceDockTab === 'guidance' ? (
                                 <WorkspaceNudgeSurface

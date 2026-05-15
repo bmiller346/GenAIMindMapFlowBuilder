@@ -22,10 +22,12 @@ import {
 import { getWorkspaceNodeData } from "../utils/manualNodes";
 import {
     acceptAIDraftSession,
+    buildAIDraftMemoryContext,
     buildAIDraftSessionRequestPayload,
     buildSelectedSourceDraftPayload,
     buildSelectedSourcesDraftPayload,
-    createAIDraftSession
+    createAIDraftSession,
+    inferAIDraftChangeIntent
 } from "../utils/aiDraftSessions";
 import { createAIActionRun } from "../utils/aiActionRuns";
 import { buildSourceLibraryProjection } from "../views/graphProjection";
@@ -727,11 +729,22 @@ const actionsThatDraftNodes = new Set([
 const AI_GENERATION_STAGES = [
     'Preparing request',
     'Selecting source context',
+    'Choosing model',
     'Calling AI model',
     'Validating draft',
     'Building preview',
     'Saving starter graph'
 ];
+
+const AI_GENERATION_STAGE_HELP = {
+    'Preparing request': 'Packaging your prompt, scope, role, and requested output.',
+    'Selecting source context': 'Collecting workspace nodes and selected source chunks.',
+    'Choosing model': 'Applying the model policy for this kind of draft.',
+    'Calling AI model': 'Waiting for the model to produce structured draft JSON.',
+    'Validating draft': 'Checking the draft contract, citations, and review flags.',
+    'Building preview': 'Preparing the non-canonical preview before anything changes.',
+    'Saving starter graph': 'Persisting the accepted starter graph.'
+};
 
 const sourceOrReviewActionIds = new Set([
     'ask_follow_up',
@@ -753,6 +766,16 @@ const modelOptions = ['auto', ...supportedOpenAIModels];
 
 const draftSessionEndpoint = ({ flowId }) =>
     `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions`;
+
+const formatStageContextValue = (value, fallback = 'None') => {
+    if (Array.isArray(value)) {
+        return value.length ? value.join(', ') : fallback;
+    }
+    if (value === null || value === undefined || value === '') {
+        return fallback;
+    }
+    return String(value);
+};
 
 const hasWorkspaceBriefContext = (brief = {}) =>
     Boolean(
@@ -776,6 +799,7 @@ const PromptModal = ({
     initialActionId,
     initialPrompt = '',
     initialVisual = 'auto',
+    initialPromptPlaceholder = '',
     initialContextSourceId = '',
     initialContextSourceIds = []
 }) => {
@@ -796,6 +820,7 @@ const PromptModal = ({
         clearGeneratedHelperPreview: state.clearGeneratedHelperPreview,
         setActiveAIActionPreview: state.setActiveAIActionPreview,
         setActiveAIDraftSession: state.setActiveAIDraftSession,
+        activeAIDraftSession: state.activeAIDraftSession,
         recordAIActionRun: state.recordAIActionRun,
         setInspectorNodeId: state.setInspectorNodeId,
         workspaceBrief: state.workspaceBrief,
@@ -812,6 +837,7 @@ const PromptModal = ({
         clearGeneratedHelperPreview,
         setActiveAIActionPreview,
         setActiveAIDraftSession,
+        activeAIDraftSession,
         recordAIActionRun,
         setInspectorNodeId,
         workspaceBrief,
@@ -845,6 +871,7 @@ const PromptModal = ({
     const [customPrompt, setCustomPrompt] = useState(initialPrompt || '');
     const [stageMessage, setStageMessage] = useState('');
     const [generationStage, setGenerationStage] = useState('');
+    const [stageContext, setStageContext] = useState([]);
     const [stageDebug, setStageDebug] = useState(null);
     const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
     const promptScope = scope === 'nodes' ? 'node' : scope || 'node';
@@ -1063,6 +1090,11 @@ const PromptModal = ({
         setIsGeneratingPreview(true);
         setGenerationStage('Preparing request');
         setStageMessage('');
+        setStageContext([
+            { label: 'Prompt', value: localPrompt || effectiveAction.label },
+            { label: 'Role', value: effectiveRole.label },
+            { label: 'Output', value: selectedVisual === 'auto' ? 'Auto' : selectedVisual }
+        ]);
         setStageDebug(null);
         const childEdges = edges.filter((edge) => edge.source === targetNodeId);
         const sourceRefs =
@@ -1078,6 +1110,48 @@ const PromptModal = ({
                   : scope === 'nodes'
                     ? { type: 'nodes', node_ids: selectedNodeIds }
                   : { type: scope || 'node', node_id: targetNodeId };
+        const shouldSeedInitialGraph =
+            scope === 'workspace' &&
+            nodes.length === 0 &&
+            shouldDraftNode &&
+            selectedVisual !== 'no_visual';
+        const promptText = localPrompt || effectiveAction.label;
+        const changeIntent = inferAIDraftChangeIntent(
+            promptText,
+            activeAIDraftSession?.session_id ? 'update' : 'supplement'
+        );
+        const memoryContext = buildAIDraftMemoryContext({
+            nodes,
+            edges,
+            scope: normalizedScope,
+            sourceRefs,
+            selectedSourcePayload,
+            activeDraftSession: activeAIDraftSession,
+            prompt: promptText,
+            changeIntent,
+            outputMode: shouldSeedInitialGraph ? 'initial_graph_seed' : 'draft_preview'
+        });
+        setStageContext([
+            { label: 'Scope', value: normalizedScope.type },
+            {
+                label: 'Context',
+                value:
+                    normalizedScope.type === 'nodes'
+                        ? `${selectedNodeIds.length} selected nodes`
+                        : selectedSourcePayload?.metadata?.selected_source_count
+                          ? `${selectedSourcePayload.metadata.selected_source_count} selected sources`
+                          : selectedSourcePayload?.metadata?.selected_source_title ||
+                            targetLabel
+            },
+            {
+                label: 'Sources',
+                value: selectedSourcePayload?.metadata?.selected_source_chunk_count
+                    ? `${selectedSourcePayload.metadata.selected_source_chunk_count} chunks`
+                    : selectedContextSources.length
+                      ? `${selectedContextSources.length} source${selectedContextSources.length === 1 ? '' : 's'}`
+                      : 'Workspace graph only'
+            }
+        ]);
         const { draftNodes, draftEdges } = buildFallbackDraftGraph({
             shouldDraftNode,
             inferredShape,
@@ -1089,11 +1163,6 @@ const PromptModal = ({
             sourceRefs,
             selectedVisual
         });
-        const shouldSeedInitialGraph =
-            scope === 'workspace' &&
-            nodes.length === 0 &&
-            shouldDraftNode &&
-            selectedVisual !== 'no_visual';
         const draftAnnotations =
             effectiveAction.id === 'custom_prompt'
                 ? []
@@ -1108,7 +1177,7 @@ const PromptModal = ({
             scope: normalizedScope,
             role: effectiveRole.label,
             intent: effectiveAction.id,
-            prompt: localPrompt || effectiveAction.label,
+            prompt: promptText,
             draftNodes,
             draftEdges,
             draftAnnotations,
@@ -1125,6 +1194,8 @@ const PromptModal = ({
                 output_shape: inferredShape,
                 requested_visual: selectedVisual,
                 preview_mode: 'local_fallback',
+                change_intent: changeIntent,
+                follow_up_memory: memoryContext,
                 source_node_id:
                     scope === 'workspace' || scope === 'source' || scope === 'nodes'
                         ? null
@@ -1169,6 +1240,8 @@ const PromptModal = ({
                 preview_mode: 'local_fallback',
                 output_shape: inferredShape,
                 requested_visual: selectedVisual,
+                change_intent: changeIntent,
+                follow_up_memory: memoryContext,
                 model: selectedModel === 'auto' ? 'auto' : selectedModel,
                 model_tier: selectedModel === 'auto' ? 'auto' : 'explicit',
                 model_reason:
@@ -1352,18 +1425,28 @@ const PromptModal = ({
                 role: effectiveRole,
                 action: effectiveAction,
                 scope: normalizedScope,
-                prompt: localPrompt || effectiveAction.label,
+                prompt: promptText,
                 selectedModel,
                 selectedSourcePayload,
                 desiredOutputs: ['graph_draft', 'no_visual'].includes(inferredShape) ? [] : [inferredShape],
                 workspaceBrief,
+                memoryContext,
+                changeIntent,
                 metadata: {
                     requested_visual: selectedVisual,
                     output_shape: inferredShape,
                     routed_role_id: effectiveRole.id,
-                    routed_action_id: effectiveAction.id
+                    routed_action_id: effectiveAction.id,
+                    change_intent: changeIntent,
+                    follow_up_memory: memoryContext
                 }
             });
+            setGenerationStage('Choosing model');
+            setStageContext([
+                { label: 'Model policy', value: selectedModel === 'auto' ? 'Auto by intent' : 'Explicit model' },
+                { label: 'Requested model', value: selectedModel === 'auto' ? 'Auto' : selectedModel },
+                { label: 'Preview mode', value: shouldSeedInitialGraph ? 'Initial graph' : 'Draft preview' }
+            ]);
             setGenerationStage('Calling AI model');
             const response = endpoint
                 ? await axios.post(endpoint, requestPayload)
@@ -1393,16 +1476,20 @@ const PromptModal = ({
                 role: effectiveRole,
                 action: effectiveAction,
                 scope: normalizedScope,
-                prompt: localPrompt || effectiveAction.label,
+                prompt: promptText,
                 selectedModel,
                 selectedSourcePayload,
                 desiredOutputs: ['graph_draft', 'no_visual'].includes(inferredShape) ? [] : [inferredShape],
                 workspaceBrief,
+                memoryContext,
+                changeIntent,
                 metadata: {
                     requested_visual: selectedVisual,
                     output_shape: inferredShape,
                     routed_role_id: effectiveRole.id,
-                    routed_action_id: effectiveAction.id
+                    routed_action_id: effectiveAction.id,
+                    change_intent: changeIntent,
+                    follow_up_memory: memoryContext
                 }
             });
             setStageDebug(buildGenerationDebugSnapshot({
@@ -1593,7 +1680,10 @@ const PromptModal = ({
                     <textarea
                         value={customPrompt}
                         onChange={(event) => setCustomPrompt(event.target.value)}
-                        placeholder="Example: turn this commissioning plan into a task-ready workflow."
+                        placeholder={
+                            initialPromptPlaceholder ||
+                            'Example: turn this commissioning plan into a task-ready workflow.'
+                        }
                     />
                 </label>
                 <label>
@@ -1677,22 +1767,41 @@ const PromptModal = ({
                 <div className="ai-action-stage-message">{stageMessage}</div>
             ) : null}
             {isGeneratingPreview ? (
-                <div className="ai-action-stage-progress" aria-label="AI generation progress">
-                    {AI_GENERATION_STAGES.map((stage) => {
-                        const currentIndex = AI_GENERATION_STAGES.indexOf(generationStage);
-                        const stageIndex = AI_GENERATION_STAGES.indexOf(stage);
-                        const stageState =
-                            stageIndex < currentIndex
-                                ? 'complete'
-                                : stage === generationStage
-                                  ? 'active'
-                                  : 'pending';
-                        return (
-                            <span key={stage} className={`ai-action-stage-${stageState}`}>
-                                {stage}
-                            </span>
-                        );
-                    })}
+                <div className="ai-action-stage-card" aria-label="AI generation progress">
+                    <div className="ai-action-stage-now">
+                        <span>{generationStage || 'Preparing request'}</span>
+                        <strong>
+                            {AI_GENERATION_STAGE_HELP[generationStage] ||
+                                'Preparing the AI draft workflow.'}
+                        </strong>
+                    </div>
+                    <div className="ai-action-stage-progress">
+                        {AI_GENERATION_STAGES.map((stage) => {
+                            const currentIndex = AI_GENERATION_STAGES.indexOf(generationStage);
+                            const stageIndex = AI_GENERATION_STAGES.indexOf(stage);
+                            const stageState =
+                                stageIndex < currentIndex
+                                    ? 'complete'
+                                    : stage === generationStage
+                                      ? 'active'
+                                      : 'pending';
+                            return (
+                                <span key={stage} className={`ai-action-stage-${stageState}`}>
+                                    {stage}
+                                </span>
+                            );
+                        })}
+                    </div>
+                    {stageContext.length ? (
+                        <div className="ai-action-stage-context">
+                            {stageContext.map((item) => (
+                                <div key={`${item.label}-${item.value}`}>
+                                    <span>{item.label}</span>
+                                    <strong>{formatStageContextValue(item.value)}</strong>
+                                </div>
+                            ))}
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
             {stageDebug ? (

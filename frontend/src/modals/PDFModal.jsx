@@ -135,7 +135,9 @@ const PDFModal = ({
         setWorkspaceBrief: state.setWorkspaceBrief,
         viewport: state.viewport,
         sourceLibrary: state.sourceLibrary,
-        setSourceLibrary: state.setSourceLibrary
+        setSourceLibrary: state.setSourceLibrary,
+        setActiveView: state.setActiveView,
+        setGeneratedHelperPreview: state.setGeneratedHelperPreview
     });
 
     const {
@@ -150,7 +152,9 @@ const PDFModal = ({
         setWorkspaceBrief,
         viewport,
         sourceLibrary,
-        setSourceLibrary
+        setSourceLibrary,
+        setActiveView,
+        setGeneratedHelperPreview
     } = useStore(useShallow(selector));
     const pdfAccept = '.pdf,application/pdf';
     const [processingType, setProcessingType] = useState('gpt');
@@ -331,6 +335,56 @@ const PDFModal = ({
             : {});
     };
 
+    const maybeOpenUploadedSourceReconciliation = async (sourceRecord, nextNodes = nodes) => {
+        const currentFlowId = flowStore.getState().flow_id || flowId;
+        const graphNodeCount = nextNodes.filter((node) => node.type !== 'dataSource').length;
+        if (!currentFlowId || !sourceRecord?.id || graphNodeCount === 0) {
+            return;
+        }
+        try {
+            const response = await axios.post(
+                `http://localhost:8000/api/workspaces/${currentFlowId}/sources/${encodeURIComponent(sourceRecord.id)}/reconcile/preview`,
+                { scope: { type: 'source', source_id: sourceRecord.id } }
+            );
+            const preview = response.data || {};
+            const previewItems = Array.isArray(preview.preview_items) ? preview.preview_items : [];
+            const matchedCount = Number(preview.metadata?.matched_node_count || 0);
+            const sourceOnlyCount = Number(preview.metadata?.source_only_chunk_count || 0);
+            if (!previewItems.length && matchedCount === 0 && sourceOnlyCount === 0) {
+                return;
+            }
+            setGeneratedHelperPreview('sourceLibrarianSources', preview);
+            setActiveView('sources');
+            addActivity({
+                type: 'ai_source_reconcile_previewed',
+                title: 'Source reconciliation previewed',
+                summary: `Detected overlap between ${sourceRecord.title} and the current graph.`,
+                status: 'completed',
+                source_ids: [sourceRecord.id],
+                metadata: {
+                    intent: 'reconcile_source_with_workspace',
+                    source_id: sourceRecord.id,
+                    preview_items: previewItems.length,
+                    matched_node_count: matchedCount,
+                    source_only_chunk_count: sourceOnlyCount,
+                    trigger: 'source_upload'
+                }
+            });
+        } catch (error) {
+            addActivity({
+                type: 'ai_source_reconcile_failed',
+                title: 'Source reconciliation failed',
+                summary: requestErrorMessage(error),
+                status: 'failed',
+                source_ids: [sourceRecord.id],
+                metadata: {
+                    intent: 'reconcile_source_with_workspace',
+                    trigger: 'source_upload'
+                }
+            });
+        }
+    };
+
     const manageAutomaticNode = (data) => {
         setupFlow(data)
     }
@@ -423,12 +477,13 @@ const PDFModal = ({
             }
         };
         setSourceLibrary(upsertSource(sourceLibrary, sourceRecord));
+        const nextNodes = nodes.length === 0 ? [node] : [...nodes, node];
         if (nodes.length === 0) {
             setNodes([node]);
         } else {
-            const newArr = [...nodes, node];
-            setNodes(newArr);
+            setNodes(nextNodes);
         }
+        void maybeOpenUploadedSourceReconciliation(sourceRecord, nextNodes);
 
         setTrigger(!trigger);
         popNode();

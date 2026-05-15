@@ -216,6 +216,33 @@ def test_source_prompt_sends_bounded_source_library_chunks_to_provider():
     assert session["metadata"]["source_context_truncated"] is True
 
 
+def test_requested_prompt_includes_follow_up_memory_context():
+    prompt = app._requested_prompt(
+        {
+            "prompt": "make this specific to AEC consulting",
+            "change_intent": "update",
+            "memory_context": {
+                "scope": {"type": "branch", "node_id": "aec-root"},
+                "graph_context": {
+                    "nodes": [{"id": "aec-root", "title": "Consulting Offer"}],
+                    "edges": [],
+                },
+                "source_refs": [{"document_id": "doc-aec", "chunk_id": "chunk-1"}],
+                "prior_draft_session": {
+                    "session_id": "session-aec",
+                    "latest_revision_id": "revision-aec-1",
+                },
+            },
+        }
+    )
+
+    assert "Use this follow-up AI memory while answering." in prompt
+    assert "Change intent: update" in prompt
+    assert '"node_id": "aec-root"' in prompt
+    assert '"session_id": "session-aec"' in prompt
+    assert "make this specific to AEC consulting" in prompt
+
+
 def react_root_flow():
     return {
         "_id": "workspace-1",

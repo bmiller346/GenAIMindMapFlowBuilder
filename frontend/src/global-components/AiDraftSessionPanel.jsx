@@ -9,10 +9,12 @@ import useActivityStore from '../stores/activityStore';
 import {
     AI_DRAFT_ACCEPT_MODES,
     acceptAIDraftSession,
+    buildAIDraftMemoryContext,
     buildAIDraftPreviewDiff,
     buildSelectedSourceDraftPayload,
     getAIDraftItemBadges,
     getAIDraftModelMetadata,
+    inferAIDraftChangeIntent,
     latestAIDraftRevision,
     rejectAIDraftSession,
     reviseAIDraftSession
@@ -37,6 +39,26 @@ const humanizeId = (value = '') =>
         .replace(/\s+/g, ' ')
         .trim()
         .replace(/^\w/, (letter) => letter.toUpperCase());
+
+const formatTokenCount = (value) => {
+    const count = Number(value || 0);
+    if (!Number.isFinite(count) || count <= 0) {
+        return '';
+    }
+    return count.toLocaleString();
+};
+
+const usageSummary = (modelMeta = {}) => {
+    const total = formatTokenCount(modelMeta.totalTokens || modelMeta.tokenEstimate);
+    if (!total) {
+        return 'Usage available after model response';
+    }
+    const parts = [`${total} tokens`];
+    if (modelMeta.costEstimate) {
+        parts.push(`${modelMeta.costEstimate} est.`);
+    }
+    return parts.join(' · ');
+};
 
 const scopeLabel = (scope = {}) => {
     if (typeof scope === 'string') {
@@ -401,6 +423,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
     const [acceptMode, setAcceptMode] = useState('append');
     const [selectedItemIds, setSelectedItemIds] = useState([]);
     const [message, setMessage] = useState('');
+    const [progressMessage, setProgressMessage] = useState('');
     const [isRevising, setIsRevising] = useState(false);
     const [isAccepting, setIsAccepting] = useState(false);
     const [isAddingSource, setIsAddingSource] = useState(false);
@@ -472,21 +495,54 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         }
         setIsRevising(true);
         setMessage('');
+        setProgressMessage('Sending revision to the AI model.');
+        const revisionPrompt = prompt.trim();
+        const revisionSourceRefs = [
+            ...asArray(session.source_refs),
+            ...asArray(revision.draft_nodes).flatMap((node) => asArray(node.source_refs)),
+            ...asArray(revision.draft_items).flatMap((item) => asArray(item.source_refs)),
+            ...asArray(revision.draft_annotations).flatMap((annotation) => asArray(annotation.source_refs))
+        ];
+        const changeIntent = inferAIDraftChangeIntent(revisionPrompt, 'update');
+        const memoryContext = buildAIDraftMemoryContext({
+            nodes,
+            edges,
+            scope: session.scope || { type: 'workspace' },
+            sourceRefs: revisionSourceRefs,
+            activeDraftSession: session,
+            prompt: revisionPrompt,
+            changeIntent,
+            outputMode: 'draft_revision'
+        });
+        const revisionRequestPayload = {
+            prompt: revisionPrompt,
+            model_policy: session.model_policy,
+            selected_model: session.selected_model || null,
+            model: session.selected_model && session.selected_model !== 'auto' ? session.selected_model : null,
+            change_intent: changeIntent,
+            memory_context: memoryContext,
+            metadata: {
+                change_intent: changeIntent,
+                follow_up_memory: memoryContext,
+                prior_session_id: session.session_id,
+                prior_revision_id: revision.revision_id
+            }
+        };
         try {
             const response =
                 flowId && session.session_id
-                    ? await axios.post(revisionEndpoint({ flowId, sessionId: session.session_id }), {
-                          prompt: prompt.trim(),
-                          model_policy: session.model_policy,
-                          selected_model: session.selected_model || null
-                      })
+                    ? await axios.post(
+                          revisionEndpoint({ flowId, sessionId: session.session_id }),
+                          revisionRequestPayload
+                      )
                     : null;
+            setProgressMessage('Validating the revised draft.');
             const nextSession =
                 response?.data?.session ||
                 response?.data?.draft_session ||
                 response?.data ||
                 reviseAIDraftSession(session, {
-                    prompt: prompt.trim(),
+                    prompt: revisionPrompt,
                     draftNodes: revision.draft_nodes || [],
                     draftEdges: revision.draft_edges || [],
                     draftAnnotations: [
@@ -494,30 +550,35 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                         {
                             id: `local-revision-${Date.now()}`,
                             type: 'revision_note',
-                            title: prompt.trim(),
-                            body: prompt.trim()
+                            title: revisionPrompt,
+                            body: revisionPrompt
                         }
                     ],
                     model: session.selected_model || revision.model || 'auto',
                     metadata: {
+                        change_intent: changeIntent,
+                        follow_up_memory: memoryContext,
                         model_reason: 'Local draft revision staged while backend generation is unavailable.'
                     }
                 });
             updateActiveAIDraftSession(nextSession);
             setPrompt('');
             setSelectedItemIds([]);
+            setProgressMessage('');
             recordActivity({
                 type: 'ai_draft_revised',
                 title: 'Revised AI draft session',
-                summary: prompt.trim(),
+                summary: revisionPrompt,
                 metadata: {
                     session_id: session.session_id,
-                    revision_id: latestAIDraftRevision(nextSession).revision_id
+                    revision_id: latestAIDraftRevision(nextSession).revision_id,
+                    change_intent: changeIntent
                 }
             });
         } catch (error) {
+            setProgressMessage('Preserving the revision locally.');
             const nextSession = reviseAIDraftSession(session, {
-                prompt: prompt.trim(),
+                prompt: revisionPrompt,
                 draftNodes: revision.draft_nodes || [],
                 draftEdges: revision.draft_edges || [],
                 draftAnnotations: [
@@ -525,12 +586,14 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                     {
                         id: `local-revision-${Date.now()}`,
                         type: 'revision_note',
-                        title: prompt.trim(),
-                        body: error.message || prompt.trim()
+                        title: revisionPrompt,
+                        body: error.message || revisionPrompt
                     }
                 ],
                 model: session.selected_model || revision.model || 'auto',
                 metadata: {
+                    change_intent: changeIntent,
+                    follow_up_memory: memoryContext,
                     model_reason: 'Backend revision was unavailable; preserved the request locally.'
                 }
             });
@@ -539,6 +602,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             setSelectedItemIds([]);
             setMessage('Backend revision is unavailable, so the request was preserved in the draft history.');
         } finally {
+            setProgressMessage('');
             setIsRevising(false);
         }
     };
@@ -552,6 +616,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         }
         setIsAccepting(true);
         setMessage('');
+        setProgressMessage('Applying accepted draft changes to the workspace.');
         try {
             const response =
                 flowId && session.session_id
@@ -610,6 +675,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             onAccepted?.({ session, result, mode });
             onClose?.();
         } catch (error) {
+            setProgressMessage('Applying the local draft fallback.');
             const fallback = acceptAIDraftSession({
                 session,
                 nodes,
@@ -638,6 +704,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             onAccepted?.({ session, result: fallback, mode, localFallback: true });
             onClose?.();
         } finally {
+            setProgressMessage('');
             setIsAccepting(false);
         }
     };
@@ -670,6 +737,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         }
         setIsAddingSource(true);
         setMessage('');
+        setProgressMessage('Reconciling the draft against the selected source.');
         const sourcePayload = buildSelectedSourceDraftPayload(sourceToAdd);
         try {
             const response =
@@ -708,6 +776,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 });
             updateActiveAIDraftSession(nextSession);
             setSourceToAddId('');
+            setProgressMessage('');
             recordActivity({
                 type: 'ai_draft_source_reconciled',
                 title: 'Reconciled source into AI draft',
@@ -722,6 +791,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             });
             setMessage('Source reconciled into the draft. Review the new revision before accepting.');
         } catch (error) {
+            setProgressMessage('Preserving source context locally.');
             const nextSession = reviseAIDraftSession(session, {
                 prompt: `Add source context: ${sourceToAdd.title || sourceToAdd.id}`,
                 draftNodes: revision.draft_nodes || [],
@@ -745,6 +815,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             updateActiveAIDraftSession(nextSession);
             setMessage('Backend source reconciliation is unavailable, so the source context was preserved locally.');
         } finally {
+            setProgressMessage('');
             setIsAddingSource(false);
         }
     };
@@ -869,6 +940,17 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                         {modelMeta.reason ? <small>{modelMeta.reason}</small> : null}
                     </div>
                     <div>
+                        <span>Usage</span>
+                        <strong>{usageSummary(modelMeta)}</strong>
+                        <small>
+                            {modelMeta.inputTokens || modelMeta.outputTokens
+                                ? `${formatTokenCount(modelMeta.inputTokens)} in · ${formatTokenCount(modelMeta.outputTokens)} out`
+                                : modelMeta.usageCostSource === 'token_usage_only'
+                                  ? 'Cost estimate needs configured pricing.'
+                                  : 'Tracked per draft revision.'}
+                        </small>
+                    </div>
+                    <div>
                         <span>Sources</span>
                         <strong>{coverage.total ? `${coverage.cited}/${coverage.total} cited` : 'No items'}</strong>
                         <small>{coverage.uncited ? `${coverage.uncited} needs review` : 'Ready for review'}</small>
@@ -960,6 +1042,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                     {isAccepting ? 'Accepting' : primaryAcceptText}
                 </button>
             </div>
+            {progressMessage ? <p className="ai-draft-message active">{progressMessage}</p> : null}
             {message ? <p className="ai-draft-message">{message}</p> : null}
         </div>
     );

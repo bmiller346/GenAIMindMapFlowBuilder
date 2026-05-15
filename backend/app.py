@@ -167,6 +167,7 @@ from ai_helpers import (
     generate_ai_action_preview,
     generate_ai_draft_session_with_provider,
     generate_helper_preview,
+    generate_source_reconciliation_preview,
     generate_source_librarian_preview,
     normalize_ai_draft_scope,
     revise_ai_draft_session_with_provider,
@@ -1284,6 +1285,52 @@ def query_with_workspace_brief(query: str, workspace_brief: dict | None) -> str:
     return "\n".join(brief_lines)
 
 
+def _bounded_json_for_prompt(value: Any, limit: int = 10000) -> str:
+    try:
+        text = json.dumps(value, indent=2, default=str)
+    except TypeError:
+        text = str(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 32)]}\n... truncated for prompt budget"
+
+
+def query_with_follow_up_memory(query: str, request: dict[str, Any] | None) -> str:
+    if not isinstance(request, dict):
+        return query
+
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+    memory_context = request.get("memory_context")
+    if not isinstance(memory_context, dict):
+        memory_context = metadata.get("follow_up_memory")
+    if not isinstance(memory_context, dict):
+        memory_context = {}
+
+    change_intent = (
+        request.get("change_intent")
+        or metadata.get("change_intent")
+        or memory_context.get("change_intent")
+        or ""
+    )
+    if not memory_context and not change_intent:
+        return query
+
+    memory_lines = [
+        "Use this follow-up AI memory while answering.",
+        "The memory describes what the user had selected, the current graph context, source refs, prior draft/session state, and whether to update, supplement, or compare.",
+        f"Change intent: {change_intent or 'supplement'}",
+    ]
+    if memory_context:
+        memory_lines.extend(
+            [
+                "Follow-up memory context JSON:",
+                _bounded_json_for_prompt(memory_context),
+            ]
+        )
+    memory_lines.extend(["", f"User question: {query}"])
+    return "\n".join(memory_lines)
+
+
 def calculate_file_hash(file):
     hasher = sha256()
 
@@ -2338,6 +2385,26 @@ def get_workspace_sources(flow_id: str):
     return get_workspace_graph_or_404(flow_id)["source_library"]
 
 
+@app.post("/api/workspaces/{flow_id}/sources/{source_id}/reconcile/preview")
+def preview_source_reconciliation(flow_id: str, source_id: str, request: dict[str, Any] | None = None):
+    graph = get_workspace_graph_or_404(flow_id)
+    scope = request.get("scope") if isinstance(request, dict) else None
+    try:
+        return generate_source_reconciliation_preview(
+            graph,
+            source_id=source_id,
+            scope=scope if isinstance(scope, dict) else {"type": "source", "source_id": source_id},
+        )
+    except GraphSchemaError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Source reconciliation preview failed schema validation.",
+                "errors": exc.errors,
+            },
+        ) from exc
+
+
 @app.get("/api/workspaces/{flow_id}/exports/markdown")
 def export_workspace_markdown(flow_id: str):
     graph = get_workspace_graph_or_404(flow_id)
@@ -2408,6 +2475,105 @@ def save_ai_draft_session(session: dict) -> dict:
     except PyMongoError:
         local_save_ai_draft_session(normalized)
     return normalized
+
+
+def list_ai_draft_sessions_for_workspace(flow_id: str) -> list[dict]:
+    sessions: list[dict] = []
+    try:
+        sessions = list(
+            ai_draft_session_collection.find(
+                {"workspace_id": flow_id},
+                {"_id": 0},
+            )
+        )
+    except PyMongoError:
+        sessions = []
+    if not sessions:
+        sessions = [
+            session
+            for session in load_local_ai_draft_sessions()
+            if session.get("workspace_id") == flow_id
+        ]
+    return [validate_ai_draft_session(session) for session in sessions]
+
+
+def _ai_usage_from_metadata(metadata: dict | None) -> dict:
+    if not isinstance(metadata, dict):
+        return {}
+    usage = metadata.get("usage") if isinstance(metadata.get("usage"), dict) else metadata
+    return {
+        "input_tokens": _int_ai_usage(usage.get("input_tokens")),
+        "output_tokens": _int_ai_usage(usage.get("output_tokens")),
+        "total_tokens": _int_ai_usage(usage.get("total_tokens") or usage.get("estimated_tokens")),
+        "estimated_cost_usd": usage.get("estimated_cost_usd"),
+        "cost_source": usage.get("cost_source") or metadata.get("usage_cost_source"),
+    }
+
+
+def _int_ai_usage(value) -> int:
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _add_ai_usage(left: dict, right: dict) -> dict:
+    result = {
+        "input_tokens": int(left.get("input_tokens") or 0) + int(right.get("input_tokens") or 0),
+        "output_tokens": int(left.get("output_tokens") or 0) + int(right.get("output_tokens") or 0),
+        "total_tokens": int(left.get("total_tokens") or 0) + int(right.get("total_tokens") or 0),
+    }
+    costs = []
+    for value in (left.get("estimated_cost_usd"), right.get("estimated_cost_usd")):
+        if isinstance(value, str) and value.startswith("$"):
+            try:
+                costs.append(float(value[1:]))
+            except ValueError:
+                pass
+    if costs:
+        result["estimated_cost_usd"] = f"${sum(costs):.4f}"
+    return result
+
+
+def summarize_ai_usage_for_workspace(flow_id: str) -> dict:
+    sessions = list_ai_draft_sessions_for_workspace(flow_id)
+    totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    by_session = []
+    for session in sessions:
+        session_total = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        revision_usages = []
+        for revision in session.get("revisions", []):
+            usage = _ai_usage_from_metadata(revision.get("metadata"))
+            if not usage.get("total_tokens"):
+                continue
+            revision_usages.append(
+                {
+                    "revision_id": revision.get("revision_id", ""),
+                    "created_at": revision.get("created_at", ""),
+                    "model": revision.get("model") or revision.get("metadata", {}).get("model", ""),
+                    **usage,
+                }
+            )
+            session_total = _add_ai_usage(session_total, usage)
+        if not revision_usages:
+            session_total = _ai_usage_from_metadata(session.get("metadata"))
+        totals = _add_ai_usage(totals, session_total)
+        by_session.append(
+            {
+                "session_id": session.get("session_id", ""),
+                "status": session.get("status", ""),
+                "selected_model": session.get("selected_model", ""),
+                "created_at": session.get("created_at", ""),
+                **session_total,
+                "revisions": revision_usages,
+            }
+        )
+    return {
+        "workspace_id": flow_id,
+        **totals,
+        "session_count": len(sessions),
+        "sessions": by_session,
+    }
 
 
 def get_ai_draft_session_or_404(flow_id: str, session_id: str) -> dict:
@@ -2695,14 +2861,7 @@ def _draft_revision_from_request(
         role=request.get("role") or session.get("role") or "Custom",
         action=request.get("action") or "custom_prompt",
         scope=session.get("scope") or {"type": "workspace"},
-        custom_prompt=query_with_workspace_brief(
-            request.get("prompt") or request.get("custom_prompt") or "",
-            request.get("workspace_brief")
-            if isinstance(request.get("workspace_brief"), dict)
-            else (request.get("metadata") or {}).get("workspace_brief")
-            if isinstance(request.get("metadata"), dict)
-            else None,
-        ),
+        custom_prompt=_requested_prompt(request),
         created_by=request.get("created_by") or "user",
         model=request.get("model"),
     )
@@ -2752,7 +2911,7 @@ def _requested_source_chunks(request: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _requested_prompt(request: dict[str, Any]) -> str:
-    return query_with_workspace_brief(
+    prompt_with_brief = query_with_workspace_brief(
         request.get("prompt") or request.get("custom_prompt") or "",
         request.get("workspace_brief")
         if isinstance(request.get("workspace_brief"), dict)
@@ -2760,6 +2919,7 @@ def _requested_prompt(request: dict[str, Any]) -> str:
         if isinstance(request.get("metadata"), dict)
         else None,
     )
+    return query_with_follow_up_memory(prompt_with_brief, request)
 
 
 def _requested_model_policy(request: dict[str, Any]) -> str | None:
@@ -2884,6 +3044,12 @@ def get_ai_draft_session(flow_id: str, session_id: str):
     return get_ai_draft_session_or_404(flow_id, session_id)
 
 
+@app.get("/api/workspaces/{flow_id}/ai/usage")
+def get_workspace_ai_usage(flow_id: str):
+    get_workspace_graph_or_404(flow_id)
+    return summarize_ai_usage_for_workspace(flow_id)
+
+
 @app.post("/api/workspaces/{flow_id}/ai/draft-sessions/{session_id}/revisions")
 def create_ai_draft_revision(
     flow_id: str,
@@ -2906,6 +3072,9 @@ def create_ai_draft_revision(
                 desired_outputs=_requested_desired_outputs(request),
                 source_chunks=_requested_source_chunks(request),
             )
+            metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+            if metadata:
+                session.setdefault("metadata", {}).update(metadata)
             return save_ai_draft_session(session)
         except MissingConfigurationError as exc:
             raise configuration_http_error(exc) from exc
@@ -3855,8 +4024,8 @@ def get_summary_from_openai(
         update_operation_progress(
             operation_id,
             phase="ai_reading",
-            message="AI is reading source chunks",
-            detail="The model is summarizing locally extracted document chunks.",
+            message="AI is reading the source document",
+            detail="The model is summarizing the document text prepared from your upload.",
             progress=62,
         )
         summary_text, ai_metadata = generate_document_summary(
@@ -4107,7 +4276,7 @@ def openai_mindmap_generator(
             operation_id,
             phase="ai_deriving",
             message="AI is deriving workspace nodes",
-            detail="The model is generating a source-grounded TraceSpace draft from local chunks.",
+            detail="The model is turning the source document into a reviewable TraceSpace draft.",
             progress=64,
         )
         response_json, ai_metadata = generate_document_mindmap(
