@@ -88,6 +88,7 @@ def _artifact_definition(
         "artifact_type": artifact_type,
         "requires": requires,
         "optional": optional,
+        # Product-facing contract notes, not executable JSON Schema.
         "generated_schema": generated_schema,
         "projection_requirements": projection_requirements,
         "supported_views": supported_views,
@@ -98,20 +99,373 @@ def _artifact_definition(
     }
 
 
+SOURCE_REF_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "document_id": {"type": "string"},
+        "chunk_id": {"type": ["string", "null"]},
+        "page": {"type": ["integer", "number", "string", "null"]},
+        "section": {"type": ["string", "null"]},
+        "quote_snippet": {"type": ["string", "null"]},
+        "confidence": {"type": ["number", "string", "null"]},
+    },
+    "required": [
+        "document_id",
+        "chunk_id",
+        "page",
+        "section",
+        "quote_snippet",
+        "confidence",
+    ],
+}
+
+METADATA_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "source": {"type": ["string", "null"]},
+        "scope": {"type": ["string", "null"]},
+        "artifact_type": {"type": ["string", "null"]},
+        "layout_hint": {"type": ["string", "null"]},
+        "rationale": {"type": ["string", "null"]},
+        "review_reason": {"type": ["string", "null"]},
+        "source_signal": {"type": ["string", "null"]},
+    },
+    "required": [
+        "source",
+        "scope",
+        "artifact_type",
+        "layout_hint",
+        "rationale",
+        "review_reason",
+        "source_signal",
+    ],
+}
+
+PROVENANCE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "generated_by": {"type": ["string", "null"]},
+        "prompt_profile": {"type": ["string", "null"]},
+        "ai_role": {"type": ["string", "null"]},
+        "input_scope": {"type": ["string", "null"]},
+        "model_provider": {"type": ["string", "null"]},
+        "model": {"type": ["string", "null"]},
+        "confidence_summary": {"type": ["string", "null"]},
+        "input_source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "generated_by",
+        "prompt_profile",
+        "ai_role",
+        "input_scope",
+        "model_provider",
+        "model",
+        "confidence_summary",
+        "input_source_refs",
+        "assumptions",
+    ],
+}
+
+VALIDATION_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "status": {"type": ["string", "null"]},
+        "validation_status": {"type": ["string", "null"]},
+        "message": {"type": ["string", "null"]},
+        "errors": {"type": "array", "items": {"type": "string"}},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "status",
+        "validation_status",
+        "message",
+        "errors",
+        "warnings",
+    ],
+}
+
+GENERIC_OUTPUT_ITEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "label": {"type": ["string", "null"]},
+        "summary": {"type": ["string", "null"]},
+        "description": {"type": ["string", "null"]},
+        "status": {"type": ["string", "null"]},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "metadata": METADATA_OUTPUT_SCHEMA,
+    },
+    "required": [
+        "id",
+        "title",
+        "label",
+        "summary",
+        "description",
+        "status",
+        "source_refs",
+        "assumptions",
+        "metadata",
+    ],
+}
+
+
+def strict_openai_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Return a Responses strict-mode compatible JSON schema.
+
+    Strict Responses schemas require every object property to be required. Callers
+    should use [] for irrelevant lists and null for irrelevant nullable objects.
+    """
+    normalized = deepcopy(schema)
+
+    def visit(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        node_type = node.get("type")
+        is_object = node_type == "object" or (
+            isinstance(node_type, list) and "object" in node_type
+        )
+        if is_object:
+            properties = node.get("properties")
+            if not isinstance(properties, dict):
+                properties = {}
+                node["properties"] = properties
+            node["additionalProperties"] = False
+            node["required"] = list(properties.keys())
+            for child in properties.values():
+                visit(child)
+        is_array = node_type == "array" or (
+            isinstance(node_type, list) and "array" in node_type
+        )
+        if is_array:
+            visit(node.get("items"))
+        for combiner in ("anyOf", "oneOf", "allOf"):
+            options = node.get(combiner)
+            if isinstance(options, list):
+                for option in options:
+                    visit(option)
+
+    visit(normalized)
+    return normalized
+
+
+ARTIFACT_DATA_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "summary": {"type": ["string", "null"]},
+        "items": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "summary",
+        "items",
+        "source_refs",
+        "assumptions",
+    ],
+}
+
 GENERIC_ARTIFACT_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "required": ["id", "artifact_type", "status", "data", "provenance", "validation"],
+    "additionalProperties": False,
     "properties": {
         "id": {"type": "string"},
         "artifact_type": {"type": "string"},
-        "title": {"type": "string"},
+        "title": {"type": ["string", "null"]},
         "status": {"type": "string"},
-        "data": {"type": "object"},
-        "source_refs": {"type": "array"},
-        "assumptions": {"type": "array"},
-        "provenance": {"type": "object"},
-        "validation": {"type": "object"},
+        "data": ARTIFACT_DATA_SCHEMA,
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "provenance": PROVENANCE_OUTPUT_SCHEMA,
+        "validation": VALIDATION_OUTPUT_SCHEMA,
     },
+    "required": [
+        "id",
+        "artifact_type",
+        "title",
+        "status",
+        "data",
+        "source_refs",
+        "assumptions",
+        "provenance",
+        "validation",
+    ],
+}
+
+
+KNOWLEDGE_GRAPH_EDGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "source_node_id": {"type": "string"},
+        "target_node_id": {"type": "string"},
+        "relationship_type": {
+            "type": "string",
+            "enum": sorted(KNOWLEDGE_GRAPH_RELATIONSHIP_TYPES),
+        },
+        "source_signal": {
+            "type": "string",
+            "enum": sorted(KNOWLEDGE_GRAPH_SOURCE_SIGNALS),
+        },
+        "confidence": {"type": ["number", "string", "null"]},
+        "rationale": {"type": ["string", "null"]},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "review_state": {"type": ["string", "null"]},
+    },
+    "required": [
+        "id",
+        "source_node_id",
+        "target_node_id",
+        "relationship_type",
+        "source_signal",
+        "confidence",
+        "rationale",
+        "source_refs",
+        "assumptions",
+        "review_state",
+    ],
+}
+
+KNOWLEDGE_GRAPH_CLUSTER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "node_ids": {"type": "array", "items": {"type": "string"}},
+        "rationale": {"type": ["string", "null"]},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "id",
+        "title",
+        "node_ids",
+        "rationale",
+        "source_refs",
+        "assumptions",
+    ],
+}
+
+KNOWLEDGE_GRAPH_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "properties": {
+        "relationship_edges": {"type": "array", "items": KNOWLEDGE_GRAPH_EDGE_SCHEMA},
+        "clusters": {"type": "array", "items": KNOWLEDGE_GRAPH_CLUSTER_SCHEMA},
+    },
+    "required": ["relationship_edges", "clusters"],
+}
+
+FLOW_CHART_STEP_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "title": {"type": "string"},
+        "summary": {"type": ["string", "null"]},
+        "step_type": {"type": ["string", "null"]},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+        "metadata": METADATA_OUTPUT_SCHEMA,
+    },
+    "required": [
+        "id",
+        "title",
+        "summary",
+        "step_type",
+        "source_refs",
+        "assumptions",
+        "metadata",
+    ],
+}
+
+FLOW_CHART_EDGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "source_step_id": {"type": "string"},
+        "target_step_id": {"type": "string"},
+        "label": {"type": ["string", "null"]},
+        "relationship_type": {"type": ["string", "null"]},
+        "metadata": METADATA_OUTPUT_SCHEMA,
+    },
+    "required": [
+        "id",
+        "source_step_id",
+        "target_step_id",
+        "label",
+        "relationship_type",
+        "metadata",
+    ],
+}
+
+FLOW_CHART_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "properties": {
+        "steps": {"type": "array", "items": FLOW_CHART_STEP_SCHEMA},
+        "edges": {"type": "array", "items": FLOW_CHART_EDGE_SCHEMA},
+        "decisions": {"type": "array", "items": FLOW_CHART_STEP_SCHEMA},
+    },
+    "required": ["steps", "edges", "decisions"],
+}
+
+CHART_DATA_ROW_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "id": {"type": "string"},
+        "label": {"type": "string"},
+        "category": {"type": ["string", "null"]},
+        "value": {"type": ["number", "string", "null"]},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "id",
+        "label",
+        "category",
+        "value",
+        "source_refs",
+        "assumptions",
+    ],
+}
+
+CHART_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "properties": {
+        "chart_type": {"type": ["string", "null"]},
+        "title": {"type": ["string", "null"]},
+        "summary": {"type": ["string", "null"]},
+        "x_field": {"type": ["string", "null"]},
+        "y_field": {"type": ["string", "null"]},
+        "data_rows": {"type": "array", "items": CHART_DATA_ROW_SCHEMA},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "chart_type",
+        "title",
+        "summary",
+        "x_field",
+        "y_field",
+        "data_rows",
+        "source_refs",
+        "assumptions",
+    ],
 }
 
 
@@ -300,7 +654,7 @@ AI_DRAFT_REVISION_OUTPUT_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {
                 "type": "object",
-                "additionalProperties": True,
+                "additionalProperties": False,
                 "properties": {
                     "id": {"type": "string"},
                     "title": {"type": "string"},
@@ -308,43 +662,60 @@ AI_DRAFT_REVISION_OUTPUT_SCHEMA: dict[str, Any] = {
                     "node_type": {"type": "string"},
                     "parent_id": {"type": ["string", "null"]},
                     "status": {"type": "string"},
-                    "source_refs": {"type": "array"},
-                    "metadata": {"type": "object"},
+                    "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+                    "assumptions": {"type": "array", "items": {"type": "string"}},
+                    "metadata": METADATA_OUTPUT_SCHEMA,
                 },
-                "required": ["id", "title"],
+                "required": [
+                    "id",
+                    "title",
+                    "summary",
+                    "node_type",
+                    "parent_id",
+                    "status",
+                    "source_refs",
+                    "assumptions",
+                    "metadata",
+                ],
             },
         },
         "draft_edges": {
             "type": "array",
             "items": {
                 "type": "object",
-                "additionalProperties": True,
+                "additionalProperties": False,
                 "properties": {
                     "id": {"type": "string"},
                     "source_node_id": {"type": "string"},
                     "target_node_id": {"type": "string"},
                     "relationship_type": {"type": "string"},
-                    "metadata": {"type": "object"},
+                    "metadata": METADATA_OUTPUT_SCHEMA,
                 },
-                "required": ["id", "source_node_id", "target_node_id"],
+                "required": [
+                    "id",
+                    "source_node_id",
+                    "target_node_id",
+                    "relationship_type",
+                    "metadata",
+                ],
             },
         },
-        "draft_annotations": {"type": "array", "items": {"type": "object"}},
-        "draft_items": {"type": "array", "items": {"type": "object"}},
+        "draft_annotations": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "draft_items": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
         "generated_artifacts": {"type": "array", "items": GENERIC_ARTIFACT_SCHEMA},
-        "source_coverage": {"type": "array", "items": {"type": "object"}},
-        "tasks": {"type": "array", "items": {"type": "object"}},
-        "checklist": {"type": "array", "items": {"type": "object"}},
-        "flow_chart": {"type": "object"},
-        "knowledge_graph": {"type": "object"},
-        "chart": {"type": "object"},
-        "outline": {"type": "array", "items": {"type": "object"}},
-        "table": {"type": "array", "items": {"type": "object"}},
-        "kanban": {"type": "array", "items": {"type": "object"}},
-        "presentation_sections": {"type": "array", "items": {"type": "object"}},
-        "review_annotations": {"type": "array", "items": {"type": "object"}},
+        "source_coverage": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "tasks": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "checklist": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "flow_chart": FLOW_CHART_OUTPUT_SCHEMA,
+        "knowledge_graph": KNOWLEDGE_GRAPH_OUTPUT_SCHEMA,
+        "chart": CHART_OUTPUT_SCHEMA,
+        "outline": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "table": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "kanban": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "presentation_sections": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "review_annotations": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
         "assumptions": {"type": "array", "items": {"type": "string"}},
-        "source_refs": {"type": "array", "items": {"type": "object"}},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
     },
     "required": [
         "intent",
@@ -371,6 +742,8 @@ AI_DRAFT_REVISION_OUTPUT_SCHEMA: dict[str, Any] = {
     ],
 }
 
+AI_DRAFT_REVISION_OUTPUT_SCHEMA = strict_openai_schema(AI_DRAFT_REVISION_OUTPUT_SCHEMA)
+
 
 def json_object_response_format() -> dict[str, Any]:
     return {"format": {"type": "json_object"}}
@@ -387,7 +760,7 @@ def json_schema_response_format(
             "type": "json_schema",
             "name": name,
             "strict": strict,
-            "schema": deepcopy(schema),
+            "schema": strict_openai_schema(schema) if strict else deepcopy(schema),
         }
     }
 

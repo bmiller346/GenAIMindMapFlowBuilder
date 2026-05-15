@@ -76,6 +76,8 @@ AI_ACTIONS_BY_SCOPE = {
     "branch": BRANCH_AI_ACTIONS,
     "workspace": WORKSPACE_AI_ACTIONS,
 }
+AI_DRAFT_SOURCE_CONTEXT_MAX_CHUNKS = 12
+AI_DRAFT_SOURCE_CONTEXT_MAX_REFS = 36
 
 
 def generate_source_librarian_preview(
@@ -3340,11 +3342,6 @@ def _draft_plan_for_action(
 def _custom_prompt_draft_plan(prompt: str) -> list[dict[str, Any]]:
     normalized_prompt = prompt.rstrip(".?!").strip()
     topic = _topic_from_custom_prompt(normalized_prompt)
-    lower = normalized_prompt.lower()
-    if re.search(r"\b(saas|software as a service|subscription software)\b", lower) and re.search(
-        r"\b(model|business|revenue|go[- ]to[- ]market|gtm)\b", lower
-    ):
-        return _saas_business_model_plan(topic)
     return _generic_custom_prompt_plan(topic or normalized_prompt or "AI draft")
 
 
@@ -3363,61 +3360,6 @@ def _topic_from_custom_prompt(prompt: str) -> str:
     if re.search(r"\bsaas\b", cleaned, flags=re.IGNORECASE):
         cleaned = re.sub(r"\bSAAS\b", "SaaS", cleaned, flags=re.IGNORECASE)
     return cleaned[:96].replace("business model model", "business model")
-
-
-def _saas_business_model_plan(topic: str) -> list[dict[str, Any]]:
-    root_title = "SaaS business model"
-    if topic and "saas" not in topic.lower():
-        root_title = f"SaaS business model for {topic}"
-    return [
-        {
-            "title": root_title,
-            "summary": "Subscription software model linking customer value, acquisition, pricing, retention, and unit economics.",
-            "node_type": "concept",
-        },
-        {
-            "title": "Target customers",
-            "summary": "Define ICP segments, buyer personas, urgent pain points, and willingness to pay.",
-            "node_type": "category",
-            "parent_order": 1,
-        },
-        {
-            "title": "Value proposition",
-            "summary": "Connect the product promise to measurable outcomes such as time saved, revenue lift, risk reduction, or workflow quality.",
-            "node_type": "category",
-            "parent_order": 1,
-        },
-        {
-            "title": "Acquisition channels",
-            "summary": "Map inbound, outbound, partner, product-led, and paid channels with CAC and sales-cycle assumptions.",
-            "node_type": "category",
-            "parent_order": 1,
-        },
-        {
-            "title": "Pricing and packaging",
-            "summary": "Set free trial or freemium entry, tiered plans, usage limits, add-ons, annual discounts, and expansion paths.",
-            "node_type": "category",
-            "parent_order": 1,
-        },
-        {
-            "title": "Revenue engine",
-            "summary": "Track MRR, ARR, ARPA, gross margin, expansion revenue, churn, and net revenue retention.",
-            "node_type": "category",
-            "parent_order": 1,
-        },
-        {
-            "title": "Product and operations",
-            "summary": "Cover onboarding, activation, support, reliability, security, integrations, roadmap, and customer success motions.",
-            "node_type": "category",
-            "parent_order": 1,
-        },
-        {
-            "title": "Risks and assumptions",
-            "summary": "Validate market demand, competitive differentiation, CAC payback, churn drivers, compliance needs, and funding runway.",
-            "node_type": "question",
-            "parent_order": 1,
-        },
-    ]
 
 
 def _generic_custom_prompt_plan(topic: str) -> list[dict[str, Any]]:
@@ -3875,26 +3817,100 @@ def build_ai_draft_source_context(
     scope: dict[str, Any] | None = None,
     source_chunks: list[dict[str, Any]] | None = None,
     prior_session: dict[str, Any] | None = None,
+    include_source_library: bool = True,
+    max_source_chunks: int = AI_DRAFT_SOURCE_CONTEXT_MAX_CHUNKS,
+    max_source_refs: int = AI_DRAFT_SOURCE_CONTEXT_MAX_REFS,
 ) -> dict[str, Any]:
     normalized_scope = normalize_ai_draft_scope(scope)
     scoped_graph = _scope_graph_for_ai_draft(graph, normalized_scope)
     uploaded_chunks = _normalize_source_chunks(source_chunks or [])
-    library_chunks = _source_library_chunks_for_scope(graph, normalized_scope)
-    all_chunks = _merge_source_chunks(uploaded_chunks, library_chunks)
+    library_chunks = _source_library_chunks_for_scope(graph, normalized_scope) if include_source_library else []
+    merged_chunks = _merge_source_chunks(uploaded_chunks, library_chunks)
+    chunk_limit = max(0, max_source_chunks)
+    ref_limit = max(0, max_source_refs)
+    all_chunks = merged_chunks[:chunk_limit]
     graph_refs = _collect_source_refs(scoped_graph)
     chunk_refs = _source_refs_from_chunks(all_chunks)
     session_refs = prior_session.get("source_refs", []) if isinstance(prior_session, dict) else []
-    source_refs = _merge_source_refs(_merge_source_refs(graph_refs, chunk_refs), session_refs)
-    source_library = graph.get("source_library", {}) if isinstance(graph, dict) and isinstance(graph.get("source_library"), dict) else {}
+    merged_refs = _merge_source_refs(_merge_source_refs(graph_refs, chunk_refs), session_refs)
+    source_refs = merged_refs[:ref_limit]
+    source_library = (
+        graph.get("source_library", {})
+        if include_source_library and isinstance(graph, dict) and isinstance(graph.get("source_library"), dict)
+        else {}
+    )
+    source_context_mode = _source_context_mode(
+        normalized_scope=normalized_scope,
+        uploaded_chunks=uploaded_chunks,
+        library_chunks=library_chunks,
+        include_source_library=include_source_library,
+    )
     return {
         "scope": normalized_scope,
-        "graph_context": scoped_graph,
+        "graph_context": _source_context_graph(scoped_graph),
         "source_refs": source_refs,
         "source_chunks": all_chunks,
         "uploaded_source_chunks": uploaded_chunks,
+        "source_context_mode": source_context_mode,
+        "source_chunks_included": len(all_chunks),
+        "source_refs_included": len(source_refs),
+        "source_context_truncated": len(merged_chunks) > chunk_limit or len(merged_refs) > ref_limit,
         "source_library_gaps": _source_library_gaps(source_library, scoped_graph),
         "draft_session_state": _draft_session_source_state(prior_session),
     }
+
+
+def _source_context_graph(scoped_graph: dict[str, Any]) -> dict[str, Any]:
+    graph_context = deepcopy(scoped_graph) if isinstance(scoped_graph, dict) else {}
+    graph_context.pop("source_library", None)
+    return graph_context
+
+
+def _source_context_mode(
+    *,
+    normalized_scope: dict[str, Any],
+    uploaded_chunks: list[dict[str, Any]],
+    library_chunks: list[dict[str, Any]],
+    include_source_library: bool,
+) -> str:
+    if uploaded_chunks:
+        return "uploaded_chunks"
+    if not include_source_library:
+        return "none"
+    if normalized_scope.get("type") == "source" and library_chunks:
+        return "selected_source"
+    if library_chunks:
+        return "source_library"
+    return "none"
+
+
+def _should_include_library_sources(
+    *,
+    classification: dict[str, Any],
+    prompt: str,
+    source_chunks: list[dict[str, Any]] | None,
+) -> bool:
+    if source_chunks:
+        return True
+    output_shape = str(classification.get("output_shape") or "")
+    capability = str(classification.get("capability") or "")
+    if output_shape in {"source_coverage", "source_repair"} or "source" in capability:
+        return True
+    text = str(prompt or "").lower()
+    return any(
+        term in text
+        for term in (
+            "source",
+            "sources",
+            "citation",
+            "cite",
+            "evidence",
+            "quote",
+            "document",
+            "docx",
+            "grounded",
+        )
+    )
 
 
 def generate_ai_draft_session_with_provider(
@@ -3915,10 +3931,16 @@ def generate_ai_draft_session_with_provider(
     requested_outputs = desired_outputs if desired_outputs is not None else _desired_outputs_from_graph(graph)
     classification = classify_ai_draft_intent(prompt, scope=normalized_scope, desired_outputs=requested_outputs)
     policy = normalize_model_policy(model_policy or classification["model_policy"], requested_model=model)
+    include_library_sources = _should_include_library_sources(
+        classification=classification,
+        prompt=prompt,
+        source_chunks=source_chunks,
+    )
     source_context = build_ai_draft_source_context(
         graph,
         scope=normalized_scope,
         source_chunks=source_chunks or [],
+        include_source_library=include_library_sources,
     )
     source_refs = source_context["source_refs"]
     decision = choose_openai_model(
@@ -3943,6 +3965,7 @@ def generate_ai_draft_session_with_provider(
     )
     metadata = _draft_generation_metadata(result, classification, decision, policy)
     metadata["source_context"] = _source_context_metadata(source_context)
+    metadata.update(_source_context_budget_metadata(source_context))
     generated_artifacts = validate_generated_artifacts(
         result.get("generated_artifacts", []),
         scope=normalized_scope,
@@ -3993,11 +4016,17 @@ def revise_ai_draft_session_with_provider(
     current_policy = normalized_session.get("model_policy", {})
     current_policy_name = current_policy.get("policy") if isinstance(current_policy, dict) else current_policy
     policy = normalize_model_policy(model_policy or current_policy_name or classification["model_policy"], requested_model=model)
+    include_library_sources = _should_include_library_sources(
+        classification=classification,
+        prompt=prompt,
+        source_chunks=source_chunks,
+    )
     source_context = build_ai_draft_source_context(
         graph,
         scope=normalized_scope,
         source_chunks=source_chunks or [],
         prior_session=normalized_session,
+        include_source_library=include_library_sources,
     )
     source_refs = source_context["source_refs"]
     decision = choose_openai_model(
@@ -4023,6 +4052,7 @@ def revise_ai_draft_session_with_provider(
     )
     metadata = _draft_generation_metadata(result, classification, decision, policy)
     metadata["source_context"] = _source_context_metadata(source_context)
+    metadata.update(_source_context_budget_metadata(source_context))
     generated_artifacts = validate_generated_artifacts(
         result.get("generated_artifacts", []),
         scope=normalized_scope,
@@ -4300,12 +4330,17 @@ Source context, including selected scope, source-library gaps, uploaded chunks, 
 {prior}
 Output requirements:
 - Treat mind_map as only one registered artifact type. Prefer the requested artifact_type/output_shape over map-first generation.
+- For broad mind_map or graph_draft requests, create a useful 2-4 level hierarchy instead of only top-level labels.
+- For broad conceptual, business, operating model, GTM, strategy, or learning-map requests, choose enough nodes for the subject to be genuinely useful, usually 20-40 draft_nodes unless the user asks for a quick/simple sketch.
+- Silently self-review before returning JSON: if the draft only contains generic category labels, is missing obvious domain-standard subtopics, or has fewer than 3 useful child branches under major concepts, revise it internally before finalizing.
+- Use your model knowledge of the requested domain to choose depth and subtopics; do not rely on hardcoded examples or stop at framework headings.
 - Populate generated_artifacts for visual or review outputs such as knowledge_graph, flow_chart, chart, checklist, tasks, source_coverage, and implementation_handoff_package.
 - Populate the projection matching output_shape and, when graph changes are useful, draft_nodes and draft_edges.
 - Use stable draft IDs prefixed with draft_.
 - Use source_refs only by copying from Allowed source_refs.
 - For unsourced generated nodes, set source_refs: [] and add an assumption.
-- Include generated_artifacts, source_coverage, tasks, checklist, outline, table, kanban, presentation_sections, and review_annotations as arrays even when empty.
+- Strict schema mode requires every declared field. Include generated_artifacts, source_coverage, tasks, checklist, outline, table, kanban, presentation_sections, and review_annotations as arrays even when empty.
+- For typed object projections that are not relevant to the request, return null for flow_chart, knowledge_graph, and chart. When they are relevant, fill their required arrays and use [] for empty nested lists.
 
 {ARTIFACT_REGISTRY_CONTRACT.strip()}
 """.strip()
@@ -4636,11 +4671,31 @@ def _source_context_metadata(source_context: dict[str, Any]) -> dict[str, Any]:
     gaps = source_context.get("source_library_gaps", {}) if isinstance(source_context, dict) else {}
     return {
         "scope_type": source_context.get("scope", {}).get("type", ""),
+        "source_context_mode": source_context.get("source_context_mode", "none"),
         "source_ref_count": len(source_context.get("source_refs", [])),
         "source_chunk_count": len(source_context.get("source_chunks", [])),
+        "source_chunks_included": source_context.get("source_chunks_included", len(source_context.get("source_chunks", []))),
+        "source_refs_included": source_context.get("source_refs_included", len(source_context.get("source_refs", []))),
+        "source_context_truncated": bool(source_context.get("source_context_truncated")),
         "uploaded_source_chunk_count": len(source_context.get("uploaded_source_chunks", [])),
         "documents_with_uncited_chunks": len(gaps.get("documents_with_uncited_chunks", [])) if isinstance(gaps, dict) else 0,
         "uncited_graph_nodes": len(gaps.get("uncited_graph_nodes", [])) if isinstance(gaps, dict) else 0,
+    }
+
+
+def _source_context_budget_metadata(source_context: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(source_context, dict):
+        return {
+            "source_context_mode": "none",
+            "source_chunks_included": 0,
+            "source_refs_included": 0,
+            "source_context_truncated": False,
+        }
+    return {
+        "source_context_mode": str(source_context.get("source_context_mode") or "none"),
+        "source_chunks_included": int(source_context.get("source_chunks_included") or 0),
+        "source_refs_included": int(source_context.get("source_refs_included") or 0),
+        "source_context_truncated": bool(source_context.get("source_context_truncated")),
     }
 
 

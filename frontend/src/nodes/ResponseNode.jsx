@@ -141,6 +141,8 @@ const titleFromPrompt = (prompt = '') => {
     return cleaned.length > 80 ? `${cleaned.slice(0, 77).trim()}...` : cleaned;
 };
 
+const compactNodeText = (value = '') => String(value || '').replace(/\s+/g, ' ').trim();
+
 const shouldAttachInlineSourceRefs = (prompt = '') =>
     /\b(from this|from the|based on|according to|source|citation|cite|evidence|document|docx|pdf|reference)\b/i.test(
         prompt
@@ -300,6 +302,10 @@ const ResponseNode = ({ id, data }) => {
     const graph = workspaceData.graph || {};
     const isManualTable = data.manual && df.length > 0;
     const titleValue = displayTitle || summary || '';
+    const summaryPreview = compactNodeText(summary);
+    const shouldShowSummaryPreview =
+        summaryPreview.length > 0 &&
+        compactNodeText(titleValue).toLowerCase() !== summaryPreview.toLowerCase();
     const nodeStatus = workspaceData.status || 'ai_generated';
     const dueDate = workspaceData.dueDate || '';
     const assignee = workspaceData.ownerId || '';
@@ -1411,6 +1417,9 @@ const ResponseNode = ({ id, data }) => {
                         <FiMoreHorizontal />
                     </button>
                 </div>
+                {shouldShowSummaryPreview ? (
+                    <p className="node-summary-preview">{summaryPreview}</p>
+                ) : null}
                 <form
                     className={`node-inline-ai-composer nodrag${
                         isInlineAiGenerating ? ' generating' : ''

@@ -97,7 +97,7 @@ importlib_resources==6.4.5
 iniconfig==2.0.0
 itsdangerous==2.2.0
 Jinja2==3.1.5
-jiter==0.8.2
+jiter==0.10.0
 jmespath==1.0.1
 joblib==1.4.2
 jsonpatch==1.33
@@ -145,7 +145,7 @@ oauthlib==3.2.2
 olefile==0.47
 onnx==1.17.0
 onnxruntime==1.20.1
-openai==1.58.1
+openai==1.109.1
 opencv-python==4.11.0.86
 opentelemetry-api==1.29.0
 opentelemetry-exporter-otlp-proto-common==1.29.0
@@ -261,7 +261,7 @@ transformers==4.46.3
 typer==0.15.1
 types-requests==2.32.0.20241016
 typing-inspect==0.9.0
-typing_extensions==4.12.2
+typing_extensions==4.15.0
 tzdata==2024.2
 tzlocal==5.2
 unstructured==0.17.2

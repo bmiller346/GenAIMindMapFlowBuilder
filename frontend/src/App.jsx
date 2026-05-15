@@ -27,6 +27,7 @@ import flowStore from './stores/flowStore.js';
 import NodeInspector from './global-components/NodeInspector.jsx';
 import GraphValidationPanel from './global-components/GraphValidationPanel.jsx';
 import LocalViewsPanel from './views/LocalViewsPanel.jsx';
+import CanvasStructuredView from './views/CanvasStructuredView.jsx';
 import WorkspaceBriefPanel from './global-components/WorkspaceBriefPanel.jsx';
 import ActivityPanel from './global-components/ActivityPanel.jsx';
 import SourcesPanel from './global-components/SourcesPanel.jsx';
@@ -44,6 +45,7 @@ import useActivityStore from './stores/activityStore';
 import useAutomationStore from './stores/automationStore';
 
 const CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'outline', 'tasks', 'table']);
+const STRUCTURED_CANVAS_VIEWS = new Set(['outline', 'tasks', 'table']);
 const TASK_CANVAS_TYPES = new Set([
     'task',
     'procedure',
@@ -150,23 +152,63 @@ const collectVisibleBranchIds = (nodes, edges, selectedBranchId) => {
     return visibleIds;
 };
 
+const CANVAS_OUT_OF_SCOPE_NODE_CLASS = 'canvas-node-out-of-scope';
+const CANVAS_OUT_OF_SCOPE_EDGE_CLASS = 'canvas-edge-out-of-scope';
+
+const scopedClassName = (className = '', scopeClass, isActive) => {
+    const classes = String(className || '')
+        .split(/\s+/)
+        .filter(
+            (value) =>
+                value &&
+                value !== CANVAS_OUT_OF_SCOPE_NODE_CLASS &&
+                value !== CANVAS_OUT_OF_SCOPE_EDGE_CLASS
+        );
+    if (isActive) {
+        classes.push(scopeClass);
+    }
+    return classes.join(' ') || undefined;
+};
+
 const projectCanvasGraph = ({ nodes, edges, activeCanvasView, activeGraphFilters, selectedBranchId }) => {
+    const hasBranchScope = Boolean(selectedBranchId);
     const branchIds = collectVisibleBranchIds(nodes, edges, selectedBranchId);
     const filters = Array.isArray(activeGraphFilters) ? activeGraphFilters : [];
-    const visibleIds = new Set(
+    const projectedIds = new Set(
         nodes
-            .filter((node) => branchIds.has(node.id))
             .filter((node) => nodeMatchesCanvasLens(node, activeCanvasView))
             .filter((node) => filters.every((filterId) => nodeMatchesGraphFilter(node, filterId)))
             .map((node) => node.id)
     );
 
     return {
-        nodes: nodes.map((node) => ({ ...node, hidden: !visibleIds.has(node.id) })),
-        edges: edges.map((edge) => ({
-            ...edge,
-            hidden: !visibleIds.has(edge.source) || !visibleIds.has(edge.target)
-        }))
+        nodes: nodes.map((node) => {
+            const isProjected = projectedIds.has(node.id);
+            const isOutOfScope = hasBranchScope && !branchIds.has(node.id);
+            return {
+                ...node,
+                hidden: !isProjected,
+                className: scopedClassName(
+                    node.className,
+                    CANVAS_OUT_OF_SCOPE_NODE_CLASS,
+                    isProjected && isOutOfScope
+                )
+            };
+        }),
+        edges: edges.map((edge) => {
+            const isProjected = projectedIds.has(edge.source) && projectedIds.has(edge.target);
+            const isOutOfScope =
+                hasBranchScope && (!branchIds.has(edge.source) || !branchIds.has(edge.target));
+            return {
+                ...edge,
+                hidden: !isProjected,
+                className: scopedClassName(
+                    edge.className,
+                    CANVAS_OUT_OF_SCOPE_EDGE_CLASS,
+                    isProjected && isOutOfScope
+                )
+            };
+        })
     };
 };
 
@@ -271,10 +313,20 @@ const App = () => {
             }),
         [activeCanvasView, activeGraphFilters, edges, nodes, selectedBranchId]
     );
+    const isStructuredCanvasView = STRUCTURED_CANVAS_VIEWS.has(activeCanvasView);
+    const renderedCanvasGraph = useMemo(() => {
+        if (!isStructuredCanvasView) {
+            return canvasGraph;
+        }
+        return {
+            nodes: canvasGraph.nodes.map((node) => ({ ...node, hidden: true })),
+            edges: canvasGraph.edges.map((edge) => ({ ...edge, hidden: true }))
+        };
+    }, [canvasGraph, isStructuredCanvasView]);
     const selectedVisibleNodes = useMemo(() => {
-        const visibleIds = new Set(canvasGraph.nodes.filter((node) => !node.hidden).map((node) => node.id));
+        const visibleIds = new Set(renderedCanvasGraph.nodes.filter((node) => !node.hidden).map((node) => node.id));
         return selectedCanvasNodes.filter((node) => visibleIds.has(node.id));
-    }, [canvasGraph.nodes, selectedCanvasNodes]);
+    }, [renderedCanvasGraph.nodes, selectedCanvasNodes]);
     const lastLayoutTriggerRef = useRef(trigger);
     const closeNodeInspector = useCallback(() => {
         setInspectorNodeId(undefined);
@@ -422,7 +474,6 @@ const App = () => {
     const onChange = useCallback(
         ({ nodes }) => {
             setSelectedCanvasNodes(nodes);
-            setSelectedBranchId(nodes.length === 1 ? nodes[0].id : undefined);
             const responseNodes = nodes.filter(
                 (ele) => ele.type === 'response'
             );
@@ -446,7 +497,7 @@ const App = () => {
                 setAskMultipleClass('deanimate');
             }
         },
-        [askMultipleClass, setSelectedBranchId]
+        [askMultipleClass]
     );
 
     useOnSelectionChange({
@@ -528,7 +579,6 @@ const App = () => {
             lastLayoutTriggerRef.current = trigger;
             setTimeout(() => {
                 const data = reactFlow.getNodes();
-                console.log('Problem can be here', data);
                 const { nodes: newNodes, edges: newEdges } =
                     getLayoutedElements(data, edges);
                 setNodes(newNodes);
@@ -642,8 +692,8 @@ const App = () => {
             <AutomationsPanel validationReport={validationReport} />
             <ReactFlow
                 nodeTypes={nodeType}
-                nodes={canvasGraph.nodes}
-                edges={canvasGraph.edges}
+                nodes={renderedCanvasGraph.nodes}
+                edges={renderedCanvasGraph.edges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onMoveEnd={(event, viewport) => setViewPort(viewport)}
@@ -654,35 +704,50 @@ const App = () => {
                 onInit={setRfInstance}
                 minZoom={0.2}
                 maxZoom={2.5}
+                multiSelectionKeyCode={['Control', 'Meta']}
             >
                 <Background
                     gap={28}
                     size={1}
                     color={lightMode ? '#d8d8d8' : '#2d2d2d'}
                 />
-                <Controls
-                    position="bottom-right"
-                    fitViewOptions={{ maxZoom: 1 }}
-                    showInteractive={false}
-                />
-                <MiniMap
-                    position="bottom-right"
-                    pannable
-                    zoomable
-                    nodeStrokeWidth={3}
-                    maskColor={
-                        lightMode
-                            ? 'rgba(247, 247, 247, 0.68)'
-                            : 'rgba(10, 10, 10, 0.68)'
-                    }
-                    nodeColor={(node) =>
-                        node.selected
-                            ? '#eece47'
-                            : node.data?.manual
-                              ? '#b77bff'
-                              : '#6ea8fe'
-                    }
-                />
+                {!isStructuredCanvasView ? (
+                    <>
+                        <Controls
+                            position="bottom-right"
+                            fitViewOptions={{ maxZoom: 1 }}
+                            showInteractive={false}
+                        />
+                        <MiniMap
+                            position="bottom-right"
+                            pannable
+                            zoomable
+                            nodeStrokeWidth={3}
+                            maskColor={
+                                lightMode
+                                    ? 'rgba(247, 247, 247, 0.68)'
+                                    : 'rgba(10, 10, 10, 0.68)'
+                            }
+                            nodeColor={(node) =>
+                                node.selected
+                                    ? '#eece47'
+                                    : node.data?.manual
+                                      ? '#b77bff'
+                                      : '#6ea8fe'
+                            }
+                        />
+                    </>
+                ) : null}
+                {isStructuredCanvasView ? (
+                    <CanvasStructuredView
+                        view={activeCanvasView}
+                        nodes={nodes}
+                        edges={edges}
+                        activeGraphFilters={activeGraphFilters}
+                        selectedBranchId={selectedBranchId}
+                        onOpenNode={focusNodeForReview}
+                    />
+                ) : null}
                 <Panel position="top-left" style={{ display: 'block' }}>
                     <section className="workspace-dock" aria-label="Workspace tools">
                         <nav className="workspace-dock-tabs" aria-label="Workspace panel">

@@ -26,6 +26,7 @@ import {
     buildSelectedSourcesDraftPayload,
     createAIDraftSession
 } from "../utils/aiDraftSessions";
+import { createAIActionRun } from "../utils/aiActionRuns";
 import { buildSourceLibraryProjection } from "../views/graphProjection";
 
 const viewForAction = (actionId) => {
@@ -171,22 +172,249 @@ const shouldPreferFallbackInitialSeed = ({ session, inferredShape }) => {
     return genericCount >= 1 || (!hasStepLikeNode && nodes.length <= 3);
 };
 
+const isLocalFallbackDraftSession = (session) => {
+    const candidate = session?.session_id
+        ? session
+        : session?.draft_session?.session_id
+          ? session.draft_session
+          : session?.session?.session_id
+            ? session.session
+            : session;
+    const latestRevision = Array.isArray(candidate?.revisions)
+        ? candidate.revisions[candidate.revisions.length - 1]
+        : null;
+    return (
+        candidate?.metadata?.preview_mode === 'local_fallback' ||
+        latestRevision?.metadata?.preview_mode === 'local_fallback'
+    );
+};
+
+const messageFromGenerationError = (error, fallback = 'Unable to generate preview.') => {
+    const rawDetail =
+        error?.response?.data?.detail?.message ||
+        error?.response?.data?.detail ||
+        error?.message ||
+        fallback;
+    if (typeof rawDetail === 'string') {
+        return rawDetail;
+    }
+    try {
+        return JSON.stringify(rawDetail);
+    } catch (_error) {
+        return fallback;
+    }
+};
+
+const summarizeDraftRequestForDebug = (payload = {}) => ({
+    role: payload.role || '',
+    action: payload.action || '',
+    model: payload.model || '',
+    model_policy: payload.model_policy || null,
+    scope: payload.scope || null,
+    desired_outputs: payload.desired_outputs || [],
+    prompt_length: String(payload.prompt || payload.custom_prompt || '').length,
+    prompt_preview: String(payload.prompt || payload.custom_prompt || '').slice(0, 140),
+    source_chunk_count: Array.isArray(payload.source_chunks) ? payload.source_chunks.length : 0,
+    metadata: payload.metadata || {},
+    workspace_brief_keys:
+        payload.workspace_brief && typeof payload.workspace_brief === 'object'
+            ? Object.keys(payload.workspace_brief).filter((key) => payload.workspace_brief[key])
+            : []
+});
+
+const serializeResponseDetailForDebug = (detail) => {
+    if (!detail) {
+        return null;
+    }
+    if (typeof detail === 'string') {
+        return detail;
+    }
+    try {
+        return JSON.stringify(detail);
+    } catch (_error) {
+        return String(detail);
+    }
+};
+
+const buildGenerationDebugSnapshot = ({
+    endpoint,
+    requestPayload,
+    error,
+    mode = 'request_failed'
+}) => {
+    const axiosSnapshot =
+        typeof error?.toJSON === 'function'
+            ? error.toJSON()
+            : {};
+    const request = error?.request || {};
+    const response = error?.response || null;
+    const hasHttpResponse = Boolean(response);
+    const diagnosis = hasHttpResponse
+        ? [
+              'Backend returned an HTTP response. Check status and response_detail below.',
+              response.status === 424 || response.status === 503
+                  ? 'Likely model/API configuration is missing or unavailable.'
+                  : 'Request reached the backend; inspect backend logs for this timestamp.'
+          ]
+        : [
+              'No HTTP response reached the browser.',
+              'Check that the backend is running on localhost:8000.',
+              'If the backend is running, check browser console for CORS or mixed-content errors.',
+              'Try opening http://localhost:8000/flows in a browser tab to confirm connectivity.'
+          ];
+    return {
+        timestamp: new Date().toISOString(),
+        mode,
+        endpoint,
+        resolved_endpoint:
+            typeof window !== 'undefined' && endpoint
+                ? new URL(endpoint, window.location.href).href
+                : endpoint,
+        browser_origin:
+            typeof window !== 'undefined' ? window.location.origin : '',
+        diagnosis,
+        http: {
+            status: response?.status || null,
+            status_text: response?.statusText || '',
+            response_detail: serializeResponseDetailForDebug(response?.data?.detail || response?.data)
+        },
+        axios: {
+            name: error?.name || axiosSnapshot.name || '',
+            message: error?.message || axiosSnapshot.message || '',
+            code: error?.code || axiosSnapshot.code || '',
+            is_axios_error: Boolean(error?.isAxiosError),
+            method: error?.config?.method || axiosSnapshot.config?.method || 'post',
+            url: error?.config?.url || axiosSnapshot.config?.url || endpoint,
+            timeout: error?.config?.timeout || axiosSnapshot.config?.timeout || 0
+        },
+        request: {
+            ready_state: request.readyState ?? null,
+            status: request.status ?? null,
+            status_text: request.statusText || '',
+            response_url: request.responseURL || '',
+            with_credentials: request.withCredentials ?? null
+        },
+        payload: summarizeDraftRequestForDebug(requestPayload)
+    };
+};
+
+const decorateInitialSeedNode = (node, position, variant, layoutMode = 'vertical-children') => ({
+    ...node,
+    position,
+    data: {
+        ...(node.data || {}),
+        display: {
+            ...(node.data?.display || {}),
+            layoutMode
+        },
+        metadata: {
+            ...(node.data?.metadata || {}),
+            initial_seed_visual: variant
+        },
+        data: {
+            ...(node.data?.data || {}),
+            metadata: {
+                ...(node.data?.data?.metadata || {}),
+                initial_seed_visual: variant
+            }
+        }
+    }
+});
+
+const layoutHierarchyInitialSeedGraph = ({ nodes = [], edges = [] } = {}) => {
+    if (!nodes.length) {
+        return { nodes, edges };
+    }
+
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const childMap = new Map();
+    const incoming = new Set();
+    edges.forEach((edge) => {
+        if (!edge?.source || !edge?.target || !nodeById.has(edge.target)) {
+            return;
+        }
+        incoming.add(edge.target);
+        childMap.set(edge.source, [...(childMap.get(edge.source) || []), edge.target]);
+    });
+
+    const roots = nodes.filter((node) => !incoming.has(node.id));
+    const root = roots[0] || nodes[0];
+    const rowGap = 118;
+    const columnGap = 420;
+    const top = 90;
+    const rootX = 150;
+    const visitedHeights = new Map();
+    const subtreeUnits = (nodeId, trail = new Set()) => {
+        if (visitedHeights.has(nodeId)) {
+            return visitedHeights.get(nodeId);
+        }
+        if (trail.has(nodeId)) {
+            return 1;
+        }
+        const nextTrail = new Set(trail).add(nodeId);
+        const children = (childMap.get(nodeId) || []).filter((childId) => nodeById.has(childId));
+        const units = children.length
+            ? children.reduce((total, childId) => total + subtreeUnits(childId, nextTrail), 0)
+            : 1;
+        visitedHeights.set(nodeId, Math.max(1, units));
+        return visitedHeights.get(nodeId);
+    };
+
+    const totalUnits = subtreeUnits(root.id);
+    const positioned = new Map();
+    const placeChildren = (parentId, depth, startUnit, trail = new Set()) => {
+        if (trail.has(parentId)) {
+            return;
+        }
+        const nextTrail = new Set(trail).add(parentId);
+        let cursor = startUnit;
+        (childMap.get(parentId) || [])
+            .filter((childId) => nodeById.has(childId))
+            .forEach((childId) => {
+                const units = subtreeUnits(childId);
+                const centerUnit = cursor + (units - 1) / 2;
+                positioned.set(childId, {
+                    x: rootX + depth * columnGap,
+                    y: top + centerUnit * rowGap
+                });
+                placeChildren(childId, depth + 1, cursor, nextTrail);
+                cursor += units;
+            });
+    };
+
+    positioned.set(root.id, { x: rootX, y: top });
+    placeChildren(root.id, 1, 0);
+
+    let overflowIndex = 0;
+    const laidOutNodes = nodes.map((node) => {
+        const position =
+            positioned.get(node.id) ||
+            {
+                x: rootX + (overflowIndex % 3) * columnGap,
+                y: top + (totalUnits + overflowIndex + 1) * rowGap
+            };
+        if (!positioned.has(node.id)) {
+            overflowIndex += 1;
+        }
+        const depth = Math.max(0, Math.round(((position.x || rootX) - rootX) / columnGap));
+        return decorateInitialSeedNode(
+            node,
+            position,
+            'mind-map-depth',
+            depth <= 1 ? 'balanced-map' : 'vertical-children'
+        );
+    });
+
+    return { nodes: laidOutNodes, edges };
+};
+
 const layoutInitialSeedGraph = ({ nodes = [], edges = [], shape = '' } = {}) => {
     if (!nodes.length) {
         return { nodes, edges };
     }
 
     if (!['checklist', 'tasks'].includes(shape)) {
-        return {
-            nodes: nodes.map((node, index) => ({
-                ...node,
-                position: {
-                    x: 240 + (index % 2) * 390,
-                    y: 140 + Math.floor(index / 2) * 150
-                }
-            })),
-            edges
-        };
+        return layoutHierarchyInitialSeedGraph({ nodes, edges });
     }
 
     const incoming = new Set(edges.map((edge) => edge.target));
@@ -195,33 +423,10 @@ const layoutInitialSeedGraph = ({ nodes = [], edges = [], shape = '' } = {}) => 
     const top = 90;
     const gap = 118;
     const rootY = top + Math.max(0, (children.length - 1) * gap) / 2;
-    const decorateNode = (node, position, variant) => ({
-        ...node,
-        position,
-        data: {
-            ...(node.data || {}),
-            display: {
-                ...(node.data?.display || {}),
-                layoutMode: 'compact-task-stack'
-            },
-            metadata: {
-                ...(node.data?.metadata || {}),
-                initial_seed_visual: variant
-            },
-            data: {
-                ...(node.data?.data || {}),
-                metadata: {
-                    ...(node.data?.data?.metadata || {}),
-                    initial_seed_visual: variant
-                }
-            }
-        }
-    });
-
     const laidOutNodes = [
-        decorateNode(root, { x: 140, y: rootY }, 'checklist-root'),
+        decorateInitialSeedNode(root, { x: 140, y: rootY }, 'checklist-root', 'compact-task-stack'),
         ...children.map((node, index) =>
-            decorateNode(node, { x: 560, y: top + index * gap }, 'checklist-step')
+            decorateInitialSeedNode(node, { x: 560, y: top + index * gap }, 'checklist-step', 'compact-task-stack')
         )
     ];
     const edgeByTarget = new Map(edges.map((edge) => [edge.target, edge]));
@@ -294,26 +499,23 @@ const topicFromCustomPrompt = (prompt) => {
     return cleaned.replace(/\bsaas\b/gi, 'SaaS').slice(0, 96);
 };
 
+const normalizeCustomBranchDefinition = (branch) =>
+    Array.isArray(branch)
+        ? {
+              title: branch[0],
+              summary: branch[1],
+              nodeType: branch[2],
+              parentIndex: 0
+          }
+        : {
+              title: branch.title,
+              summary: branch.summary,
+              nodeType: branch.nodeType || branch.node_type || 'concept',
+              parentIndex: Number.isFinite(branch.parentIndex) ? branch.parentIndex : 0
+          };
+
 const customPromptDraftBranches = (prompt) => {
     const topic = topicFromCustomPrompt(prompt);
-    const lower = String(prompt || '').toLowerCase();
-    if (/\b(saas|software as a service|subscription software)\b/.test(lower) && /\b(model|business|revenue|go[- ]to[- ]market|gtm)\b/.test(lower)) {
-        return {
-            rootTitle: topic && !topic.toLowerCase().includes('saas')
-                ? `SaaS business model for ${topic}`
-                : 'SaaS business model',
-            rootSummary: 'Subscription software model linking customer value, acquisition, pricing, retention, and unit economics.',
-            branches: [
-                ['Target customers', 'Define ICP segments, buyer personas, urgent pain points, and willingness to pay.', 'category'],
-                ['Value proposition', 'Connect the product promise to measurable outcomes such as time saved, revenue lift, risk reduction, or workflow quality.', 'category'],
-                ['Acquisition channels', 'Map inbound, outbound, partner, product-led, and paid channels with CAC and sales-cycle assumptions.', 'category'],
-                ['Pricing and packaging', 'Set free trial or freemium entry, tiered plans, usage limits, add-ons, annual discounts, and expansion paths.', 'category'],
-                ['Revenue engine', 'Track MRR, ARR, ARPA, gross margin, expansion revenue, churn, and net revenue retention.', 'category'],
-                ['Product and operations', 'Cover onboarding, activation, support, reliability, security, integrations, roadmap, and customer success motions.', 'category'],
-                ['Risks and assumptions', 'Validate market demand, competitive differentiation, CAC payback, churn drivers, compliance needs, and funding runway.', 'question']
-            ]
-        };
-    }
     return {
         rootTitle: rootTitleFromPrompt(prompt, topic || 'AI draft'),
         rootSummary: `Draft a reviewable structure for: ${String(prompt || topic).slice(0, 180)}`,
@@ -395,20 +597,27 @@ const buildFallbackDraftGraph = ({
             title: customPlan.rootTitle,
             summary: customPlan.rootSummary
         };
-        const branchNodes = customPlan.branches.map(([title, summary, nodeType], index) => ({
-            id: `${rootId}-branch-${index + 1}`,
-            parent_id: rootId,
-            title,
-            summary,
-            node_type: nodeType,
-            status: sourceRefs.length ? 'ai_generated' : 'needs_review',
-            source_refs: sourceRefs,
-            metadata: {
-                output_shape: inferredShape,
-                visual_mode: selectedVisual,
-                branch_index: index + 1
-            }
-        }));
+        const branchDefinitions = customPlan.branches.map(normalizeCustomBranchDefinition);
+        const branchNodes = branchDefinitions.map((branch, index) => {
+            const parentId =
+                branch.parentIndex > 0 && branch.parentIndex <= branchDefinitions.length
+                    ? `${rootId}-branch-${branch.parentIndex}`
+                    : rootId;
+            return {
+                id: `${rootId}-branch-${index + 1}`,
+                parent_id: parentId,
+                title: branch.title,
+                summary: branch.summary,
+                node_type: branch.nodeType,
+                status: sourceRefs.length ? 'ai_generated' : 'needs_review',
+                source_refs: sourceRefs,
+                metadata: {
+                    output_shape: inferredShape,
+                    visual_mode: selectedVisual,
+                    branch_index: index + 1
+                }
+            };
+        });
         return {
             draftNodes: [plannedRoot, ...branchNodes],
             draftEdges: [
@@ -423,7 +632,7 @@ const buildFallbackDraftGraph = ({
                     : []),
                 ...branchNodes.map((node) => ({
                     id: `draft-edge-${rootId}-${node.id}`,
-                    source_node_id: rootId,
+                    source_node_id: node.parent_id || rootId,
                     target_node_id: node.id
                 }))
             ]
@@ -489,6 +698,31 @@ const actionsThatDraftNodes = new Set([
     'custom_prompt'
 ]);
 
+const AI_GENERATION_STAGES = [
+    'Preparing request',
+    'Selecting source context',
+    'Calling AI model',
+    'Validating draft',
+    'Building preview',
+    'Saving starter graph'
+];
+
+const sourceOrReviewActionIds = new Set([
+    'ask_follow_up',
+    'create_sme_questions',
+    'find_missing_source_support',
+    'find_unsupported_assumptions',
+    'find_duplicate_overlapping_nodes',
+    'find_gaps',
+    'suggest_follow_up_questions',
+    'summarize_branch'
+]);
+
+const looksLikeGenerativePrompt = (prompt = '') =>
+    /\b(create|build|draft|generate|make|map|outline|plan|turn|convert|expand|workflow|flowchart|mind map|checklist|tasks?|branches?)\b/i.test(
+        prompt
+    );
+
 const modelOptions = ['auto', ...supportedOpenAIModels];
 
 const draftSessionEndpoint = ({ flowId }) =>
@@ -536,6 +770,7 @@ const PromptModal = ({
         clearGeneratedHelperPreview: state.clearGeneratedHelperPreview,
         setActiveAIActionPreview: state.setActiveAIActionPreview,
         setActiveAIDraftSession: state.setActiveAIDraftSession,
+        recordAIActionRun: state.recordAIActionRun,
         setInspectorNodeId: state.setInspectorNodeId,
         workspaceBrief: state.workspaceBrief,
         sourceLibrary: state.sourceLibrary
@@ -551,6 +786,7 @@ const PromptModal = ({
         clearGeneratedHelperPreview,
         setActiveAIActionPreview,
         setActiveAIDraftSession,
+        recordAIActionRun,
         setInspectorNodeId,
         workspaceBrief,
         sourceLibrary
@@ -582,6 +818,8 @@ const PromptModal = ({
     );
     const [customPrompt, setCustomPrompt] = useState(initialPrompt || '');
     const [stageMessage, setStageMessage] = useState('');
+    const [generationStage, setGenerationStage] = useState('');
+    const [stageDebug, setStageDebug] = useState(null);
     const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
     const promptScope = scope === 'nodes' ? 'node' : scope || 'node';
 
@@ -655,10 +893,77 @@ const PromptModal = ({
                 : scope === 'branch'
                   ? 'Selected branch'
                   : 'Selected node';
+    const plannedRoute = useMemo(() => {
+        if (!role || !selectedAction) {
+            return {
+                role,
+                action: selectedAction,
+                outputShape: selectedVisual,
+                promptOverridesAction: false
+            };
+        }
+        const localPrompt = customPrompt.trim();
+        const outputShape =
+            selectedVisual === 'auto'
+                ? inferOutputShape(localPrompt, selectedAction.id)
+                : selectedVisual;
+        const promptOverridesAction =
+            Boolean(localPrompt) &&
+            sourceOrReviewActionIds.has(selectedAction.id) &&
+            looksLikeGenerativePrompt(localPrompt);
+        const shouldRouteForRequestedOutput =
+            promptOverridesAction ||
+            selectedVisual === 'auto' ||
+            selectedVisual !== 'mind_map' ||
+            (localPrompt && selectedAction.id !== 'custom_prompt');
+        const route = shouldRouteForRequestedOutput
+            ? routeForOutputShape({
+                  outputShape: promptOverridesAction ? 'graph_draft' : outputShape,
+                  profiles,
+                  promptScope,
+                  fallbackRole: role,
+                  fallbackAction: selectedAction
+              })
+            : { role, action: selectedAction };
+        return {
+            role: route.role,
+            action: route.action,
+            outputShape,
+            promptOverridesAction
+        };
+    }, [customPrompt, profiles, promptScope, role, selectedAction, selectedVisual]);
     const willSeedInitialGraph =
         scope === 'workspace' &&
         nodes.length === 0 &&
-        selectedVisual !== 'no_visual';
+        selectedVisual !== 'no_visual' &&
+        actionsThatDraftNodes.has(plannedRoute.action?.id);
+    const contextUsedLabel = useMemo(() => {
+        if (scope === 'source' || selectedContextSources.length) {
+            return 'Selected source(s)';
+        }
+        const promptAsksForSources = /\b(source|sources|citation|cite|cited|evidence|document|ground|support|reference)\b/i.test(
+            customPrompt
+        );
+        if (
+            loadedSources.length &&
+            (promptAsksForSources || sourceOrReviewActionIds.has(plannedRoute.action?.id || ''))
+        ) {
+            return 'Source library';
+        }
+        if (nodes.length || selectedNodeIds.length || targetNodeId) {
+            return 'Workspace graph';
+        }
+        return 'No sources';
+    }, [
+        customPrompt,
+        loadedSources.length,
+        nodes.length,
+        plannedRoute.action?.id,
+        scope,
+        selectedContextSources.length,
+        selectedNodeIds.length,
+        targetNodeId
+    ]);
 
     const updateRole = (roleId) => {
         const nextRole = profiles.find((profile) => profile.id === roleId);
@@ -694,33 +999,28 @@ const PromptModal = ({
         const localPrompt = customPrompt.trim();
         if (selectedVisual === 'auto' && !localPrompt) {
             setStageMessage('Ask a question or describe what you want AI to make.');
+            setGenerationStage('');
+            setStageDebug(null);
             return;
         }
 
-        const inferredShape =
-            selectedVisual === 'auto'
-                ? inferOutputShape(localPrompt, selectedAction.id)
-                : selectedVisual;
         const {
             role: effectiveRole,
-            action: effectiveAction
-        } = selectedVisual === 'auto' || selectedVisual !== 'mind_map'
-            ? routeForOutputShape({
-                  outputShape: inferredShape,
-                  profiles,
-                  promptScope,
-                  fallbackRole: role,
-                  fallbackAction: selectedAction
-              })
-            : { role, action: selectedAction };
+            action: effectiveAction,
+            outputShape: inferredShape
+        } = plannedRoute;
 
         if (effectiveAction.id === 'custom_prompt' && !localPrompt) {
             setStageMessage('Add a custom instruction before generating this preview.');
+            setGenerationStage('');
+            setStageDebug(null);
             return;
         }
 
         setIsGeneratingPreview(true);
+        setGenerationStage('Preparing request');
         setStageMessage('');
+        setStageDebug(null);
         const childEdges = edges.filter((edge) => edge.source === targetNodeId);
         const sourceRefs =
             scope === 'source'
@@ -835,6 +1135,22 @@ const PromptModal = ({
                 source_context: selectedSourcePayload?.metadata
             }
         };
+        const recordDraftSessionRun = ({ session, status, generatedNodeIds = [] }) => {
+            const preview = session?.ai_action_run
+                ? {
+                      ai_action_run: session.ai_action_run,
+                      workspace_id: flowId || '',
+                      scope: normalizedScope
+                  }
+                : legacyPreview;
+            recordAIActionRun(
+                createAIActionRun({
+                    preview,
+                    status,
+                    generatedNodeIds
+                })
+            );
+        };
 
         const activateSession = (session) => {
             const nextSession = session?.session_id
@@ -854,6 +1170,7 @@ const PromptModal = ({
                 setSelectedBranchId(undefined);
                 setInspectorNodeId(undefined);
             }
+            recordDraftSessionRun({ session: nextSession, status: 'previewed' });
             const resolvedShape = shapeFromSession(nextSession, inferredShape);
             setActiveView(viewForOutputShape(resolvedShape, effectiveAction.id));
             recordActivity({
@@ -872,6 +1189,7 @@ const PromptModal = ({
                     model: selectedModel
                 }
             });
+            setGenerationStage('Building preview');
             setStageMessage('Draft session generated. Refine it in the drafting table before accepting.');
             window.setTimeout(() => popNode(), 150);
         };
@@ -884,17 +1202,59 @@ const PromptModal = ({
                   : session?.session?.session_id
                     ? session.session
                     : fallbackSession;
-            const nextSession = shouldPreferFallbackInitialSeed({
+            if (isLocalFallbackDraftSession(candidateSession)) {
+                setStageMessage('AI generation did not complete, so no starter canvas was created. Check the backend/model configuration and try again.');
+                setStageDebug({
+                    timestamp: new Date().toISOString(),
+                    mode: 'blocked_local_fallback',
+                    diagnosis: [
+                        'The draft session was marked local_fallback.',
+                        'Initial graph creation requires a real backend/model draft session.'
+                    ],
+                    session: {
+                        session_id: candidateSession?.session_id || '',
+                        metadata: candidateSession?.metadata || {},
+                        revision_count: Array.isArray(candidateSession?.revisions)
+                            ? candidateSession.revisions.length
+                            : 0
+                    }
+                });
+                return;
+            }
+            if (shouldPreferFallbackInitialSeed({
                 session: candidateSession,
                 inferredShape
-            })
-                ? fallbackSession
-                : candidateSession;
+            })) {
+                setStageMessage('AI generation was too generic for an initial mind map, so no starter canvas was created. Try again after the model path is available.');
+                setStageDebug({
+                    timestamp: new Date().toISOString(),
+                    mode: 'blocked_generic_initial_seed',
+                    diagnosis: [
+                        'The backend returned a draft, but it looked like a generic scaffold.',
+                        'Initial graph creation now blocks generic scaffolds instead of accepting them.'
+                    ],
+                    session: {
+                        session_id: candidateSession?.session_id || '',
+                        selected_model: candidateSession?.selected_model || '',
+                        metadata: candidateSession?.metadata || {},
+                        node_titles:
+                            candidateSession?.revisions?.[candidateSession.revisions.length - 1]?.draft_nodes?.map((node) => node.title).slice(0, 12) || []
+                    }
+                });
+                return;
+            }
+            setGenerationStage('Building preview');
+            const nextSession = candidateSession;
             const accepted = acceptAIDraftSession({
                 session: nextSession,
                 nodes: [],
                 edges: [],
                 mode: 'append'
+            });
+            recordDraftSessionRun({
+                session: nextSession,
+                status: 'accepted',
+                generatedNodeIds: accepted.accept_result.accepted_node_ids
             });
             const laidOutGraph = layoutInitialSeedGraph({
                 nodes: accepted.nodes,
@@ -910,6 +1270,7 @@ const PromptModal = ({
             setInspectorNodeId(undefined);
             const resolvedShape = shapeFromSession(nextSession, inferredShape);
             setActiveView(viewForOutputShape(resolvedShape, effectiveAction.id));
+            setGenerationStage('Saving starter graph');
             if (flowId) {
                 setSaveStatus('dirty');
                 window.setTimeout(() => {
@@ -937,43 +1298,80 @@ const PromptModal = ({
                 status: 'completed'
             });
             setStageMessage('Initial graph created. You can now iterate directly on the canvas.');
+            setStageDebug(null);
             window.setTimeout(() => popNode(), 150);
         };
 
         try {
             const endpoint = flowId ? draftSessionEndpoint({ flowId }) : '';
+            setGenerationStage('Selecting source context');
+            const requestPayload = buildAIDraftSessionRequestPayload({
+                role: effectiveRole,
+                action: effectiveAction,
+                scope: normalizedScope,
+                prompt: localPrompt || effectiveAction.label,
+                selectedModel,
+                selectedSourcePayload,
+                desiredOutputs: ['graph_draft', 'no_visual'].includes(inferredShape) ? [] : [inferredShape],
+                workspaceBrief,
+                metadata: {
+                    requested_visual: selectedVisual,
+                    output_shape: inferredShape,
+                    routed_role_id: effectiveRole.id,
+                    routed_action_id: effectiveAction.id
+                }
+            });
+            setGenerationStage('Calling AI model');
             const response = endpoint
-                ? await axios.post(
-                      endpoint,
-                      buildAIDraftSessionRequestPayload({
-                          role: effectiveRole,
-                          action: effectiveAction,
-                          scope: normalizedScope,
-                          prompt: localPrompt || effectiveAction.label,
-                          selectedModel,
-                          selectedSourcePayload,
-                          desiredOutputs: ['graph_draft', 'no_visual'].includes(inferredShape) ? [] : [inferredShape],
-                          workspaceBrief,
-                          metadata: {
-                              requested_visual: selectedVisual,
-                              output_shape: inferredShape,
-                              routed_role_id: effectiveRole.id,
-                              routed_action_id: effectiveAction.id
-                          }
-                      })
-                  )
+                ? await axios.post(endpoint, requestPayload)
                 : null;
+            setGenerationStage('Validating draft');
             if (shouldSeedInitialGraph) {
-                seedInitialGraph(response?.data || fallbackSession);
+                if (!response?.data) {
+                    setStageMessage('AI generation did not return a draft session, so no starter canvas was created.');
+                    setStageDebug({
+                        timestamp: new Date().toISOString(),
+                        mode: 'empty_response',
+                        endpoint,
+                        diagnosis: ['The request completed, but no draft session was returned.'],
+                        payload: summarizeDraftRequestForDebug(requestPayload)
+                    });
+                    return;
+                }
+                seedInitialGraph(response.data);
             } else {
                 activateSession(response?.data || fallbackSession);
             }
         } catch (error) {
-            const detail =
-                error.response?.data?.detail?.message ||
-                error.response?.data?.detail ||
-                error.message ||
-                'Unable to generate preview.';
+            const detail = messageFromGenerationError(error);
+            const endpoint = flowId ? draftSessionEndpoint({ flowId }) : '';
+            setGenerationStage('Validating draft');
+            const requestPayload = buildAIDraftSessionRequestPayload({
+                role: effectiveRole,
+                action: effectiveAction,
+                scope: normalizedScope,
+                prompt: localPrompt || effectiveAction.label,
+                selectedModel,
+                selectedSourcePayload,
+                desiredOutputs: ['graph_draft', 'no_visual'].includes(inferredShape) ? [] : [inferredShape],
+                workspaceBrief,
+                metadata: {
+                    requested_visual: selectedVisual,
+                    output_shape: inferredShape,
+                    routed_role_id: effectiveRole.id,
+                    routed_action_id: effectiveAction.id
+                }
+            });
+            setStageDebug(buildGenerationDebugSnapshot({
+                endpoint,
+                requestPayload,
+                error,
+                mode: shouldSeedInitialGraph ? 'initial_seed_failed' : 'preview_failed'
+            }));
+            if (shouldSeedInitialGraph) {
+                setStageMessage(`AI generation failed; no starter canvas was created. ${detail}`);
+                return;
+            }
             const fallbackWithWarning = {
                 ...fallbackSession,
                 warnings: [String(detail)],
@@ -990,11 +1388,7 @@ const PromptModal = ({
                     backend_warning: String(detail)
                 }
             };
-            if (shouldSeedInitialGraph) {
-                seedInitialGraph(fallbackWithWarning);
-            } else {
-                activateSession(fallbackWithWarning);
-            }
+            activateSession(fallbackWithWarning);
         } finally {
             setIsGeneratingPreview(false);
         }
@@ -1114,6 +1508,23 @@ const PromptModal = ({
                     Manage sources
                 </button>
             </div>
+            <div className="ai-action-request-summary">
+                <div>
+                    <span>Context used</span>
+                    <strong>{contextUsedLabel}</strong>
+                </div>
+                <div>
+                    <span>Routed as</span>
+                    <strong>
+                        {plannedRoute.role?.label || 'Select a role'} / {plannedRoute.action?.label || 'Select an action'}
+                    </strong>
+                </div>
+                {plannedRoute.promptOverridesAction ? (
+                    <small>
+                        Your prompt looks generative, so this will run as Workflow Mapper / Custom prompt.
+                    </small>
+                ) : null}
+            </div>
             <div className="ai-action-natural">
                 <label>
                     Ask anything
@@ -1203,6 +1614,31 @@ const PromptModal = ({
             {stageMessage ? (
                 <div className="ai-action-stage-message">{stageMessage}</div>
             ) : null}
+            {isGeneratingPreview ? (
+                <div className="ai-action-stage-progress" aria-label="AI generation progress">
+                    {AI_GENERATION_STAGES.map((stage) => {
+                        const currentIndex = AI_GENERATION_STAGES.indexOf(generationStage);
+                        const stageIndex = AI_GENERATION_STAGES.indexOf(stage);
+                        const stageState =
+                            stageIndex < currentIndex
+                                ? 'complete'
+                                : stage === generationStage
+                                  ? 'active'
+                                  : 'pending';
+                        return (
+                            <span key={stage} className={`ai-action-stage-${stageState}`}>
+                                {stage}
+                            </span>
+                        );
+                    })}
+                </div>
+            ) : null}
+            {stageDebug ? (
+                <details className="ai-action-debug" open>
+                    <summary>Generation debug</summary>
+                    <pre>{JSON.stringify(stageDebug, null, 2)}</pre>
+                </details>
+            ) : null}
             <div className="ai-action-footer">
                 <button type="button" className="secondary" onClick={() => popNode()}>
                     Cancel
@@ -1213,9 +1649,7 @@ const PromptModal = ({
                     disabled={isGeneratingPreview}
                 >
                     {isGeneratingPreview
-                        ? willSeedInitialGraph
-                            ? 'Creating graph'
-                            : 'Preparing preview'
+                        ? generationStage || 'Preparing request'
                         : willSeedInitialGraph
                           ? 'Create initial graph'
                           : 'Preview changes'}

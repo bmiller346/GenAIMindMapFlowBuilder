@@ -55,6 +55,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 import datetime
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import pandas as pd
 import sqlite3
 from vanna.openai import OpenAI_Chat
@@ -164,9 +165,11 @@ from ai_helpers import (
     build_ai_action_run,
     discard_ai_draft_session,
     generate_ai_action_preview,
+    generate_ai_draft_session_with_provider,
     generate_helper_preview,
     generate_source_librarian_preview,
     normalize_ai_draft_scope,
+    revise_ai_draft_session_with_provider,
     validate_ai_draft_session,
     list_prompt_profiles,
 )
@@ -462,6 +465,16 @@ origins = [
     "http://localhost:4173",
 ]
 
+
+def _cors_error_headers_for_origin(origin: str | None) -> dict[str, str]:
+    if origin not in origins:
+        return {}
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Credentials": "true",
+        "Vary": "Origin",
+    }
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -502,6 +515,19 @@ async def apply_local_user_settings(request, call_next):
         openai.api_key = request_settings["openai_api_key"]
     try:
         return await call_next(request)
+    except Exception as exc:
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": {
+                    "message": "Backend request failed unexpectedly.",
+                    "error_type": exc.__class__.__name__,
+                    "error": str(exc),
+                }
+            },
+            headers=_cors_error_headers_for_origin(request.headers.get("origin")),
+        )
     finally:
         openai.api_key = previous_openai_key
         reset_request_settings(token)
@@ -2442,23 +2468,55 @@ def _persist_flow_snapshot(flow_id: str, snapshot: dict) -> None:
 
 def _react_node_from_graph_node(node: dict, index: int) -> dict:
     node_type = node.get("node_type") or "concept"
+    title = str(node.get("title") or "")
+    body = str(node.get("summary") or node.get("body") or "")
+    source_refs = node.get("source_refs", [])
+    if not isinstance(source_refs, list):
+        source_refs = []
+    external_refs = node.get("external_refs", {})
+    if not isinstance(external_refs, (dict, list)):
+        external_refs = {}
+    metadata = node.get("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
     return {
         "id": node.get("id", ""),
-        "type": "question" if node_type == "question" else "custom",
-        "position": node.get("metadata", {}).get("position") or {"x": 120 + (index % 4) * 260, "y": 160 + index * 120},
+        "type": "question" if node_type == "question" else "response",
+        "position": metadata.get("position") or {"x": 120 + (index % 4) * 260, "y": 160 + index * 120},
         "data": {
-            "title": node.get("title", ""),
-            "summ": node.get("summary", ""),
+            "title": title,
+            "body": body,
+            "summary": body,
+            "summ": body,
             "node_type": node_type,
             "status": node.get("status", ""),
             "priority": node.get("priority", ""),
             "owner_id": node.get("owner_id", ""),
             "due_date": node.get("due_date", ""),
             "confidence": node.get("confidence"),
-            "source_refs": node.get("source_refs", []),
-            "external_refs": node.get("external_refs", {}),
-            "metadata": node.get("metadata", {}),
+            "source_refs": source_refs,
+            "external_refs": external_refs,
+            "metadata": metadata,
+            "manual": True,
+            "display": {
+                "collapsed": False,
+                "layoutMode": metadata.get("layout_mode") or "vertical-children",
+            },
+            "data": {
+                "title": title,
+                "body": body,
+                "summary": body,
+                "summ": body or title,
+                "query": "",
+                "df": [],
+                "graph": {},
+                "source_refs": source_refs,
+                "status": node.get("status", ""),
+            },
         },
+        "deletable": True,
+        "targetPosition": "left",
+        "sourcePosition": "right",
     }
 
 
@@ -2470,6 +2528,40 @@ def _react_edge_from_graph_edge(edge: dict) -> dict:
         "type": edge.get("metadata", {}).get("react_flow_type", ""),
         "animated": edge.get("metadata", {}).get("animated", False),
         "relationship_type": edge.get("relationship_type", "contains"),
+    }
+
+
+def _accepted_graph_focus_viewport(snapshot: dict, accepted_node_ids: list[str]) -> dict:
+    accepted_ids = {str(node_id) for node_id in accepted_node_ids if str(node_id)}
+    if not accepted_ids:
+        return snapshot.get("viewport", {}) if isinstance(snapshot.get("viewport"), dict) else {}
+
+    positions = []
+    for node in snapshot.get("nodes", []):
+        if not isinstance(node, dict) or str(node.get("id", "")) not in accepted_ids:
+            continue
+        position = node.get("position") if isinstance(node.get("position"), dict) else {}
+        try:
+            positions.append((float(position.get("x", 0)), float(position.get("y", 0))))
+        except (TypeError, ValueError):
+            continue
+
+    if not positions:
+        return snapshot.get("viewport", {}) if isinstance(snapshot.get("viewport"), dict) else {}
+
+    min_x = min(position[0] for position in positions)
+    max_x = max(position[0] for position in positions)
+    min_y = min(position[1] for position in positions)
+    max_y = max(position[1] for position in positions)
+    width = max(max_x - min_x + 320, 320)
+    height = max(max_y - min_y + 220, 220)
+    zoom = min(1, max(0.65, min(1080 / width, 620 / height)))
+    center_x = min_x + (max_x - min_x) / 2
+    center_y = min_y + (max_y - min_y) / 2
+    return {
+        "x": round(640 - center_x * zoom, 2),
+        "y": round(320 - center_y * zoom, 2),
+        "zoom": round(zoom, 3),
     }
 
 
@@ -2554,6 +2646,10 @@ def _append_accepted_graph_to_flow_snapshot(
         if edge:
             snapshot["edges"].append(_react_edge_from_graph_edge(edge))
             existing_edge_ids.add(edge_id)
+    snapshot["viewport"] = _accepted_graph_focus_viewport(
+        snapshot,
+        accept_result.get("accepted_node_ids", []),
+    )
     return snapshot
 
 
@@ -2619,6 +2715,59 @@ def _draft_revision_from_request(
     )
 
 
+def _has_client_supplied_draft(request: dict[str, Any]) -> bool:
+    return (
+        isinstance(request.get("draft_nodes"), list)
+        or isinstance(request.get("draft_items"), list)
+        or isinstance(request.get("generated_artifacts"), list)
+    )
+
+
+def _requested_desired_outputs(request: dict[str, Any]) -> list[str] | None:
+    desired_outputs = request.get("desired_outputs")
+    if isinstance(desired_outputs, list):
+        return [str(output) for output in desired_outputs if str(output).strip()]
+    return None
+
+
+def _requested_source_chunks(request: dict[str, Any]) -> list[dict[str, Any]]:
+    source_chunks = request.get("source_chunks")
+    if not isinstance(source_chunks, list):
+        return []
+    return [chunk for chunk in source_chunks if isinstance(chunk, dict)]
+
+
+def _requested_prompt(request: dict[str, Any]) -> str:
+    return query_with_workspace_brief(
+        request.get("prompt") or request.get("custom_prompt") or "",
+        request.get("workspace_brief")
+        if isinstance(request.get("workspace_brief"), dict)
+        else (request.get("metadata") or {}).get("workspace_brief")
+        if isinstance(request.get("metadata"), dict)
+        else None,
+    )
+
+
+def _requested_model_policy(request: dict[str, Any]) -> str | None:
+    policy = request.get("model_policy")
+    if isinstance(policy, str):
+        return policy
+    if isinstance(policy, dict):
+        value = policy.get("policy")
+        return str(value) if value else None
+    return None
+
+
+def _requested_model(request: dict[str, Any]) -> str | None:
+    model = request.get("model")
+    if not isinstance(model, str):
+        return None
+    normalized = model.strip()
+    if not normalized or normalized.lower() == "auto":
+        return None
+    return normalized
+
+
 @app.post("/api/workspaces/{flow_id}/ai/draft-sessions")
 def create_ai_draft_session(
     flow_id: str,
@@ -2627,6 +2776,58 @@ def create_ai_draft_session(
     request = request or {}
     graph = get_workspace_graph_or_404(flow_id)
     scope = normalize_ai_draft_scope(request.get("scope") if isinstance(request.get("scope"), dict) else {"type": "workspace"})
+    if not _has_client_supplied_draft(request):
+        try:
+            generated_session = generate_ai_draft_session_with_provider(
+                graph,
+                workspace_id=flow_id,
+                prompt=_requested_prompt(request),
+                scope=scope,
+                role=request.get("role") or "Ask AI",
+                model_policy=_requested_model_policy(request),
+                model=_requested_model(request),
+                desired_outputs=_requested_desired_outputs(request),
+                source_chunks=_requested_source_chunks(request),
+            )
+            generated_session["ai_action_run"] = build_ai_action_run(
+                workspace_id=flow_id,
+                scope=scope if scope.get("type") in {"workspace", "branch", "node"} else {"type": "workspace"},
+                role=request.get("role") or "Ask AI",
+                action=request.get("action") or "custom_prompt",
+                custom_prompt=request.get("prompt") or request.get("custom_prompt"),
+                input_source_refs=generated_session.get("source_refs") or graph.get("source_refs") or [],
+                created_by=request.get("created_by") or "user",
+                generated_node_ids=[
+                    node.get("id", "")
+                    for node in generated_session.get("revisions", [{}])[-1].get("draft_nodes", [])
+                    if isinstance(node, dict)
+                ],
+            )
+            metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+            if metadata:
+                generated_session.setdefault("metadata", {}).update(metadata)
+            return save_ai_draft_session(validate_ai_draft_session(generated_session))
+        except MissingConfigurationError as exc:
+            raise configuration_http_error(exc) from exc
+        except GraphSchemaError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "AI draft generation failed schema validation.",
+                    "errors": exc.errors,
+                },
+            ) from exc
+        except Exception as exc:
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": "AI draft generation failed while calling the model provider.",
+                    "error_type": exc.__class__.__name__,
+                    "error": str(exc),
+                },
+            ) from exc
+
     action_run = build_ai_action_run(
         workspace_id=flow_id,
         scope=scope if scope.get("type") in {"workspace", "branch", "node"} else {"type": "workspace"},
@@ -2680,6 +2881,39 @@ def create_ai_draft_revision(
     if session.get("status") != "drafting":
         raise HTTPException(status_code=409, detail="Only active draft sessions can be revised.")
     graph = get_workspace_graph_or_404(flow_id)
+    if not _has_client_supplied_draft(request):
+        try:
+            session = revise_ai_draft_session_with_provider(
+                session,
+                graph,
+                prompt=_requested_prompt(request),
+                model_policy=_requested_model_policy(request),
+                model=_requested_model(request),
+                desired_outputs=_requested_desired_outputs(request),
+                source_chunks=_requested_source_chunks(request),
+            )
+            return save_ai_draft_session(session)
+        except MissingConfigurationError as exc:
+            raise configuration_http_error(exc) from exc
+        except GraphSchemaError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "AI draft revision failed schema validation.",
+                    "errors": exc.errors,
+                },
+            ) from exc
+        except Exception as exc:
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "message": "AI draft revision failed while calling the model provider.",
+                    "error_type": exc.__class__.__name__,
+                    "error": str(exc),
+                },
+            ) from exc
+
     revision = _draft_revision_from_request(session, graph, request)
     session = append_ai_draft_revision(
         session,

@@ -1,5 +1,6 @@
 /* eslint-disable react/prop-types */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useReactFlow } from '@xyflow/react';
 import axios from 'axios';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
@@ -264,6 +265,88 @@ const sourceCoverage = (items = []) => {
     };
 };
 
+const draftNodeId = (node = {}) => node.id || node.node_id || '';
+
+const draftEdgeSourceId = (edge = {}) => edge.source_node_id || edge.source || edge.parent_id || '';
+
+const draftEdgeTargetId = (edge = {}) => edge.target_node_id || edge.target || edge.child_id || '';
+
+const isUnsourcedOrNeedsReview = (node = {}) => {
+    const status = String(node.status || node.metadata?.status || '').toLowerCase();
+    const nodeType = String(node.node_type || node.type || node.metadata?.node_type || '').toLowerCase();
+    return (
+        status === 'needs_review' ||
+        node.metadata?.needs_review === true ||
+        (nodeType !== 'reference' && asArray(node.source_refs).length === 0)
+    );
+};
+
+const buildDraftOutlinePreview = (revision = {}, session = {}) => {
+    const nodes = asArray(revision.draft_nodes);
+    const edges = asArray(revision.draft_edges);
+    const nodeById = new Map(nodes.map((node) => [draftNodeId(node), node]).filter(([id]) => id));
+    const childrenByParent = new Map();
+    const draftChildIds = new Set();
+
+    edges.forEach((edge) => {
+        const sourceId = draftEdgeSourceId(edge);
+        const targetId = draftEdgeTargetId(edge);
+        if (!sourceId || !targetId || !nodeById.has(targetId)) {
+            return;
+        }
+        if (nodeById.has(sourceId)) {
+            draftChildIds.add(targetId);
+        }
+        const children = childrenByParent.get(sourceId) || [];
+        children.push({ edge, node: nodeById.get(targetId) });
+        childrenByParent.set(sourceId, children);
+    });
+
+    nodes.forEach((node) => {
+        const parentId = node.parent_id || node.metadata?.parent_id;
+        const nodeId = draftNodeId(node);
+        if (parentId && nodeById.has(parentId)) {
+            draftChildIds.add(nodeId);
+            const existingChildren = childrenByParent.get(parentId) || [];
+            if (!existingChildren.some((child) => draftNodeId(child.node) === nodeId)) {
+                existingChildren.push({ edge: { relationship_type: 'contains' }, node });
+                childrenByParent.set(parentId, existingChildren);
+            }
+        }
+    });
+
+    const roots = nodes.filter((node) => !draftChildIds.has(draftNodeId(node)));
+    const promptTitle = asArray(session.prompt_history).at(-1)?.content || revision.prompt || session.role;
+    return {
+        title: promptTitle || 'AI draft',
+        nodeCount: nodes.length,
+        edgeCount: edges.length,
+        needsReviewCount: nodes.filter(isUnsourcedOrNeedsReview).length,
+        roots: roots.length ? roots : nodes.slice(0, 1),
+        childrenByParent,
+        nodeById
+    };
+};
+
+const collectVisibleDraftOutlineIds = (preview) => {
+    const visibleIds = new Set();
+    const visit = (node, depth) => {
+        const nodeId = draftNodeId(node);
+        if (!nodeId || visibleIds.has(nodeId)) {
+            return;
+        }
+        visibleIds.add(nodeId);
+        if (depth >= 1) {
+            return;
+        }
+        asArray(preview.childrenByParent.get(nodeId))
+            .slice(0, 6)
+            .forEach(({ node: child }) => visit(child, depth + 1));
+    };
+    asArray(preview.roots).forEach((root) => visit(root, 0));
+    return visibleIds;
+};
+
 const revisionEndpoint = ({ flowId, sessionId }) =>
     `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions/${sessionId}/revisions`;
 
@@ -289,6 +372,7 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
         activeGraphFilters: state.activeGraphFilters,
         setNodes: state.setNodes,
         setEdges: state.setEdges,
+        setViewPort: state.setViewPort,
         setActiveView: state.setActiveView,
         clearGeneratedHelperPreview: state.clearGeneratedHelperPreview,
         updateActiveAIDraftSession: state.updateActiveAIDraftSession,
@@ -303,6 +387,7 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
         activeGraphFilters,
         setNodes,
         setEdges,
+        setViewPort,
         setActiveView,
         clearGeneratedHelperPreview,
         updateActiveAIDraftSession,
@@ -311,6 +396,7 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
     const flowId = flowStore((state) => state.flow_id);
     const setSaveStatus = flowStore((state) => state.setSaveStatus);
     const recordActivity = useActivityStore((state) => state.recordActivity);
+    const { setViewport } = useReactFlow();
     const [prompt, setPrompt] = useState('');
     const [acceptMode, setAcceptMode] = useState('append');
     const [selectedItemIds, setSelectedItemIds] = useState([]);
@@ -324,6 +410,10 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
     const items = useMemo(() => extractRevisionItems(revision), [revision]);
     const reviewNotes = useMemo(() => extractRevisionNotes(revision), [revision]);
     const coverage = useMemo(() => sourceCoverage(items), [items]);
+    const outlinePreview = useMemo(
+        () => buildDraftOutlinePreview(revision, session),
+        [revision, session]
+    );
     const selectedSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
     const modelMeta = useMemo(() => getAIDraftModelMetadata(session, revision), [revision, session]);
     const acceptImpact = useMemo(
@@ -477,6 +567,10 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
             }
             if (Array.isArray(graph.edges)) {
                 setEdges(graph.edges);
+            }
+            if (graph.viewport && typeof graph.viewport === 'object') {
+                setViewPort(graph.viewport);
+                setViewport(graph.viewport, { duration: 360 });
             }
             if (!Array.isArray(graph.nodes) && !Array.isArray(graph.edges)) {
                 const fallback = acceptAIDraftSession({
@@ -746,6 +840,8 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
                 </button>
             </div>
 
+            <DraftOutlinePreview preview={outlinePreview} />
+
             {renderProjection()}
 
             {reviewNotes.length ? (
@@ -868,6 +964,95 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
 };
 
 export default AiDraftSessionPanel;
+
+const DraftOutlinePreview = ({ preview }) => {
+    if (!preview?.nodeCount) {
+        return null;
+    }
+    const shownNodeIds = new Set();
+    const visibleNodeIds = collectVisibleDraftOutlineIds(preview);
+    const renderedRoots = preview.roots.map((root) => (
+        <DraftOutlineNode
+            key={`outline-root-${draftNodeId(root)}`}
+            node={root}
+            preview={preview}
+            depth={0}
+            shownNodeIds={shownNodeIds}
+        />
+    ));
+    const hiddenNodeCount = Math.max(preview.nodeCount - visibleNodeIds.size, 0);
+    return (
+        <section className="ai-draft-outline-preview" aria-label="Draft tree preview">
+            <div className="ai-draft-outline-header">
+                <span>Draft outline</span>
+                <strong>{preview.title}</strong>
+                <p>
+                    {preview.nodeCount} {preview.nodeCount === 1 ? 'node' : 'nodes'} · {preview.edgeCount}{' '}
+                    {preview.edgeCount === 1 ? 'edge' : 'edges'} · {preview.needsReviewCount}{' '}
+                    unsourced/needs-review
+                </p>
+            </div>
+            <ol className="ai-draft-outline-tree">
+                {renderedRoots}
+                {hiddenNodeCount ? (
+                    <li className="ai-draft-outline-more">
+                        {hiddenNodeCount} more {hiddenNodeCount === 1 ? 'node' : 'nodes'} in item review
+                    </li>
+                ) : null}
+            </ol>
+        </section>
+    );
+};
+
+const DraftOutlineNode = ({ node, preview, depth, shownNodeIds }) => {
+    const nodeId = draftNodeId(node);
+    if (!nodeId || shownNodeIds.has(nodeId)) {
+        return null;
+    }
+    shownNodeIds.add(nodeId);
+    const children = asArray(preview.childrenByParent.get(nodeId));
+    const visibleChildren = depth < 1 ? children.slice(0, 6) : [];
+    const hiddenChildren = Math.max(children.length - visibleChildren.length, 0);
+    const relationLabel = humanizeId(node.relationship_type || node.metadata?.relationship_type || '');
+    return (
+        <li className={`ai-draft-outline-node depth-${Math.min(depth, 2)}`}>
+            <div>
+                <span>{depth === 0 ? 'Root' : relationLabel || `Level ${depth + 1}`}</span>
+                <strong>{node.title || node.label || 'Untitled draft node'}</strong>
+                {node.summary || node.body ? <p>{node.summary || node.body}</p> : null}
+                <DraftBadges
+                    item={{
+                        ...node,
+                        id: nodeId,
+                        item_type: node.node_type || node.type || 'node'
+                    }}
+                    compact
+                />
+            </div>
+            {visibleChildren.length || hiddenChildren ? (
+                <ol>
+                    {visibleChildren.map(({ edge, node: child }) => (
+                        <DraftOutlineNode
+                            key={`outline-${nodeId}-${draftNodeId(child)}`}
+                            node={{
+                                ...child,
+                                relationship_type: edge.relationship_type
+                            }}
+                            preview={preview}
+                            depth={depth + 1}
+                            shownNodeIds={shownNodeIds}
+                        />
+                    ))}
+                    {hiddenChildren ? (
+                        <li className="ai-draft-outline-more">
+                            {hiddenChildren} more below {node.title || nodeId}
+                        </li>
+                    ) : null}
+                </ol>
+            ) : null}
+        </li>
+    );
+};
 
 const DraftBadges = ({ item, compact = false }) => {
     const badges = getAIDraftItemBadges(item);

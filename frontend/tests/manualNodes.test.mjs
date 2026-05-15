@@ -199,6 +199,40 @@ test('normalizeWorkspaceNode adds canonical fields while preserving legacy respo
     assert.equal(aiNode.data.data.graph, '{"data":[]}');
 });
 
+test('normalizeWorkspaceNode keeps generated title and body readable from draft-like data', () => {
+    const normalized = normalizeWorkspaceNode({
+        id: 'draft-1',
+        type: 'custom',
+        position: { x: 10, y: 20 },
+        data: {
+            label: 'Accepted draft node',
+            summary: 'Short body for the canvas preview'
+        }
+    });
+
+    assert.equal(normalized.type, 'response');
+    assert.equal(normalized.data.title, 'Accepted draft node');
+    assert.equal(normalized.data.body, 'Short body for the canvas preview');
+    assert.equal(normalized.data.data.summ, 'Short body for the canvas preview');
+
+    const summaryOnly = normalizeWorkspaceNode({
+        id: 'draft-2',
+        type: 'response',
+        data: {
+            summary: 'Summary becomes the visible title when no title is provided'
+        }
+    });
+
+    assert.equal(
+        summaryOnly.data.title,
+        'Summary becomes the visible title when no title is provided'
+    );
+    assert.equal(
+        summaryOnly.data.body,
+        'Summary becomes the visible title when no title is provided'
+    );
+});
+
 test('getWorkspaceNodeData exposes the canonical data contract', () => {
     const node = createWorkspaceNode({
         id: 'contract-1',

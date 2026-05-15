@@ -27,6 +27,22 @@ import {
 import useActivityStore from '../stores/activityStore';
 import useAutomationStore from '../stores/automationStore';
 import { createSourceLibrarySnapshot } from '../views/graphProjection';
+
+const EMPTY_GRAPH_ALLOWED_ACTIVITY_TYPES = new Set([
+    'manual_nodes_deleted',
+    'workspace_created',
+    'workspace_opened',
+    'workspace_reset',
+    'revert_snapshot_restored'
+]);
+
+const latestMeaningfulActivity = (events = []) =>
+    (Array.isArray(events) ? events : []).find(
+        (event) =>
+            event &&
+            !['autosave_persisted', 'save_manual', 'workspace_renamed'].includes(event.type)
+    );
+
 const Header = ({
     setIsDrawer,
     setFlowList,
@@ -260,9 +276,25 @@ const Header = ({
     };
 
     const saveFlowCall = (nameOverride, snapshotOverride) => {
-        const flow_json = stringifyFlowSnapshot(
-            snapshotOverride || buildCurrentSnapshot()
+        const snapshot = snapshotOverride || buildCurrentSnapshot();
+        const lastNodeCount = Array.isArray(lastSavedSnapshot?.nodes)
+            ? lastSavedSnapshot.nodes.length
+            : 0;
+        const nextNodeCount = Array.isArray(snapshot?.nodes) ? snapshot.nodes.length : 0;
+        const lastMeaningfulActivity = latestMeaningfulActivity(
+            snapshot?.activity_events || activityEvents
         );
+        if (
+            lastNodeCount > 0 &&
+            nextNodeCount === 0 &&
+            !EMPTY_GRAPH_ALLOWED_ACTIVITY_TYPES.has(lastMeaningfulActivity?.type)
+        ) {
+            const message =
+                'Skipped saving an empty graph snapshot because the previous saved workspace had nodes and no delete/reset action was recorded.';
+            setSaveError(message);
+            return Promise.reject(new Error(message));
+        }
+        const flow_json = stringifyFlowSnapshot(snapshot);
         const data = {
             flow_id: flow_id,
             flow_name: nameOverride ?? flow_name,
@@ -270,7 +302,6 @@ const Header = ({
             flow_type: flow_type || 'manual',
             summary: 'Please work'
         };
-        console.log('JSON DATA', data);
         return axios.put(`http://localhost:8000/flow-update`, data, {
             headers: {
                 'Content-Type': 'application/json'
@@ -321,7 +352,7 @@ const Header = ({
     }, [saveLatestWorkspaceSnapshot]);
 
     useEffect(() => {
-        if (!hasUnsavedChanges || saveStatus === 'saving') {
+        if (!hasUnsavedChanges || saveStatus === 'saving' || saveStatus === 'error') {
             return;
         }
 

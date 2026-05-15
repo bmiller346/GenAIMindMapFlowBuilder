@@ -9,7 +9,6 @@ const flowStore = create((set, get) => ({
 		})
 	},
 	setFlow: (id) => {
-		console.log("DEBUGGGGGGGGGGGGGGG", id)
 		rememberWorkspace(id)
 		set({
 			flow_id: id,
@@ -28,7 +27,6 @@ const flowStore = create((set, get) => ({
 	},
 	flow_name: undefined,
 	setFlowName: (name) => {
-		console.log(name)
 		set({
 			flow_name: name
 		})

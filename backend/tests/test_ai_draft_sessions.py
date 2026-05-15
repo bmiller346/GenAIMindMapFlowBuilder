@@ -5,11 +5,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app
+from ai.providers import FixtureDocMapAIProvider
 from ai_helpers import (
     accept_ai_draft_revision,
     append_ai_draft_revision,
+    build_ai_draft_source_context,
     build_ai_draft_revision,
     build_ai_draft_session,
+    generate_ai_draft_session_with_provider,
 )
 from export.workspace_graph import build_workspace_graph
 
@@ -48,6 +51,169 @@ def draft_node(node_id="draft-1", *, sourced=False):
         "external_refs": {},
         "metadata": {"source": "test"},
     }
+
+
+def test_react_node_projection_uses_registered_response_node_shape():
+    react_node = app._react_node_from_graph_node(
+        {
+            "id": "draft-1",
+            "title": "Visible branch",
+            "summary": "Visible details",
+            "node_type": "branch",
+            "status": "needs_review",
+            "source_refs": [],
+            "metadata": {"position": {"x": 10, "y": 20}},
+        },
+        1,
+    )
+
+    assert react_node["type"] == "response"
+    assert react_node["data"]["title"] == "Visible branch"
+    assert react_node["data"]["body"] == "Visible details"
+    assert react_node["data"]["data"]["summ"] == "Visible details"
+    assert react_node["targetPosition"] == "left"
+    assert react_node["sourcePosition"] == "right"
+
+
+def test_source_context_can_skip_workspace_library_for_unsourced_generation():
+    graph = {
+        "workspace": {"id": "workspace-1"},
+        "nodes": [],
+        "edges": [],
+        "source_library": {
+            "documents": [
+                {
+                    "id": "doc-1",
+                    "chunks": [
+                        {
+                            "id": "chunk-1",
+                            "heading": "Old source",
+                            "snippet": "This should not bias a generic prompt.",
+                        }
+                    ],
+                }
+            ]
+        },
+    }
+
+    context = build_ai_draft_source_context(
+        graph,
+        scope={"type": "workspace"},
+        include_source_library=False,
+    )
+
+    assert context["source_chunks"] == []
+    assert context["source_refs"] == []
+    assert context["source_library_gaps"]["documents_with_uncited_chunks"] == []
+
+
+def source_library_graph(chunk_count=16):
+    return {
+        "workspace": {"id": "workspace-1", "title": "Demo"},
+        "nodes": [],
+        "edges": [],
+        "tasks": [],
+        "views": {},
+        "source_library": {
+            "documents": [
+                {
+                    "id": "doc-1",
+                    "filename": "strategy.pdf",
+                    "chunks": [
+                        {
+                            "id": f"chunk-{index}",
+                            "heading": f"Section {index}",
+                            "snippet": f"Source library evidence snippet {index}.",
+                        }
+                        for index in range(1, chunk_count + 1)
+                    ],
+                }
+            ]
+        },
+    }
+
+
+def draft_response_json():
+    return json.dumps(
+        {
+            "output_shape": "graph_draft",
+            "draft_nodes": [
+                {
+                    "id": "draft_root",
+                    "title": "Draft root",
+                    "summary": "Fixture draft.",
+                    "node_type": "concept",
+                    "status": "ai_generated",
+                    "source_refs": [],
+                    "metadata": {},
+                }
+            ],
+            "draft_edges": [],
+            "draft_annotations": [],
+            "draft_items": [],
+            "source_refs": [],
+            "assumptions": [],
+            "generated_artifacts": [],
+            "source_coverage": [],
+            "tasks": [],
+            "checklist": [],
+            "outline": [],
+            "table": [],
+            "kanban": [],
+            "presentation_sections": [],
+            "review_annotations": [],
+        }
+    )
+
+
+def request_prompt_text(provider):
+    request_input = provider.requests[0].input
+    if isinstance(request_input, list):
+        return "\n".join(str(item.get("content") or "") for item in request_input)
+    return str(request_input)
+
+
+def test_generic_business_prompt_does_not_send_source_library_chunks_to_provider():
+    provider = FixtureDocMapAIProvider(draft_response_json())
+
+    session = generate_ai_draft_session_with_provider(
+        source_library_graph(),
+        workspace_id="workspace-1",
+        prompt="Create a SaaS business model map",
+        scope={"type": "workspace"},
+        role="Workflow Mapper",
+        provider=provider,
+    )
+
+    prompt_text = request_prompt_text(provider)
+    assert "Source library evidence snippet" not in prompt_text
+    assert '"source_chunks": []' in prompt_text
+    assert session["metadata"]["source_context_mode"] == "none"
+    assert session["metadata"]["source_chunks_included"] == 0
+    assert session["metadata"]["source_refs_included"] == 0
+    assert session["metadata"]["source_context_truncated"] is False
+
+
+def test_source_prompt_sends_bounded_source_library_chunks_to_provider():
+    provider = FixtureDocMapAIProvider(draft_response_json())
+
+    session = generate_ai_draft_session_with_provider(
+        source_library_graph(chunk_count=16),
+        workspace_id="workspace-1",
+        prompt="Create a citation-backed source coverage map from the document evidence",
+        scope={"type": "workspace"},
+        role="Source Librarian",
+        provider=provider,
+    )
+
+    prompt_text = request_prompt_text(provider)
+    assert "Source library evidence snippet 1." in prompt_text
+    assert "Source library evidence snippet 12." in prompt_text
+    assert "Source library evidence snippet 13." not in prompt_text
+    assert session["metadata"]["source_context_mode"] == "source_library"
+    assert session["metadata"]["source_chunks_included"] == 12
+    assert session["metadata"]["source_refs_included"] == 12
+    assert session["metadata"]["source_context_truncated"] is True
 
 
 def react_root_flow():
@@ -299,19 +465,93 @@ def test_accept_endpoint_save_reload_preserves_source_refs_needs_review_and_audi
         "cited-branch",
         "uncited-branch",
     ]
-    assert accept_response["graph"]["nodes"][1]["data"]["source_refs"] == [{"document_id": "doc-1"}]
+    cited_snapshot = next(node for node in accept_response["graph"]["nodes"] if node["id"] == "cited-branch")
+    uncited_snapshot = next(node for node in accept_response["graph"]["nodes"] if node["id"] == "uncited-branch")
+    assert cited_snapshot["type"] == "response"
+    assert cited_snapshot["data"]["title"] == "Draft branch"
+    assert cited_snapshot["data"]["body"] == "Proposed branch"
+    assert cited_snapshot["data"]["source_refs"] == [{"document_id": "doc-1"}]
+    assert cited_snapshot["data"]["data"]["summ"] == "Proposed branch"
+    assert cited_snapshot["data"]["data"]["source_refs"] == [{"document_id": "doc-1"}]
+    assert uncited_snapshot["type"] == "response"
+    assert uncited_snapshot["data"]["status"] == "needs_review"
+    assert uncited_snapshot["data"]["data"]["status"] == "needs_review"
+    assert accept_response["graph"]["viewport"]["zoom"] > 0
+    assert accept_response["graph"]["viewport"] != {}
 
 
-def test_workspace_custom_prompt_draft_session_uses_backend_preview(monkeypatch):
+def test_workspace_custom_prompt_draft_session_prefers_model_generation(monkeypatch):
     graph = sample_graph()
     persisted = {}
+    calls = []
 
     def fake_save(session):
         persisted[session["session_id"]] = copy.deepcopy(session)
         return session
 
+    def fake_generate(graph, **kwargs):
+        calls.append(kwargs)
+        return build_ai_draft_session(
+            workspace_id=kwargs["workspace_id"],
+            prompt=kwargs["prompt"],
+            scope=kwargs["scope"],
+            role=kwargs["role"],
+            intent="create_graph_draft",
+            draft_nodes=[
+                {
+                    "id": "draft_saas_model",
+                    "title": "SaaS business model",
+                    "summary": "Model-generated SaaS map.",
+                    "node_type": "concept",
+                    "status": "ai_generated",
+                    "source_refs": [],
+                    "metadata": {},
+                },
+                {
+                    "id": "draft_saas_metrics",
+                    "title": "Core SaaS metrics",
+                    "summary": "ARR, MRR, NRR, churn, CAC, and payback.",
+                    "node_type": "category",
+                    "parent_id": "draft_saas_model",
+                    "status": "ai_generated",
+                    "source_refs": [],
+                    "metadata": {},
+                },
+                {
+                    "id": "draft_retention",
+                    "title": "Retention and NRR",
+                    "summary": "Track logo churn, revenue churn, and expansion.",
+                    "node_type": "concept",
+                    "parent_id": "draft_saas_metrics",
+                    "status": "ai_generated",
+                    "source_refs": [],
+                    "metadata": {},
+                },
+            ],
+            draft_edges=[
+                {
+                    "id": "draft_edge_model_metrics",
+                    "source_node_id": "draft_saas_model",
+                    "target_node_id": "draft_saas_metrics",
+                    "relationship_type": "contains",
+                    "metadata": {},
+                },
+                {
+                    "id": "draft_edge_metrics_retention",
+                    "source_node_id": "draft_saas_metrics",
+                    "target_node_id": "draft_retention",
+                    "relationship_type": "contains",
+                    "metadata": {},
+                },
+            ],
+            selected_model="gpt-5.4",
+            model_reason="Fixture model generation.",
+            metadata={"preview_mode": "responses_structured_draft", "provider": "fixture"},
+        )
+
     monkeypatch.setattr(app, "get_workspace_graph_or_404", lambda flow_id: copy.deepcopy(graph))
     monkeypatch.setattr(app, "save_ai_draft_session", fake_save)
+    monkeypatch.setattr(app, "generate_ai_draft_session_with_provider", fake_generate)
 
     session = app.create_ai_draft_session(
         "workspace-1",
@@ -327,19 +567,22 @@ def test_workspace_custom_prompt_draft_session_uses_backend_preview(monkeypatch)
 
     revision = session["revisions"][0]
     titles = [node["title"] for node in revision["draft_nodes"]]
-    child_edges = [
-        edge
-        for edge in revision["draft_edges"]
-        if edge["source_node_id"] == revision["draft_nodes"][0]["id"]
-    ]
+    assert calls
+    assert calls[0]["prompt"] == "show a SAAS business model"
+    assert calls[0]["role"] == "workflow_mapper"
+    assert calls[0]["model"] is None
     assert session["status"] == "drafting"
-    assert session["selected_model"]
+    assert session["selected_model"] == "gpt-5.4"
+    assert session["metadata"]["preview_mode"] == "responses_structured_draft"
+    assert session["ai_action_run"]["generated_node_ids"] == [
+        "draft_saas_model",
+        "draft_saas_metrics",
+        "draft_retention",
+    ]
     assert revision["draft_nodes"][0]["title"] == "SaaS business model"
-    assert "Pricing and packaging" in titles
-    assert "Revenue engine" in titles
-    assert len(revision["draft_nodes"]) >= 7
-    assert len(child_edges) >= 6
-    assert revision["metadata"]["preview_mode"] == "deterministic_draft"
+    assert "Core SaaS metrics" in titles
+    assert "Retention and NRR" in titles
+    assert revision["metadata"]["ai_draft_session_contract_version"] == "1"
 
 
 def test_discard_endpoint_persists_rejection_without_graph_mutation(monkeypatch):

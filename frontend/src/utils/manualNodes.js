@@ -34,6 +34,11 @@ const cloneDataFrame = (df) => (Array.isArray(df) ? structuredClone(df) : []);
 const cloneValue = (value, fallback) =>
     value !== undefined && value !== null ? structuredClone(value) : fallback;
 
+const firstText = (...values) =>
+    values
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .find(Boolean) || '';
+
 const normalizePosition = (position = {}) => ({
     x: Number.isFinite(position.x) ? position.x : 0,
     y: Number.isFinite(position.y) ? position.y : 0
@@ -117,15 +122,29 @@ export const getNodeDisplayState = (node = {}) => ({
 export const getWorkspaceNodeData = (node = {}) => {
     const data = node.data || {};
     const legacyData = data.data && typeof data.data === 'object' ? data.data : {};
-    const title =
-        data.title ||
-        legacyData.title ||
-        data.question ||
-        data.content ||
-        legacyData.summ ||
-        node.id ||
-        'Untitled node';
-    const body = data.body || data.summary || legacyData.body || legacyData.summ || '';
+    const body = firstText(
+        data.body,
+        data.summary,
+        legacyData.body,
+        legacyData.summary,
+        legacyData.summ
+    );
+    const title = firstText(
+        data.title,
+        legacyData.title,
+        data.label,
+        legacyData.label,
+        data.question,
+        legacyData.question,
+        data.content,
+        legacyData.content,
+        data.summary,
+        legacyData.summary,
+        legacyData.summ,
+        body,
+        node.id,
+        'Untitled node'
+    );
     const sourceRefs = data.source_refs || legacyData.source_refs;
 
     return {
@@ -175,7 +194,7 @@ export const normalizeWorkspaceNode = (node = {}) => {
     if (!node || typeof node !== 'object') {
         return node;
     }
-    if (node.type !== WORKSPACE_NODE_TYPE && node.type !== 'pdfResponse') {
+    if (node.type !== WORKSPACE_NODE_TYPE && node.type !== 'pdfResponse' && node.type !== 'custom') {
         return node;
     }
 
@@ -199,7 +218,7 @@ export const normalizeWorkspaceNode = (node = {}) => {
 
     return {
         ...node,
-        type: node.type || WORKSPACE_NODE_TYPE,
+        type: node.type === 'pdfResponse' ? 'pdfResponse' : WORKSPACE_NODE_TYPE,
         position: normalizePosition(node.position),
         data: nextData,
         deletable: node.deletable !== false,
