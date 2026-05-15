@@ -21,15 +21,29 @@ not replacements for the internal graph.
 
 ## Current Status
 
-Status: MVP implementation is mostly in place, with final end-to-end smoke
-verification still needed.
+Status: Core MVP implementation is mostly in place. Real-file backend smoke
+verification passed for PDF and DOCX intake, but live provider/browser release
+verification and live integration handoffs are still incomplete.
 
 Recently verified:
 
-- Backend roadmap-relevant tests pass: 125 passed.
+- Backend roadmap-relevant targeted tests pass: 71 passed.
 - Frontend production build passes with `npm run build`.
 - AI draft-session frontend contract tests pass with
   `node --test frontend/tests/aiDraftSessions.test.mjs`.
+- Source draft review frontend contract tests pass with
+  `node --test frontend/tests/sourceDraftReview.test.mjs`.
+- Browser-level Ask AI regression paths pass for selected node, selected
+  branch discard, selected source, whole workspace accept, and legacy profile
+  discoverability: 5 Playwright tests passed.
+- Backend Ask AI draft-session smoke paths pass for workspace, selected node,
+  selected branch, and source-scoped requests. The selected-source UI now opens
+  Ask AI from the Sources panel and sends source scope plus selected source
+  chunks to the draft-session endpoint.
+- Real-file backend upload smoke passed for `examples/gpt4all.pdf` and
+  `examples/Project-Management-Plan-1.docx` using the real upload, extraction,
+  chunking, source metadata, source draft review, save/reopen, JSON export, and
+  Markdown export paths with a fixture AI provider in place of live OpenAI.
 - Strict AI graph contract validation exists and is covered by tests.
 - Document ingestion, source refs, graph validation, exports, Miro payloads,
   monday existing-group export, monday template mapping, monday status pull,
@@ -37,9 +51,10 @@ Recently verified:
 
 Known verification gap:
 
-- The complete desktop/browser MVP loop still needs a fresh manual smoke test
-  with real PDF and DOCX uploads: upload, generate, edit, save, reopen, export
-  JSON/Markdown, and confirm source/review indicators in the UI.
+- The complete desktop/browser MVP loop still needs a live browser smoke with
+  real OpenAI configuration: upload, generate, review source draft, edit, save,
+  reopen, export JSON/Markdown, and confirm source/review indicators in the UI.
+- Live Miro and monday.com pushes are not verified and remain incomplete.
 
 ## Product Rules
 
@@ -116,18 +131,26 @@ paths are temporary legacy paths, not the product architecture.
   `DOCMAP_ALLOW_LEGACY_ASSISTANTS`.
 - [x] Add tests for Responses API request construction.
 - [x] Add fixture/mock provider for offline graph-generation tests.
-- [ ] Remove remaining legacy Assistants source/persona paths after each has a
-  Responses equivalent; no workflow should silently downshift to a legacy model.
+- [ ] Remove the two remaining legacy Assistants file-search fallbacks after
+  source chunk extraction covers every supported upload type; no workflow
+  silently downshifts to a legacy model.
 
 Current discrepancy:
 
 - Older component Q&A and follow-up paths in `backend/app.py` now use
   Responses-backed component context helpers instead of the legacy Assistants
   helper.
-- Legacy Assistants calls still exist for source fallback and dead web crawler
-  fallback code paths in `backend/app.py`. The active document source intake
-  path is Responses-first, marks fallback metadata as `legacy_assistants`, and
-  can disable fallback with `DOCMAP_ALLOW_LEGACY_ASSISTANTS=false`.
+- Remaining legacy Assistants exceptions are exactly:
+  `openai_summarize_source` source-summary fallback when local chunks are
+  unavailable, and `openai_mindmap_generator` graph-generation fallback when
+  local chunks are unavailable. Both are disabled by default, require
+  `DOCMAP_ALLOW_LEGACY_ASSISTANTS=true`, reject unsupported old model names,
+  and persist/report `processing_type: "legacy_assistants"` plus
+  `ai_provider.provider: "assistants_legacy_fallback"` when used.
+- The dead web crawler Assistants block has been removed. Active web, image,
+  audio, video, document-summary, document-graph, component Q&A, and Ask AI
+  draft paths use Responses-backed helpers/adapters with GPT-5.5/GPT-5.4 model
+  policy or explicit supported-model selection.
 
 ### Workspace Graph And Local Views
 
@@ -183,39 +206,59 @@ Current discrepancy:
 
 ### Miro Bridge
 
-- [x] Miro preview/scaffold payload endpoints.
-- [x] Dry-run Miro layout preview.
-- [x] Selected-branch Miro frame execution behind `miro_api_token`.
-- [x] Whole-workspace Miro board export.
-- [x] Shapes/connectors are the durable fallback export mode.
-- [x] Native Miro mind map API is evaluated and available as an optional
-  dry-run planning path.
-- [x] Exported Miro objects preserve internal node IDs and source reference
-  text.
-- [x] Returned Miro board/item IDs are persisted in `external_refs`.
-- [x] Miro auth configuration and token handling exist.
-- [x] SME review board mode exists for `needs_review` nodes.
+- [ ] Miro preview/scaffold payload endpoints are implemented and covered by
+  tests, but are not live-verified for release.
+- [ ] Dry-run Miro layout preview is implemented, but is not live-verified for
+  release.
+- [ ] Selected-branch Miro frame execution behind `miro_api_token` is
+  implemented, but is not live-verified for release.
+- [ ] Whole-workspace Miro board export is implemented, but is not
+  live-verified for release.
+- [ ] Shapes/connectors are the durable fallback export mode in code, but the
+  handoff is not live-verified for release.
+- [ ] Native Miro mind map API is evaluated and available as an optional
+  dry-run planning path, but is not live-verified for release.
+- [ ] Exported Miro objects preserve internal node IDs and source reference
+  text in payload tests, but live persistence is not verified.
+- [ ] Returned Miro board/item IDs are persisted in `external_refs` in code,
+  but live persistence is not verified.
+- [ ] Miro auth configuration and token handling exist in code, but are not
+  live-verified.
+- [ ] SME review board mode exists for `needs_review` nodes in code, but is not
+  live-verified.
 - [ ] Miro import/sync is intentionally not complete.
 - [ ] Pulling Miro review metadata/comments is not complete.
 
 ### monday.com Bridge
 
-- [x] monday preview/scaffold payload endpoints.
-- [x] Branch-to-task preview UI exists.
-- [x] Accepted local preview metadata can be staged as monday selection input.
-- [x] monday selection input is consumed by monday export mapping.
-- [x] Explicit confirmation is required before creating monday items.
-- [x] monday export batches include durable `ExportBatch` metadata.
-- [x] Task/procedure/needs_review nodes export to an existing board/group.
-- [x] monday items are created in an existing group from accepted task nodes.
-- [x] monday mappings include status, owner, due date, priority, source doc,
+- [ ] monday preview/scaffold payload endpoints are implemented and covered by
+  tests, but are not live-verified for release.
+- [ ] Branch-to-task preview UI exists, but monday handoff is not
+  live-verified.
+- [ ] Accepted local preview metadata can be staged as monday selection input,
+  but live handoff is not verified.
+- [ ] monday selection input is consumed by monday export mapping in tests, but
+  live handoff is not verified.
+- [ ] Explicit confirmation is required before creating monday items in code,
+  but live creation is not verified.
+- [ ] monday export batches include durable `ExportBatch` metadata in code, but
+  live persistence is not verified.
+- [ ] Task/procedure/needs_review nodes export to an existing board/group in
+  code, but live export is not verified.
+- [ ] monday items are created in an existing group from accepted task nodes in
+  code, but live creation is not verified.
+- [ ] monday mappings include status, owner, due date, priority, source doc,
   source page, confidence, node type, review state, original node ID, app link,
-  export batch ID, and last pushed timestamp.
-- [x] monday board/item IDs are stored in `external_refs`.
-- [x] monday auth configuration and token handling exist.
-- [x] Reusable "Autodesk Building Block Review" template mapping exists.
-- [x] monday status can be pulled back into node review status without changing
-  canonical graph structure.
+  export batch ID, and last pushed timestamp in payload tests, but live export
+  is not verified.
+- [ ] monday board/item IDs are stored in `external_refs` in code, but live
+  persistence is not verified.
+- [ ] monday auth configuration and token handling exist in code, but are not
+  live-verified.
+- [ ] Reusable "Autodesk Building Block Review" template mapping exists in
+  tests, but is not live-verified.
+- [ ] monday status can be pulled back into node review status without changing
+  canonical graph structure in tests, but live status pull is not verified.
 - [x] monday group-creation decision is made for MVP: exports require an
   existing board and group; automatic group creation from DocMap categories is
   deferred.
@@ -236,8 +279,11 @@ These are the features required to call the core MVP functional.
 - [x] User can edit node metadata.
 - [x] User can save and reopen a workspace.
 - [x] User can export internal JSON and Markdown.
-- [ ] Manual full-loop smoke test with real PDF and DOCX uploads is still
-  needed before declaring the MVP release-ready.
+- [x] Backend full-loop smoke test with real PDF and DOCX uploads passed using
+  a fixture AI provider: upload, extract/chunk, generate source draft, edit,
+  save, reopen, export JSON, and export Markdown.
+- [ ] Live browser/OpenAI full-loop smoke test with real PDF and DOCX uploads
+  is still needed before declaring the MVP release-ready.
 
 ## MVP Plus
 
@@ -274,9 +320,9 @@ These are the features required to call the core MVP functional.
 
 ## Still Needed For Fully Functional MVP
 
-1. Run a manual end-to-end smoke test with real PDF and DOCX documents:
-   upload, extract, generate, validate, edit, save, reopen, and export JSON and
-   Markdown.
+1. Run a live browser/OpenAI end-to-end smoke test with real PDF and DOCX
+   documents: upload, extract, generate, validate, review/accept source draft,
+   edit, save, reopen, and export JSON and Markdown.
 2. Verify live Miro and monday pushes against real credentials and confirm
    returned external refs persist after save/reopen.
 
@@ -326,7 +372,7 @@ Core product rules:
   accept cited-only, or store as review notes.
 - [x] Acceptance must show a preview diff: added nodes, added edges, updated
   nodes, review outputs, and unsourced items that will become `needs_review`.
-- [ ] Rejected or canceled drafts leave no canonical graph mutation, but may
+- [x] Rejected or canceled drafts leave no canonical graph mutation, but may
   retain an auditable AIActionRun record.
 - [x] Draft revisions can be discarded without affecting the canonical graph.
 - [x] Accepted draft changes create an undoable graph revision or equivalent
@@ -401,7 +447,9 @@ Frontend UX:
 Acceptance criteria:
 
 - [ ] User can create an AI draft from selected node, selected branch, selected
-  source, selected nodes, or whole workspace.
+  source, selected nodes, or whole workspace. Backend smoke verifies
+  workspace/node/branch/source scopes; browser smoke verifies workspace/node/
+  branch/source; multi-selected node UI coverage is still incomplete.
 - [x] Prompt "create a mind map for cereals by manufacturer" creates a draft
   session with manufacturer branches and proposed child nodes, without mutating
   the graph. Covered by offline Responses fixture provider tests.
@@ -414,7 +462,7 @@ Acceptance criteria:
 - [ ] User can add a source document mid-session and ask the system to reconcile
   the draft against it.
 - [x] Accepted changes run through canonical graph validation before persistence.
-- [ ] Source-backed accepted nodes retain citations after save/reload/export.
+- [x] Source-backed accepted nodes retain citations after save/reload/export.
 - [x] Unsourced accepted nodes are persisted as `needs_review`.
 - [x] Draft sessions can be discarded without graph changes.
 - [x] Accepted draft changes create a graph revision or undo point.
@@ -427,7 +475,10 @@ Acceptance criteria:
   browser/end-to-end verification remains part of the broader drafting-table
   test.
 - [ ] Browser-level test covers draft creation, follow-up revision, selected
-  accept, save/reload, and source/review indicators.
+  accept, save/reload, and source/review indicators. Existing browser coverage
+  verifies node selected-accept save/reopen with review/source badges, branch
+  discard, workspace accept, and selected-source request scoping; full
+  real-file browser/OpenAI coverage remains missing.
 - [x] Backend tests cover intent classification, Responses request construction,
   schema parsing, graph diff validation, accept modes, and provenance
   persistence.
@@ -494,5 +545,8 @@ All graph mutations in this area must remain preview/confirm operations.
   badges, metadata edit, save/reopen, and JSON export.
 - [x] Unsupported/non-primary source guidance distinguishes source-traceable
   document intake from AI/data intake.
-- [ ] Browser-level full-loop MVP smoke test with real PDF and DOCX uploads.
+- [x] Backend real-file full-loop smoke test with real PDF and DOCX uploads and
+  fixture AI provider.
+- [ ] Browser-level full-loop MVP smoke test with real PDF and DOCX uploads and
+  live OpenAI configuration.
 - [ ] Live credential smoke tests for Miro and monday handoff paths.
