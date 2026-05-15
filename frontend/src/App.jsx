@@ -1081,6 +1081,28 @@ const App = () => {
                                             {aiUsageStatus ||
                                                 `${formatUsageNumber(aiUsage?.session_count)} draft sessions tracked`}
                                         </span>
+                                        {Array.isArray(aiUsage?.sessions) && aiUsage.sessions.length ? (
+                                            <details>
+                                                <summary>Details</summary>
+                                                <div>
+                                                    {aiUsage.sessions.slice(0, 5).map((session) => (
+                                                        <article key={session.session_id || session.created_at}>
+                                                            <strong>{session.selected_model || 'auto'}</strong>
+                                                            <span>
+                                                                {formatUsageNumber(session.total_tokens)} tokens
+                                                                {session.estimated_cost_usd
+                                                                    ? ` · ${session.estimated_cost_usd} est.`
+                                                                    : ''}
+                                                            </span>
+                                                            <small>
+                                                                {session.status || 'draft'} ·{' '}
+                                                                {formatUsageNumber(session.revisions?.length)} revisions
+                                                            </small>
+                                                        </article>
+                                                    ))}
+                                                </div>
+                                            </details>
+                                        ) : null}
                                     </section>
                                 </div>
                             ) : null}
