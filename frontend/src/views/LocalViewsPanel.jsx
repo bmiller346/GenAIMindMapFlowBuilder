@@ -322,7 +322,7 @@ const EmptyState = ({
     );
 };
 
-const LocalViewsPanel = ({ hidden, onSelectNode }) => {
+const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -1002,7 +1002,9 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                                 <th>Relationship</th>
                                 <th>To</th>
                                 <th>Kind</th>
+                                <th>Confidence</th>
                                 <th>Review state</th>
+                                <th>Details</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1012,8 +1014,14 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                                     <td>{row.relationship}</td>
                                     <td>{row.target.title}</td>
                                     <td>{row.connection_kind}</td>
+                                    <td>{row.confidence || 'Not set'}</td>
                                     <td>
                                         <OutputStatePill state="Locally projected" />
+                                    </td>
+                                    <td>
+                                        <button type="button" onClick={() => onSelectEdge?.(row.id)}>
+                                            Open
+                                        </button>
                                     </td>
                                 </tr>
                             ))}

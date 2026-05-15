@@ -670,6 +670,23 @@ export const getConnectionRows = (projection) =>
                     : 'Cross-link',
                 confidence: edge.confidence || edge.data?.confidence || '',
                 review_state: edge.review_state || edge.data?.review_state || '',
+                rationale:
+                    edge.rationale ||
+                    edge.data?.rationale ||
+                    edge.metadata?.rationale ||
+                    edge.data?.source_signal ||
+                    '',
+                source_signal:
+                    edge.source_signal ||
+                    edge.data?.source_signal ||
+                    edge.metadata?.source_signal ||
+                    '',
+                source_refs: [
+                    ...(Array.isArray(edge.source_refs) ? edge.source_refs : []),
+                    ...(Array.isArray(edge.data?.source_refs) ? edge.data.source_refs : []),
+                    ...(Array.isArray(edge.metadata?.source_refs) ? edge.metadata.source_refs : [])
+                ],
+                raw_edge: edge,
                 locally_projected: true
             };
         })

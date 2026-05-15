@@ -23,6 +23,10 @@ import {
     createSourceUndoHandler,
     createSourceUndoSnapshot
 } from '../utils/sourceOperationActivity';
+import {
+    sourceRecordFromUpload,
+    stageUploadedSourceReconciliationPreview
+} from '../utils/sourceReconciliationPreview';
 const WEBModal = () => {
 	const selector = (state) => ({
         trigger: state.trigger,
@@ -200,6 +204,11 @@ const WEBModal = () => {
 	}
 
 	const manageNodes = (data) => {
+		const sourceRecord = sourceRecordFromUpload(data, { content: url }, flowId, {
+			fallbackType: 'web',
+			fallbackTypeLabel: 'Web',
+			fallbackTitle: url
+		});
 		const node = {
             id: data.component_id,
             position: { x: 0, y: 0 },
@@ -208,15 +217,24 @@ const WEBModal = () => {
                 name: data.type,
                 content: url,
                 flow_id: flowId,
-                prompt: 'Research Assistant'
+                prompt: 'Research Assistant',
+                component_id: data.component_id,
+                source_document_id: sourceRecord.id,
+                source_document: sourceRecord.metadata,
+                document_chunks: sourceRecord.chunks,
+                source_segments: sourceRecord.segments
             }
         };
+		const nextNodes = nodes.length === 0 ? [node] : [...nodes, node]
 		if (nodes.length === 0) {
-			setNodes([node]);
+			setNodes(nextNodes);
 		} else {
-			const newArr = [...nodes, node]
-			setNodes(newArr)
+			setNodes(nextNodes)
 		}
+		void stageUploadedSourceReconciliationPreview({
+			sourceRecord,
+			nodes: nextNodes
+		});
 		setTrigger(!trigger)
 		popNode()
 	}

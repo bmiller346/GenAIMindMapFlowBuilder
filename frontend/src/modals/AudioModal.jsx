@@ -24,6 +24,10 @@ import {
     createSourceUndoHandler,
     createSourceUndoSnapshot
 } from '../utils/sourceOperationActivity';
+import {
+    sourceRecordFromUpload,
+    stageUploadedSourceReconciliationPreview
+} from '../utils/sourceReconciliationPreview';
 
 const AudioModal = () => {
     const selector = (state) => ({
@@ -150,6 +154,10 @@ const AudioModal = () => {
     };
 
     const manageNodes = (data) => {
+        const sourceRecord = sourceRecordFromUpload(data, file, flowId, {
+            fallbackType: 'audio',
+            fallbackTypeLabel: 'Audio'
+        });
         const node = {
             id: data.component_id,
             position: { x: 0, y: 0 },
@@ -160,14 +168,23 @@ const AudioModal = () => {
                 flow_id: flowId,
                 prompt: 'Research Assistant',
                 file: file,
+                component_id: data.component_id,
+                source_document_id: sourceRecord.id,
+                source_document: sourceRecord.metadata,
+                document_chunks: sourceRecord.chunks,
+                source_segments: sourceRecord.segments
             }
         };
+        const nextNodes = nodes.length === 0 ? [node] : [...nodes, node];
         if (nodes.length === 0) {
-            setNodes([node]);
+            setNodes(nextNodes);
         } else {
-            const newArr = [...nodes, node];
-            setNodes(newArr);
+            setNodes(nextNodes);
         }
+        void stageUploadedSourceReconciliationPreview({
+            sourceRecord,
+            nodes: nextNodes
+        });
 
         setTrigger(!trigger);
         popNode();

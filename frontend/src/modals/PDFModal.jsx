@@ -28,78 +28,13 @@ import {
     createFlowSnapshot,
     stringifyFlowSnapshot
 } from '../utils/flowSnapshots';
-
-const parseMindmapJson = (mindmapJson) => {
-    if (!mindmapJson) {
-        return {};
-    }
-    if (typeof mindmapJson === 'string') {
-        try {
-            return JSON.parse(mindmapJson);
-        } catch (error) {
-            return {};
-        }
-    }
-    return mindmapJson;
-};
-
-const hasGraphDraft = (data) => {
-    const flow = parseMindmapJson(data?.mindmap_json);
-    return (flow.nodes || []).length > 0 || (flow.edges || []).length > 0;
-};
-
-const sourceRecordFromUpload = (data, file, flowId) => {
-    const flow = parseMindmapJson(data?.mindmap_json);
-    const sourceLibrary = Array.isArray(flow.source_library) ? flow.source_library : [];
-    const fromGraph =
-        sourceLibrary.find((source) => source.component_id === data.component_id) ||
-        sourceLibrary.find((source) => source.title === file?.name) ||
-        sourceLibrary[0] ||
-        {};
-
-    return {
-        id:
-            fromGraph.id ||
-            data.normalized_document_id ||
-            data.source_document_id ||
-            data.document_id ||
-            data.component_id ||
-            file?.name ||
-            nanoid(),
-        title: fromGraph.title || file?.name || data.filename || 'PDF source',
-        type: fromGraph.type || data.type || 'pdf',
-        type_label: fromGraph.type_label || 'PDF',
-        status: fromGraph.status || 'parsed',
-        node_id: fromGraph.node_id || '',
-        component_id: fromGraph.component_id || data.component_id || '',
-        flow_id: fromGraph.flow_id || data.flow_id || flowId || '',
-        file_hash: fromGraph.file_hash || data.file_hash || '',
-        size: fromGraph.size || file?.size || 0,
-        version: fromGraph.version || '',
-        metadata: {
-            ...(fromGraph.metadata || {}),
-            original_filename: file?.name || fromGraph.title || data.filename || ''
-        },
-        chunks: Array.isArray(fromGraph.chunks) ? fromGraph.chunks : [],
-        segments: Array.isArray(fromGraph.segments) ? fromGraph.segments : [],
-        normalized_document_id:
-            fromGraph.normalized_document_id ||
-            data.normalized_document_id ||
-            data.source_document_id ||
-            ''
-    };
-};
-
-const upsertSource = (sources = [], source = {}) => {
-    if (!source.id) {
-        return sources;
-    }
-    const existingIndex = sources.findIndex((item) => item.id === source.id);
-    if (existingIndex < 0) {
-        return [...sources, source];
-    }
-    return sources.map((item, index) => (index === existingIndex ? { ...item, ...source } : item));
-};
+import {
+    parseMindmapJson,
+    sourceRecordFromUpload,
+    stageUploadedSourceReconciliationPreview,
+    uploadHasGraphDraft,
+    upsertSource
+} from '../utils/sourceReconciliationPreview';
 
 const PDFModal = ({
     sourcePickerMode = 'workspace_intake',
@@ -135,9 +70,7 @@ const PDFModal = ({
         setWorkspaceBrief: state.setWorkspaceBrief,
         viewport: state.viewport,
         sourceLibrary: state.sourceLibrary,
-        setSourceLibrary: state.setSourceLibrary,
-        setActiveView: state.setActiveView,
-        setGeneratedHelperPreview: state.setGeneratedHelperPreview
+        setSourceLibrary: state.setSourceLibrary
     });
 
     const {
@@ -152,9 +85,7 @@ const PDFModal = ({
         setWorkspaceBrief,
         viewport,
         sourceLibrary,
-        setSourceLibrary,
-        setActiveView,
-        setGeneratedHelperPreview
+        setSourceLibrary
     } = useStore(useShallow(selector));
     const pdfAccept = '.pdf,application/pdf';
     const [processingType, setProcessingType] = useState('gpt');
@@ -305,7 +236,7 @@ const PDFModal = ({
     };
     
     const setupNodes = (data) => {
-        if (hasGraphDraft(data) || data.flow_type === 'automatic') {
+        if (uploadHasGraphDraft(data) || data.flow_type === 'automatic') {
             manageAutomaticNode(data)
         } else {
             manageNodes(data)
@@ -333,56 +264,6 @@ const PDFModal = ({
                   initialContextSourceId: uploadedSource.id
               }
             : {});
-    };
-
-    const maybeOpenUploadedSourceReconciliation = async (sourceRecord, nextNodes = nodes) => {
-        const currentFlowId = flowStore.getState().flow_id || flowId;
-        const graphNodeCount = nextNodes.filter((node) => node.type !== 'dataSource').length;
-        if (!currentFlowId || !sourceRecord?.id || graphNodeCount === 0) {
-            return;
-        }
-        try {
-            const response = await axios.post(
-                `http://localhost:8000/api/workspaces/${currentFlowId}/sources/${encodeURIComponent(sourceRecord.id)}/reconcile/preview`,
-                { scope: { type: 'source', source_id: sourceRecord.id } }
-            );
-            const preview = response.data || {};
-            const previewItems = Array.isArray(preview.preview_items) ? preview.preview_items : [];
-            const matchedCount = Number(preview.metadata?.matched_node_count || 0);
-            const sourceOnlyCount = Number(preview.metadata?.source_only_chunk_count || 0);
-            if (!previewItems.length && matchedCount === 0 && sourceOnlyCount === 0) {
-                return;
-            }
-            setGeneratedHelperPreview('sourceLibrarianSources', preview);
-            setActiveView('sources');
-            addActivity({
-                type: 'ai_source_reconcile_previewed',
-                title: 'Source reconciliation previewed',
-                summary: `Detected overlap between ${sourceRecord.title} and the current graph.`,
-                status: 'completed',
-                source_ids: [sourceRecord.id],
-                metadata: {
-                    intent: 'reconcile_source_with_workspace',
-                    source_id: sourceRecord.id,
-                    preview_items: previewItems.length,
-                    matched_node_count: matchedCount,
-                    source_only_chunk_count: sourceOnlyCount,
-                    trigger: 'source_upload'
-                }
-            });
-        } catch (error) {
-            addActivity({
-                type: 'ai_source_reconcile_failed',
-                title: 'Source reconciliation failed',
-                summary: requestErrorMessage(error),
-                status: 'failed',
-                source_ids: [sourceRecord.id],
-                metadata: {
-                    intent: 'reconcile_source_with_workspace',
-                    trigger: 'source_upload'
-                }
-            });
-        }
     };
 
     const manageAutomaticNode = (data) => {
@@ -483,7 +364,10 @@ const PDFModal = ({
         } else {
             setNodes(nextNodes);
         }
-        void maybeOpenUploadedSourceReconciliation(sourceRecord, nextNodes);
+        void stageUploadedSourceReconciliationPreview({
+            sourceRecord,
+            nodes: nextNodes
+        });
 
         setTrigger(!trigger);
         popNode();

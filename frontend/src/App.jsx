@@ -29,6 +29,7 @@ import Header from './global-components/Header.jsx';
 import Drawer from './global-components/Drawer.jsx';
 import flowStore from './stores/flowStore.js';
 import NodeInspector from './global-components/NodeInspector.jsx';
+import EdgeInspector from './global-components/EdgeInspector.jsx';
 import GraphValidationPanel from './global-components/GraphValidationPanel.jsx';
 import LocalViewsPanel from './views/LocalViewsPanel.jsx';
 import CanvasStructuredView from './views/CanvasStructuredView.jsx';
@@ -455,6 +456,8 @@ const App = () => {
         setSelectedBranchId: state.setSelectedBranchId,
         inspectorNodeId: state.inspectorNodeId,
         setInspectorNodeId: state.setInspectorNodeId,
+        inspectorEdgeId: state.inspectorEdgeId,
+        setInspectorEdgeId: state.setInspectorEdgeId,
         setViewPort: state.setViewPort,
         setWorkspaceBrief: state.setWorkspaceBrief,
         setSourceLibrary: state.setSourceLibrary,
@@ -475,6 +478,8 @@ const App = () => {
         setSelectedBranchId,
         inspectorNodeId,
         setInspectorNodeId,
+        inspectorEdgeId,
+        setInspectorEdgeId,
         setViewPort,
         setWorkspaceBrief,
         setSourceLibrary,
@@ -577,6 +582,18 @@ const App = () => {
             )
         );
     }, [setInspectorNodeId, setNodes]);
+    const openEdgeInspector = useCallback(
+        (event, edge) => {
+            event?.stopPropagation?.();
+            if (edge?.id) {
+                setInspectorEdgeId(edge.id);
+            }
+        },
+        [setInspectorEdgeId]
+    );
+    const closeEdgeInspector = useCallback(() => {
+        setInspectorEdgeId(undefined);
+    }, [setInspectorEdgeId]);
     const focusNodeForReview = useCallback(
         (nodeId) => {
             if (!nodeId) {
@@ -662,6 +679,15 @@ const App = () => {
         if (deletedIds.has(inspectorNodeId)) {
             setInspectorNodeId(undefined);
         }
+        if (
+            currentEdges.some(
+                (edge) =>
+                    edge.id === inspectorEdgeId &&
+                    (deletedIds.has(edge.source) || deletedIds.has(edge.target))
+            )
+        ) {
+            setInspectorEdgeId(undefined);
+        }
         setSelectedCanvasNodes([]);
         setSelectedNodes(undefined);
         setAskMultipleClass('deanimate');
@@ -680,9 +706,11 @@ const App = () => {
         });
     }, [
         inspectorNodeId,
+        inspectorEdgeId,
         recordActivity,
         selectedBranchId,
         setEdges,
+        setInspectorEdgeId,
         setInspectorNodeId,
         setNodes,
         setSaveStatus,
@@ -969,6 +997,7 @@ const App = () => {
                 edges={renderedCanvasGraph.edges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
+                onEdgeClick={openEdgeInspector}
                 onMoveEnd={(event, viewport) => setViewPort(viewport)}
                 colorMode={lightMode ? 'light' : 'dark'}
                 fitView={true}
@@ -1164,6 +1193,7 @@ const App = () => {
                     <LocalViewsPanel
                         hidden={false}
                         onSelectNode={focusNodeForReview}
+                        onSelectEdge={setInspectorEdgeId}
                     />
                 </Panel>
                 <Panel
@@ -1181,12 +1211,19 @@ const App = () => {
                     position="top-right"
                     style={{ display: 'block' }}
                 >
-                    <NodeInspector
-                        selectedNodeId={inspectorNodeId}
-                        validationIssues={selectedNodeIssues}
-                        onClose={closeNodeInspector}
-                        onAiDraftAccepted={openNextStepsAfterDraftAccept}
-                    />
+                    {inspectorEdgeId ? (
+                        <EdgeInspector
+                            selectedEdgeId={inspectorEdgeId}
+                            onClose={closeEdgeInspector}
+                        />
+                    ) : (
+                        <NodeInspector
+                            selectedNodeId={inspectorNodeId}
+                            validationIssues={selectedNodeIssues}
+                            onClose={closeNodeInspector}
+                            onAiDraftAccepted={openNextStepsAfterDraftAccept}
+                        />
+                    )}
                 </Panel>
                 <SourceDraftReviewPanel />
             </ReactFlow>

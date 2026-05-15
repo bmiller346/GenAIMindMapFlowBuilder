@@ -5075,6 +5075,36 @@ img:hover {
   opacity: 0.8;
 }
 
+.edge-inspector-detail {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.edge-inspector-detail span,
+.edge-inspector-source-list span,
+.edge-inspector-source-list small {
+  font-size: 0.72rem;
+  font-weight: 800;
+  opacity: 0.7;
+}
+
+.edge-inspector-detail strong {
+  font-size: 0.9rem;
+}
+
+.edge-inspector-source-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.edge-inspector-source-list li {
+  display: grid;
+  gap: 0.2rem;
+}
+
 .node-task-metadata-card {
   border: 1px solid var(--question-border);
   border-radius: 0.5rem;

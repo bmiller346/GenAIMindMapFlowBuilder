@@ -222,6 +222,7 @@ const useStore = create((set, get) => ({
     nudgePreferences: getNudgePreferences(),
     selectedBranchId: undefined,
     inspectorNodeId: undefined,
+    inspectorEdgeId: undefined,
     workspaceBrief: {
         configured: false,
         preset: 'custom',
@@ -317,7 +318,16 @@ const useStore = create((set, get) => ({
         set({ selectedBranchId });
     },
     setInspectorNodeId: (inspectorNodeId) => {
-        set({ inspectorNodeId });
+        set({
+            inspectorNodeId,
+            inspectorEdgeId: inspectorNodeId ? undefined : get().inspectorEdgeId
+        });
+    },
+    setInspectorEdgeId: (inspectorEdgeId) => {
+        set({
+            inspectorEdgeId,
+            inspectorNodeId: inspectorEdgeId ? undefined : get().inspectorNodeId
+        });
     },
     setWorkspaceBrief: (workspaceBrief) => {
         set({ workspaceBrief });

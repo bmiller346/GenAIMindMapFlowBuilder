@@ -33,8 +33,10 @@ import {
     getPromptProfilesForScope
 } from '../prompts/promptsModel';
 import {
+    buildAIDraftMemoryContext,
     buildAIDraftSessionRequestPayload,
-    createAIDraftSession
+    createAIDraftSession,
+    inferAIDraftChangeIntent
 } from '../utils/aiDraftSessions';
 import {
     createWorkspaceEdge,
@@ -922,6 +924,20 @@ const ResponseNode = ({ id, data }) => {
             ? workspaceData.sourceRefs || []
             : [];
         const childEdges = edges.filter((edge) => edge.source === id);
+        const changeIntent = inferAIDraftChangeIntent(
+            localPrompt,
+            activeAIDraftSession?.session_id ? 'update' : 'supplement'
+        );
+        const memoryContext = buildAIDraftMemoryContext({
+            nodes,
+            edges,
+            scope: normalizedScope,
+            sourceRefs,
+            activeDraftSession: activeAIDraftSession,
+            prompt: localPrompt,
+            changeIntent,
+            outputMode: 'inline_node_prompt'
+        });
         const suggestions = getFollowUpSuggestions(
             role,
             selectedAction,
@@ -989,6 +1005,8 @@ const ResponseNode = ({ id, data }) => {
                 role_id: role.id,
                 action_label: selectedAction.label,
                 preview_mode: 'inline_node_prompt',
+                change_intent: changeIntent,
+                follow_up_memory: memoryContext,
                 source_node_id: id
             }
         });
@@ -1015,6 +1033,8 @@ const ResponseNode = ({ id, data }) => {
             assumptions: [`User instruction: ${localPrompt}`],
             metadata: {
                 preview_mode: 'inline_node_prompt',
+                change_intent: changeIntent,
+                follow_up_memory: memoryContext,
                 model: 'auto',
                 model_tier: 'auto',
                 model_reason: 'Inline node prompt uses automatic model selection.'
@@ -1056,7 +1076,14 @@ const ResponseNode = ({ id, data }) => {
                 action: selectedAction,
                 scope: normalizedScope,
                 prompt: localPrompt,
-                selectedModel: 'auto'
+                selectedModel: 'auto',
+                memoryContext,
+                changeIntent,
+                metadata: {
+                    preview_mode: 'inline_node_prompt',
+                    change_intent: changeIntent,
+                    follow_up_memory: memoryContext
+                }
             });
             const response = flowId
                 ? await axios.post(

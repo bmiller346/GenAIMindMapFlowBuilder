@@ -24,6 +24,10 @@ import {
     createSourceUndoHandler,
     createSourceUndoSnapshot
 } from '../utils/sourceOperationActivity';
+import {
+    sourceRecordFromUpload,
+    stageUploadedSourceReconciliationPreview
+} from '../utils/sourceReconciliationPreview';
 
 const ImgModal = () => {
 const flowId = flowStore((s) => s.flow_id);
@@ -211,6 +215,10 @@ const flowId = flowStore((s) => s.flow_id);
     };
 
     const manageNodes = (data) => {
+        const sourceRecord = sourceRecordFromUpload(data, file, flowId, {
+            fallbackType: 'img',
+            fallbackTypeLabel: 'Image'
+        });
         const node = {
             id: data.component_id,
             position: { x: 0, y: 0 },
@@ -220,15 +228,24 @@ const flowId = flowStore((s) => s.flow_id);
                 content: file.name,
                 flow_id: flowId,
                 prompt: 'Research Assistant',
-                file: file
+                file: file,
+                component_id: data.component_id,
+                source_document_id: sourceRecord.id,
+                source_document: sourceRecord.metadata,
+                document_chunks: sourceRecord.chunks,
+                source_segments: sourceRecord.segments
             }
         };
+        const nextNodes = nodes.length === 0 ? [node] : [...nodes, node];
         if (nodes.length === 0) {
-            setNodes([node]);
+            setNodes(nextNodes);
         } else {
-            const newArr = [...nodes, node];
-            setNodes(newArr);
+            setNodes(nextNodes);
         }
+        void stageUploadedSourceReconciliationPreview({
+            sourceRecord,
+            nodes: nextNodes
+        });
 
         setTrigger(!trigger);
         popNode();
