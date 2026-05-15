@@ -642,6 +642,13 @@ export const getTaskPreviewRows = (projection) =>
             };
         });
 
+export const getTaskCandidateRows = (projection) => {
+    const confirmedIds = new Set(getTaskRows(projection).map((node) => node.id));
+    return getTaskPreviewRows(projection).filter(
+        (node) => node.included && !confirmedIds.has(node.id)
+    );
+};
+
 export const getChecklistPreviewRows = (projection) => {
     const childCountByNode = projection.edges.reduce((counts, edge) => {
         counts.set(edge.source, (counts.get(edge.source) || 0) + 1);

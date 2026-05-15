@@ -30,14 +30,18 @@ import flowStore from '../stores/flowStore';
 import { createWorkspaceNode, getRootPosition } from '../utils/manualNodes';
 
 const CORE_VIEWS = [
-    { id: 'mindmap', label: 'Mind Map', detail: 'Hierarchical canvas lens' },
-    { id: 'knowledgeGraph', label: 'Knowledge Graph', detail: 'Entity and relationship lens' },
-    { id: 'outline', label: 'Outline', detail: 'Hierarchy as rows' },
-    { id: 'tasks', label: 'Tasks', detail: 'Accepted task fields' },
-    { id: 'table', label: 'Table', detail: 'Accepted node fields' }
+    { id: 'mindmap', label: 'Mind Map', detail: 'Map the workspace structure', group: 'Explore' },
+    { id: 'knowledgeGraph', label: 'Connections', detail: 'Find relationships and overlaps', group: 'Explore' },
+    { id: 'outline', label: 'Outline', detail: 'Review hierarchy as an outline', group: 'Review' },
+    { id: 'table', label: 'Table', detail: 'View graph as table rows', group: 'Review' },
+    { id: 'tasks', label: 'Tasks', detail: 'Act on confirmed and potential tasks', group: 'Act' }
 ];
 
 const CANVAS_VIEW_IDS = new Set(CORE_VIEWS.map((view) => view.id));
+const CORE_VIEW_GROUPS = ['Explore', 'Review', 'Act'].map((label) => ({
+    label,
+    views: CORE_VIEWS.filter((view) => view.group === label)
+}));
 
 const REVIEW_VIEWS = [
     { id: 'preview', label: 'Task preview' },
@@ -49,7 +53,7 @@ const REVIEW_VIEWS = [
 const AI_OUTPUT_VIEWS = [
     { id: 'connections', label: 'Find connections', detail: 'AI can propose relationship edges' },
     { id: 'flowchart', label: 'Create flow chart', detail: 'AI can infer process structure' },
-    { id: 'chartData', label: 'Extract chart data', detail: 'AI can extract structured chart rows' },
+    { id: 'chartData', label: 'Create structured table', detail: 'AI can infer table columns and rows' },
     { id: 'preview', label: 'Generate task preview', detail: 'AI or local task projection' },
     { id: 'checklist', label: 'Create checklist', detail: 'AI or local checklist projection' }
 ];
@@ -108,9 +112,16 @@ const HANDOFF_VIEWS = [
 ];
 
 const WORKSPACE_OUTPUT_GROUPS = [
-    { label: 'Generate', views: AI_OUTPUT_VIEWS },
-    { label: 'Review', views: REVIEW_VIEWS.filter((view) => view.id !== 'preview') },
-    { label: 'Handoff', views: HANDOFF_VIEWS }
+    { label: 'Explore', views: AI_OUTPUT_VIEWS.filter((view) => ['connections', 'flowchart'].includes(view.id)) },
+    {
+        label: 'Review',
+        views: [
+            ...REVIEW_VIEWS.filter((view) => view.id !== 'preview'),
+            ...AI_OUTPUT_VIEWS.filter((view) => view.id === 'chartData')
+        ]
+    },
+    { label: 'Act', views: AI_OUTPUT_VIEWS.filter((view) => ['preview', 'checklist'].includes(view.id)) },
+    { label: 'Share', views: HANDOFF_VIEWS }
 ];
 
 const WORKSPACE_OUTPUT_OPTIONS = WORKSPACE_OUTPUT_GROUPS.flatMap((group) => group.views);
@@ -407,6 +418,16 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
         [acceptedPreviewIds, allPreviewIds, generatedTaskPreview, previewRows, projection.edges.length]
     );
 
+    const selectedBranchNode = useMemo(
+        () => nodes.find((node) => node.id === selectedBranchId),
+        [nodes, selectedBranchId]
+    );
+    const selectedBranchTitle =
+        selectedBranchNode?.data?.title ||
+        selectedBranchNode?.data?.label ||
+        selectedBranchNode?.data?.content ||
+        projection.nodes.find((node) => node.id === selectedBranchId)?.title ||
+        '';
     const selectedRoot = projection.nodes.find((node) => node.id === selectedBranchId);
     const activePreviewIds =
         acceptedPreviewIds.size > 0 ? acceptedPreviewIds : allPreviewIds;
@@ -418,7 +439,6 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
     const activeCanvasOption = CORE_VIEWS.find((view) => view.id === activeCanvasView);
     const showCanvasNudges = isNudgeCategoryEnabled(nudgePreferences, 'canvas');
     const showTaskNudges = isNudgeCategoryEnabled(nudgePreferences, 'tasks');
-
     useEffect(() => {
         if (!filtersOpen && !outputMenuOpen) {
             return undefined;
@@ -441,6 +461,30 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
             ? activeGraphFilters.filter((id) => id !== filterId)
             : [...activeGraphFilters, filterId];
         setActiveGraphFilters(nextFilters);
+    };
+    const activeScopeItems = useMemo(() => {
+        const items = [];
+        if (selectedBranchId) {
+            items.push({
+                id: 'selected-branch',
+                label: `Selected branch: ${selectedBranchTitle || selectedBranchId}`,
+                onClear: () => setSelectedBranchId(undefined)
+            });
+        }
+        activeGraphFilters.forEach((filterId) => {
+            const filter = GRAPH_FILTERS.find((item) => item.id === filterId);
+            items.push({
+                id: filterId,
+                label: filter?.label || filterId,
+                onClear: () => toggleGraphFilter(filterId)
+            });
+        });
+        return items;
+    }, [activeGraphFilters, selectedBranchId, selectedBranchTitle, toggleGraphFilter]);
+
+    const clearScopeAndFilters = () => {
+        setSelectedBranchId(undefined);
+        setActiveGraphFilters([]);
     };
 
     const togglePreviewRow = (nodeId) => {
@@ -614,18 +658,23 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                 <div className="local-view-taxonomy" role="navigation" aria-label="Workspace lenses and outputs">
                     <div className="local-view-primary-row">
                         <div className="local-view-section local-view-section-views">
-                            <span>Canvas</span>
+                            <span>Make it useful</span>
                             <div className="local-view-tabs" role="tablist" aria-label="Canvas views">
-                                {CORE_VIEWS.map((view) => (
-                                    <button
-                                        key={view.id}
-                                        type="button"
-                                        title={view.detail}
-                                        className={activeCanvasView === view.id ? 'active' : ''}
-                                        onClick={() => setActiveCanvasView(view.id)}
-                                    >
-                                        {view.label}
-                                    </button>
+                                {CORE_VIEW_GROUPS.map((group) => (
+                                    <div key={group.label} className="local-intent-group">
+                                        <small>{group.label}</small>
+                                        {group.views.map((view) => (
+                                            <button
+                                                key={view.id}
+                                                type="button"
+                                                title={view.detail}
+                                                className={activeCanvasView === view.id ? 'active' : ''}
+                                                onClick={() => setActiveCanvasView(view.id)}
+                                            >
+                                                {view.label}
+                                            </button>
+                                        ))}
+                                    </div>
                                 ))}
                             </div>
                         </div>
@@ -660,14 +709,14 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                     </div>
                     <div className="local-view-output-row">
                         <div className="local-view-section local-view-section-output">
-                            <span>{outputModeValue ? 'Review surface' : 'Create / Review'}</span>
+                            <span>{outputModeValue ? 'Next action' : 'Improve workspace'}</span>
                             <button
                                 type="button"
                                 className={`local-output-menu-button ${outputMenuOpen || outputModeValue ? 'active' : ''}`}
                                 onClick={() => setOutputMenuOpen((open) => !open)}
                                 aria-expanded={outputMenuOpen}
                             >
-                                <span>{activeOutputOption?.label || `Use ${activeCanvasOption?.label || 'canvas'}`}</span>
+                                <span>{activeOutputOption?.label || `Use ${activeCanvasOption?.label || 'workspace'}`}</span>
                                 <span className="local-filter-menu-caret" aria-hidden="true">
                                     {outputMenuOpen ? '^' : 'v'}
                                 </span>
@@ -763,21 +812,32 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                 </div>
             ) : null}
 
-            {activeGraphFilters.length > 0 && !filtersOpen ? (
-                <div className="local-active-filter-strip" aria-label="Active graph filters">
-                    {activeGraphFilters.map((filterId) => {
-                        const filter = GRAPH_FILTERS.find((item) => item.id === filterId);
-                        return (
+            {!filtersOpen ? (
+                <div className="local-active-filter-strip" aria-label="Current scope and filters">
+                    <span>Showing:</span>
+                    {activeScopeItems.length > 0 ? (
+                        activeScopeItems.map((item) => (
+                            <button
+                                key={item.id}
+                                type="button"
+                                onClick={item.onClear}
+                                title="Remove"
+                            >
+                                {item.label} x
+                            </button>
+                        ))
+                    ) : (
+                        <small>Whole workspace</small>
+                    )}
+                    {activeScopeItems.length > 0 ? (
                         <button
-                            key={filterId}
                             type="button"
-                            onClick={() => toggleGraphFilter(filterId)}
-                            title="Remove filter"
+                            className="local-clear-scope-filters"
+                            onClick={clearScopeAndFilters}
                         >
-                            {filter?.label || filterId}
+                            Clear all
                         </button>
-                        );
-                    })}
+                    ) : null}
                 </div>
             ) : null}
 
@@ -906,7 +966,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                     <strong>
                         {activeView === 'flowchart'
                             ? 'Create flow chart'
-                            : 'Extract chart data'}
+                            : 'Create structured table'}
                     </strong>
                     <span>
                         This output needs AI enrichment. Generate a preview first, then review
@@ -920,7 +980,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode }) => {
                         >
                             {activeView === 'flowchart'
                                 ? 'Ask AI to draft flow chart'
-                                : 'Ask AI to extract chart data'}
+                                : 'Ask AI to create table'}
                         </button>
                         <button type="button" onClick={() => setActiveView('gaps')}>
                             Review missing fields

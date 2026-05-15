@@ -362,7 +362,7 @@ const requestImmediateWorkspaceSave = () => {
     }, 50);
 };
 
-const AiDraftSessionPanel = ({ session, onClose }) => {
+const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -607,6 +607,7 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
             clearActiveAIDraftSession();
             clearGeneratedHelperPreview('nodeAiActionRequest');
             setActiveView(canvasForDraft(session, revision, activeCanvasView));
+            onAccepted?.({ session, result, mode });
             onClose?.();
         } catch (error) {
             const fallback = acceptAIDraftSession({
@@ -634,6 +635,7 @@ const AiDraftSessionPanel = ({ session, onClose }) => {
             clearActiveAIDraftSession();
             clearGeneratedHelperPreview('nodeAiActionRequest');
             setActiveView(canvasForDraft(session, revision, activeCanvasView));
+            onAccepted?.({ session, result: fallback, mode, localFallback: true });
             onClose?.();
         } finally {
             setIsAccepting(false);

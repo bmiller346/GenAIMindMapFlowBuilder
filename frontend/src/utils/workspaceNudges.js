@@ -229,7 +229,7 @@ export const getProjectionReadiness = (projection, workspaceBrief = {}, taskMeta
                 hasRenderableChart(projection) || hasStructuredRows(projection)
                     ? []
                     : [{ field: 'structured_or_extracted_data' }],
-            enrichmentLabel: 'Extract chart data',
+            enrichmentLabel: 'Create structured table',
             generationLabel: 'Create chart'
         })
     };

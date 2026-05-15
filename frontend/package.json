@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "test:source-library": "node --test tests/sourceLibraryProjection.test.mjs",
+    "test:graph-projection": "node --test tests/graphProjection.test.mjs",
     "test:manual-nodes": "node --test tests/manualNodes.test.mjs",
     "test:flow-snapshots": "node --test tests/flowSnapshots.test.mjs",
     "test:e2e": "playwright test",

@@ -46,6 +46,18 @@ import useAutomationStore from './stores/automationStore';
 
 const CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'outline', 'tasks', 'table']);
 const STRUCTURED_CANVAS_VIEWS = new Set(['outline', 'tasks', 'table']);
+const STRUCTURED_AI_PRESETS = {
+    tasks: {
+        role: 'task-planner',
+        action: 'generate_tasks',
+        scope: 'branch'
+    },
+    table: {
+        role: 'data-table-interpreter',
+        action: 'interpret_table_data',
+        scope: 'workspace'
+    }
+};
 const TASK_CANVAS_TYPES = new Set([
     'task',
     'procedure',
@@ -282,6 +294,7 @@ const App = () => {
     const [selectedCanvasNodes, setSelectedCanvasNodes] = useState([]);
     const [validationReport, setValidationReport] = useState();
     const [workspaceDockTab, setWorkspaceDockTab] = useState('sources');
+    const [nextStepsOpenToken, setNextStepsOpenToken] = useState(0);
     const reactFlow = useReactFlow();
     const { fitView } = useReactFlow();
     const popNode = modalStore((s) => s.popNode);
@@ -460,6 +473,33 @@ const App = () => {
         });
     }, [pushNode, selectedVisibleNodes]);
 
+    const openStructuredAiPreset = useCallback(
+        (presetKey) => {
+            const preset = STRUCTURED_AI_PRESETS[presetKey];
+            if (!preset || !flow_id) {
+                return;
+            }
+            const preferredScope =
+                preset.scope === 'branch' && selectedBranchId ? 'branch' : preset.scope;
+            pushNode(PromptModal, {
+                scope: preferredScope,
+                nodeId: preferredScope === 'branch' ? selectedBranchId : undefined,
+                initialRoleId: preset.role,
+                initialActionId: preset.action
+            });
+            recordActivity({
+                type: 'ai_action_picker_opened',
+                title: 'Workspace Ask AI opened',
+                summary: `Opened preview-first AI action: ${preset.action}.`,
+                metadata: {
+                    scope: preferredScope,
+                    action: preset.action || ''
+                }
+            });
+        },
+        [flow_id, pushNode, recordActivity, selectedBranchId]
+    );
+
     const fitSelectedNodes = useCallback(() => {
         const selectedIds = new Set(selectedVisibleNodes.map((node) => node.id));
         if (selectedIds.size === 0) {
@@ -470,6 +510,11 @@ const App = () => {
             reactFlow.fitView({ nodes: flowNodes, duration: 360, maxZoom: 1.12 });
         }
     }, [reactFlow, selectedVisibleNodes]);
+
+    const openNextStepsAfterDraftAccept = useCallback(() => {
+        setIsAiHelpersOpen(true);
+        setNextStepsOpenToken((token) => token + 1);
+    }, []);
 
     const onChange = useCallback(
         ({ nodes }) => {
@@ -746,6 +791,8 @@ const App = () => {
                         activeGraphFilters={activeGraphFilters}
                         selectedBranchId={selectedBranchId}
                         onOpenNode={focusNodeForReview}
+                        onGenerateTaskCandidates={() => openStructuredAiPreset('tasks')}
+                        onCreateStructuredTable={() => openStructuredAiPreset('table')}
                     />
                 ) : null}
                 <Panel position="top-left" style={{ display: 'block' }}>
@@ -856,6 +903,8 @@ const App = () => {
                     <AiHelpersPanel
                         hidden={!isAiHelpersOpen}
                         selectedNodes={selectedNodes || []}
+                        autoOpenToken={nextStepsOpenToken}
+                        summaryLabel={nextStepsOpenToken ? 'Next steps' : 'AI Helpers'}
                     />
                 </Panel>
                 <Panel
@@ -866,6 +915,7 @@ const App = () => {
                         selectedNodeId={inspectorNodeId}
                         validationIssues={selectedNodeIssues}
                         onClose={closeNodeInspector}
+                        onAiDraftAccepted={openNextStepsAfterDraftAccept}
                     />
                 </Panel>
                 <SourceDraftReviewPanel />

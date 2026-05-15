@@ -175,7 +175,7 @@ const requestImmediateWorkspaceSave = () => {
     }, 50);
 };
 
-const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
+const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDraftAccepted }) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -654,6 +654,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                         <AiDraftSessionPanel
                             session={activeAIDraftSession}
                             onClose={onClose}
+                            onAccepted={onAiDraftAccepted}
                         />
                     ) : null}
                     {renderAIActionPreview()}
@@ -692,6 +693,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                     <AiDraftSessionPanel
                         session={activeAIDraftSession}
                         onClose={onClose}
+                        onAccepted={onAiDraftAccepted}
                     />
                 </div>
             </aside>
@@ -720,6 +722,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose }) => {
                     <AiDraftSessionPanel
                         session={activeAIDraftSession}
                         onClose={onClose}
+                        onAccepted={onAiDraftAccepted}
                     />
                 ) : null}
                 <label>

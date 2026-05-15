@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
@@ -76,7 +76,7 @@ const sourceTitleFromNode = (node = {}) =>
     node.id ||
     'Selected source';
 
-const AiHelpersPanel = ({ hidden, selectedNodes = [] }) => {
+const AiHelpersPanel = ({ hidden, selectedNodes = [], autoOpenToken = 0, summaryLabel = 'AI Helpers' }) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -107,6 +107,12 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [] }) => {
     const [runningActionId, setRunningActionId] = useState('');
     const [actionError, setActionError] = useState('');
     const [scopeType, setScopeType] = useState('workspace');
+
+    useEffect(() => {
+        if (autoOpenToken) {
+            setIsOpen(true);
+        }
+    }, [autoOpenToken]);
 
     const projection = useMemo(
         () => buildGraphProjection(nodes, edges, selectedBranchId),
@@ -280,10 +286,10 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [] }) => {
                 ),
                 helperAction(
                     'extract-chart-data',
-                    'Extract chart data',
+                    'Create structured table',
                     'chartData',
                     projection.nodes.filter((node) => node.table_rows?.length).length,
-                    'Prepared chart data extraction target.'
+                    'Prepared structured table generation target.'
                 )
             ]
         },
@@ -527,7 +533,7 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [] }) => {
                 onClick={() => setIsOpen((current) => !current)}
                 aria-expanded={isOpen}
             >
-                <span>AI Helpers</span>
+                <span>{summaryLabel}</span>
                 <strong>{selectedRoot ? selectedRoot.title : 'Whole graph'}</strong>
             </button>
             {isOpen ? (

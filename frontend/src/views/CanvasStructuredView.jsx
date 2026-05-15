@@ -1,5 +1,9 @@
 import { useMemo } from 'react';
-import { buildFilteredGraphProjection, getTaskRows } from './graphProjection.js';
+import {
+    buildFilteredGraphProjection,
+    getTaskCandidateRows,
+    getTaskRows
+} from './graphProjection.js';
 
 const VIEW_LABELS = {
     outline: 'Outline',
@@ -31,15 +35,6 @@ const tableShapeLabel = (node) => {
 const summaryText = (node) => {
     const value = node.summary || node.query || '';
     return typeof value === 'string' ? value : '';
-};
-
-const taskRowsForProjection = (projection) => {
-    const typedRows = getTaskRows(projection);
-    if (typedRows.length > 0) {
-        return typedRows;
-    }
-
-    return projection.nodes.filter((node) => node.node_type !== 'reference');
 };
 
 const OutlineItem = ({ node, projection, depth, onOpenNode }) => {
@@ -92,7 +87,9 @@ const CanvasStructuredView = ({
     edges = [],
     activeGraphFilters = [],
     selectedBranchId,
-    onOpenNode
+    onOpenNode,
+    onGenerateTaskCandidates,
+    onCreateStructuredTable
 }) => {
     const projection = useMemo(
         () =>
@@ -102,7 +99,11 @@ const CanvasStructuredView = ({
             }),
         [activeGraphFilters, edges, nodes, selectedBranchId]
     );
-    const taskRows = useMemo(() => taskRowsForProjection(projection), [projection]);
+    const taskRows = useMemo(() => getTaskRows(projection), [projection]);
+    const potentialTaskRows = useMemo(
+        () => getTaskCandidateRows(projection).slice(0, 24),
+        [projection]
+    );
     const label = VIEW_LABELS[view] || 'Structured view';
 
     if (nodes.length === 0) {
@@ -117,13 +118,24 @@ const CanvasStructuredView = ({
         <section className="canvas-structured-view" aria-label={label}>
             <header className="canvas-structured-header">
                 <div>
-                    <span>Workspace projection</span>
+                    <span>
+                        {view === 'table' ? 'View graph as table' : 'Workspace projection'}
+                    </span>
                     <strong>{label}</strong>
                 </div>
                 <p>
                     {projection.nodes.length} nodes, {projection.edges.length} links
                     {activeGraphFilters.length ? `, ${activeGraphFilters.length} filters` : ''}
                 </p>
+                {view === 'table' ? (
+                    <button
+                        type="button"
+                        className="canvas-structured-header-action"
+                        onClick={onCreateStructuredTable}
+                    >
+                        Create structured table
+                    </button>
+                ) : null}
             </header>
 
             {view === 'outline' ? (
@@ -141,36 +153,74 @@ const CanvasStructuredView = ({
             ) : null}
 
             {view === 'tasks' ? (
-                <div className="canvas-structured-table-wrap">
-                    <table className="canvas-structured-table">
-                        <thead>
-                            <tr>
-                                <th>Task</th>
-                                <th>Type</th>
-                                <th>Status</th>
-                                <th>Owner</th>
-                                <th>Due</th>
-                                <th>Source</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {taskRows.map((row) => (
-                                <tr key={row.id}>
-                                    <td>
-                                        <button type="button" onClick={() => onOpenNode?.(row.id)}>
-                                            {row.title}
-                                        </button>
-                                        {summaryText(row) ? <p>{summaryText(row)}</p> : null}
-                                    </td>
-                                    <td>{rowTypeLabel(row)}</td>
-                                    <td>{row.status || '-'}</td>
-                                    <td>{row.owner_id || '-'}</td>
-                                    <td>{row.due_date || '-'}</td>
-                                    <td>{sourceLabel(row)}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                <div className="canvas-structured-task-surface">
+                    <section className="canvas-structured-task-section">
+                        <div className="canvas-structured-section-header">
+                            <strong>Confirmed tasks</strong>
+                            <span>{taskRows.length}</span>
+                        </div>
+                        {taskRows.length > 0 ? (
+                            <div className="canvas-structured-table-wrap">
+                                <table className="canvas-structured-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Task</th>
+                                            <th>Type</th>
+                                            <th>Status</th>
+                                            <th>Owner</th>
+                                            <th>Due</th>
+                                            <th>Source</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {taskRows.map((row) => (
+                                            <tr key={row.id}>
+                                                <td>
+                                                    <button type="button" onClick={() => onOpenNode?.(row.id)}>
+                                                        {row.title}
+                                                    </button>
+                                                    {summaryText(row) ? <p>{summaryText(row)}</p> : null}
+                                                </td>
+                                                <td>{rowTypeLabel(row)}</td>
+                                                <td>{row.status || '-'}</td>
+                                                <td>{row.owner_id || '-'}</td>
+                                                <td>{row.due_date || '-'}</td>
+                                                <td>{sourceLabel(row)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ) : (
+                            <div className="canvas-structured-empty inline">
+                                <strong>No tasks yet</strong>
+                                <span>Create task candidates from the graph, then accept the ones that should become canonical.</span>
+                                <button type="button" onClick={onGenerateTaskCandidates}>
+                                    Generate task candidates
+                                </button>
+                            </div>
+                        )}
+                    </section>
+                    {potentialTaskRows.length > 0 ? (
+                        <section className="canvas-structured-task-section">
+                            <div className="canvas-structured-section-header">
+                                <strong>Potential tasks</strong>
+                                <span>{potentialTaskRows.length}</span>
+                            </div>
+                            <div className="canvas-structured-potential-list">
+                                {potentialTaskRows.map((row) => (
+                                    <button
+                                        key={row.id}
+                                        type="button"
+                                        onClick={() => onOpenNode?.(row.id)}
+                                    >
+                                        <strong>{row.title}</strong>
+                                        <span>{rowTypeLabel(row)} · candidate</span>
+                                    </button>
+                                ))}
+                            </div>
+                        </section>
+                    ) : null}
                 </div>
             ) : null}
 
