@@ -1,5 +1,5 @@
 /* eslint-disable react/prop-types */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getSourceRepairPreviewRows } from './graphProjection';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
 import {
@@ -105,6 +105,9 @@ const sourceOnlyChunksFromPreview = (generatedPreview) =>
         ? generatedPreview.metadata.source_only_chunks.filter(Boolean)
         : [];
 
+const sourceOnlyChunkKey = (chunk, index) =>
+    chunk.chunk_id || `${chunk.source_id || 'source'}-${chunk.section || 'section'}-${index}`;
+
 const titleFromSourceChunk = (chunk, index) =>
     chunk.section || `Source section ${index + 1}`;
 
@@ -146,12 +149,24 @@ const SourceRepairPreview = ({
         [previewRows]
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
+    const [selectedSourceOnlyIds, setSelectedSourceOnlyIds] = useState(new Set());
     const [applyMode, setApplyMode] = useState('update_matches');
     const [modeMessage, setModeMessage] = useState('');
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
     const sourceOnlyChunks = useMemo(
         () => sourceOnlyChunksFromPreview(generatedPreview),
         [generatedPreview]
+    );
+    const sourceOnlyChunkIds = useMemo(
+        () => sourceOnlyChunks.map((chunk, index) => sourceOnlyChunkKey(chunk, index)),
+        [sourceOnlyChunks]
+    );
+    const selectedSourceOnlyChunks = useMemo(
+        () =>
+            sourceOnlyChunks.filter((chunk, index) =>
+                selectedSourceOnlyIds.has(sourceOnlyChunkKey(chunk, index))
+            ),
+        [selectedSourceOnlyIds, sourceOnlyChunks]
     );
     const diffSummary = useMemo(
         () =>
@@ -168,6 +183,17 @@ const SourceRepairPreview = ({
     const addActivity = useActivityStore((s) => s.addActivity);
     const flowId = flowStore((s) => s.flow_id);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
+    const isSourceOnlyMode = applyMode !== 'update_matches';
+    const sourceOnlyModeBlocked = isSourceOnlyMode && selectedSourceOnlyChunks.length === 0;
+    const sourceOnlyModeMessage =
+        modeMessage ||
+        (sourceOnlyModeBlocked
+            ? 'Select at least one source-only section before applying this mode.'
+            : '');
+
+    useEffect(() => {
+        setSelectedSourceOnlyIds(new Set(sourceOnlyChunkIds));
+    }, [sourceOnlyChunkIds]);
 
     const toggleRow = (repairId) => {
         setSelectedIds(() => {
@@ -181,9 +207,26 @@ const SourceRepairPreview = ({
         });
     };
 
+    const toggleSourceOnlyChunk = (chunkId) => {
+        setSelectedSourceOnlyIds((current) => {
+            const next = new Set(current);
+            if (next.has(chunkId)) {
+                next.delete(chunkId);
+            } else {
+                next.add(chunkId);
+            }
+            return next;
+        });
+        setModeMessage('');
+    };
+
     const appendSourceOnlyNodes = ({ mode, acceptedAt }) => {
         if (!sourceOnlyChunks.length) {
             setModeMessage('No uncited source sections are available for this mode.');
+            return false;
+        }
+        if (!selectedSourceOnlyChunks.length) {
+            setModeMessage('Select at least one source-only section before applying this mode.');
             return false;
         }
 
@@ -222,7 +265,7 @@ const SourceRepairPreview = ({
             const keptEdges = baseEdges.filter(
                 (edge) => !childIds.has(edge.source) && !childIds.has(edge.target)
             );
-            sourceOnlyChunks.forEach((chunk, index) => {
+            selectedSourceOnlyChunks.forEach((chunk, index) => {
                 const node = createWorkspaceNode({
                     title: titleFromSourceChunk(chunk, index),
                     nodeType: 'needs_review',
@@ -263,7 +306,7 @@ const SourceRepairPreview = ({
             parentId = parent.id;
         }
 
-        sourceOnlyChunks.forEach((chunk, index) => {
+        selectedSourceOnlyChunks.forEach((chunk, index) => {
             const node = createWorkspaceNode({
                 title: titleFromSourceChunk(chunk, index),
                 nodeType: 'needs_review',
@@ -312,8 +355,8 @@ const SourceRepairPreview = ({
             addActivity({
                 status: 'completed',
                 title: 'Applied source reconciliation',
-                detail: `Applied ${sourceOnlyChunks.length} source-only section${
-                    sourceOnlyChunks.length === 1 ? '' : 's'
+                detail: `Applied ${selectedSourceOnlyChunks.length} source-only section${
+                    selectedSourceOnlyChunks.length === 1 ? '' : 's'
                 } with ${SOURCE_RECONCILIATION_MODES.find((mode) => mode.id === applyMode)?.label}.`,
                 context: 'Helper: Source Librarian'
             });
@@ -413,7 +456,7 @@ const SourceRepairPreview = ({
                 <span className="output-state-pill">
                     {generatedPreview ? 'AI-generated' : 'Accepted workspace'}
                 </span>
-                <button type="button" onClick={acceptRepairs}>
+                <button type="button" onClick={acceptRepairs} disabled={sourceOnlyModeBlocked}>
                     {applyMode === 'update_matches' ? 'Accept selected' : 'Apply mode'}
                 </button>
                 {generatedPreview ? (
@@ -435,8 +478,8 @@ const SourceRepairPreview = ({
                     <div>
                         <strong>Apply mode</strong>
                         <span>
-                            {sourceOnlyChunks.length} source-only section
-                            {sourceOnlyChunks.length === 1 ? '' : 's'} available for supplement or comparison.
+                            {selectedSourceOnlyChunks.length} of {sourceOnlyChunks.length} source-only section
+                            {sourceOnlyChunks.length === 1 ? '' : 's'} selected for supplement or comparison.
                         </span>
                     </div>
                     <div className="source-reconcile-mode-grid">
@@ -459,7 +502,7 @@ const SourceRepairPreview = ({
                             </button>
                         ))}
                     </div>
-                    {modeMessage ? <small>{modeMessage}</small> : null}
+                    {sourceOnlyModeMessage ? <small>{sourceOnlyModeMessage}</small> : null}
                 </div>
             ) : null}
             {sourceOnlyChunks.length ? (
@@ -471,14 +514,48 @@ const SourceRepairPreview = ({
                             additions, comparison material, or replacement candidates.
                         </span>
                     </div>
+                    <div className="source-only-section-actions">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSelectedSourceOnlyIds(new Set(sourceOnlyChunkIds));
+                                setModeMessage('');
+                            }}
+                        >
+                            Select all
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSelectedSourceOnlyIds(new Set());
+                                setModeMessage('');
+                            }}
+                        >
+                            Clear
+                        </button>
+                    </div>
                     <div className="source-only-section-list">
-                        {sourceOnlyChunks.map((chunk, index) => (
-                            <article key={`${chunk.chunk_id || chunk.section || index}`}>
-                                <span>{chunk.page ? `p. ${chunk.page}` : `Section ${index + 1}`}</span>
-                                <strong>{titleFromSourceChunk(chunk, index)}</strong>
-                                <p>{bodyFromSourceChunk(chunk)}</p>
-                            </article>
-                        ))}
+                        {sourceOnlyChunks.map((chunk, index) => {
+                            const chunkId = sourceOnlyChunkKey(chunk, index);
+                            const title = titleFromSourceChunk(chunk, index);
+                            return (
+                                <article key={chunkId}>
+                                    <label className="source-only-section-row">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedSourceOnlyIds.has(chunkId)}
+                                            onChange={() => toggleSourceOnlyChunk(chunkId)}
+                                            aria-label={`Include source-only section ${title}`}
+                                        />
+                                        <span>
+                                            <span>{chunk.page ? `p. ${chunk.page}` : `Section ${index + 1}`}</span>
+                                            <strong>{title}</strong>
+                                            <p>{bodyFromSourceChunk(chunk)}</p>
+                                        </span>
+                                    </label>
+                                </article>
+                            );
+                        })}
                     </div>
                 </section>
             ) : generatedPreview ? (

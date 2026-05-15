@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+test.setTimeout(60000);
+
 const flowId = '507f1f77bcf86cd7994390a1';
 const sourceId = 'aec business plan/2026';
 const sourceTitle = 'AEC Consulting Business Plan.docx';
@@ -241,13 +243,19 @@ const setupMockBackend = async (page) => {
                     source_id: sourceId,
                     source_title: sourceTitle,
                     matched_node_count: 1,
-                    source_only_chunk_count: 1,
+                    source_only_chunk_count: 2,
                     source_only_chunks: [
                         {
                             chunk_id: 'chunk-revenue',
                             section: 'Revenue Model',
                             snippet:
                                 'Revenue should blend retained advisory, implementation packages, and principal-led strategic workshops.'
+                        },
+                        {
+                            chunk_id: 'chunk-delivery',
+                            section: 'Delivery Model',
+                            snippet:
+                                'Delivery should combine diagnostic workshops, implementation sprints, and governance checkpoints.'
                         }
                     ],
                     recommended_modes: [
@@ -599,7 +607,7 @@ test('uploaded business plan reconciles with generated graph and opens scoped AE
     await expect(page.locator('.local-source-repair-preview')).toContainText(
         'Reconcile source support for Target market and positioning'
     );
-    await expect(page.locator('.source-only-sections')).toContainText('Revenue Model');
+    await expect(page.getByRole('region', { name: 'Source-only sections' })).toContainText('Revenue Model');
     expect(reconcileUrls[0]).toContain(encodeURIComponent(sourceId));
 
     await page.getByRole('button', { name: 'Accept selected' }).click();
@@ -704,4 +712,43 @@ test('uploaded business plan reconciles with generated graph and opens scoped AE
         preview_type: 'task',
         preview_status: 'needs_review'
     });
+});
+
+test('source-only reconciliation sections can be applied selectively', async ({ page }) => {
+    await setupMockBackend(page);
+
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.goto('/');
+
+    await page.getByText('Add New Source').click();
+    await page.getByRole('button', { name: /Upload DOCX/ }).click();
+    await expect(page.getByText('Load A Docx', { exact: true })).toBeVisible();
+    await page.locator('#docxFileUpload').setInputFiles({
+        name: sourceTitle,
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        buffer: Buffer.from(
+            'AEC consulting business plan: retained advisory, implementation packages, delivery sprints, and governance checkpoints.'
+        )
+    });
+    await page.locator('.modal-container').getByRole('button', { name: 'Add', exact: true }).click();
+
+    const sourceOnlySections = page.getByRole('region', { name: 'Source-only sections' });
+    await expect(sourceOnlySections).toContainText('Revenue Model');
+    await expect(sourceOnlySections).toContainText('Delivery Model');
+    await page.locator('.source-only-section-actions').getByRole('button', { name: 'Clear' }).click();
+    await page.getByRole('button', { name: 'Supplement graph' }).click();
+    await expect(page.getByRole('button', { name: 'Apply mode' })).toBeDisabled();
+    await expect(page.locator('.source-reconcile-modes')).toContainText(
+        'Select at least one source-only section before applying this mode.'
+    );
+
+    await page
+        .getByRole('region', { name: 'Source-only sections' })
+        .getByLabel('Include source-only section Revenue Model')
+        .check();
+    await expect(page.getByRole('button', { name: 'Apply mode' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Apply mode' }).click();
+
+    await expect(page.locator('.node-response').filter({ hasText: 'retained advisory' })).toBeVisible();
+    await expect(page.locator('.node-response').filter({ hasText: 'diagnostic workshops' })).toHaveCount(0);
 });

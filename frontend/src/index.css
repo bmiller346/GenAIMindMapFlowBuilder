@@ -6901,6 +6901,23 @@ img:hover {
     gap: 8px;
 }
 
+.source-only-section-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.source-only-section-actions button {
+    border: 1px solid var(--border-subtle);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 5px 10px;
+}
+
 .source-only-section-list article {
     display: grid;
     gap: 4px;
@@ -6908,6 +6925,33 @@ img:hover {
     border-radius: 6px;
     background: var(--surface);
     padding: 9px 10px;
+}
+
+.source-only-section-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.source-only-section-row input {
+    accent-color: #eece47;
+    margin: 0;
+    margin-top: 2px;
+    width: 1.05rem;
+    height: 1.05rem;
+}
+
+.source-only-section-row > span {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+
+.source-only-section-list article:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
 }
 
 .local-projection-table {
