@@ -11,6 +11,8 @@ backend\.env
 backend/docmap_flows.json
 backend\ai-interview-poc-2b5cf8540f16.json
 ai-interview-poc-2b5cf8540f16.json
+chroma/
+sqlite_data.db
 
 # Logs
 logs
