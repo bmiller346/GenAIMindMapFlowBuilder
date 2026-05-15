@@ -69,6 +69,33 @@ def response_output_text(response: Any) -> str:
     return "".join(text_parts)
 
 
+def response_usage(response: Any) -> dict[str, int]:
+    usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+    if not usage:
+        return {}
+
+    def read_int(*keys: str) -> int:
+        for key in keys:
+            value = usage.get(key) if isinstance(usage, dict) else getattr(usage, key, None)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                return int(value)
+        return 0
+
+    input_tokens = read_int("input_tokens", "prompt_tokens")
+    output_tokens = read_int("output_tokens", "completion_tokens")
+    total_tokens = read_int("total_tokens")
+    if not total_tokens and (input_tokens or output_tokens):
+        total_tokens = input_tokens + output_tokens
+    result = {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+    return {key: value for key, value in result.items() if value}
+
+
 def _response_error_detail(response: httpx.Response) -> str:
     try:
         data = response.json()
@@ -133,4 +160,5 @@ class OpenAIResponsesDocMapProvider:
             provider=self.provider,
             raw_response=response,
             model=(response.get("model") if isinstance(response, dict) else getattr(response, "model", "")) or request.model,
+            usage=response_usage(response),
         )

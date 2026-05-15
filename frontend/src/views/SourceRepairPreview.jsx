@@ -8,6 +8,12 @@ import {
 } from './previewDiffSummary';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
+import {
+    createWorkspaceEdge,
+    createWorkspaceNode,
+    getChildPosition,
+    getRootPosition
+} from '../utils/manualNodes';
 
 const getNestedData = (data) => {
     if (data?.data && typeof data.data === 'object') {
@@ -38,6 +44,7 @@ const sourceLabel = (sourceRef) => {
 
 const mergeSourceRef = (currentRef, suggestedRef) => ({
     document_id: currentRef?.document_id || suggestedRef?.document_id || '',
+    chunk_id: currentRef?.chunk_id || suggestedRef?.chunk_id || '',
     page: currentRef?.page || suggestedRef?.page || '',
     section: currentRef?.section || suggestedRef?.section || '',
     quote_snippet:
@@ -70,12 +77,58 @@ const sourceRepairRowsFromGeneratedPreview = (generatedPreview) => {
     });
 };
 
+const SOURCE_RECONCILIATION_MODES = [
+    {
+        id: 'update_matches',
+        label: 'Update matching nodes',
+        detail: 'Apply selected source refs to existing graph nodes.'
+    },
+    {
+        id: 'supplement_graph',
+        label: 'Supplement graph',
+        detail: 'Create review nodes from uncited source sections.'
+    },
+    {
+        id: 'keep_both_for_comparison',
+        label: 'Keep both as comparison',
+        detail: 'Create a comparison branch for uncited source sections.'
+    },
+    {
+        id: 'replace_branch',
+        label: 'Replace selected branch',
+        detail: 'Replace children of the selected branch with uncited source sections.'
+    }
+];
+
+const sourceOnlyChunksFromPreview = (generatedPreview) =>
+    Array.isArray(generatedPreview?.metadata?.source_only_chunks)
+        ? generatedPreview.metadata.source_only_chunks.filter(Boolean)
+        : [];
+
+const titleFromSourceChunk = (chunk, index) =>
+    chunk.section || `Source section ${index + 1}`;
+
+const bodyFromSourceChunk = (chunk) =>
+    chunk.snippet || 'This source section needs review before it becomes accepted graph structure.';
+
+const refFromSourceChunk = (generatedPreview, chunk) => ({
+    document_id: chunk.source_id || generatedPreview?.metadata?.source_id || '',
+    chunk_id: chunk.chunk_id || '',
+    page: chunk.page || '',
+    section: chunk.section || '',
+    quote_snippet: chunk.snippet || '',
+    confidence: 'medium'
+});
+
 const SourceRepairPreview = ({
     nodes,
     projection,
     generatedPreview,
     onRejectGeneratedPreview,
+    edges,
+    selectedBranchId,
     setNodes,
+    setEdges,
     setActiveView,
     onAskAi
 }) => {
@@ -93,7 +146,13 @@ const SourceRepairPreview = ({
         [previewRows]
     );
     const [selectedIds, setSelectedIds] = useState(new Set());
+    const [applyMode, setApplyMode] = useState('update_matches');
+    const [modeMessage, setModeMessage] = useState('');
     const activeIds = selectedIds.size > 0 ? selectedIds : defaultIds;
+    const sourceOnlyChunks = useMemo(
+        () => sourceOnlyChunksFromPreview(generatedPreview),
+        [generatedPreview]
+    );
     const diffSummary = useMemo(
         () =>
             makePreviewDiffSummary({
@@ -122,12 +181,147 @@ const SourceRepairPreview = ({
         });
     };
 
+    const appendSourceOnlyNodes = ({ mode, acceptedAt }) => {
+        if (!sourceOnlyChunks.length) {
+            setModeMessage('No uncited source sections are available for this mode.');
+            return false;
+        }
+
+        const sourceTitle = generatedPreview?.metadata?.source_title || 'Uploaded source';
+        const baseNodes = [...nodes];
+        const baseEdges = [...(edges || [])];
+        const createdNodes = [];
+        const createdEdges = [];
+
+        if (mode === 'replace_branch') {
+            if (!selectedBranchId) {
+                setModeMessage('Select a branch before replacing from source.');
+                return false;
+            }
+            const childIds = new Set();
+            const collect = (parentId) => {
+                baseEdges
+                    .filter((edge) => edge.source === parentId)
+                    .forEach((edge) => {
+                        if (!childIds.has(edge.target)) {
+                            childIds.add(edge.target);
+                            collect(edge.target);
+                        }
+                    });
+            };
+            collect(selectedBranchId);
+            if (
+                childIds.size > 0 &&
+                !window.confirm(
+                    `Replace ${childIds.size} child node${childIds.size === 1 ? '' : 's'} under this branch with source-only sections?`
+                )
+            ) {
+                return false;
+            }
+            const keptNodes = baseNodes.filter((node) => !childIds.has(node.id));
+            const keptEdges = baseEdges.filter(
+                (edge) => !childIds.has(edge.source) && !childIds.has(edge.target)
+            );
+            sourceOnlyChunks.forEach((chunk, index) => {
+                const node = createWorkspaceNode({
+                    title: titleFromSourceChunk(chunk, index),
+                    nodeType: 'needs_review',
+                    body: bodyFromSourceChunk(chunk),
+                    sourceRefs: [refFromSourceChunk(generatedPreview, chunk)],
+                    position: getChildPosition([...keptNodes, ...createdNodes], keptEdges, selectedBranchId),
+                    status: 'needs_review'
+                });
+                node.data.reconciliation = {
+                    accepted_at: acceptedAt,
+                    mode,
+                    source_id: generatedPreview?.metadata?.source_id || '',
+                    source_only_chunk_id: chunk.chunk_id || ''
+                };
+                createdNodes.push(node);
+                createdEdges.push(createWorkspaceEdge(selectedBranchId, node.id));
+            });
+            setNodes([...keptNodes, ...createdNodes]);
+            setEdges([...keptEdges, ...createdEdges]);
+            return true;
+        }
+
+        let parentId = '';
+        if (mode === 'keep_both_for_comparison') {
+            const parent = createWorkspaceNode({
+                title: `Source comparison: ${sourceTitle}`,
+                nodeType: 'needs_review',
+                body: 'Source-only content staged for comparison against the accepted graph.',
+                position: getRootPosition(baseNodes),
+                status: 'needs_review'
+            });
+            parent.data.reconciliation = {
+                accepted_at: acceptedAt,
+                mode,
+                source_id: generatedPreview?.metadata?.source_id || ''
+            };
+            createdNodes.push(parent);
+            parentId = parent.id;
+        }
+
+        sourceOnlyChunks.forEach((chunk, index) => {
+            const node = createWorkspaceNode({
+                title: titleFromSourceChunk(chunk, index),
+                nodeType: 'needs_review',
+                body: bodyFromSourceChunk(chunk),
+                sourceRefs: [refFromSourceChunk(generatedPreview, chunk)],
+                position: parentId
+                    ? getChildPosition([...baseNodes, ...createdNodes], baseEdges, parentId)
+                    : {
+                          x: getRootPosition([...baseNodes, ...createdNodes]).x,
+                          y: getRootPosition([...baseNodes, ...createdNodes]).y + index * 118
+                      },
+                status: 'needs_review'
+            });
+            node.data.reconciliation = {
+                accepted_at: acceptedAt,
+                mode,
+                source_id: generatedPreview?.metadata?.source_id || '',
+                source_only_chunk_id: chunk.chunk_id || ''
+            };
+            createdNodes.push(node);
+            if (parentId) {
+                createdEdges.push(createWorkspaceEdge(parentId, node.id));
+            }
+        });
+        setNodes([...baseNodes, ...createdNodes]);
+        if (createdEdges.length) {
+            setEdges([...baseEdges, ...createdEdges]);
+        }
+        return true;
+    };
+
     const acceptRepairs = () => {
-        if (activeIds.size === 0) {
+        if (applyMode === 'update_matches' && activeIds.size === 0) {
             return;
         }
 
         const acceptedAt = new Date().toISOString();
+        if (applyMode !== 'update_matches') {
+            const applied = appendSourceOnlyNodes({ mode: applyMode, acceptedAt });
+            if (!applied) {
+                return;
+            }
+            if (flowId) {
+                setSaveStatus('dirty');
+            }
+            addActivity({
+                status: 'completed',
+                title: 'Applied source reconciliation',
+                detail: `Applied ${sourceOnlyChunks.length} source-only section${
+                    sourceOnlyChunks.length === 1 ? '' : 's'
+                } with ${SOURCE_RECONCILIATION_MODES.find((mode) => mode.id === applyMode)?.label}.`,
+                context: 'Helper: Source Librarian'
+            });
+            onRejectGeneratedPreview?.();
+            setActiveView('mindmap');
+            return;
+        }
+
         const rowsById = new Map(previewRows.map((row) => [row.id, row]));
 
         setNodes(
@@ -212,7 +406,7 @@ const SourceRepairPreview = ({
                 <div>
                     <strong>Source-reference repair</strong>
                     <span>
-                        {generatedPreview ? 'AI-generated source artifact' : 'Accepted source coverage'} |{' '}
+                    {generatedPreview ? 'AI-generated source artifact' : 'Accepted source coverage'} |{' '}
                         {previewRows.length} nodes need source repair
                     </span>
                 </div>
@@ -220,7 +414,7 @@ const SourceRepairPreview = ({
                     {generatedPreview ? 'AI-generated' : 'Accepted workspace'}
                 </span>
                 <button type="button" onClick={acceptRepairs}>
-                    Accept selected
+                    {applyMode === 'update_matches' ? 'Accept selected' : 'Apply mode'}
                 </button>
                 {generatedPreview ? (
                     <button type="button" onClick={rejectGeneratedPreview}>
@@ -229,6 +423,72 @@ const SourceRepairPreview = ({
                 ) : null}
             </div>
             <PreviewDiffSummary changes={diffSummary} />
+            {generatedPreview?.warnings?.length ? (
+                <div className="local-preview-warning">
+                    {generatedPreview.warnings.map((warning) => (
+                        <span key={warning}>{warning}</span>
+                    ))}
+                </div>
+            ) : null}
+            {generatedPreview?.metadata?.recommended_modes?.length ? (
+                <div className="source-reconcile-modes">
+                    <div>
+                        <strong>Apply mode</strong>
+                        <span>
+                            {sourceOnlyChunks.length} source-only section
+                            {sourceOnlyChunks.length === 1 ? '' : 's'} available for supplement or comparison.
+                        </span>
+                    </div>
+                    <div className="source-reconcile-mode-grid">
+                        {SOURCE_RECONCILIATION_MODES.map((mode) => (
+                            <button
+                                key={mode.id}
+                                type="button"
+                                className={applyMode === mode.id ? 'active' : ''}
+                                disabled={
+                                    mode.id !== 'update_matches' &&
+                                    sourceOnlyChunks.length === 0
+                                }
+                                onClick={() => {
+                                    setApplyMode(mode.id);
+                                    setModeMessage('');
+                                }}
+                            >
+                                <strong>{mode.label}</strong>
+                                <span>{mode.detail}</span>
+                            </button>
+                        ))}
+                    </div>
+                    {modeMessage ? <small>{modeMessage}</small> : null}
+                </div>
+            ) : null}
+            {sourceOnlyChunks.length ? (
+                <section className="source-only-sections" aria-label="Source-only sections">
+                    <div>
+                        <strong>Source-only sections</strong>
+                        <span>
+                            These document sections did not match accepted graph nodes. Keep them as reviewable
+                            additions, comparison material, or replacement candidates.
+                        </span>
+                    </div>
+                    <div className="source-only-section-list">
+                        {sourceOnlyChunks.map((chunk, index) => (
+                            <article key={`${chunk.chunk_id || chunk.section || index}`}>
+                                <span>{chunk.page ? `p. ${chunk.page}` : `Section ${index + 1}`}</span>
+                                <strong>{titleFromSourceChunk(chunk, index)}</strong>
+                                <p>{bodyFromSourceChunk(chunk)}</p>
+                            </article>
+                        ))}
+                    </div>
+                </section>
+            ) : generatedPreview ? (
+                <section className="source-only-sections compact" aria-label="Source-only sections">
+                    <div>
+                        <strong>No source-only sections</strong>
+                        <span>Every uncited source section matched an existing graph node or was already cited.</span>
+                    </div>
+                </section>
+            ) : null}
             <div className="local-table-wrap">
                 <table className="local-projection-table">
                     <thead>

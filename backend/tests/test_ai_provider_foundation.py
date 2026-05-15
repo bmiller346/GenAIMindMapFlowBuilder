@@ -11,6 +11,7 @@ from ai.responses_client import (
     build_responses_create_payload,
     post_openai_responses_json,
     response_output_text,
+    response_usage,
 )
 
 
@@ -99,7 +100,10 @@ def test_openai_responses_provider_calls_injected_client_without_network():
     class FakeResponses:
         def create(self, **payload):
             calls.append(payload)
-            return SimpleNamespace(output_text='{"nodes": []}')
+            return SimpleNamespace(
+                output_text='{"nodes": []}',
+                usage=SimpleNamespace(input_tokens=12, output_tokens=8, total_tokens=20),
+            )
 
     fake_client = SimpleNamespace(responses=FakeResponses())
     provider = OpenAIResponsesDocMapProvider(client=fake_client)
@@ -114,6 +118,7 @@ def test_openai_responses_provider_calls_injected_client_without_network():
 
     assert result.text == '{"nodes": []}'
     assert result.provider == "openai_responses"
+    assert result.usage == {"input_tokens": 12, "output_tokens": 8, "total_tokens": 20}
     assert calls == [
         {
             "model": "gpt-5.5",
@@ -189,3 +194,13 @@ def test_response_output_text_supports_raw_dict_responses():
     }
 
     assert response_output_text(response) == '{"nodes": []}'
+
+
+def test_response_usage_supports_dict_and_legacy_token_names():
+    assert response_usage(
+        {"usage": {"prompt_tokens": 7, "completion_tokens": 5}}
+    ) == {
+        "input_tokens": 7,
+        "output_tokens": 5,
+        "total_tokens": 12,
+    }

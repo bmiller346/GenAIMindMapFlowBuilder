@@ -133,6 +133,123 @@ def generate_source_librarian_preview(
     return validate_ai_helper_preview(preview)
 
 
+def generate_source_reconciliation_preview(
+    graph: dict[str, Any],
+    *,
+    source_id: str,
+    scope: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_scope = normalize_helper_scope(
+        scope or {"type": "source", "source_id": source_id}
+    )
+    document = _source_library_document(graph, source_id)
+    if not document:
+        raise GraphSchemaError([f"source_reconciliation.source_id: source '{source_id}' not found"])
+
+    source_refs_by_node = _source_reconciliation_refs_by_node(graph, document)
+    items: list[dict[str, Any]] = []
+    nodes = graph.get("nodes", []) if isinstance(graph.get("nodes"), list) else []
+    for node in nodes:
+        if not isinstance(node, dict) or node.get("node_type") == "reference":
+            continue
+        node_id = str(node.get("id") or "")
+        if not node_id:
+            continue
+        existing_refs = _node_source_refs(node)
+        has_selected_source = any(
+            str(ref.get("document_id") or "") == str(source_id)
+            for ref in existing_refs
+            if isinstance(ref, dict)
+        )
+        suggested_ref = source_refs_by_node.get(node_id)
+        if has_selected_source and not _source_issues(node):
+            continue
+        if not suggested_ref:
+            continue
+        issues = _source_issues(node)
+        if not issues:
+            issues = ["Selected source may strengthen this node"]
+        items.append(
+            {
+                "id": f"source_reconcile_{_token(source_id)}_{_token(node_id)}",
+                "preview_type": "source_repair",
+                "node_id": node_id,
+                "title": f"Reconcile source support for {node.get('title') or node_id}",
+                "rationale": (
+                    "Selected source contains overlapping language for this graph node. "
+                    "Review before applying the citation."
+                ),
+                "confidence": suggested_ref.get("confidence") or "medium",
+                "source_refs": [suggested_ref],
+                "assumptions": [],
+                "proposed_mutation": {
+                    "source_refs": [suggested_ref],
+                    "source_ref_repair": {
+                        "repair_type": "reconcile_uploaded_source",
+                        "issues": issues,
+                        "source_id": str(source_id),
+                        "suggested_from_node_id": "",
+                        "suggested_from_title": document.get("filename")
+                        or document.get("title")
+                        or str(source_id),
+                        "suggestion_relationship": "source_overlap",
+                    },
+                },
+            }
+        )
+
+    matched_node_ids = set(source_refs_by_node)
+    matched_chunk_ids = {
+        str(source_ref.get("chunk_id") or "")
+        for source_ref in source_refs_by_node.values()
+        if isinstance(source_ref, dict) and source_ref.get("chunk_id")
+    }
+    uncited_chunks = [
+        chunk
+        for chunk in document.get("chunks", [])
+        if isinstance(chunk, dict) and int(chunk.get("cited_by_count") or 0) == 0
+        and str(chunk.get("id") or chunk.get("chunk_id") or "") not in matched_chunk_ids
+    ]
+    source_only_chunks = [
+        {
+            "source_id": str(source_id),
+            "chunk_id": str(chunk.get("id") or chunk.get("chunk_id") or ""),
+            "page": chunk.get("page"),
+            "section": chunk.get("heading") or chunk.get("section") or "",
+            "snippet": str(chunk.get("snippet") or chunk.get("text") or "")[:360],
+        }
+        for chunk in uncited_chunks[:8]
+        if isinstance(chunk, dict)
+    ]
+    warnings = []
+    if source_only_chunks:
+        warnings.append(
+            f"{len(source_only_chunks)} source chunk(s) are not cited by accepted graph nodes yet. Use supplement, replace branch, or keep both as comparison after review."
+        )
+
+    return build_helper_preview(
+        helper_id="source_librarian",
+        action="source_repair",
+        scope=normalized_scope,
+        generated_by="deterministic_reconciliation",
+        preview_items=items,
+        warnings=warnings,
+        metadata={
+            "source_id": str(source_id),
+            "source_title": document.get("filename") or document.get("title") or str(source_id),
+            "matched_node_count": len(matched_node_ids),
+            "source_only_chunk_count": len(uncited_chunks),
+            "source_only_chunks": source_only_chunks,
+            "recommended_modes": [
+                "supplement_graph",
+                "update_matching_nodes",
+                "replace_branch",
+                "keep_both_for_comparison",
+            ],
+        },
+    )
+
+
 def generate_reviewer_preview(
     graph: dict[str, Any],
     *,
@@ -4078,7 +4195,7 @@ def generate_ai_draft_session_with_provider(
         prompt_profile=classification.get("requested_artifact_types", []),
         input_source_refs=_merge_source_refs(source_refs, result.get("source_refs", [])),
     )
-    return build_ai_draft_session(
+    session = build_ai_draft_session(
         workspace_id=workspace_id or _workspace_id(graph),
         prompt=prompt,
         scope=normalized_scope,
@@ -4095,6 +4212,9 @@ def generate_ai_draft_session_with_provider(
         source_refs=_merge_source_refs(source_refs, result.get("source_refs", [])),
         metadata=metadata,
     )
+    if session.get("revisions"):
+        session["revisions"][-1].setdefault("metadata", {}).update(metadata)
+    return validate_ai_draft_session(session)
 
 
 def revise_ai_draft_session_with_provider(
@@ -4174,6 +4294,7 @@ def revise_ai_draft_session_with_provider(
         draft_annotations=result["draft_annotations"],
         generated_artifacts=generated_artifacts,
         model=metadata["actual_model"],
+        metadata=metadata,
     )
     revised = append_ai_draft_revision(normalized_session, revision, prompt=prompt)
     revised["selected_model"] = metadata["actual_model"]
@@ -4381,6 +4502,7 @@ def _generate_ai_draft_revision_payload(
     )
     parsed["provider"] = generated.provider
     parsed["actual_model"] = generated.model or _model_from_raw_response(generated.raw_response) or request.model
+    parsed["usage"] = _normalize_generation_usage(generated.usage, model=parsed["actual_model"], provider=generated.provider)
     return parsed
 
 
@@ -4710,6 +4832,126 @@ def _source_library_chunks_for_scope(
     return _normalize_source_chunks(chunks)
 
 
+def _source_library_document(
+    graph: dict[str, Any],
+    source_id: str,
+) -> dict[str, Any] | None:
+    source_library = graph.get("source_library", {}) if isinstance(graph, dict) else {}
+    documents = source_library.get("documents", []) if isinstance(source_library, dict) else []
+    if not isinstance(documents, list):
+        return None
+    for document in documents:
+        if not isinstance(document, dict):
+            continue
+        document_id = str(
+            document.get("id")
+            or document.get("document_id")
+            or document.get("source_document_id")
+            or ""
+        )
+        if document_id == str(source_id):
+            return document
+    return None
+
+
+def _source_ref_from_chunk(
+    document: dict[str, Any],
+    chunk: dict[str, Any],
+    confidence: str = "medium",
+) -> dict[str, Any]:
+    document_id = str(
+        document.get("id")
+        or document.get("document_id")
+        or document.get("source_document_id")
+        or ""
+    )
+    return {
+        "document_id": document_id,
+        "chunk_id": str(chunk.get("id") or chunk.get("chunk_id") or ""),
+        "page": chunk.get("page"),
+        "section": chunk.get("heading") or chunk.get("section") or "",
+        "quote_snippet": str(
+            chunk.get("quote_snippet")
+            or chunk.get("snippet")
+            or chunk.get("text")
+            or ""
+        )[:360],
+        "confidence": confidence,
+    }
+
+
+def _token_terms(value: Any) -> set[str]:
+    text = str(value or "").lower()
+    terms = set(re.findall(r"[a-z0-9][a-z0-9_-]{2,}", text))
+    stop_words = {
+        "and",
+        "are",
+        "for",
+        "from",
+        "into",
+        "that",
+        "the",
+        "this",
+        "with",
+        "will",
+        "your",
+    }
+    return {term for term in terms if term not in stop_words}
+
+
+def _source_reconciliation_refs_by_node(
+    graph: dict[str, Any],
+    document: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    chunks = document.get("chunks", []) if isinstance(document.get("chunks"), list) else []
+    nodes = graph.get("nodes", []) if isinstance(graph.get("nodes"), list) else []
+    best_refs: dict[str, tuple[float, dict[str, Any]]] = {}
+    normalized_chunks = [chunk for chunk in chunks if isinstance(chunk, dict)]
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "")
+        if not node_id:
+            continue
+        node_terms = _token_terms(
+            " ".join(
+                [
+                    str(node.get("title") or ""),
+                    str(node.get("summary") or ""),
+                    str(node.get("body") or ""),
+                    str(node.get("node_type") or ""),
+                ]
+            )
+        )
+        if not node_terms:
+            continue
+        for chunk in normalized_chunks:
+            chunk_terms = _token_terms(
+                " ".join(
+                    [
+                        str(chunk.get("heading") or chunk.get("section") or ""),
+                        str(chunk.get("snippet") or chunk.get("text") or ""),
+                    ]
+                )
+            )
+            if not chunk_terms:
+                continue
+            overlap = len(node_terms & chunk_terms)
+            if overlap == 0:
+                continue
+            score = overlap / max(len(node_terms), 1)
+            if overlap >= 2 or score >= 0.34:
+                confidence = "high" if score >= 0.6 else "medium"
+                current = best_refs.get(node_id)
+                if current and current[0] >= score:
+                    continue
+                best_refs[node_id] = (
+                    score,
+                    _source_ref_from_chunk(document, chunk, confidence),
+                )
+    return {node_id: source_ref for node_id, (_, source_ref) in best_refs.items()}
+
+
 def _source_library_gaps(
     source_library: dict[str, Any],
     scoped_graph: dict[str, Any],
@@ -4825,7 +5067,96 @@ def _draft_generation_metadata(
         "registered_artifact_types": classification.get("registered_artifact_types", registered_artifact_types()),
         "artifact_registry_version": ARTIFACT_REGISTRY_VERSION,
         "risk": classification["risk"],
+        "usage": result.get("usage", {}) if isinstance(result.get("usage"), dict) else {},
+        **_flat_usage_metadata(result.get("usage", {}) if isinstance(result.get("usage"), dict) else {}),
     }
+
+
+def _normalize_generation_usage(
+    usage: dict[str, Any] | None,
+    *,
+    model: str,
+    provider: str,
+) -> dict[str, Any]:
+    if not isinstance(usage, dict):
+        usage = {}
+    input_tokens = _positive_int(usage.get("input_tokens") or usage.get("prompt_tokens"))
+    output_tokens = _positive_int(usage.get("output_tokens") or usage.get("completion_tokens"))
+    total_tokens = _positive_int(usage.get("total_tokens")) or input_tokens + output_tokens
+    normalized = {
+        "model": str(model or ""),
+        "provider": str(provider or ""),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
+    normalized = {key: value for key, value in normalized.items() if value not in ("", 0)}
+    cost = _estimate_generation_cost_usd(normalized)
+    if cost is not None:
+        normalized["estimated_cost_usd"] = f"${cost:.4f}"
+        normalized["cost_source"] = "OPENAI_PRICING_PER_1M_JSON"
+    elif total_tokens:
+        normalized["cost_source"] = "token_usage_only"
+    return normalized
+
+
+def _positive_int(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    try:
+        return max(0, int(float(str(value))))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _estimate_generation_cost_usd(usage: dict[str, Any]) -> float | None:
+    pricing = get_setting("OPENAI_PRICING_PER_1M_JSON")
+    if not pricing:
+        return None
+    try:
+        table = json.loads(pricing)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(table, dict):
+        return None
+    model = str(usage.get("model") or "")
+    rates = table.get(model) or table.get(model.split("-")[0]) or table.get("default")
+    if not isinstance(rates, dict):
+        return None
+    input_rate = _float_rate(rates.get("input") or rates.get("input_per_1m"))
+    output_rate = _float_rate(rates.get("output") or rates.get("output_per_1m"))
+    if input_rate is None and output_rate is None:
+        total_rate = _float_rate(rates.get("total") or rates.get("total_per_1m"))
+        if total_rate is None:
+            return None
+        return (int(usage.get("total_tokens") or 0) / 1_000_000) * total_rate
+    return (
+        (int(usage.get("input_tokens") or 0) / 1_000_000) * (input_rate or 0)
+        + (int(usage.get("output_tokens") or 0) / 1_000_000) * (output_rate or 0)
+    )
+
+
+def _float_rate(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _flat_usage_metadata(usage: dict[str, Any]) -> dict[str, Any]:
+    if not usage:
+        return {}
+    flattened = {
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "total_tokens": usage.get("total_tokens"),
+        "estimated_tokens": usage.get("total_tokens"),
+        "estimated_cost_usd": usage.get("estimated_cost_usd"),
+        "usage_cost_source": usage.get("cost_source"),
+    }
+    return {key: value for key, value in flattened.items() if value not in (None, "", 0)}
 
 
 def _model_from_raw_response(raw_response: Any) -> str:

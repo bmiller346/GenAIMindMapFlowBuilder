@@ -16,6 +16,7 @@ from ai_helpers import (
     generate_integration_operator_preview,
     generate_helper_preview,
     generate_project_planner_preview,
+    generate_source_reconciliation_preview,
     generate_reviewer_preview,
     generate_source_librarian_preview,
     get_prompt_profile,
@@ -151,6 +152,61 @@ def test_source_librarian_source_coverage_reads_workspace_source_library():
     )
     assert unused_item["node_id"] == "source-node-1"
     assert unused_item["source_refs"] == [{"document_id": "doc-unused"}]
+
+
+def test_source_reconciliation_preview_matches_source_chunks_to_graph_nodes():
+    graph = sample_graph()
+    graph["nodes"].append(
+        {
+            "id": "operations",
+            "title": "Project intake workflow",
+            "summary": "Intake validates project template and client location.",
+            "node_type": "workflow",
+            "status": "needs_review",
+            "source_refs": [],
+        }
+    )
+    graph["source_library"] = {
+        "documents": [
+            {
+                "id": "doc-business-plan",
+                "filename": "BusinessPlan.docx",
+                "chunks": [
+                    {
+                        "id": "chunk-intake",
+                        "heading": "Project Intake",
+                        "snippet": "The project intake workflow validates the project template and client location before setup.",
+                        "cited_by_count": 0,
+                    },
+                    {
+                        "id": "chunk-finance",
+                        "heading": "Financial Plan",
+                        "snippet": "The uploaded plan also contains revenue assumptions not yet represented in the graph.",
+                        "cited_by_count": 0,
+                    },
+                ],
+                "cited_node_ids": [],
+            }
+        ]
+    }
+
+    preview = generate_source_reconciliation_preview(
+        graph,
+        source_id="doc-business-plan",
+    )
+
+    matched = next(
+        item for item in preview["preview_items"] if item["node_id"] == "operations"
+    )
+    assert preview["generated_by"] == "deterministic_reconciliation"
+    assert matched["preview_type"] == "source_repair"
+    assert matched["source_refs"][0]["document_id"] == "doc-business-plan"
+    assert matched["source_refs"][0]["chunk_id"] == "chunk-intake"
+    assert matched["proposed_mutation"]["source_ref_repair"]["repair_type"] == "reconcile_uploaded_source"
+    assert preview["metadata"]["matched_node_count"] == 1
+    assert preview["metadata"]["source_only_chunk_count"] == 1
+    assert preview["metadata"]["source_only_chunks"][0]["chunk_id"] == "chunk-finance"
+    assert "not cited" in preview["warnings"][0]
 
 
 def test_parse_ai_helper_preview_accepts_fenced_json():

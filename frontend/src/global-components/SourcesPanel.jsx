@@ -1,7 +1,9 @@
 /* eslint-disable react/prop-types */
 import { useMemo, useState } from 'react';
+import axios from 'axios';
 import { useShallow } from 'zustand/shallow';
 import useActivityStore from '../stores/activityStore';
+import flowStore from '../stores/flowStore';
 import modalStore from '../stores/modalStore';
 import useStore from '../stores/store';
 import PromptModal from '../modals/PromptModal';
@@ -73,16 +75,19 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
         edges: state.edges,
         workspaceBrief: state.workspaceBrief,
         sourceLibrary: state.sourceLibrary,
-        setActiveView: state.setActiveView
+        setActiveView: state.setActiveView,
+        setGeneratedHelperPreview: state.setGeneratedHelperPreview
     });
-    const { nodes, edges, workspaceBrief, sourceLibrary, setActiveView } = useStore(
+    const { nodes, edges, workspaceBrief, sourceLibrary, setActiveView, setGeneratedHelperPreview } = useStore(
         useShallow(selector)
     );
+    const flowId = flowStore((state) => state.flow_id);
     const pushNode = modalStore((state) => state.pushNode);
     const activities = useActivityStore((state) => state.activities);
     const recordActivity = useActivityStore((state) => state.recordActivity);
     const [selectedSourceId, setSelectedSourceId] = useState('');
     const [checkedSourceIds, setCheckedSourceIds] = useState([]);
+    const [reconcileStatus, setReconcileStatus] = useState('');
 
     const projection = useMemo(
         () =>
@@ -139,6 +144,80 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                 source_ids: sources.map((source) => source.id)
             }
         });
+    };
+
+    const openSourceReconciliation = async (sources) => {
+        if (sources.length === 0) {
+            return;
+        }
+        if (!flowId) {
+            setReconcileStatus('Save or open a workspace before reconciling sources.');
+            return;
+        }
+        setReconcileStatus('Reconciling source against workspace...');
+        try {
+            const previews = await Promise.all(
+                sources.map((source) =>
+                    axios.post(
+                        `http://localhost:8000/api/workspaces/${flowId}/sources/${encodeURIComponent(source.id)}/reconcile/preview`,
+                        { scope: { type: 'source', source_id: source.id } }
+                    )
+                )
+            );
+            const preview =
+                previews.length === 1
+                    ? previews[0].data
+                    : {
+                          ...previews[0].data,
+                          preview_items: previews.flatMap(
+                              (response) => response.data?.preview_items || []
+                          ),
+                          warnings: previews.flatMap(
+                              (response) => response.data?.warnings || []
+                          ),
+                          metadata: {
+                              ...(previews[0].data?.metadata || {}),
+                              selected_source_count: previews.length,
+                              selected_source_ids: sources.map((source) => source.id)
+                          }
+                      };
+            setGeneratedHelperPreview('sourceLibrarianSources', preview);
+            setActiveView('sources');
+            setReconcileStatus('');
+            onClose();
+            recordActivity({
+                type: sources.length > 1 ? 'ai_multi_source_reconcile_previewed' : 'ai_source_reconcile_previewed',
+                title: sources.length > 1 ? 'Multi-source reconciliation previewed' : 'Source reconciliation previewed',
+                summary:
+                    sources.length > 1
+                        ? `Prepared reconciliation for ${sources.length} selected sources.`
+                        : `Prepared reconciliation for ${sources[0].title}.`,
+                source_ids: sources.map((source) => source.id),
+                metadata: {
+                    scope: sources.length > 1 ? 'bounded_sources' : 'source',
+                    source_ids: sources.map((source) => source.id),
+                    intent: 'reconcile_source_with_workspace',
+                    preview_items: preview.preview_items?.length || 0
+                }
+            });
+        } catch (error) {
+            const detail =
+                error.response?.data?.detail?.message ||
+                error.response?.data?.detail ||
+                error.message ||
+                'Unable to reconcile source.';
+            setReconcileStatus(String(detail));
+            recordActivity({
+                status: 'failed',
+                type: 'ai_source_reconcile_failed',
+                title: 'Source reconciliation failed',
+                summary: String(detail),
+                source_ids: sources.map((source) => source.id),
+                metadata: {
+                    intent: 'reconcile_source_with_workspace'
+                }
+            });
+        }
     };
 
     if (!isOpen) {
@@ -238,7 +317,7 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                                     <div>
                                         <dt>Extraction</dt>
                                         <dd>
-                                            {selectedSource.chunk_count} chunks,{' '}
+                                            {selectedSource.chunk_count} sections,{' '}
                                             {selectedSource.segment_count} segments
                                         </dd>
                                     </div>
@@ -247,6 +326,15 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
 
                             <section className="sources-repair-note">
                                 <p>{sourceRepairText(projection, selectedSource)}</p>
+                                {reconcileStatus ? <span>{reconcileStatus}</span> : null}
+                                <button
+                                    type="button"
+                                    onClick={() => openSourceReconciliation(aiSources)}
+                                >
+                                    {aiSources.length > 1
+                                        ? `Reconcile ${aiSources.length} sources`
+                                        : 'Reconcile with workspace'}
+                                </button>
                                 <button
                                     type="button"
                                     onClick={() => openAskAIForSources(aiSources)}

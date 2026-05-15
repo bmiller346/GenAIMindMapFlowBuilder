@@ -855,16 +855,33 @@ const ResponseNode = ({ id, data }) => {
         setIsMenuOpen(false);
     };
 
-    const openAskAi = (scope = 'node') => {
+    const openAskAi = (scope = 'node', options = {}) => {
         setSelectedBranchId(id);
-        pushModal(PromptModal, { scope, nodeId: id });
+        pushModal(PromptModal, {
+            scope,
+            nodeId: id,
+            initialRoleId: options.initialRoleId,
+            initialActionId: options.initialActionId,
+            initialPrompt: options.initialPrompt || '',
+            initialVisual: options.initialVisual || 'auto',
+            initialPromptPlaceholder: options.initialPromptPlaceholder || ''
+        });
         recordActivity({
             type: 'ai_action_picker_opened',
-            title: scope === 'branch' ? 'Branch Ask AI opened' : 'Node Ask AI opened',
-            summary: `Opened preview-first AI actions for ${displayTitle || summary || id}.`,
+            title:
+                options.intent === 'specialize_branch'
+                    ? 'Branch specialization opened'
+                    : scope === 'branch'
+                      ? 'Branch Ask AI opened'
+                      : 'Node Ask AI opened',
+            summary:
+                options.intent === 'specialize_branch'
+                    ? `Opened preview-first specialization for ${displayTitle || summary || id}.`
+                    : `Opened preview-first AI actions for ${displayTitle || summary || id}.`,
             node_ids: [id],
             metadata: {
-                scope
+                scope,
+                intent: options.intent || ''
             }
         });
         setIsMenuOpen(false);
@@ -872,6 +889,17 @@ const ResponseNode = ({ id, data }) => {
         setSlashQuery('');
         setActiveSlashIndex(0);
     };
+
+    const openSpecializeBranch = () =>
+        openAskAi('branch', {
+            initialRoleId: 'workflow-mapper',
+            initialActionId: 'custom_prompt',
+            initialVisual: 'mind_map',
+            initialPrompt: '',
+            initialPromptPlaceholder:
+                'Describe the domain, audience, product line, standard, or implementation context to specialize this branch for.',
+            intent: 'specialize_branch'
+        });
 
     const stageInlineAiDraft = async (event) => {
         event.preventDefault();
@@ -1162,6 +1190,14 @@ const ResponseNode = ({ id, data }) => {
             description: 'Open the full branch role picker',
             previewOnly: true,
             action: () => openAskAi('branch')
+        },
+        {
+            id: 'specialize-branch',
+            group: 'AI',
+            label: 'Specialize branch',
+            description: 'Make this branch domain-specific',
+            previewOnly: true,
+            action: () => openSpecializeBranch()
         },
         {
             id: 'assistant',
@@ -1560,6 +1596,10 @@ const ResponseNode = ({ id, data }) => {
                             <button type="button" onClick={() => openAskAi('branch')}>
                                 <FiGitBranch />
                                 Advanced branch AI
+                            </button>
+                            <button type="button" onClick={openSpecializeBranch}>
+                                <FiGitBranch />
+                                Specialize branch
                             </button>
                         </div>
                         <div className="node-action-group">

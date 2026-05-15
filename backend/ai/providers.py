@@ -21,6 +21,7 @@ class DocMapGenerationResult:
     provider: str
     raw_response: Any | None = None
     model: str = ""
+    usage: dict[str, Any] = field(default_factory=dict)
 
 
 class DocMapAIProvider(Protocol):
@@ -50,4 +51,5 @@ class FixtureDocMapAIProvider:
             provider="fixture",
             raw_response={"fixture": True, "model": request.model},
             model=request.model,
+            usage={},
         )

@@ -738,7 +738,7 @@ const AI_GENERATION_STAGES = [
 
 const AI_GENERATION_STAGE_HELP = {
     'Preparing request': 'Packaging your prompt, scope, role, and requested output.',
-    'Selecting source context': 'Collecting workspace nodes and selected source chunks.',
+    'Selecting source context': 'Collecting workspace nodes and selected source sections.',
     'Choosing model': 'Applying the model policy for this kind of draft.',
     'Calling AI model': 'Waiting for the model to produce structured draft JSON.',
     'Validating draft': 'Checking the draft contract, citations, and review flags.',
@@ -1146,7 +1146,7 @@ const PromptModal = ({
             {
                 label: 'Sources',
                 value: selectedSourcePayload?.metadata?.selected_source_chunk_count
-                    ? `${selectedSourcePayload.metadata.selected_source_chunk_count} chunks`
+                    ? `${selectedSourcePayload.metadata.selected_source_chunk_count} sections`
                     : selectedContextSources.length
                       ? `${selectedContextSources.length} source${selectedContextSources.length === 1 ? '' : 's'}`
                       : 'Workspace graph only'
