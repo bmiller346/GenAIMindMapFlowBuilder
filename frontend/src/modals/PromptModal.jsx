@@ -21,7 +21,6 @@ import {
 } from "../prompts/promptsModel";
 import { getWorkspaceNodeData } from "../utils/manualNodes";
 import {
-    acceptAIDraftSession,
     buildAIDraftMemoryContext,
     buildAIDraftSessionRequestPayload,
     buildSelectedSourceDraftPayload,
@@ -165,7 +164,7 @@ const viewForOutputShape = (shape, actionId) =>
     OUTPUT_SHAPE_VIEW[shape] || viewForAction(actionId || 'custom_prompt');
 
 const MAP_REVIEW_SCOPES = new Set(['workspace', 'source', 'nodes']);
-const CANVAS_REVIEW_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'outline', 'executive', 'tasks', 'kanban', 'table']);
+const CANVAS_REVIEW_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
 
 const viewForDraftReview = ({ scopeType, requestedView, activeCanvasView }) => {
     if (!MAP_REVIEW_SCOPES.has(scopeType)) {
@@ -337,153 +336,6 @@ const buildGenerationDebugSnapshot = ({
         },
         payload: summarizeDraftRequestForDebug(requestPayload)
     };
-};
-
-const decorateInitialSeedNode = (node, position, variant, layoutMode = 'vertical-children') => ({
-    ...node,
-    position,
-    data: {
-        ...(node.data || {}),
-        display: {
-            ...(node.data?.display || {}),
-            layoutMode
-        },
-        metadata: {
-            ...(node.data?.metadata || {}),
-            initial_seed_visual: variant
-        },
-        data: {
-            ...(node.data?.data || {}),
-            metadata: {
-                ...(node.data?.data?.metadata || {}),
-                initial_seed_visual: variant
-            }
-        }
-    }
-});
-
-const layoutHierarchyInitialSeedGraph = ({ nodes = [], edges = [] } = {}) => {
-    if (!nodes.length) {
-        return { nodes, edges };
-    }
-
-    const nodeById = new Map(nodes.map((node) => [node.id, node]));
-    const childMap = new Map();
-    const incoming = new Set();
-    edges.forEach((edge) => {
-        if (!edge?.source || !edge?.target || !nodeById.has(edge.target)) {
-            return;
-        }
-        incoming.add(edge.target);
-        childMap.set(edge.source, [...(childMap.get(edge.source) || []), edge.target]);
-    });
-
-    const roots = nodes.filter((node) => !incoming.has(node.id));
-    const root = roots[0] || nodes[0];
-    const rowGap = 118;
-    const columnGap = 420;
-    const top = 90;
-    const rootX = 150;
-    const visitedHeights = new Map();
-    const subtreeUnits = (nodeId, trail = new Set()) => {
-        if (visitedHeights.has(nodeId)) {
-            return visitedHeights.get(nodeId);
-        }
-        if (trail.has(nodeId)) {
-            return 1;
-        }
-        const nextTrail = new Set(trail).add(nodeId);
-        const children = (childMap.get(nodeId) || []).filter((childId) => nodeById.has(childId));
-        const units = children.length
-            ? children.reduce((total, childId) => total + subtreeUnits(childId, nextTrail), 0)
-            : 1;
-        visitedHeights.set(nodeId, Math.max(1, units));
-        return visitedHeights.get(nodeId);
-    };
-
-    const totalUnits = subtreeUnits(root.id);
-    const positioned = new Map();
-    const placeChildren = (parentId, depth, startUnit, trail = new Set()) => {
-        if (trail.has(parentId)) {
-            return;
-        }
-        const nextTrail = new Set(trail).add(parentId);
-        let cursor = startUnit;
-        (childMap.get(parentId) || [])
-            .filter((childId) => nodeById.has(childId))
-            .forEach((childId) => {
-                const units = subtreeUnits(childId);
-                const centerUnit = cursor + (units - 1) / 2;
-                positioned.set(childId, {
-                    x: rootX + depth * columnGap,
-                    y: top + centerUnit * rowGap
-                });
-                placeChildren(childId, depth + 1, cursor, nextTrail);
-                cursor += units;
-            });
-    };
-
-    positioned.set(root.id, { x: rootX, y: top });
-    placeChildren(root.id, 1, 0);
-
-    let overflowIndex = 0;
-    const laidOutNodes = nodes.map((node) => {
-        const position =
-            positioned.get(node.id) ||
-            {
-                x: rootX + (overflowIndex % 3) * columnGap,
-                y: top + (totalUnits + overflowIndex + 1) * rowGap
-            };
-        if (!positioned.has(node.id)) {
-            overflowIndex += 1;
-        }
-        const depth = Math.max(0, Math.round(((position.x || rootX) - rootX) / columnGap));
-        return decorateInitialSeedNode(
-            node,
-            position,
-            'mind-map-depth',
-            depth <= 1 ? 'balanced-map' : 'vertical-children'
-        );
-    });
-
-    return { nodes: laidOutNodes, edges };
-};
-
-const layoutInitialSeedGraph = ({ nodes = [], edges = [], shape = '' } = {}) => {
-    if (!nodes.length) {
-        return { nodes, edges };
-    }
-
-    if (!['checklist', 'tasks'].includes(shape)) {
-        return layoutHierarchyInitialSeedGraph({ nodes, edges });
-    }
-
-    const incoming = new Set(edges.map((edge) => edge.target));
-    const root = nodes.find((node) => !incoming.has(node.id)) || nodes[0];
-    const children = nodes.filter((node) => node.id !== root.id);
-    const top = 90;
-    const gap = 118;
-    const rootY = top + Math.max(0, (children.length - 1) * gap) / 2;
-    const laidOutNodes = [
-        decorateInitialSeedNode(root, { x: 140, y: rootY }, 'checklist-root', 'compact-task-stack'),
-        ...children.map((node, index) =>
-            decorateInitialSeedNode(node, { x: 560, y: top + index * gap }, 'checklist-step', 'compact-task-stack')
-        )
-    ];
-    const edgeByTarget = new Map(edges.map((edge) => [edge.target, edge]));
-    const laidOutEdges = children.map((node) => {
-        const existing = edgeByTarget.get(node.id);
-        return {
-            ...(existing || {}),
-            id: existing?.id || `initial-seed-edge-${root.id}-${node.id}`,
-            source: root.id,
-            target: node.id,
-            type: 'step',
-            animated: false
-        };
-    });
-
-    return { nodes: laidOutNodes, edges: laidOutEdges };
 };
 
 const nodeTypeForShape = (shape, actionId) => {
@@ -755,8 +607,7 @@ const AI_GENERATION_STAGES = [
     'Choosing model',
     'Calling AI model',
     'Validating draft',
-    'Building preview',
-    'Saving starter graph'
+    'Building preview'
 ];
 
 const AI_GENERATION_STAGE_HELP = {
@@ -765,8 +616,7 @@ const AI_GENERATION_STAGE_HELP = {
     'Choosing model': 'Applying the model policy for this kind of draft.',
     'Calling AI model': 'Waiting for the model to produce structured draft JSON.',
     'Validating draft': 'Checking the draft contract, citations, and review flags.',
-    'Building preview': 'Preparing the non-canonical preview before anything changes.',
-    'Saving starter graph': 'Persisting the accepted starter graph.'
+    'Building preview': 'Preparing the non-canonical preview before anything changes.'
 };
 
 const sourceOrReviewActionIds = new Set([
@@ -789,9 +639,6 @@ const modelOptions = ['auto', ...supportedOpenAIModels];
 
 const draftSessionEndpoint = ({ flowId }) =>
     `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions`;
-
-const draftAcceptEndpoint = ({ flowId, sessionId }) =>
-    `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions/${sessionId}/accept`;
 
 const formatStageContextValue = (value, fallback = 'None') => {
     if (Array.isArray(value)) {
@@ -839,13 +686,10 @@ const PromptModal = ({
     const storeSelector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
-        setNodes: state.setNodes,
-        setEdges: state.setEdges,
         activeCanvasView: state.activeCanvasView,
         setActiveView: state.setActiveView,
         setSelectedBranchId: state.setSelectedBranchId,
         setGeneratedHelperPreview: state.setGeneratedHelperPreview,
-        clearGeneratedHelperPreview: state.clearGeneratedHelperPreview,
         setActiveAIActionPreview: state.setActiveAIActionPreview,
         setActiveAIDraftSession: state.setActiveAIDraftSession,
         activeAIDraftSession: state.activeAIDraftSession,
@@ -857,13 +701,10 @@ const PromptModal = ({
     const {
         nodes,
         edges,
-        setNodes,
-        setEdges,
         activeCanvasView,
         setActiveView,
         setSelectedBranchId,
         setGeneratedHelperPreview,
-        clearGeneratedHelperPreview,
         setActiveAIActionPreview,
         setActiveAIDraftSession,
         activeAIDraftSession,
@@ -874,7 +715,6 @@ const PromptModal = ({
     } = useStore(useShallow(storeSelector));
     const recordActivity = useActivityStore((state) => state.recordActivity);
     const flowId = flowStore((state) => state.flow_id);
-    const setSaveStatus = flowStore((state) => state.setSaveStatus);
     const targetSourceId = propSourceId || (scope === 'source' ? sourceId : undefined);
     const selectedNodeIds = Array.isArray(nodeIds) ? nodeIds.filter(Boolean) : [];
     const targetNodeId = scope === 'source' || scope === 'nodes' ? undefined : nodeId || sourceId;
@@ -1398,111 +1238,8 @@ const PromptModal = ({
                 });
                 return;
             }
-            setGenerationStage('Building preview');
-            const nextSession = candidateSession;
-            let accepted = null;
-            let backendAcceptUsed = false;
-            if (flowId && nextSession.session_id) {
-                try {
-                    setGenerationStage('Saving starter graph');
-                    const acceptResponse = await axios.post(
-                        draftAcceptEndpoint({ flowId, sessionId: nextSession.session_id }),
-                        {
-                            mode: 'append',
-                            selected_item_ids: [],
-                            apply_intent: 'accept',
-                            change_intent: changeIntent
-                        }
-                    );
-                    const acceptPayload = acceptResponse?.data || {};
-                    const acceptedGraph =
-                        acceptPayload.graph || acceptPayload.workspace || acceptPayload;
-                    if (Array.isArray(acceptedGraph.nodes) || Array.isArray(acceptedGraph.edges)) {
-                        accepted = {
-                            nodes: Array.isArray(acceptedGraph.nodes) ? acceptedGraph.nodes : [],
-                            edges: Array.isArray(acceptedGraph.edges) ? acceptedGraph.edges : [],
-                            session:
-                                acceptPayload.session ||
-                                acceptPayload.draft_session ||
-                                {
-                                    ...nextSession,
-                                    status: 'accepted'
-                                },
-                            accept_result:
-                                acceptPayload.accept_result ||
-                                acceptPayload.result ||
-                                acceptPayload
-                        };
-                        backendAcceptUsed = true;
-                    }
-                } catch (acceptError) {
-                    setStageDebug((current) => ({
-                        ...(current || {}),
-                        backend_accept_error:
-                            acceptError?.response?.data?.detail ||
-                            acceptError?.message ||
-                            String(acceptError)
-                    }));
-                }
-            }
-            if (!accepted) {
-                accepted = acceptAIDraftSession({
-                    session: nextSession,
-                    nodes: [],
-                    edges: [],
-                    mode: 'append'
-                });
-            }
-            recordDraftSessionRun({
-                session: accepted.session || nextSession,
-                status: 'accepted',
-                generatedNodeIds: accepted.accept_result.accepted_node_ids
-            });
-            const laidOutGraph = layoutInitialSeedGraph({
-                nodes: accepted.nodes,
-                edges: accepted.edges,
-                shape: inferredShape
-            });
-            setNodes(laidOutGraph.nodes);
-            setEdges(laidOutGraph.edges);
-            setActiveAIActionPreview(undefined);
-            setActiveAIDraftSession(undefined);
-            clearGeneratedHelperPreview('nodeAiActionRequest');
-            setSelectedBranchId(undefined);
-            setInspectorNodeId(undefined);
-            const resolvedShape = shapeFromSession(nextSession, inferredShape);
-            setActiveView(viewForOutputShape(resolvedShape, effectiveAction.id));
-            setGenerationStage('Saving starter graph');
-            if (flowId) {
-                setSaveStatus('dirty');
-                window.setTimeout(() => {
-                    window.dispatchEvent(new CustomEvent('docmap:save-workspace-now'));
-                }, 50);
-            }
-            recordActivity({
-                type: 'ai_initial_graph_seeded',
-                title: `${effectiveRole.label}: Initial graph`,
-                summary: `Created the initial ${viewForOutputShape(resolvedShape, effectiveAction.id)} canvas from Ask AI.`,
-                node_ids: accepted.accept_result.accepted_node_ids,
-                metadata: {
-                    scope,
-                    role: effectiveRole.label,
-                    action: effectiveAction.id,
-                    visual: selectedVisual,
-                    output_shape: resolvedShape,
-                    mode: 'initial_seed',
-                    accepted_node_ids: accepted.accept_result.accepted_node_ids,
-                    accepted_edge_ids: accepted.accept_result.accepted_edge_ids,
-                    preview_diff: accepted.accept_result.preview_diff,
-                    backend_accept_used: backendAcceptUsed,
-                    filters_changed: false,
-                    model: selectedModel
-                },
-                status: 'completed'
-            });
-            setStageMessage('Initial graph created. You can now iterate directly on the canvas.');
-            setStageDebug(null);
-            window.setTimeout(() => popNode(), 150);
+            activateSession(candidateSession);
+            setStageMessage('Starter draft generated. Review and accept it before it changes the canvas.');
         };
 
         try {

@@ -672,7 +672,7 @@ test('workspace dock can collapse back to a compact canvas rail', async ({ page 
     await expect(page.locator('.workspace-dock-content')).toBeVisible();
 });
 
-test('empty canvas Ask AI creates the initial graph through backend draft accept', async ({ page }) => {
+test('empty canvas Ask AI stages the initial graph before backend draft accept', async ({ page }) => {
     const { draftSessionRequests, draftAcceptRequests, state } = await setupMockBackend(page);
     state.createdFlow = true;
     state.savedFlowName = 'Initial graph QA';
@@ -691,11 +691,20 @@ test('empty canvas Ask AI creates the initial graph through backend draft accept
         .evaluate((button) => button.click());
 
     await expect.poll(() => draftSessionRequests.length, { timeout: 7000 }).toBe(1);
-    await expect.poll(() => draftAcceptRequests.length, { timeout: 7000 }).toBe(1);
     expect(draftSessionRequests[0].scope).toBe('workspace');
+    expect(draftAcceptRequests).toHaveLength(0);
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('workspace generated child');
+    await expect(page.locator('.node-response').filter({ hasText: 'workspace generated child' })).toHaveCount(0);
+
+    await page
+        .locator('.node-inspector .ai-draft-accept')
+        .getByRole('button', { name: 'Accept 1 item' })
+        .click();
+    await expect.poll(() => draftAcceptRequests.length, { timeout: 7000 }).toBe(1);
     expect(draftAcceptRequests[0].requestBody).toMatchObject({
         mode: 'append',
-        apply_intent: 'accept'
+        apply_intent: 'supplement'
     });
     await expect(page.locator('.node-response').filter({ hasText: 'workspace generated child' })).toBeVisible();
     expect(parseSnapshot(state.savedFlowJson).nodes).toHaveLength(1);
