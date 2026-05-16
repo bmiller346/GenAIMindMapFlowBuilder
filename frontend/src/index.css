@@ -8170,6 +8170,85 @@ img:hover {
   line-height: 1.1rem;
 }
 
+.ai-helper-next-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  border: 1px solid color-mix(in srgb, #2aa198 38%, var(--question-border));
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, #2aa198 8%, var(--input-bar-color));
+  padding: 0.65rem;
+}
+
+.ai-helper-next-steps__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.ai-helper-next-steps__header strong {
+  font-size: 0.82rem;
+}
+
+.ai-helper-next-steps__header span {
+  font-size: 0.74rem;
+  line-height: 1.05rem;
+  opacity: 0.72;
+}
+
+.ai-helper-next-steps__list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.45rem;
+}
+
+.ai-helper-next-steps__list button {
+  display: grid;
+  gap: 0.18rem;
+  width: 100%;
+  min-height: 4.1rem;
+  border: 1px solid var(--question-border);
+  border-radius: 0.42rem;
+  background: var(--modal-container-color);
+  color: var(--font-color);
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-helper-next-steps__list button:hover {
+  background-color: var(--data-source-hover);
+}
+
+.ai-helper-next-steps__list button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ai-helper-next-steps__list span {
+  color: #2aa198;
+  font-size: 0.68rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.ai-helper-next-steps__list strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.ai-helper-next-steps__list small {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: 0.72rem;
+  line-height: 1rem;
+  opacity: 0.72;
+}
+
 .ai-helper-card {
   display: flex;
   flex-direction: column;

@@ -5,6 +5,7 @@ import {
     buildGraphProjection
 } from '../src/views/graphProjection.js';
 import {
+    buildWorkspaceNextSteps,
     buildWorkspaceNudgeProjection,
     findConnectionOpportunities,
     getProjectionReadiness,
@@ -185,4 +186,32 @@ test('filter projection narrows canonical graph data without mutating it', () =>
     assert.deepEqual(filtered.nodes.map((item) => item.id), ['task-2']);
     assert.equal(projection.nodes.length, 3);
     assert.equal(nodes[1].data.owner_id, undefined);
+});
+
+test('next steps prioritize repair before enrichment and include expected result copy', () => {
+    const sourceRefs = [{ document_id: 'source-1', page: 2 }];
+    const result = buildWorkspaceNextSteps({
+        nodes: [
+            node('claim-1', { node_type: 'requirement' }),
+            node('claim-2', {
+                node_type: 'task',
+                source_refs: sourceRefs
+            }),
+            node('claim-3', {
+                node_type: 'task',
+                source_refs: sourceRefs
+            })
+        ],
+        edges: [],
+        workspaceBrief: { desired_outputs: ['knowledge_graph', 'tasks'] }
+    });
+
+    assert.equal(result.steps.length, 3);
+    assert.equal(result.steps[0].category, NUDGE_CATEGORIES.SOURCE_COVERAGE);
+    assert.equal(result.steps[0].action_label, 'Open source repair');
+    assert.match(result.steps[0].expected_result, /Review source and confidence repairs/);
+    assert.equal(result.steps[1].category, NUDGE_CATEGORIES.SOURCE_COVERAGE);
+    assert.equal(result.steps[1].action.flow, 'confidence_repair');
+    assert.equal(result.steps[2].category, NUDGE_CATEGORIES.KNOWLEDGE_GRAPH_CONNECTIONS);
+    assert.equal(result.steps[2].action_label, 'Find connections');
 });

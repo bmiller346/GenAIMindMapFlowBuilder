@@ -635,3 +635,75 @@ export const buildWorkspaceNudgeProjection = ({
         source_projection: sourceProjection
     };
 };
+
+const NEXT_STEP_CATEGORY_PRIORITY = {
+    [NUDGE_CATEGORIES.SOURCE_COVERAGE]: 1,
+    [NUDGE_CATEGORIES.REVIEW_QUALITY]: 2,
+    [NUDGE_CATEGORIES.KNOWLEDGE_GRAPH_CONNECTIONS]: 3,
+    [NUDGE_CATEGORIES.TASK_READINESS]: 4,
+    [NUDGE_CATEGORIES.AI_OUTPUT_OPPORTUNITIES]: 5,
+    [NUDGE_CATEGORIES.INTEGRATION_READINESS]: 6,
+    [NUDGE_CATEGORIES.CANVAS_NAVIGATION]: 7
+};
+
+const SEVERITY_PRIORITY = {
+    high: 1,
+    medium: 2,
+    low: 3
+};
+
+const expectedResultForAction = (nudge) => {
+    const action = nudge.action || {};
+    if (action.type === 'ai_enrichment' && action.output_type === 'knowledge_graph') {
+        return 'AI proposes relationship edges with rationale for review.';
+    }
+    if (action.type === 'generate_output') {
+        return 'AI creates a preview that can be accepted or rejected.';
+    }
+    if (action.type === 'open_view' && action.view === 'sources') {
+        return 'Review source and confidence repairs before changing the graph.';
+    }
+    if (action.type === 'open_view' && action.view === 'gaps') {
+        return 'Review weak branches, missing details, and assumptions.';
+    }
+    if (action.type === 'open_view' && action.view === 'tasks') {
+        return 'Confirm task candidates and fill owner, priority, and due date fields.';
+    }
+    if (action.type === 'open_panel' && action.panel === 'integrations') {
+        return 'Prepare a handoff package without pushing to external systems.';
+    }
+    if (action.type === 'reset_branch') {
+        return 'Return the workspace to a valid whole-graph scope.';
+    }
+    return nudge.detail || 'Open the recommended workspace view.';
+};
+
+export const buildWorkspaceNextSteps = (options = {}, limit = 3) => {
+    const result = buildWorkspaceNudgeProjection(options);
+    const steps = result.nudges
+        .map((nudge) => ({
+            ...nudge,
+            expected_result: expectedResultForAction(nudge)
+        }))
+        .sort((left, right) => {
+            const categoryDelta =
+                (NEXT_STEP_CATEGORY_PRIORITY[left.category] || 99) -
+                (NEXT_STEP_CATEGORY_PRIORITY[right.category] || 99);
+            if (categoryDelta !== 0) {
+                return categoryDelta;
+            }
+            const severityDelta =
+                (SEVERITY_PRIORITY[left.severity] || 99) -
+                (SEVERITY_PRIORITY[right.severity] || 99);
+            if (severityDelta !== 0) {
+                return severityDelta;
+            }
+            return left.title.localeCompare(right.title);
+        })
+        .slice(0, limit);
+
+    return {
+        ...result,
+        steps
+    };
+};

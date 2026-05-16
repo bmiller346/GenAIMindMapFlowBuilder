@@ -16,6 +16,7 @@ import {
     getSourceRepairPreviewRows,
     getTaskPreviewRows
 } from '../views/graphProjection';
+import { buildWorkspaceNextSteps } from '../utils/workspaceNudges';
 
 const helperAction = (id, label, view, count, detail, helperId, previewAction, previewKey) => ({
     id,
@@ -181,6 +182,18 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [], autoOpenToken = 0, summary
         }),
         [nodes, projection]
     );
+    const nextStepProjection = useMemo(
+        () =>
+            buildWorkspaceNextSteps({
+                nodes,
+                edges,
+                sourceLibrary,
+                selectedBranchId,
+                filters: activeGraphFilters
+            }),
+        [activeGraphFilters, edges, nodes, selectedBranchId, sourceLibrary]
+    );
+    const recommendedNextSteps = nextStepProjection.steps;
 
     const selectedRoot = projection.nodes.find((node) => node.id === selectedBranchId);
     const hasFilteredScope = (activeGraphFilters || []).length > 0 || Boolean(selectedBranchId);
@@ -529,6 +542,75 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [], autoOpenToken = 0, summary
         }
     };
 
+    const helperActionForNextStep = (step) => {
+        const action = step.action || {};
+        const outputType = action.output_type || action.view;
+        let directActionId = '';
+
+        if (action.type === 'open_view' && action.view === 'sources') {
+            directActionId = 'repair-sources';
+        } else if (action.type === 'open_view' && action.view === 'gaps') {
+            directActionId = 'find-gaps';
+        } else if (action.type === 'open_view' && action.view === 'tasks') {
+            directActionId = 'preview-tasks';
+        } else if (action.type === 'ai_enrichment' && outputType === 'knowledge_graph') {
+            directActionId = 'find-connections';
+        } else if (action.type === 'generate_output' && outputType === 'tasks') {
+            directActionId = 'preview-tasks';
+        } else if (action.type === 'generate_output' && outputType === 'checklist') {
+            directActionId = 'preview-checklist';
+        } else if (action.type === 'generate_output' && outputType === 'flow_chart') {
+            directActionId = 'create-flow-chart';
+        } else if (action.type === 'generate_output' && outputType === 'chart') {
+            directActionId = 'extract-chart-data';
+        } else if (action.type === 'generate_output' && outputType === 'knowledge_graph') {
+            directActionId = 'create-knowledge-graph';
+        }
+
+        if (!directActionId) {
+            return null;
+        }
+
+        for (const role of helperRoles) {
+            const helperActionMatch = role.actions.find((item) => item.id === directActionId);
+            if (helperActionMatch) {
+                return { role, action: helperActionMatch };
+            }
+        }
+        return null;
+    };
+
+    const viewForNextStep = (step) => {
+        const view = step.action?.view || step.action?.output_type;
+        return (
+            {
+                tasks: 'preview',
+                table: 'chartData',
+                chart: 'chartData',
+                flow_chart: 'flowchart',
+                knowledge_graph: 'connections'
+            }[view] || view
+        );
+    };
+
+    const openRecommendedNextStep = async (step) => {
+        const helperTarget = helperActionForNextStep(step);
+        if (helperTarget) {
+            await openHelperAction(helperTarget.role, helperTarget.action);
+            return;
+        }
+        if (step.action?.type === 'reset_branch') {
+            setSelectedBranchId(undefined);
+            setScopeType('workspace');
+            return;
+        }
+        const nextView = viewForNextStep(step);
+        if (nextView) {
+            setActiveView(nextView);
+            setIsOpen(false);
+        }
+    };
+
     if (hidden) {
         return null;
     }
@@ -595,6 +677,28 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [], autoOpenToken = 0, summary
                     </div>
                     {actionError ? (
                         <div className="ai-helper-error">{actionError}</div>
+                    ) : null}
+                    {recommendedNextSteps.length > 0 ? (
+                        <article className="ai-helper-next-steps">
+                            <div className="ai-helper-next-steps__header">
+                                <strong>Recommended next</strong>
+                                <span>Reviewable actions based on the current graph.</span>
+                            </div>
+                            <div className="ai-helper-next-steps__list">
+                                {recommendedNextSteps.map((step) => (
+                                    <button
+                                        key={step.id}
+                                        type="button"
+                                        onClick={() => openRecommendedNextStep(step)}
+                                        disabled={nodes.length === 0 || Boolean(runningActionId)}
+                                    >
+                                        <span>{step.action_label}</span>
+                                        <strong>{step.title}</strong>
+                                        <small>{step.expected_result}</small>
+                                    </button>
+                                ))}
+                            </div>
+                        </article>
                     ) : null}
                     {helperRoles.map((role) => (
                         <article key={role.id} className="ai-helper-card">
