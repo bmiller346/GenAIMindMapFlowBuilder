@@ -155,6 +155,13 @@ test('kanban columns group confirmed task rows by board status', () => {
                     ...node('task-done', 'task').data,
                     status: 'approved'
                 }
+            },
+            {
+                ...node('task-archived', 'task', 'Archived task'),
+                data: {
+                    ...node('task-archived', 'task').data,
+                    status: 'deprecated'
+                }
             }
         ],
         []
@@ -169,6 +176,57 @@ test('kanban columns group confirmed task rows by board status', () => {
     assert.deepEqual(idsByColumn.in_progress, ['task-progress']);
     assert.deepEqual(idsByColumn.blocked, ['task-blocked']);
     assert.deepEqual(idsByColumn.done, ['task-done']);
+    assert.deepEqual(idsByColumn.archived, ['task-archived']);
+    assert.deepEqual(
+        Object.fromEntries(columns.map((column) => [column.id, column.status])),
+        {
+            backlog: 'needs_review',
+            in_progress: 'in_progress',
+            blocked: 'blocked',
+            done: 'approved',
+            archived: 'rejected'
+        }
+    );
+});
+
+test('kanban columns sort by due date, priority, then title', () => {
+    const projection = buildGraphProjection(
+        [
+            {
+                ...node('task-later-critical', 'task', 'Critical later'),
+                data: {
+                    ...node('task-later-critical', 'task').data,
+                    priority: 'critical',
+                    due_date: '2026-06-20'
+                }
+            },
+            {
+                ...node('task-sooner-low', 'task', 'Low sooner'),
+                data: {
+                    ...node('task-sooner-low', 'task').data,
+                    priority: 'low',
+                    due_date: '2026-06-01'
+                }
+            },
+            {
+                ...node('task-alpha', 'task', 'Alpha'),
+                data: {
+                    ...node('task-alpha', 'task').data,
+                    priority: 'high',
+                    due_date: '2026-06-20'
+                }
+            }
+        ],
+        []
+    );
+
+    const backlog = getKanbanColumns(projection).find((column) => column.id === 'backlog');
+
+    assert.deepEqual(backlog.items.map((item) => item.id), [
+        'task-sooner-low',
+        'task-later-critical',
+        'task-alpha'
+    ]);
 });
 
 test('accepted checklist projections preserve checklist metadata in preview rows', () => {

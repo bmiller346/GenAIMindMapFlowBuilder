@@ -2604,10 +2604,11 @@ export const getTaskRows = (projection) =>
         });
 
 export const KANBAN_COLUMN_DEFINITIONS = [
-    { id: 'backlog', label: 'Backlog', statuses: ['ai_generated', 'needs_review'] },
-    { id: 'in_progress', label: 'In Progress', statuses: ['in_progress', 'reviewed'] },
-    { id: 'blocked', label: 'Blocked', statuses: ['blocked', 'rejected'] },
-    { id: 'done', label: 'Done', statuses: ['approved', 'done'] }
+    { id: 'backlog', label: 'Backlog', status: 'needs_review', statuses: ['ai_generated', 'needs_review'] },
+    { id: 'in_progress', label: 'In Progress', status: 'in_progress', statuses: ['in_progress', 'reviewed'] },
+    { id: 'blocked', label: 'Blocked', status: 'blocked', statuses: ['blocked'] },
+    { id: 'done', label: 'Done', status: 'approved', statuses: ['approved', 'done'] },
+    { id: 'archived', label: 'Archived', status: 'rejected', statuses: ['rejected', 'deprecated'] }
 ];
 
 const kanbanColumnForStatus = (status = '') => {
@@ -2619,10 +2620,34 @@ const kanbanColumnForStatus = (status = '') => {
     );
 };
 
+const KANBAN_PRIORITY_RANK = {
+    critical: 0,
+    high: 1,
+    medium: 2,
+    low: 3
+};
+
+const kanbanSortValue = (row) => ({
+    dueDate: row.due_date ? String(row.due_date) : '9999-12-31',
+    priority:
+        KANBAN_PRIORITY_RANK[normalizeSignal(row.priority)] ??
+        Number.MAX_SAFE_INTEGER,
+    title: String(row.title || '').toLowerCase()
+});
+
+const compareKanbanRows = (a, b) => {
+    const left = kanbanSortValue(a);
+    const right = kanbanSortValue(b);
+    return (
+        left.dueDate.localeCompare(right.dueDate) ||
+        left.priority - right.priority ||
+        left.title.localeCompare(right.title)
+    );
+};
+
 export const getKanbanColumns = (projection) => {
     const columns = KANBAN_COLUMN_DEFINITIONS.map((column) => ({
         ...column,
-        status: column.statuses[0],
         items: []
     }));
     const columnById = new Map(columns.map((column) => [column.id, column]));
@@ -2630,6 +2655,10 @@ export const getKanbanColumns = (projection) => {
     getTaskRows(projection).forEach((row) => {
         const column = kanbanColumnForStatus(row.status);
         columnById.get(column.id)?.items.push(row);
+    });
+
+    columns.forEach((column) => {
+        column.items.sort(compareKanbanRows);
     });
 
     return columns;

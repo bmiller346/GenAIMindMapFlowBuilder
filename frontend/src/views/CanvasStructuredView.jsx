@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
+import KanbanBoardView from './KanbanBoardView.jsx';
 import {
     buildFilteredGraphProjection,
     getExecutiveOutputProjection,
@@ -21,6 +22,9 @@ const VIEW_LABELS = {
 const TASK_STATUS_OPTIONS = [
     'ai_generated',
     'needs_review',
+    'in_progress',
+    'blocked',
+    'done',
     'reviewed',
     'approved',
     'rejected',
@@ -104,10 +108,37 @@ const OutlineItem = ({ node, projection, depth, onOpenNode }) => {
     );
 };
 
-const EmptyStructuredView = ({ label }) => (
+const EmptyStructuredView = ({ view, label, onOpenSources, onAskAi, onStartManual }) => (
     <div className="canvas-structured-empty">
-        <strong>No accepted graph nodes yet</strong>
-        <span>{label} will populate after you accept or create nodes in the workspace.</span>
+        <strong>{view === 'kanban' ? 'Start a Kanban board' : 'No accepted graph nodes yet'}</strong>
+        <span>
+            {view === 'kanban'
+                ? 'Ask AI to shape work into board columns, add sources, or create the first task node.'
+                : `${label} will populate after you accept or create nodes in the workspace.`}
+        </span>
+        <div className="canvas-structured-empty-actions">
+            <button type="button" onClick={onOpenSources}>
+                Add sources
+            </button>
+            <button
+                type="button"
+                onClick={() =>
+                    onAskAi?.(
+                        view === 'kanban'
+                            ? {
+                                  initialVisual: 'kanban',
+                                  initialPrompt: 'Create a Kanban board from this workspace with backlog, in-progress, blocked, done, and follow-up question cards.'
+                              }
+                            : undefined
+                    )
+                }
+            >
+                Ask AI
+            </button>
+            <button type="button" onClick={onStartManual}>
+                Start with node
+            </button>
+        </div>
     </div>
 );
 
@@ -173,6 +204,9 @@ const CanvasStructuredView = ({
     activeGraphFilters = [],
     selectedBranchId,
     onOpenNode,
+    onOpenSources,
+    onAskAi,
+    onStartManual,
     onGenerateTaskCandidates,
     onCreateStructuredTable
 }) => {
@@ -300,14 +334,7 @@ const CanvasStructuredView = ({
         });
     };
 
-    const handleKanbanDragStart = (event, row) => {
-        event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData('text/plain', row.id);
-    };
-
-    const handleKanbanDrop = (event, status) => {
-        event.preventDefault();
-        const nodeId = event.dataTransfer.getData('text/plain');
+    const moveKanbanTask = (nodeId, status) => {
         if (!nodeId) {
             return;
         }
@@ -321,7 +348,13 @@ const CanvasStructuredView = ({
     if (nodes.length === 0) {
         return (
             <section className="canvas-structured-view" aria-label={label}>
-                <EmptyStructuredView label={label} />
+                <EmptyStructuredView
+                    view={view}
+                    label={label}
+                    onOpenSources={onOpenSources}
+                    onAskAi={onAskAi}
+                    onStartManual={onStartManual}
+                />
             </section>
         );
     }
@@ -538,46 +571,11 @@ const CanvasStructuredView = ({
 
             {view === 'kanban' ? (
                 taskRows.length > 0 ? (
-                    <div className="canvas-kanban-board" aria-label="Kanban task board">
-                        {kanbanColumns.map((column) => (
-                            <section
-                                key={column.id}
-                                className="canvas-kanban-column"
-                                onDragOver={(event) => event.preventDefault()}
-                                onDrop={(event) => handleKanbanDrop(event, column.status)}
-                            >
-                                <div className="canvas-kanban-column-header">
-                                    <strong>{column.label}</strong>
-                                    <span>{column.items.length}</span>
-                                </div>
-                                <div className="canvas-kanban-cards">
-                                    {column.items.length ? (
-                                        column.items.map((row) => (
-                                            <article
-                                                key={row.id}
-                                                className="canvas-kanban-card"
-                                                draggable
-                                                onDragStart={(event) => handleKanbanDragStart(event, row)}
-                                            >
-                                                <button type="button" onClick={() => onOpenNode?.(row.id)}>
-                                                    {row.title}
-                                                </button>
-                                                {summaryText(row) ? <p>{summaryText(row)}</p> : null}
-                                                <div className="canvas-kanban-card-meta">
-                                                    {row.priority ? <span>{row.priority}</span> : null}
-                                                    {row.owner_id ? <span>{row.owner_id}</span> : null}
-                                                    {row.due_date ? <span>{row.due_date}</span> : null}
-                                                    <span>{sourceLabel(row)}</span>
-                                                </div>
-                                            </article>
-                                        ))
-                                    ) : (
-                                        <div className="canvas-kanban-empty-column">Drop tasks here</div>
-                                    )}
-                                </div>
-                            </section>
-                        ))}
-                    </div>
+                    <KanbanBoardView
+                        columns={kanbanColumns}
+                        onOpenNode={onOpenNode}
+                        onMoveTask={moveKanbanTask}
+                    />
                 ) : (
                     <div className="canvas-structured-empty inline">
                         <strong>No tasks on the board yet</strong>

@@ -903,10 +903,14 @@ const App = () => {
         pushNode(DataSourceSelect);
     }, [pushNode]);
 
-    const openEmptyCanvasAskAi = useCallback(() => {
+    const openEmptyCanvasAskAi = useCallback((options = {}) => {
         setSelectedBranchId(undefined);
         setInspectorNodeId(undefined);
-        pushNode(PromptModal, { scope: 'workspace' });
+        pushNode(PromptModal, {
+            scope: 'workspace',
+            initialPrompt: options?.initialPrompt,
+            initialVisual: options?.initialVisual
+        });
         recordActivity({
             type: 'ai_action_picker_opened',
             title: 'Workspace Ask AI opened',
@@ -1260,6 +1264,9 @@ const App = () => {
                         activeGraphFilters={activeGraphFilters}
                         selectedBranchId={selectedBranchId}
                         onOpenNode={focusNodeForReview}
+                        onOpenSources={openEmptyCanvasSources}
+                        onAskAi={openEmptyCanvasAskAi}
+                        onStartManual={openManualStart}
                         onGenerateTaskCandidates={() => openStructuredAiPreset('tasks')}
                         onCreateStructuredTable={() => openStructuredAiPreset('table')}
                     />
