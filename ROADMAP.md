@@ -58,6 +58,10 @@ Known verification gap:
 - The complete desktop/browser MVP loop still needs a live browser smoke with
   real OpenAI configuration: upload, generate, review source draft, edit, save,
   reopen, export JSON/Markdown, and confirm source/review indicators in the UI.
+- Software inventory overlap and rationalization now has a product guide at
+  `PRODUCT_GUIDE_SOFTWARE_INVENTORY.md`. The core contract, deterministic
+  scoring, and review surfacing are implemented, but the realistic fixture and
+  full e2e validation flow in that guide remain future hardening work.
 - The live OpenAI smoke script is available at `backend/tests/live_openai_smoke.py`,
   but could not run in this environment because neither `openai_api_key` nor
   `OPENAI_API_KEY` is configured.
