@@ -271,7 +271,7 @@ const PPTXModal = () => {
                     id="filesUp"
                     type="file"
                     accept={pptxAccept}
-                    style={{ display: 'none' }}
+                    className="file-input-hidden"
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>

@@ -138,6 +138,49 @@
   stroke-dasharray: 6 7;
 }
 
+.canvas-scope-banner {
+  display: grid;
+  gap: 0.15rem;
+  max-width: 17rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--modal-container-color) 94%, transparent);
+  color: var(--font-color);
+  box-shadow: var(--border-box-shadow);
+}
+
+.canvas-scope-banner span {
+  color: #2563eb;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.canvas-scope-banner strong {
+  font-size: 0.9rem;
+  line-height: 1.2;
+}
+
+.canvas-scope-banner small {
+  color: var(--input-color);
+  font-size: 0.72rem;
+}
+
+.canvas-scope-banner button {
+  justify-self: start;
+  margin-top: 0.35rem;
+  padding: 0.32rem 0.55rem;
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
 .react-flow__edge.semantic-edge-hierarchy .react-flow__edge-path {
   stroke: #94a3b8;
   stroke-width: 1.5;
@@ -294,6 +337,13 @@
   padding: 0 0.55rem;
   font-size: 0.78rem;
   font-weight: 850;
+  white-space: nowrap;
+}
+
+.selection-action-bar span {
+  color: var(--input-color);
+  font-size: 0.76rem;
+  font-weight: 750;
   white-space: nowrap;
 }
 
@@ -502,6 +552,15 @@ h4 {
 .data-source-input {
   width: 100%;
   min-width: 0;
+}
+
+.file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .source-intake-config {
@@ -4614,6 +4673,25 @@ hr {
   width: min(34rem, calc(100vw - 2rem));
   max-height: calc(100vh - 2rem);
   overflow: auto;
+}
+
+.code-intelligence-modal {
+  width: min(48rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+}
+
+.code-intelligence-report {
+  max-height: 22rem;
+  overflow: auto;
+  border: 1px solid var(--question-border);
+  border-radius: 0.55rem;
+  background-color: rgba(0, 0, 0, 0.22);
+  color: var(--font-color);
+  font-size: 0.8rem;
+  line-height: 1.25rem;
+  padding: 0.85rem;
+  white-space: pre-wrap;
 }
 
 .settings-secret-row {

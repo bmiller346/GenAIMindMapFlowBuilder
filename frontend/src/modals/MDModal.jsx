@@ -280,7 +280,7 @@ const MDModal = () => {
                     id="filesUp"
                     type="file"
                     accept={markdownAccept}
-                    style={{ display: 'none' }}
+                    className="file-input-hidden"
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>

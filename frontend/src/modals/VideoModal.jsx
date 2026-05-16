@@ -273,7 +273,7 @@ const videoAccept = 'video/*';
                     id="filesUp"
                     type="file"
                     accept={videoAccept}
-                    style={{ display: 'none' }}
+                    className="file-input-hidden"
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>

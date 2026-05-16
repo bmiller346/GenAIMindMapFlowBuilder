@@ -316,14 +316,14 @@ const SourceSetModal = ({
                 type="file"
                 multiple
                 webkitdirectory=""
-                style={{ display: 'none' }}
+                className="file-input-hidden"
                 onChange={handleSelection}
             />
             <input
                 ref={fileInputRef}
                 type="file"
                 multiple
-                style={{ display: 'none' }}
+                className="file-input-hidden"
                 onChange={handleSelection}
             />
 

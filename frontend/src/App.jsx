@@ -613,6 +613,16 @@ const App = () => {
         const visibleIds = new Set(renderedCanvasGraph.nodes.filter((node) => !node.hidden).map((node) => node.id));
         return selectedCanvasNodes.filter((node) => visibleIds.has(node.id));
     }, [renderedCanvasGraph.nodes, selectedCanvasNodes]);
+    const selectedBranchNode = useMemo(
+        () => nodes.find((node) => node.id === selectedBranchId),
+        [nodes, selectedBranchId]
+    );
+    const selectedBranchTitle =
+        selectedBranchNode?.data?.title ||
+        selectedBranchNode?.data?.content ||
+        selectedBranchNode?.data?.summ ||
+        selectedBranchId ||
+        '';
     const lastLayoutTriggerRef = useRef(trigger);
     const closeNodeInspector = useCallback(() => {
         setInspectorNodeId(undefined);
@@ -681,22 +691,24 @@ const App = () => {
         if (selectedIds.size === 0) {
             return;
         }
-        const childrenByParent = currentEdges.reduce((children, edge) => {
-            const next = children.get(edge.source) || [];
-            next.push(edge.target);
-            children.set(edge.source, next);
-            return children;
-        }, new Map());
         const deletedIds = new Set(selectedIds);
-        const queue = [...selectedIds];
-        while (queue.length > 0) {
-            const nodeId = queue.shift();
-            (childrenByParent.get(nodeId) || []).forEach((childId) => {
-                if (!deletedIds.has(childId)) {
-                    deletedIds.add(childId);
-                    queue.push(childId);
-                }
-            });
+        if (selectedIds.size === 1) {
+            const childrenByParent = currentEdges.reduce((children, edge) => {
+                const next = children.get(edge.source) || [];
+                next.push(edge.target);
+                children.set(edge.source, next);
+                return children;
+            }, new Map());
+            const queue = [...selectedIds];
+            while (queue.length > 0) {
+                const nodeId = queue.shift();
+                (childrenByParent.get(nodeId) || []).forEach((childId) => {
+                    if (!deletedIds.has(childId)) {
+                        deletedIds.add(childId);
+                        queue.push(childId);
+                    }
+                });
+            }
         }
         const descendantCount = deletedIds.size - selectedIds.size;
         if (
@@ -1209,12 +1221,25 @@ const App = () => {
                         selectedNodes={selectedNodes}
                     />
                 </Panel>
+                {selectedBranchId ? (
+                    <Panel position="top-left" style={{ display: 'block' }}>
+                        <section className="canvas-scope-banner" aria-label="Active canvas scope">
+                            <span>Branch lens</span>
+                            <strong>{selectedBranchTitle || 'Selected branch'}</strong>
+                            <small>Other visible nodes stay dimmed for context.</small>
+                            <button type="button" onClick={() => setSelectedBranchId(undefined)}>
+                                Clear
+                            </button>
+                        </section>
+                    </Panel>
+                ) : null}
                 {selectedVisibleNodes.length ? (
                     <Panel position="bottom-center" style={{ display: 'block' }}>
                         <section className="selection-action-bar" aria-label="Selected node actions">
                             <strong>
                                 {selectedVisibleNodes.length} selected
                             </strong>
+                            {selectedBranchId ? <span>Branch lens active</span> : null}
                             <button type="button" onClick={askAiAboutSelection}>
                                 <FiMessageSquare />
                                 Ask AI
@@ -1234,6 +1259,11 @@ const App = () => {
                             <button type="button" onClick={clearNodeSelection}>
                                 Clear
                             </button>
+                            {selectedBranchId ? (
+                                <button type="button" onClick={() => setSelectedBranchId(undefined)}>
+                                    Clear lens
+                                </button>
+                            ) : null}
                         </section>
                     </Panel>
                 ) : null}

@@ -255,7 +255,7 @@ const AudioModal = () => {
                     id="filesUp"
                     type="file"
                     accept={audioAccept}
-                    style={{ display: 'none' }}
+                    className="file-input-hidden"
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>

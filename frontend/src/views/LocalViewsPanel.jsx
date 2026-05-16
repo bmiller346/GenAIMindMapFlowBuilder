@@ -588,6 +588,14 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
         selectedCanvasNode?.data?.content ||
         selectedCanvasNode?.id ||
         '';
+    const branchLensCandidate = selectedRoot || selectedCanvasNode;
+    const branchLensCandidateTitle =
+        branchLensCandidate?.title ||
+        branchLensCandidate?.data?.title ||
+        branchLensCandidate?.data?.label ||
+        branchLensCandidate?.data?.content ||
+        branchLensCandidate?.id ||
+        '';
     const selectedSource = useMemo(
         () =>
             (sourceLibrary || []).find(
@@ -692,6 +700,12 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const clearScopeAndFilters = () => {
         setSelectedBranchId(undefined);
         setActiveGraphFilters([]);
+    };
+
+    const applySelectedBranchScope = () => {
+        if (branchLensCandidate?.id) {
+            setSelectedBranchId(branchLensCandidate.id);
+        }
     };
 
     const togglePreviewRow = (nodeId) => {
@@ -951,14 +965,20 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                 <button
                                     type="button"
                                     className={selectedBranchId ? 'active' : ''}
-                                    disabled={!selectedRoot}
-                                    onClick={() => selectedRoot && setSelectedBranchId(selectedRoot.id)}
+                                    disabled={!branchLensCandidate}
+                                    onClick={applySelectedBranchScope}
                                 >
                                     Selected branch
                                 </button>
                             </div>
                             <div className="local-scope-context">
-                                <span>{selectedRoot ? selectedRoot.title : 'Whole graph'}</span>
+                                <span>
+                                    {selectedBranchId
+                                        ? selectedBranchTitle || selectedBranchId
+                                        : branchLensCandidateTitle
+                                          ? `Ready: ${branchLensCandidateTitle}`
+                                          : 'Whole graph'}
+                                </span>
                                 {selectedBranchId ? (
                                     <button type="button" onClick={() => setSelectedBranchId(undefined)}>
                                         Clear

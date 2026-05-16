@@ -267,7 +267,7 @@ const HTMLModal = () => {
                     id="filesUp"
                     type="file"
                     accept={modalAccept}
-                    style={{ display: 'none' }}
+                    className="file-input-hidden"
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>

@@ -393,7 +393,7 @@ const PDFModal = ({
                     id="filesUp"
                     type="file"
                     accept={pdfAccept}
-                    style={{ display: 'none' }}
+                    className="file-input-hidden"
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>

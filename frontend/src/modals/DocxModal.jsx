@@ -477,7 +477,7 @@ const DocxModal = ({
                     id="docxFileUpload"
                     type="file"
                     accept={docxAccept}
-                    style={{ display: 'none' }}
+                    className="file-input-hidden"
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>

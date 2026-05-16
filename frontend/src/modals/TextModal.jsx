@@ -279,7 +279,7 @@ const flowId = flowStore((s) => s.flow_id);
                     id="filesUp"
                     type="file"
                     accept={textAccept}
-                    style={{ display: 'none' }}
+                    className="file-input-hidden"
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>
