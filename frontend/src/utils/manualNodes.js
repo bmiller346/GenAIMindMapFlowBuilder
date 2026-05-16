@@ -34,6 +34,8 @@ const cloneDataFrame = (df) => (Array.isArray(df) ? structuredClone(df) : []);
 const cloneValue = (value, fallback) =>
     value !== undefined && value !== null ? structuredClone(value) : fallback;
 
+const cloneArray = (value) => (Array.isArray(value) ? structuredClone(value).filter(Boolean) : []);
+
 const firstText = (...values) =>
     values
         .map((value) => (typeof value === 'string' ? value.trim() : ''))
@@ -146,6 +148,8 @@ export const getWorkspaceNodeData = (node = {}) => {
         'Untitled node'
     );
     const sourceRefs = data.source_refs || legacyData.source_refs;
+    const generatedArtifacts = data.generated_artifacts || legacyData.generated_artifacts;
+    const artifactIds = data.artifact_ids || legacyData.artifact_ids;
 
     return {
         title,
@@ -164,6 +168,11 @@ export const getWorkspaceNodeData = (node = {}) => {
         dueDate: data.due_date || legacyData.due_date || '',
         confidence: data.confidence || legacyData.confidence || '',
         sourceRefs: Array.isArray(sourceRefs) ? sourceRefs.filter(Boolean) : [],
+        artifactType: data.artifact_type || legacyData.artifact_type || '',
+        artifactIds: cloneArray(artifactIds),
+        reviewState: data.review_state || legacyData.review_state || '',
+        generatedArtifacts: cloneArray(generatedArtifacts),
+        metadata: cloneValue(data.metadata || legacyData.metadata, {}),
         externalRefs: Array.isArray(data.external_refs || legacyData.external_refs)
             ? data.external_refs || legacyData.external_refs
             : [],
@@ -181,13 +190,23 @@ const createLegacyResponseData = ({
     df = [],
     graph = DEFAULT_GRAPH_DATA,
     query = '',
-    sourceRefs = []
+    sourceRefs = [],
+    artifactType = '',
+    artifactIds = [],
+    reviewState = '',
+    generatedArtifacts = [],
+    metadata = {}
 }) => ({
     summ: body || title,
     query,
     df: cloneDataFrame(df),
     graph: cloneValue(graph, DEFAULT_GRAPH_DATA),
-    source_refs: Array.isArray(sourceRefs) ? sourceRefs.filter(Boolean) : []
+    source_refs: Array.isArray(sourceRefs) ? sourceRefs.filter(Boolean) : [],
+    artifact_type: artifactType,
+    artifact_ids: cloneArray(artifactIds),
+    review_state: reviewState,
+    generated_artifacts: cloneArray(generatedArtifacts),
+    metadata: cloneValue(metadata, {})
 });
 
 export const normalizeWorkspaceNode = (node = {}) => {
@@ -210,6 +229,11 @@ export const normalizeWorkspaceNode = (node = {}) => {
         due_date: normalized.dueDate,
         confidence: normalized.confidence,
         source_refs: normalized.sourceRefs,
+        artifact_type: normalized.artifactType,
+        artifact_ids: normalized.artifactIds,
+        review_state: normalized.reviewState,
+        generated_artifacts: normalized.generatedArtifacts,
+        metadata: normalized.metadata,
         external_refs: normalized.externalRefs,
         display: normalized.display,
         manual: normalized.manual,
@@ -364,7 +388,12 @@ export const updateWorkspaceNode = (node, patch = {}) => {
         df: nextData.df || nextData.data?.df,
         graph: nextData.graph || nextData.data?.graph,
         query: nextData.query || nextData.data?.query,
-        sourceRefs: nextData.source_refs
+        sourceRefs: nextData.source_refs,
+        artifactType: nextData.artifact_type || nextData.data?.artifact_type,
+        artifactIds: nextData.artifact_ids || nextData.data?.artifact_ids,
+        reviewState: nextData.review_state || nextData.data?.review_state,
+        generatedArtifacts: nextData.generated_artifacts || nextData.data?.generated_artifacts,
+        metadata: nextData.metadata || nextData.data?.metadata
     });
 
     return {

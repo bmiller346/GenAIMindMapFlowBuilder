@@ -253,6 +253,11 @@ test('getWorkspaceNodeData exposes the canonical data contract', () => {
         dueDate: '',
         confidence: '',
         sourceRefs: [{ document_id: 'doc-1' }],
+        artifactType: '',
+        artifactIds: [],
+        reviewState: '',
+        generatedArtifacts: [],
+        metadata: {},
         externalRefs: [],
         display: {
             collapsed: true,
@@ -263,6 +268,50 @@ test('getWorkspaceNodeData exposes the canonical data contract', () => {
         query: '',
         manual: true
     });
+});
+
+test('normalizeWorkspaceNode preserves structured data artifacts for graph embedding', () => {
+    const artifact = {
+        id: 'artifact-table-1',
+        artifact_type: 'data_table',
+        title: 'Query Result Table',
+        data: {
+            rows: [{ Tool: 'Bluebeam', Count: 12 }],
+            columns: ['Tool', 'Count'],
+            query_id: 'query-1'
+        },
+        source_refs: [{ source_type: 'data_table', table_name: 'software_inventory' }],
+        review_state: 'source_backed'
+    };
+
+    const normalized = normalizeWorkspaceNode({
+        id: 'structured-1',
+        type: 'response',
+        data: {
+            title: 'Software overlap by category',
+            node_type: 'artifact',
+            artifact_type: 'structured_data_analysis',
+            artifact_ids: ['artifact-table-1'],
+            review_state: 'source_backed',
+            generated_artifacts: [artifact],
+            source_refs: [{ source_type: 'sql_query', query_id: 'query-1' }],
+            metadata: { domain: 'structured_data', query_id: 'query-1' },
+            data: {
+                summ: 'Software overlap by category',
+                query: 'SELECT Tool, Count FROM software_inventory',
+                df: [{ Tool: 'Bluebeam', Count: 12 }]
+            }
+        }
+    });
+
+    assert.equal(normalized.data.node_type, 'artifact');
+    assert.equal(normalized.data.artifact_type, 'structured_data_analysis');
+    assert.deepEqual(normalized.data.artifact_ids, ['artifact-table-1']);
+    assert.equal(normalized.data.review_state, 'source_backed');
+    assert.deepEqual(normalized.data.generated_artifacts, [artifact]);
+    assert.equal(normalized.data.data.artifact_type, 'structured_data_analysis');
+    assert.deepEqual(normalized.data.data.generated_artifacts, [artifact]);
+    assert.deepEqual(normalized.data.metadata, { domain: 'structured_data', query_id: 'query-1' });
 });
 
 test('normalizeWorkspaceEdges applies layout-specific edge style from source nodes', () => {

@@ -271,6 +271,23 @@ export const normalizeGraphNode = (node) => {
             firstValue(node, ['confidence'], sourceRef.confidence || ''),
         source_ref: sourceRef,
         source_refs: workspaceData.sourceRefs.length ? workspaceData.sourceRefs : sourceRefs(node),
+        artifact_type:
+            workspaceData.artifactType || data.artifact_type || nestedData.artifact_type || '',
+        artifact_ids:
+            workspaceData.artifactIds?.length
+                ? workspaceData.artifactIds
+                : Array.isArray(data.artifact_ids || nestedData.artifact_ids)
+                  ? data.artifact_ids || nestedData.artifact_ids
+                  : [],
+        review_state:
+            workspaceData.reviewState || data.review_state || nestedData.review_state || '',
+        generated_artifacts:
+            workspaceData.generatedArtifacts?.length
+                ? workspaceData.generatedArtifacts
+                : Array.isArray(data.generated_artifacts || nestedData.generated_artifacts)
+                  ? data.generated_artifacts || nestedData.generated_artifacts
+                  : [],
+        artifact_metadata: workspaceData.metadata || data.metadata || nestedData.metadata || {},
         table_rows: workspaceData.df.length ? workspaceData.df : rows,
         table_columns: tableColumns(workspaceData.df.length ? workspaceData.df : rows),
         graph: workspaceData.graph || data.graph || nestedData.graph || {},

@@ -1,48 +1,21 @@
-import { DataGrid } from '@mui/x-data-grid';
-import { useEffect, useState } from 'react';
 import { AgGridReact } from 'ag-grid-react'; // React Data Grid Component
 import 'ag-grid-community/styles/ag-grid.css';
 import { AllCommunityModule, ModuleRegistry } from 'ag-grid-community';
-import { alignProperty } from '@mui/material/styles/cssUtils';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 const TableComponent = ({ df }) => {
-    // 	const columns = [
-    //   { field: 'id', headerName: 'ID', width: 70 },
-    //   { field: 'firstName', headerName: 'First name', width: 130 },
-    //   { field: 'lastName', headerName: 'Last name', width: 130 },
-    // 	]
-
-    const [rows, setRows] = useState({});
-    const [cols, setCols] = useState({});
-
-    const row = [];
-    df.forEach((element, index) => {
-        row.push({
-            ...element
-        });
-    });
-
-    const col = [];
-    const firstRow = df[0];
-    const keys = Object.keys(firstRow);
-
-    for (let i = 0; i < keys.length; i++) {
-        col.push({
-            field: keys[i],
-            cellStyle: { textAlign: 'center', color: 'white' },
-            flex: 1
-        });
+    if (!Array.isArray(df) || df.length === 0) {
+        return null;
     }
 
-    // useEffect(() => {
-    // 	if (df.length === 0) {
-    // 		return
-    // 	}
-    // 	parseCols();
-    // 	parseRows();
-    // }, df)
+    const rowData = df.map((row) => ({ ...row }));
+    const columnDefs = Object.keys(df[0] || {}).map((field) => ({
+        field,
+        cellStyle: { textAlign: 'center', color: 'white' },
+        flex: 1
+    }));
+
     return (
         <div className="table-block">
             <div
@@ -50,8 +23,8 @@ const TableComponent = ({ df }) => {
                 style={{ height: '392px', width: '100%' }}
             >
                 <AgGridReact
-                    rowData={row}
-                    columnDefs={col}
+                    rowData={rowData}
+                    columnDefs={columnDefs}
                     rowClass={'ag-row'}
                     rowHeight={56}
                     rowStyle={{ alignItems: 'center !important' }}

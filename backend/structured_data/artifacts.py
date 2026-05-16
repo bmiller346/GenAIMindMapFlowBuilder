@@ -83,6 +83,7 @@ def build_structured_data_artifacts(
                 "Query Result Chart",
                 {
                     "chart_spec": chart_spec,
+                    "data_rows": normalized_rows,
                     "chart_library": "plotly",
                     "table_name": table_name,
                     "query_id": query_id,

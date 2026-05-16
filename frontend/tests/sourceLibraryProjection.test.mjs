@@ -238,3 +238,46 @@ test('buildGraphProjection preserves manual table rows for local views', () => {
     assert.deepEqual(projectedNode.table_columns, ['Name', 'Role']);
     assert.deepEqual(projectedNode.table_rows, [{ Name: 'Ada', Role: 'Reviewer' }]);
 });
+
+test('buildGraphProjection keeps structured data artifact provenance with visual nodes', () => {
+    const artifact = {
+        id: 'artifact-chart-1',
+        artifact_type: 'chart',
+        title: 'License count by tool',
+        data: { chart_library: 'plotly', query_id: 'query-1' },
+        source_refs: [{ source_type: 'sql_query', query_id: 'query-1' }],
+        review_state: 'source_backed'
+    };
+    const structuredDataNode = {
+        id: 'structured-data-1',
+        type: 'response',
+        data: {
+            title: 'License evidence',
+            node_type: 'artifact',
+            artifact_type: 'structured_data_analysis',
+            artifact_ids: ['artifact-chart-1'],
+            review_state: 'source_backed',
+            generated_artifacts: [artifact],
+            source_refs: [{ source_type: 'sql_query', query_id: 'query-1' }],
+            metadata: { domain: 'structured_data', query_id: 'query-1' },
+            data: {
+                summ: 'License evidence',
+                df: [{ Tool: 'Bluebeam', Licenses: 12 }],
+                query: 'SELECT Tool, Licenses FROM software_inventory'
+            }
+        }
+    };
+
+    const projection = buildGraphProjection([structuredDataNode], []);
+    const projectedNode = projection.nodes[0];
+
+    assert.equal(projectedNode.node_type, 'artifact');
+    assert.equal(projectedNode.artifact_type, 'structured_data_analysis');
+    assert.deepEqual(projectedNode.artifact_ids, ['artifact-chart-1']);
+    assert.deepEqual(projectedNode.generated_artifacts, [artifact]);
+    assert.deepEqual(projectedNode.source_refs, [{ source_type: 'sql_query', query_id: 'query-1' }]);
+    assert.deepEqual(projectedNode.artifact_metadata, {
+        domain: 'structured_data',
+        query_id: 'query-1'
+    });
+});
