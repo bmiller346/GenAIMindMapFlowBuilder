@@ -30,8 +30,16 @@ dist-ssr
 .local/
 screenshots/
 backend/.pytest-tmp/
+backend/.pytest-tmp*/
+backend/.pytest-cache/
+backend/.pytest_cache/
+artifacts/
+test-results/
+playwright-report/
 frontend/test-results/
 frontend/playwright-report/
+**/test-results/
+**/playwright-report/
 *.local
 
 # Editor directories and files
