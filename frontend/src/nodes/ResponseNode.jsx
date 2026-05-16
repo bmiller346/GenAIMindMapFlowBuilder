@@ -487,7 +487,8 @@ const ResponseNode = ({ id, data }) => {
             kind,
             parentTitle: displayTitle || summary || id,
             context: structuredDataContext,
-            summary: kind === 'finding' ? summary : ''
+            summary: kind === 'finding' ? summary : '',
+            evidenceNodeId: id
         });
         const childNode = createWorkspaceNode({
             ...childData,

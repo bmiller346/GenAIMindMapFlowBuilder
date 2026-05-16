@@ -489,6 +489,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
             kind,
             parentTitle: draft.title || selectedNode.id,
             context: structuredDataContext,
+            evidenceNodeId: selectedNode.id,
             summary:
                 kind === 'finding'
                     ? firstValue(selectedNode.data || {}, ['body', 'summary', 'summ'])

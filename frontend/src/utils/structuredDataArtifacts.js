@@ -122,7 +122,8 @@ export const structuredDataChildData = ({
     kind = 'finding',
     parentTitle = 'Structured evidence',
     context = {},
-    summary = ''
+    summary = '',
+    evidenceNodeId = ''
 } = {}) => {
     const titlePrefix = kind === 'task' ? 'Review evidence from' : 'Finding from';
     const title = `${titlePrefix} ${context.tableName || parentTitle}`;
@@ -147,6 +148,7 @@ export const structuredDataChildData = ({
             domain: 'structured_data',
             accepted_from: 'structured_data_preview',
             preview_kind: kind,
+            evidence_node_id: evidenceNodeId,
             query_id: context.queryId,
             table_name: context.tableName,
             result_hash: context.resultHash

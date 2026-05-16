@@ -229,6 +229,74 @@ test('kanban columns sort by due date, priority, then title', () => {
     ]);
 });
 
+test('kanban task rows preserve structured data evidence metadata', () => {
+    const structuredRef = {
+        source_type: 'data_table',
+        table_name: 'software_inventory',
+        query_id: 'query-1',
+        result_hash: 'abc123def456',
+        row_count: 12,
+        confidence: 0.91
+    };
+    const projection = buildGraphProjection(
+        [
+            {
+                ...node('evidence-task', 'task', 'Review PDF tool overlap'),
+                data: {
+                    ...node('evidence-task', 'task').data,
+                    status: 'needs_review',
+                    source_refs: [structuredRef],
+                    artifact_type: 'tasks',
+                    artifact_ids: ['artifact-table-1'],
+                    generated_artifacts: [
+                        {
+                            id: 'artifact-query-1',
+                            artifact_type: 'sql_query',
+                            data: {
+                                sql: 'SELECT category, COUNT(*) FROM software_inventory GROUP BY category',
+                                query_id: 'query-1',
+                                table_name: 'software_inventory',
+                                result_hash: 'abc123def456'
+                            }
+                        },
+                        {
+                            id: 'artifact-table-1',
+                            artifact_type: 'data_table',
+                            data: {
+                                row_count: 12,
+                                columns: ['category', 'count'],
+                                query_id: 'query-1',
+                                table_name: 'software_inventory',
+                                result_hash: 'abc123def456'
+                            }
+                        }
+                    ],
+                    metadata: {
+                        domain: 'structured_data',
+                        evidence_node_id: 'structured-evidence-1',
+                        table_name: 'software_inventory',
+                        query_id: 'query-1',
+                        result_hash: 'abc123def456',
+                        row_count: 12
+                    }
+                }
+            }
+        ],
+        []
+    );
+
+    const [taskRow] = getTaskRows(projection);
+    const backlog = getKanbanColumns(projection).find((column) => column.id === 'backlog');
+
+    assert.equal(taskRow.structured_evidence.table_name, 'software_inventory');
+    assert.equal(taskRow.structured_evidence.query_id, 'query-1');
+    assert.equal(taskRow.structured_evidence.row_count, 12);
+    assert.equal(taskRow.structured_evidence.source_backed, true);
+    assert.equal(taskRow.structured_evidence.evidence_node_id, 'structured-evidence-1');
+    assert.match(taskRow.structured_evidence.query, /SELECT category/);
+    assert.equal(backlog.items[0].structured_evidence.table_name, 'software_inventory');
+});
+
 test('accepted checklist projections preserve checklist metadata in preview rows', () => {
     const projection = buildGraphProjection(
         [

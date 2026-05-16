@@ -2577,11 +2577,78 @@ export const getEnterpriseReadinessSummary = (projection) => {
     };
 };
 
+const firstSourceEvidenceValue = (refs = [], key) =>
+    refs.find((ref) => ref?.[key] !== undefined && ref?.[key] !== null && ref?.[key] !== '')?.[key] ?? '';
+
+const sqlArtifactForNode = (node = {}) =>
+    (node.generated_artifacts || []).find((artifact) => artifact?.artifact_type === 'sql_query');
+
+const tableArtifactForNode = (node = {}) =>
+    (node.generated_artifacts || []).find((artifact) => artifact?.artifact_type === 'data_table');
+
+const structuredEvidenceForTask = (node = {}) => {
+    const refs = node.source_refs || [];
+    const metadata = node.artifact_metadata || {};
+    const hasStructuredEvidence =
+        metadata.domain === 'structured_data' ||
+        ['data_table', 'sql_query'].includes(String(node.artifact_type || '')) ||
+        refs.some((ref) => ['data_table', 'sql_query'].includes(String(ref?.source_type || ''))) ||
+        (node.generated_artifacts || []).some((artifact) =>
+            ['data_table', 'sql_query', 'chart', 'data_summary'].includes(String(artifact?.artifact_type || ''))
+        );
+
+    if (!hasStructuredEvidence) {
+        return null;
+    }
+
+    const tableArtifact = tableArtifactForNode(node);
+    const sqlArtifact = sqlArtifactForNode(node);
+    const rowCountValue =
+        metadata.row_count ??
+        tableArtifact?.data?.row_count ??
+        firstSourceEvidenceValue(refs, 'row_count') ??
+        '';
+    const rowCount = Number.isFinite(Number(rowCountValue)) ? Number(rowCountValue) : 0;
+    const tableName =
+        metadata.table_name ||
+        tableArtifact?.data?.table_name ||
+        sqlArtifact?.data?.table_name ||
+        firstSourceEvidenceValue(refs, 'table_name') ||
+        '';
+    const queryId =
+        metadata.query_id ||
+        tableArtifact?.data?.query_id ||
+        sqlArtifact?.data?.query_id ||
+        firstSourceEvidenceValue(refs, 'query_id') ||
+        '';
+    const resultHash =
+        metadata.result_hash ||
+        tableArtifact?.data?.result_hash ||
+        sqlArtifact?.data?.result_hash ||
+        firstSourceEvidenceValue(refs, 'result_hash') ||
+        '';
+    const query = node.query || sqlArtifact?.data?.sql || firstSourceEvidenceValue(refs, 'query') || '';
+
+    return {
+        source_backed: refs.some(hasSourceEvidence),
+        table_name: tableName,
+        query_id: queryId,
+        result_hash: resultHash,
+        row_count: rowCount,
+        query,
+        evidence_node_id: metadata.evidence_node_id || '',
+        artifact_types: (node.generated_artifacts || [])
+            .map((artifact) => artifact?.artifact_type)
+            .filter(Boolean)
+    };
+};
+
 export const getTaskRows = (projection) =>
     projection.nodes
         .filter((node) => isConfirmedTaskNode(node))
         .map((node) => {
             const taskProjection = taskProjectionForNode(node);
+            const structuredEvidence = structuredEvidenceForTask(node);
 
             return {
                 ...node,
@@ -2599,7 +2666,9 @@ export const getTaskRows = (projection) =>
                 source_document: node.source_ref.document_id || '',
                 source_page: node.source_ref.page || '',
                 source_section: node.source_ref.section || '',
-                source_quote: node.source_ref.quote_snippet || ''
+                source_quote: node.source_ref.quote_snippet || '',
+                structured_evidence: structuredEvidence,
+                evidence_node_id: structuredEvidence?.evidence_node_id || ''
             };
         });
 

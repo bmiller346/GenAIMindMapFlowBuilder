@@ -91,7 +91,8 @@ test('structuredDataChildData creates finding and task node data with source ref
     const task = structuredDataChildData({
         kind: 'task',
         parentTitle: 'Software overlap',
-        context
+        context,
+        evidenceNodeId: 'structured-evidence-1'
     });
 
     assert.equal(finding.nodeType, 'finding');
@@ -100,4 +101,5 @@ test('structuredDataChildData creates finding and task node data with source ref
     assert.equal(task.nodeType, 'task');
     assert.equal(task.artifactType, 'tasks');
     assert.equal(task.metadata.query_id, 'query-1');
+    assert.equal(task.metadata.evidence_node_id, 'structured-evidence-1');
 });

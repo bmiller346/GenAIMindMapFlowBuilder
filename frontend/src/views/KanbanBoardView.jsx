@@ -1,6 +1,11 @@
 import { useMemo, useState } from 'react';
 
 const sourceLabel = (node) => {
+    if (node.structured_evidence?.table_name || node.structured_evidence?.query_id) {
+        return [node.structured_evidence.table_name, node.structured_evidence.query_id]
+            .filter(Boolean)
+            .join(' | ');
+    }
     const ref = node.source_ref || {};
     return [ref.document_id, ref.page ? `p. ${ref.page}` : '', ref.section]
         .filter(Boolean)
@@ -23,11 +28,25 @@ const cardMeta = (row) =>
         row.priority ? statusLabel(row.priority) : '',
         row.owner_id ? `Owner: ${row.owner_id}` : '',
         row.due_date ? `Due: ${row.due_date}` : '',
-        sourceLabel(row)
+        row.structured_evidence ? '' : sourceLabel(row)
     ].filter(Boolean);
+
+const evidenceChips = (row) => {
+    const evidence = row.structured_evidence;
+    if (!evidence) {
+        return [];
+    }
+    return [
+        evidence.source_backed ? 'Source-backed' : 'Needs source review',
+        evidence.table_name || '',
+        evidence.row_count ? `${evidence.row_count} rows` : '',
+        evidence.query_id || ''
+    ].filter(Boolean);
+};
 
 const KanbanBoardView = ({ columns = [], onOpenNode, onMoveTask }) => {
     const [dragTargetId, setDragTargetId] = useState('');
+    const [openQueryIds, setOpenQueryIds] = useState(new Set());
     const columnIndexById = useMemo(
         () => new Map(columns.map((column, index) => [column.id, index])),
         [columns]
@@ -57,6 +76,18 @@ const KanbanBoardView = ({ columns = [], onOpenNode, onMoveTask }) => {
         if (target) {
             onMoveTask?.(row.id, target.status);
         }
+    };
+
+    const toggleQuery = (rowId) => {
+        setOpenQueryIds((current) => {
+            const next = new Set(current);
+            if (next.has(rowId)) {
+                next.delete(rowId);
+            } else {
+                next.add(rowId);
+            }
+            return next;
+        });
     };
 
     return (
@@ -112,7 +143,44 @@ const KanbanBoardView = ({ columns = [], onOpenNode, onMoveTask }) => {
                                             <span key={item}>{item}</span>
                                         ))}
                                     </div>
+                                    {row.structured_evidence ? (
+                                        <div className="canvas-kanban-evidence">
+                                            <div className="canvas-kanban-evidence-chips">
+                                                {evidenceChips(row).map((item) => (
+                                                    <span key={item}>{item}</span>
+                                                ))}
+                                            </div>
+                                            {openQueryIds.has(row.id) && row.structured_evidence.query ? (
+                                                <pre className="canvas-kanban-query">
+                                                    <code>{row.structured_evidence.query}</code>
+                                                </pre>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
                                     <div className="canvas-kanban-card-actions" aria-label={`Move ${row.title}`}>
+                                        {row.structured_evidence ? (
+                                            <>
+                                                <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                        onOpenNode?.(row.evidence_node_id || row.id)
+                                                    }
+                                                >
+                                                    Open evidence
+                                                </button>
+                                                {row.structured_evidence.query ? (
+                                                    <button type="button" onClick={() => toggleQuery(row.id)}>
+                                                        {openQueryIds.has(row.id) ? 'Hide query' : 'View query'}
+                                                    </button>
+                                                ) : null}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => onMoveTask?.(row.id, 'reviewed')}
+                                                >
+                                                    Mark reviewed
+                                                </button>
+                                            </>
+                                        ) : null}
                                         <button
                                             type="button"
                                             onClick={() => moveRelative(row, column, -1)}

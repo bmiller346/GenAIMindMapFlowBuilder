@@ -7860,9 +7860,51 @@ img:hover {
   gap: 0.35rem;
 }
 
+.canvas-kanban-evidence {
+  display: grid;
+  gap: 0.45rem;
+  border: 1px solid rgba(52, 211, 153, 0.28);
+  border-radius: 0.45rem;
+  background: rgba(52, 211, 153, 0.08);
+  padding: 0.55rem;
+}
+
+.canvas-kanban-evidence-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.canvas-kanban-evidence-chips span {
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  border-radius: 999px;
+  color: var(--font-color);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0.24rem 0.42rem;
+}
+
+.canvas-kanban-query {
+  max-height: 7rem;
+  overflow: auto;
+  border-radius: 0.35rem;
+  background-color: var(--modal-container-color);
+  margin: 0;
+  padding: 0.5rem;
+  white-space: pre-wrap;
+}
+
+.canvas-kanban-query code {
+  background: transparent;
+  font-size: 0.72rem !important;
+  line-height: 1.1rem !important;
+}
+
 .canvas-kanban-card-actions {
   display: flex;
   gap: 0.4rem;
+  flex-wrap: wrap;
   justify-content: flex-end;
 }
 
