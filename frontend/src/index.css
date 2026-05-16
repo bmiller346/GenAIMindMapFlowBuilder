@@ -7724,6 +7724,7 @@ img:hover {
 
 .canvas-structured-outline,
 .canvas-structured-table-wrap,
+.canvas-kanban-board,
 .canvas-structured-task-surface,
 .canvas-structured-executive {
   flex: 1;
@@ -7736,6 +7737,108 @@ img:hover {
   display: grid;
   align-content: start;
   gap: 0.9rem;
+}
+
+.canvas-kanban-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(15rem, 1fr));
+  gap: 0.8rem;
+  align-items: stretch;
+}
+
+.canvas-kanban-column {
+  min-height: 100%;
+  border: 1px solid var(--question-border);
+  border-radius: 0.5rem;
+  background-color: var(--modal-container-color);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.canvas-kanban-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  border-bottom: 1px solid var(--question-border);
+  padding: 0.75rem 0.8rem;
+}
+
+.canvas-kanban-column-header strong {
+  font-size: 0.92rem;
+}
+
+.canvas-kanban-column-header span,
+.canvas-kanban-card-meta span {
+  border: 1px solid var(--question-border);
+  border-radius: 999px;
+  color: var(--input-color);
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0.28rem 0.45rem;
+}
+
+.canvas-kanban-cards {
+  display: grid;
+  align-content: start;
+  gap: 0.6rem;
+  min-height: 12rem;
+  overflow: auto;
+  padding: 0.7rem;
+}
+
+.canvas-kanban-card {
+  border: 1px solid var(--question-border);
+  border-radius: 0.45rem;
+  background-color: var(--input-bar-color);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.16);
+  cursor: grab;
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.75rem;
+}
+
+.canvas-kanban-card:active {
+  cursor: grabbing;
+}
+
+.canvas-kanban-card button {
+  border: 0;
+  background: transparent;
+  color: var(--font-color);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 850;
+  line-height: 1.25rem;
+  padding: 0;
+  text-align: left;
+}
+
+.canvas-kanban-card button:hover {
+  color: #eece47;
+}
+
+.canvas-kanban-card p,
+.canvas-kanban-empty-column {
+  color: var(--input-color);
+  font-size: 0.8rem;
+  line-height: 1.25rem;
+  margin: 0;
+}
+
+.canvas-kanban-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.canvas-kanban-empty-column {
+  border: 1px dashed var(--question-border);
+  border-radius: 0.45rem;
+  padding: 0.8rem;
+  text-align: center;
 }
 
 .canvas-structured-task-section {
@@ -8020,6 +8123,10 @@ img:hover {
   .canvas-structured-outline-row {
     grid-template-columns: minmax(0, 1fr);
     margin-left: calc(var(--depth, 0) * 0.75rem);
+  }
+
+  .canvas-kanban-board {
+    grid-template-columns: minmax(16rem, 1fr);
   }
 }
 

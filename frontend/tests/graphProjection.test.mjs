@@ -10,6 +10,7 @@ import {
     getEnterpriseReadinessSummary,
     getEnterpriseScoreRows,
     getGraphConfidenceSummary,
+    getKanbanColumns,
     getSourceRepairPreviewRows,
     getTeamRoadmapProjection,
     getTaskCandidateRows,
@@ -128,6 +129,46 @@ test('accepted task projections become confirmed task rows', () => {
     assert.equal(taskRow.owner_id, 'ops-team');
     assert.equal(taskRow.due_date, '2026-06-01');
     assert.deepEqual(getTaskCandidateRows(projection).map((row) => row.id), []);
+});
+
+test('kanban columns group confirmed task rows by board status', () => {
+    const projection = buildGraphProjection(
+        [
+            node('task-backlog', 'task', 'Backlog task'),
+            {
+                ...node('task-progress', 'task', 'Active task'),
+                data: {
+                    ...node('task-progress', 'task').data,
+                    status: 'in_progress'
+                }
+            },
+            {
+                ...node('task-blocked', 'task', 'Blocked task'),
+                data: {
+                    ...node('task-blocked', 'task').data,
+                    status: 'blocked'
+                }
+            },
+            {
+                ...node('task-done', 'task', 'Done task'),
+                data: {
+                    ...node('task-done', 'task').data,
+                    status: 'approved'
+                }
+            }
+        ],
+        []
+    );
+
+    const columns = getKanbanColumns(projection);
+    const idsByColumn = Object.fromEntries(
+        columns.map((column) => [column.id, column.items.map((item) => item.id)])
+    );
+
+    assert.deepEqual(idsByColumn.backlog, ['task-backlog']);
+    assert.deepEqual(idsByColumn.in_progress, ['task-progress']);
+    assert.deepEqual(idsByColumn.blocked, ['task-blocked']);
+    assert.deepEqual(idsByColumn.done, ['task-done']);
 });
 
 test('accepted checklist projections preserve checklist metadata in preview rows', () => {

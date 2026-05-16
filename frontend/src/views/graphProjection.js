@@ -2603,6 +2603,38 @@ export const getTaskRows = (projection) =>
             };
         });
 
+export const KANBAN_COLUMN_DEFINITIONS = [
+    { id: 'backlog', label: 'Backlog', statuses: ['ai_generated', 'needs_review'] },
+    { id: 'in_progress', label: 'In Progress', statuses: ['in_progress', 'reviewed'] },
+    { id: 'blocked', label: 'Blocked', statuses: ['blocked', 'rejected'] },
+    { id: 'done', label: 'Done', statuses: ['approved', 'done'] }
+];
+
+const kanbanColumnForStatus = (status = '') => {
+    const normalized = normalizeSignal(status || 'needs_review');
+    return (
+        KANBAN_COLUMN_DEFINITIONS.find((column) =>
+            column.statuses.map(normalizeSignal).includes(normalized)
+        ) || KANBAN_COLUMN_DEFINITIONS[0]
+    );
+};
+
+export const getKanbanColumns = (projection) => {
+    const columns = KANBAN_COLUMN_DEFINITIONS.map((column) => ({
+        ...column,
+        status: column.statuses[0],
+        items: []
+    }));
+    const columnById = new Map(columns.map((column) => [column.id, column]));
+
+    getTaskRows(projection).forEach((row) => {
+        const column = kanbanColumnForStatus(row.status);
+        columnById.get(column.id)?.items.push(row);
+    });
+
+    return columns;
+};
+
 export const getTaskPreviewRows = (projection) =>
     projection.nodes
         .filter((node) => node.node_type !== 'reference')

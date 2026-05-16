@@ -38,7 +38,8 @@ const CORE_VIEWS = [
     { id: 'outline', label: 'Outline', detail: 'Review hierarchy as an outline', group: 'Review' },
     { id: 'executive', label: 'Executive', detail: 'Package summary and evidence', group: 'Review' },
     { id: 'table', label: 'Table', detail: 'View workspace data as table rows', group: 'Review' },
-    { id: 'tasks', label: 'Tasks', detail: 'Act on confirmed and potential tasks', group: 'Act' }
+    { id: 'tasks', label: 'Tasks', detail: 'Act on confirmed and potential tasks', group: 'Act' },
+    { id: 'kanban', label: 'Kanban', detail: 'Move tasks through board columns', group: 'Act' }
 ];
 
 const CANVAS_VIEW_IDS = new Set(CORE_VIEWS.map((view) => view.id));

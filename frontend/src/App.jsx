@@ -50,8 +50,8 @@ import { rememberWorkspace, selectStartupWorkspace } from './utils/workspaceSess
 import useActivityStore from './stores/activityStore';
 import useAutomationStore from './stores/automationStore';
 
-const CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'outline', 'executive', 'tasks', 'table']);
-const STRUCTURED_CANVAS_VIEWS = new Set(['outline', 'executive', 'tasks', 'table']);
+const CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'outline', 'executive', 'tasks', 'kanban', 'table']);
+const STRUCTURED_CANVAS_VIEWS = new Set(['outline', 'executive', 'tasks', 'kanban', 'table']);
 const STRUCTURED_AI_PRESETS = {
     tasks: {
         role: 'task-planner',

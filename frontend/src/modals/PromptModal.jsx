@@ -78,7 +78,7 @@ const OUTPUT_SHAPE_VIEW = {
     checklist: 'checklist',
     flow_chart: 'flowchart',
     chart: 'chartData',
-    kanban: 'preview',
+    kanban: 'kanban',
     review_annotations: 'gaps',
     sme_questions: 'sme',
     source_coverage: 'sources',
