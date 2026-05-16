@@ -733,3 +733,65 @@ test('multi-source draft payload bounds workspace request to selected chunks', (
     ]);
     assert.equal(request.metadata.source_context.source_context_mode, 'bounded_multi_source');
 });
+
+test('selected relationship draft items accept only chosen semantic edges locally', () => {
+    const session = createAIDraftSession({
+        sessionId: 'session-relationships',
+        revisionId: 'revision-relationships',
+        prompt: 'Find connections',
+        draftNodes: [],
+        draftEdges: [],
+        draftItems: [
+            {
+                id: 'item-rel-approval',
+                item_type: 'relationship',
+                title: 'Plan depends on approval',
+                content: 'Approval is required before launch.',
+                confidence: 0.84,
+                source_refs: [{ document_id: 'doc-plan', chunk_id: 'approval' }],
+                metadata: {
+                    relationship_edge_id: 'rel-approval',
+                    source_node_id: 'plan',
+                    target_node_id: 'approval',
+                    relationship_type: 'depends_on',
+                    rationale: 'Approval is required before launch.'
+                }
+            },
+            {
+                id: 'item-rel-risk',
+                item_type: 'relationship',
+                title: 'Risk blocks launch',
+                content: 'Risk may block launch.',
+                confidence: 0.42,
+                metadata: {
+                    relationship_edge_id: 'rel-risk',
+                    source_node_id: 'risk',
+                    target_node_id: 'launch',
+                    relationship_type: 'blocks',
+                    rationale: 'Risk may block launch.'
+                }
+            }
+        ]
+    });
+
+    const result = acceptAIDraftSession({
+        session,
+        nodes: [
+            createWorkspaceNode({ id: 'plan', title: 'Plan' }),
+            createWorkspaceNode({ id: 'approval', title: 'Approval' }),
+            createWorkspaceNode({ id: 'risk', title: 'Risk' }),
+            createWorkspaceNode({ id: 'launch', title: 'Launch' })
+        ],
+        edges: [],
+        mode: 'selected',
+        selectedItemIds: ['item-rel-risk']
+    });
+
+    assert.equal(result.edges.length, 1);
+    assert.equal(result.edges[0].id, 'rel-risk');
+    assert.equal(result.edges[0].relationship_type, 'blocks');
+    assert.equal(result.edges[0].metadata.confidence, 0.42);
+    assert.deepEqual(result.accept_result.accepted_edge_ids, ['rel-risk']);
+    assert.equal(result.accept_result.preview_diff.added_edges, 1);
+    assert.deepEqual(result.accept_result.preview_diff.accepted_item_ids, ['item-rel-risk']);
+});

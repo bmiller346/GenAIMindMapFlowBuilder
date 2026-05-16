@@ -153,6 +153,22 @@ const isEdgeLikeItem = (item = {}) => {
     );
 };
 
+const isRelationshipCandidateItem = (item = {}) => {
+    const type = String(item.item_type || item.type || '').toLowerCase();
+    const relationshipType = String(
+        item.relationship_type ||
+            item.metadata?.relationship_type ||
+            item.metadata?.relationshipType ||
+            ''
+    ).toLowerCase();
+    return (
+        type === 'relationship' ||
+        type === 'relationship_candidate' ||
+        Boolean(item.metadata?.relationship_edge_id) ||
+        (relationshipType && !['contains', 'child', 'parent'].includes(relationshipType))
+    );
+};
+
 const extractRevisionItems = (revision = {}) => {
     const nodeItems = asArray(revision.draft_nodes).map((node) => ({
         id: node.id || node.node_id,
@@ -171,7 +187,7 @@ const extractRevisionItems = (revision = {}) => {
     }));
     const nodeIds = new Set(nodeItems.map((item) => item.metadata.draft_node_id).filter(Boolean));
     const draftItems = asArray(revision.draft_items)
-        .filter((item) => !isReviewLikeItem(item) && !isEdgeLikeItem(item))
+        .filter((item) => !isReviewLikeItem(item) && (!isEdgeLikeItem(item) || isRelationshipCandidateItem(item)))
         .filter((item) => {
             const nodeId = item.metadata?.draft_node_id || item.metadata?.node_id || item.node_id;
             return !nodeId || !nodeIds.has(nodeId);

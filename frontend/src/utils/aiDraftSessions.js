@@ -1044,6 +1044,26 @@ export const selectedDraftNodes = ({ revision = {}, mode = 'append', selectedIte
     return nodes;
 };
 
+const selectedRelationshipDraftItems = ({ revision = {}, mode = 'append', selectedItemIds = [] } = {}) => {
+    if (mode === 'notes_only') {
+        return [];
+    }
+    const selected = new Set(asArray(selectedItemIds));
+    return asArray(revision.draft_items)
+        .map(normalizeAIDraftItem)
+        .filter((item) => {
+            const metadata = item.metadata || {};
+            const relationshipType = firstText(metadata.relationship_type, item.relationship_type);
+            if (!metadata.source_node_id || !metadata.target_node_id || !relationshipType) {
+                return false;
+            }
+            if (['contains', 'child', 'parent'].includes(relationshipType)) {
+                return false;
+            }
+            return mode !== 'selected' || selected.has(item.id);
+        });
+};
+
 export const buildAIDraftPreviewDiff = (
     session = {},
     { mode = 'append', selectedItemIds = [] } = {}
@@ -1057,6 +1077,7 @@ export const buildAIDraftPreviewDiff = (
         mode === 'notes_only'
             ? []
             : asArray(revision.draft_edges).filter((edge) => nodeIds.has(edge.target_node_id));
+    const relationshipItems = selectedRelationshipDraftItems({ revision, mode, selectedItemIds });
     const needsReviewRepairs =
         mode === 'notes_only'
             ? 0
@@ -1066,13 +1087,13 @@ export const buildAIDraftPreviewDiff = (
     const diff = {
         mode,
         added_nodes: mode === 'merge' ? 0 : nodes.length,
-        added_edges: mode === 'merge' ? 0 : edges.length,
+        added_edges: mode === 'merge' ? 0 : edges.length + relationshipItems.length,
         updated_nodes: updatedNodes,
         review_outputs: asArray(revision.draft_annotations).length,
         needs_review_repairs: needsReviewRepairs,
         accepted_item_ids: asArray(selectedItemIds).length
             ? asArray(selectedItemIds)
-            : nodes.map((node) => node.id),
+            : [...nodes.map((node) => node.id), ...relationshipItems.map((item) => item.id)],
         metadata: {
             change_intent: changeIntent,
             accept_mode: mode,
@@ -1131,6 +1152,7 @@ export const acceptAIDraftSession = ({
 } = {}) => {
     const revision = latestAIDraftRevision(session);
     const acceptedDrafts = selectedDraftNodes({ revision, mode, selectedItemIds });
+    const acceptedRelationships = selectedRelationshipDraftItems({ revision, mode, selectedItemIds });
     const existingIds = new Set(nodes.map((node) => node.id));
     const generatedNodes =
         mode === 'notes_only'
@@ -1142,7 +1164,7 @@ export const acceptAIDraftSession = ({
                   .filter((node) => !existingIds.has(node.id));
     const generatedIds = new Set(generatedNodes.map((node) => node.id));
     const existingEdgeKeys = new Set(edges.map((edge) => `${edge.source}->${edge.target}`));
-    const generatedEdges =
+    const generatedHierarchyEdges =
         mode === 'notes_only'
             ? []
             : asArray(revision.draft_edges)
@@ -1162,6 +1184,46 @@ export const acceptAIDraftSession = ({
                       existingEdgeKeys.add(key);
                       return true;
                   });
+    const generatedRelationshipEdges =
+        mode === 'notes_only'
+            ? []
+            : acceptedRelationships
+                  .map((item) => {
+                      const metadata = item.metadata || {};
+                      const relationshipType = firstText(metadata.relationship_type, item.relationship_type, 'related_to');
+                      return {
+                          id: firstText(metadata.relationship_edge_id, metadata.edge_id, item.id),
+                          source: metadata.source_node_id,
+                          target: metadata.target_node_id,
+                          type: 'smoothstep',
+                          animated: false,
+                          relationship_type: relationshipType,
+                          source_refs: asArray(item.source_refs),
+                          metadata: {
+                              ...metadata,
+                              source: metadata.source || 'ai_draft_relationship',
+                              confidence: item.confidence ?? metadata.confidence ?? '',
+                              rationale: firstText(metadata.rationale, item.content),
+                              review_state: firstText(item.status, metadata.review_state, 'needs_review')
+                          },
+                          data: {
+                              relationship_type: relationshipType,
+                              confidence: item.confidence ?? metadata.confidence ?? '',
+                              rationale: firstText(metadata.rationale, item.content),
+                              review_state: firstText(item.status, metadata.review_state, 'needs_review')
+                          }
+                      };
+                  })
+                  .filter((edge) => edge.source && edge.target)
+                  .filter((edge) => {
+                      const key = `${edge.source}->${edge.target}->${edge.relationship_type}`;
+                      if (existingEdgeKeys.has(key)) {
+                          return false;
+                      }
+                      existingEdgeKeys.add(key);
+                      return true;
+                  });
+    const generatedEdges = [...generatedHierarchyEdges, ...generatedRelationshipEdges];
     const nextNodes = attachDraftNotes({
         nodes: [...nodes, ...generatedNodes],
         session,

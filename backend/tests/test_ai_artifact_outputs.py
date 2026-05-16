@@ -494,7 +494,92 @@ def test_accepting_knowledge_graph_artifact_adds_relationship_edges():
     assert edge["source_refs"] == [SOURCE_REF]
     assert result["preview_diff"]["added_edges"] == 1
     assert result["preview_diff"]["relationship_edges"] == 1
-    assert "item_artifact-knowledge-graph" in result["accepted_item_ids"]
+    assert result["accepted_item_ids"] == [
+        "item_artifact-knowledge-graph_relationship_1_root_approval_depends_on"
+    ]
+
+
+def test_accepting_selected_knowledge_graph_relationship_adds_only_selected_edge():
+    graph = _graph(["knowledge_graph"])
+    session = build_ai_draft_session(
+        workspace_id="workspace-artifacts",
+        prompt="Find connection candidates.",
+        scope={"type": "workspace"},
+        role="Gap Analyst",
+        intent="draft_knowledge_graph",
+        draft_nodes=[],
+        draft_edges=[],
+        draft_annotations=[],
+        generated_artifacts=[
+            {
+                "id": "artifact-knowledge-graph",
+                "artifact_type": "knowledge_graph",
+                "title": "Knowledge Graph",
+                "status": "draft",
+                "data": {
+                    "relationship_edges": [
+                        {
+                            "id": "rel-approval",
+                            "source_node_id": "root",
+                            "target_node_id": "approval",
+                            "relationship_type": "depends_on",
+                            "source_signal": "explicit_text",
+                            "confidence": 0.84,
+                            "rationale": "Deployment depends on approval.",
+                            "source_refs": [SOURCE_REF],
+                            "assumptions": [],
+                            "review_state": "reviewed",
+                        },
+                        {
+                            "id": "rel-risk",
+                            "source_node_id": "approval",
+                            "target_node_id": "root",
+                            "relationship_type": "blocks",
+                            "source_signal": "ai_inferred",
+                            "confidence": 0.42,
+                            "rationale": "Approval may block launch.",
+                            "source_refs": [],
+                            "assumptions": ["Approval is required before launch."],
+                            "review_state": "needs_review",
+                        },
+                    ]
+                },
+                "source_refs": [SOURCE_REF],
+                "assumptions": [],
+            }
+        ],
+    )
+
+    revision = session["revisions"][0]
+    relationship_items = [
+        item for item in revision["draft_items"] if item["item_type"] == "relationship"
+    ]
+    assert [item["metadata"]["relationship_edge_id"] for item in relationship_items] == [
+        "rel-approval",
+        "rel-risk",
+    ]
+
+    accepted_graph, _accepted_session, result = accept_ai_draft_revision(
+        graph,
+        session,
+        accept_mode="selected",
+        selected_item_ids=["item_rel-risk"],
+    )
+
+    relationship_edges = [
+        edge
+        for edge in accepted_graph["edges"]
+        if edge["relationship_type"] in {"depends_on", "blocks"}
+    ]
+    assert len(relationship_edges) == 1
+    edge = relationship_edges[0]
+    assert edge["id"] == "rel-risk"
+    assert edge["relationship_type"] == "blocks"
+    assert edge["metadata"]["relationship_edge_id"] == "rel-risk"
+    assert edge["metadata"]["confidence"] == 0.42
+    assert result["accepted_edge_ids"] == ["rel-risk"]
+    assert result["accepted_item_ids"] == ["item_rel-risk"]
+    assert result["preview_diff"]["relationship_edges"] == 1
 
 
 def test_accepting_software_overlap_report_adds_relationship_edges():

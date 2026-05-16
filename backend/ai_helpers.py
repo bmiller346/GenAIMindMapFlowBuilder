@@ -945,7 +945,15 @@ def _draft_preview_diff_payload(
         "added_nodes": len(added_node_ids),
         "added_edges": len(added_edge_ids),
         "added_artifacts": len([artifact for artifact in generated_artifacts or [] if isinstance(artifact, dict)]),
-        "relationship_edges": sum(
+        "relationship_edges": len(
+            [
+                edge
+                for edge in draft_edges
+                if isinstance(edge, dict)
+                and str(edge.get("relationship_type") or "contains") != "contains"
+            ]
+        )
+        or sum(
             len(artifact.get("data", {}).get("relationship_edges", []))
             for artifact in generated_artifacts or []
             if isinstance(artifact, dict) and isinstance(artifact.get("data"), dict)
@@ -1266,6 +1274,10 @@ def _draft_items_from_revision_parts(
             continue
         artifact_id = str(artifact.get("id", ""))
         artifact_type = str(artifact.get("artifact_type") or "artifact")
+        relationship_items = _relationship_draft_items_from_artifact(artifact)
+        if relationship_items:
+            items.extend(relationship_items)
+            continue
         items.append(
             {
                 "id": f"item_{artifact_id}",
@@ -1277,6 +1289,80 @@ def _draft_items_from_revision_parts(
                 "status": artifact.get("status") or "draft",
                 "selected": True,
                 "metadata": {"artifact_id": artifact_id, "artifact_type": artifact_type},
+            }
+        )
+    return items
+
+
+def _relationship_edge_accept_id(
+    artifact: dict[str, Any],
+    relationship: dict[str, Any],
+    index: int,
+) -> str:
+    artifact_type = str(artifact.get("artifact_type") or "knowledge_graph")
+    artifact_id = str(artifact.get("id") or artifact_type or "knowledge_graph")
+    source = str(relationship.get("source_node_id") or "")
+    target = str(relationship.get("target_node_id") or "")
+    relationship_type = str(relationship.get("relationship_type") or "related_to")
+    safe_type = relationship_type.replace(" ", "_")
+    return str(
+        relationship.get("id")
+        or relationship.get("edge_id")
+        or f"{artifact_id}_relationship_{index}_{source}_{target}_{safe_type}"
+    )
+
+
+def _relationship_draft_items_from_artifact(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    artifact_type = str(artifact.get("artifact_type") or "")
+    if artifact_type not in {"knowledge_graph", "software_overlap_report"}:
+        return []
+    data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
+    relationship_edges = data.get("relationship_edges", [])
+    if not isinstance(relationship_edges, list):
+        return []
+    artifact_id = str(artifact.get("id") or artifact_type or "knowledge_graph")
+    items: list[dict[str, Any]] = []
+    for index, relationship in enumerate(relationship_edges, start=1):
+        if not isinstance(relationship, dict):
+            continue
+        source = str(relationship.get("source_node_id") or "")
+        target = str(relationship.get("target_node_id") or "")
+        relationship_type = str(relationship.get("relationship_type") or "related_to")
+        if not source or not target:
+            continue
+        edge_id = _relationship_edge_accept_id(artifact, relationship, index)
+        confidence = relationship.get("confidence", "")
+        rationale = str(relationship.get("rationale") or relationship.get("source_signal") or "")
+        title = str(
+            relationship.get("title")
+            or f"{source} {relationship_type.replace('_', ' ')} {target}"
+        )
+        items.append(
+            {
+                "id": f"item_{edge_id}",
+                "item_type": "relationship",
+                "title": title,
+                "content": rationale,
+                "source_refs": deepcopy(relationship.get("source_refs", []))
+                if isinstance(relationship.get("source_refs"), list)
+                else [],
+                "assumptions": deepcopy(relationship.get("assumptions", []))
+                if isinstance(relationship.get("assumptions"), list)
+                else [],
+                "confidence": confidence,
+                "status": relationship.get("review_state") or artifact.get("status") or "needs_review",
+                "selected": True,
+                "metadata": {
+                    "artifact_id": artifact_id,
+                    "artifact_type": artifact_type,
+                    "relationship_edge_id": edge_id,
+                    "edge_id": edge_id,
+                    "source_node_id": source,
+                    "target_node_id": target,
+                    "relationship_type": relationship_type,
+                    "source_signal": relationship.get("source_signal", ""),
+                    "rationale": rationale,
+                },
             }
         )
     return items
@@ -1340,11 +1426,35 @@ def _selected_generated_artifacts(
         return artifacts
 
     artifact_ids = _selected_metadata_ids(revision, selected_ids, "artifact_id")
-    return [
-        artifact
-        for artifact in artifacts
-        if artifact.get("id") in selected_ids or artifact.get("id") in artifact_ids
-    ]
+    relationship_edge_ids = _selected_metadata_ids(revision, selected_ids, "relationship_edge_id")
+    selected_artifacts: list[dict[str, Any]] = []
+    for artifact in artifacts:
+        artifact_type = artifact.get("artifact_type")
+        artifact_id = str(artifact.get("id") or "")
+        if artifact_type not in {"knowledge_graph", "software_overlap_report"}:
+            if artifact.get("id") in selected_ids or artifact.get("id") in artifact_ids:
+                selected_artifacts.append(artifact)
+            continue
+        whole_artifact_selected = artifact.get("id") in selected_ids or f"item_{artifact_id}" in selected_ids
+        if whole_artifact_selected and not relationship_edge_ids:
+            selected_artifacts.append(artifact)
+            continue
+        data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
+        relationship_edges = data.get("relationship_edges", [])
+        if not isinstance(relationship_edges, list):
+            continue
+        filtered_edges = [
+            relationship
+            for index, relationship in enumerate(relationship_edges, start=1)
+            if isinstance(relationship, dict)
+            and _relationship_edge_accept_id(artifact, relationship, index) in relationship_edge_ids
+        ]
+        if filtered_edges:
+            filtered_artifact = deepcopy(artifact)
+            filtered_artifact.setdefault("data", {})
+            filtered_artifact["data"]["relationship_edges"] = filtered_edges
+            selected_artifacts.append(filtered_artifact)
+    return selected_artifacts
 
 
 def _knowledge_graph_artifact_edges_for_accept(
@@ -1368,12 +1478,7 @@ def _knowledge_graph_artifact_edges_for_accept(
             relationship_type = str(relationship.get("relationship_type") or "related_to")
             if not source or not target:
                 continue
-            safe_type = relationship_type.replace(" ", "_")
-            edge_id = str(
-                relationship.get("id")
-                or relationship.get("edge_id")
-                or f"{artifact_id}_relationship_{index}_{source}_{target}_{safe_type}"
-            )
+            edge_id = _relationship_edge_accept_id(artifact, relationship, index)
             metadata = relationship.get("metadata") if isinstance(relationship.get("metadata"), dict) else {}
             edges.append(
                 {
@@ -1388,6 +1493,7 @@ def _knowledge_graph_artifact_edges_for_accept(
                         **deepcopy(metadata),
                         "source": f"{artifact_type}_artifact",
                         "artifact_id": artifact_id,
+                        "relationship_edge_id": edge_id,
                         "source_signal": relationship.get("source_signal", ""),
                         "confidence": relationship.get("confidence", ""),
                         "rationale": relationship.get("rationale", ""),
@@ -1418,6 +1524,11 @@ def _accepted_item_ids(
         for edge in accepted_edges
         if isinstance(edge, dict) and isinstance(edge.get("metadata"), dict)
     }
+    accepted_relationship_edge_ids = {
+        edge.get("metadata", {}).get("relationship_edge_id", "")
+        for edge in accepted_edges
+        if isinstance(edge, dict) and isinstance(edge.get("metadata"), dict)
+    }
     item_ids = []
     for item in revision.get("draft_items", []):
         if not isinstance(item, dict):
@@ -1426,11 +1537,17 @@ def _accepted_item_ids(
         raw_id = (
             metadata.get("node_id")
             or metadata.get("edge_id")
+            or metadata.get("relationship_edge_id")
             or metadata.get("annotation_id")
             or metadata.get("artifact_id")
         )
         item_id = item.get("id")
-        if item_id in selected_ids or raw_id in accepted_raw_ids or raw_id in accepted_artifact_ids:
+        if (
+            item_id in selected_ids
+            or raw_id in accepted_raw_ids
+            or raw_id in accepted_artifact_ids
+            or raw_id in accepted_relationship_edge_ids
+        ):
             item_ids.append(str(item_id))
     return item_ids
 
