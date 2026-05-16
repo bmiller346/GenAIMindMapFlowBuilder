@@ -165,16 +165,16 @@ const viewForOutputShape = (shape, actionId) =>
     OUTPUT_SHAPE_VIEW[shape] || viewForAction(actionId || 'custom_prompt');
 
 const MAP_REVIEW_SCOPES = new Set(['workspace', 'source', 'nodes']);
-const MAP_CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph']);
+const CANVAS_REVIEW_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'outline', 'executive', 'tasks', 'kanban', 'table']);
 
 const viewForDraftReview = ({ scopeType, requestedView, activeCanvasView }) => {
     if (!MAP_REVIEW_SCOPES.has(scopeType)) {
         return requestedView;
     }
-    if (MAP_CANVAS_VIEWS.has(requestedView)) {
+    if (CANVAS_REVIEW_VIEWS.has(requestedView)) {
         return requestedView;
     }
-    return MAP_CANVAS_VIEWS.has(activeCanvasView) ? activeCanvasView : 'mindmap';
+    return CANVAS_REVIEW_VIEWS.has(activeCanvasView) ? activeCanvasView : 'mindmap';
 };
 
 const shapeFromSession = (session, fallbackShape) => {
