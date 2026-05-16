@@ -822,6 +822,7 @@ const PromptModal = ({
     initialActionId,
     initialPrompt = '',
     initialVisual = 'auto',
+    initialChangeIntent = '',
     initialPromptPlaceholder = '',
     initialContextSourceId = '',
     initialContextSourceIds = []
@@ -1071,6 +1072,7 @@ const PromptModal = ({
                 initialActionId: selectedAction?.id || selectedActionId,
                 initialPrompt: customPrompt,
                 initialVisual: selectedVisual,
+                initialChangeIntent,
                 initialContextSourceIds: selectedContextSourceIds,
                 initialContextSourceId: selectedContextSourceIds[0] || ''
             }
@@ -1141,10 +1143,12 @@ const PromptModal = ({
             shouldDraftNode &&
             selectedVisual !== 'no_visual';
         const promptText = localPrompt || effectiveAction.label;
-        const changeIntent = inferAIDraftChangeIntent(
-            promptText,
-            activeAIDraftSession?.session_id ? 'update' : 'supplement'
-        );
+        const changeIntent =
+            initialChangeIntent ||
+            inferAIDraftChangeIntent(
+                promptText,
+                activeAIDraftSession?.session_id ? 'update' : 'supplement'
+            );
         const memoryContext = buildAIDraftMemoryContext({
             nodes,
             edges,

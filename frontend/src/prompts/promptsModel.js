@@ -92,6 +92,7 @@ export const sourceFirstActionPresets = [
         visual: 'mind_map',
         roleId: 'workflow-mapper',
         actionId: 'generate_child_nodes',
+        changeIntent: 'supplement',
         availability: 'source_only'
     },
     {
@@ -102,6 +103,7 @@ export const sourceFirstActionPresets = [
         visual: 'table',
         roleId: 'data-table-interpreter',
         actionId: 'interpret_table_data',
+        changeIntent: 'supplement',
         availability: 'source_only'
     },
     {
@@ -112,6 +114,7 @@ export const sourceFirstActionPresets = [
         visual: 'knowledge_graph',
         roleId: 'standards-extractor',
         actionId: 'custom_prompt',
+        changeIntent: 'supplement',
         availability: 'always'
     },
     {
@@ -122,6 +125,7 @@ export const sourceFirstActionPresets = [
         visual: 'tasks',
         roleId: 'task-planner',
         actionId: 'generate_tasks',
+        changeIntent: 'supplement',
         availability: 'source_only'
     },
     {
@@ -132,6 +136,7 @@ export const sourceFirstActionPresets = [
         visual: 'outline',
         roleId: 'research-assistant',
         actionId: 'summarize_branch',
+        changeIntent: 'compare',
         availability: 'always'
     },
     {
@@ -142,6 +147,7 @@ export const sourceFirstActionPresets = [
         visual: 'source_coverage',
         roleId: 'source-ref-repair',
         actionId: 'find_missing_source_support',
+        changeIntent: 'compare',
         availability: 'graph'
     },
     {
@@ -152,6 +158,7 @@ export const sourceFirstActionPresets = [
         visual: 'mind_map',
         roleId: 'workflow-mapper',
         actionId: 'generate_child_nodes',
+        changeIntent: 'supplement',
         availability: 'graph'
     },
     {
@@ -162,6 +169,7 @@ export const sourceFirstActionPresets = [
         visual: 'source_coverage',
         roleId: 'source-ref-repair',
         actionId: 'find_missing_source_support',
+        changeIntent: 'update',
         availability: 'graph',
         reconciliation: true
     }

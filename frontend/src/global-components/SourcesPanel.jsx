@@ -153,7 +153,8 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
             initialRoleId: preset.roleId || 'source-ref-repair',
             initialActionId: preset.actionId || 'find_missing_source_support',
             initialPrompt: preset.prompt || '',
-            initialVisual: preset.visual || 'auto'
+            initialVisual: preset.visual || 'auto',
+            initialChangeIntent: preset.changeIntent || ''
         });
         recordActivity({
             type: sources.length > 1 ? 'ai_multi_source_draft_requested' : 'ai_source_draft_requested',
@@ -170,6 +171,7 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                 source_ids: boundedSources.map((source) => source.id),
                 intent: preset.id || '',
                 action: preset.actionId || '',
+                change_intent: preset.changeIntent || '',
                 requested_visual: preset.visual || '',
                 bounded_source_count: boundedSources.length,
                 bounded_source_chunk_count: sourceChunkCount
