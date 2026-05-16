@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, status, File, Depends, Form, Query, Response
+from fastapi import FastAPI, HTTPException, UploadFile, status, File, Depends, Form, Header, Query, Response
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 from bson import ObjectId
@@ -82,7 +82,7 @@ from unstructured.documents.elements import (
     Title,
     NarrativeText,
     ListItem,
-    Header,
+    Header as UnstructuredHeader,
 )
 import google.generativeai as genai
 import vertexai
@@ -107,10 +107,15 @@ from config import (
 )
 from code_intelligence import (
     CodeIntelligenceCapabilityError,
+    GitHubRepoScanError,
     code_intelligence_capability_contract,
+    code_intelligence_to_markdown,
+    require_code_intelligence_enabled,
     resolve_allowed_local_repo_root,
+    scan_github_repo,
     scan_local_repo,
 )
+from integrations.github import GitHubClient, GitHubClientError
 from export.csv_tasks import export_task_rows
 from export.workspace_graph import (
     build_workspace_graph,
@@ -480,6 +485,17 @@ class LocalRepoScanRequest(BaseModel):
     max_file_bytes: int = Field(default=256_000, ge=1, le=2_000_000)
     large_file_line_threshold: int = Field(default=500, ge=50, le=10_000)
 
+
+class GitHubRepoScanRequest(BaseModel):
+    owner: str
+    repo: str
+    ref: str = "main"
+    path: str = ""
+    repo_label: str = ""
+    max_files: int = Field(default=200, ge=1, le=1000)
+    max_file_bytes: int = Field(default=256_000, ge=1, le=2_000_000)
+    large_file_line_threshold: int = Field(default=500, ge=50, le=10_000)
+
 origins = [
     "http://127.0.0.1:5173",
     "http://localhost:5173",
@@ -578,6 +594,26 @@ def get_capabilities():
     return code_intelligence_capability_contract()
 
 
+def _github_http_exception(exc: GitHubClientError) -> HTTPException:
+    status_code = exc.status_code or status.HTTP_502_BAD_GATEWAY
+    if status_code not in {
+        status.HTTP_401_UNAUTHORIZED,
+        status.HTTP_403_FORBIDDEN,
+        status.HTTP_404_NOT_FOUND,
+        status.HTTP_429_TOO_MANY_REQUESTS,
+    }:
+        status_code = status.HTTP_502_BAD_GATEWAY
+    headers = {"Retry-After": exc.retry_after} if exc.retry_after and status_code == status.HTTP_429_TOO_MANY_REQUESTS else None
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "message": str(exc),
+            "reason_code": exc.reason_code,
+        },
+        headers=headers,
+    )
+
+
 @app.post("/api/code-intelligence/local-repo/scan")
 def scan_local_repo_endpoint(request: LocalRepoScanRequest):
     try:
@@ -594,6 +630,57 @@ def scan_local_repo_endpoint(request: LocalRepoScanRequest):
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@app.post("/api/code-intelligence/local-repo/report.md")
+def scan_local_repo_report_endpoint(request: LocalRepoScanRequest):
+    graph = scan_local_repo_endpoint(request)
+    return Response(
+        content=code_intelligence_to_markdown(graph),
+        media_type="text/markdown",
+    )
+
+
+@app.post("/api/code-intelligence/github/scan")
+def scan_github_repo_endpoint(
+    request: GitHubRepoScanRequest,
+    x_docmap_github_token: str = Header(default=""),
+):
+    try:
+        require_code_intelligence_enabled()
+    except CodeIntelligenceCapabilityError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    if not x_docmap_github_token.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GitHub token is required.")
+
+    repo_name = f"{request.owner}/{request.repo}"
+    try:
+        return scan_github_repo(
+            GitHubClient(x_docmap_github_token),
+            repo=repo_name,
+            ref=request.ref,
+            path_prefix=request.path,
+            max_files=request.max_files,
+            max_file_bytes=request.max_file_bytes,
+            large_file_line_threshold=request.large_file_line_threshold,
+        )
+    except GitHubRepoScanError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except GitHubClientError as exc:
+        raise _github_http_exception(exc) from exc
+
+
+@app.post("/api/code-intelligence/github/report.md")
+def scan_github_repo_report_endpoint(
+    request: GitHubRepoScanRequest,
+    x_docmap_github_token: str = Header(default=""),
+):
+    graph = scan_github_repo_endpoint(request, x_docmap_github_token)
+    return Response(
+        content=code_intelligence_to_markdown(graph),
+        media_type="text/markdown",
+    )
 LOCAL_AI_DRAFT_SESSION_STORE_PATH = Path(
     os.getenv("DOCMAP_LOCAL_AI_DRAFT_SESSION_STORE", "docmap_ai_draft_sessions.json")
 )
@@ -1684,7 +1771,7 @@ def camelot_pdf_processing(flow_id, file, flow_type):
 
         # Extract content (text, title, etc.) from the PDF
         for element in elements:
-            if isinstance(element, (Text, Title, NarrativeText, ListItem, Header)):
+            if isinstance(element, (Text, Title, NarrativeText, ListItem, UnstructuredHeader)):
                 content_data.append(
                     {"data": element.text, "page_number": element.metadata.page_number}
                 )

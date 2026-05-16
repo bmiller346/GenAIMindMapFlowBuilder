@@ -33,6 +33,8 @@ const SettingsModal = () => {
     const popNode = modalStore((s) => s.popNode);
     const nudgePreferences = useStore((s) => s.nudgePreferences);
     const setNudgePreferences = useStore((s) => s.setNudgePreferences);
+    const developerMode = useStore((s) => s.developerMode);
+    const setDeveloperMode = useStore((s) => s.setDeveloperMode);
     const [openaiApiKey, setOpenaiApiKey] = useState('');
     const [miroApiToken, setMiroApiToken] = useState('');
     const [mondayApiToken, setMondayApiToken] = useState('');
@@ -46,11 +48,16 @@ const SettingsModal = () => {
     });
     const [draftNudgePreferences, setDraftNudgePreferences] =
         useState(nudgePreferences);
+    const [draftDeveloperMode, setDraftDeveloperMode] = useState(developerMode);
     const credentialStorageMode = getCredentialStorageMode();
 
     useEffect(() => {
         setDraftNudgePreferences(nudgePreferences);
     }, [nudgePreferences]);
+
+    useEffect(() => {
+        setDraftDeveloperMode(developerMode);
+    }, [developerMode]);
 
     useEffect(() => {
         let mounted = true;
@@ -91,6 +98,7 @@ const SettingsModal = () => {
         try {
             const persistedSettings = await saveCredentialSettings(nextSettings);
             setNudgePreferences(draftNudgePreferences);
+            setDeveloperMode(draftDeveloperMode);
             setOpenaiApiKey(persistedSettings.openaiApiKey);
             setMiroApiToken(persistedSettings.miroApiToken);
             setMondayApiToken(persistedSettings.mondayApiToken);
@@ -285,6 +293,25 @@ const SettingsModal = () => {
                             </label>
                         ))}
                     </div>
+                </details>
+            </section>
+            <section className="settings-section">
+                <details className="settings-advanced">
+                    <summary>Developer tools</summary>
+                    <label className="settings-toggle-row" htmlFor="developer-mode">
+                        <span>
+                            <strong>Developer mode</strong>
+                            <small>Show hidden diagnostics and code intelligence tools for local engineering work.</small>
+                        </span>
+                        <input
+                            id="developer-mode"
+                            type="checkbox"
+                            checked={draftDeveloperMode}
+                            onChange={(event) =>
+                                setDraftDeveloperMode(event.target.checked)
+                            }
+                        />
+                    </label>
                 </details>
             </section>
             {saved ? (

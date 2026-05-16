@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import modalStore from '../stores/modalStore';
+import useStore from '../stores/store';
 
 const HELP_ARTICLES = [
     {
@@ -86,9 +87,13 @@ const HELP_ARTICLES = [
 
 const HelpModal = () => {
     const popNode = modalStore((s) => s.popNode);
-    const [activeArticleId, setActiveArticleId] = useState(HELP_ARTICLES[0].id);
+    const developerMode = useStore((s) => s.developerMode);
+    const visibleArticles = developerMode
+        ? HELP_ARTICLES
+        : HELP_ARTICLES.filter((article) => article.id !== 'debug-panel');
+    const [activeArticleId, setActiveArticleId] = useState(visibleArticles[0].id);
     const activeArticle =
-        HELP_ARTICLES.find((article) => article.id === activeArticleId) || HELP_ARTICLES[0];
+        visibleArticles.find((article) => article.id === activeArticleId) || visibleArticles[0];
 
     return (
         <div className="modal-container help-modal">
@@ -103,7 +108,7 @@ const HelpModal = () => {
             </div>
             <div className="help-modal-body">
                 <nav className="help-article-list" aria-label="Help articles">
-                    {HELP_ARTICLES.map((article) => (
+                    {visibleArticles.map((article) => (
                         <button
                             key={article.id}
                             type="button"

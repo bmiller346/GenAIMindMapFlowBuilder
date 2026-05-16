@@ -65,6 +65,11 @@ def test_scan_local_repo_builds_source_cited_code_graph(tmp_path):
 def test_scan_local_repo_ignores_generated_and_secret_files(tmp_path):
     (tmp_path / "main.py").write_text("def run():\n    return True\n", encoding="utf-8")
     (tmp_path / ".env").write_text("SECRET=do-not-ingest\n", encoding="utf-8")
+    (tmp_path / ".env.production").write_text("SECRET=do-not-ingest-prod\n", encoding="utf-8")
+    (tmp_path / "id_ed25519").write_text("PRIVATE=do-not-ingest-key\n", encoding="utf-8")
+    (tmp_path / "deploy.key").write_text("PRIVATE=do-not-ingest-deploy\n", encoding="utf-8")
+    (tmp_path / "credentials.json").write_text('{"client_secret":"do-not-ingest-json"}\n', encoding="utf-8")
+    (tmp_path / "config.json").write_text('{"client_secret":"do-not-ingest-config"}\n', encoding="utf-8")
     ignored_dir = tmp_path / "node_modules"
     ignored_dir.mkdir()
     (ignored_dir / "package.js").write_text("export const secret = true;\n", encoding="utf-8")
@@ -74,7 +79,15 @@ def test_scan_local_repo_ignores_generated_and_secret_files(tmp_path):
     paths = {entry["path"] for entry in graph["files"]}
     assert "main.py" in paths
     assert ".env" not in paths
+    assert ".env.production" not in paths
+    assert "id_ed25519" not in paths
+    assert "deploy.key" not in paths
+    assert "credentials.json" not in paths
+    assert "config.json" not in paths
     assert "node_modules/package.js" not in paths
+
+    serialized = str(graph)
+    assert "do-not-ingest" not in serialized
 
 
 def test_scan_local_repo_reports_missing_tests_and_docs(tmp_path):

@@ -94,6 +94,7 @@ const Header = ({
         viewport: s.viewport,
         workspaceBrief: s.workspaceBrief,
         sourceLibrary: s.sourceLibrary,
+        developerMode: s.developerMode,
         aiActionRuns: s.aiActionRuns,
         setAIActionRuns: s.setAIActionRuns
     });
@@ -114,6 +115,7 @@ const Header = ({
         viewport,
         workspaceBrief,
         sourceLibrary,
+        developerMode,
         aiActionRuns,
         setAIActionRuns
     } = useStore(useShallow(selector));
@@ -1299,14 +1301,16 @@ const Header = ({
                         >
                             Ask AI
                         </button>
-                        <button
-                            type="button"
-                            className="header-action header-action-secondary dev-debug-trigger"
-                            onClick={openDebug}
-                            title="Open temporary developer debug panel"
-                        >
-                            Debug
-                        </button>
+                        {developerMode ? (
+                            <button
+                                type="button"
+                                className="header-action header-action-secondary dev-debug-trigger"
+                                onClick={openDebug}
+                                title="Open temporary developer debug panel"
+                            >
+                                Debug
+                            </button>
+                        ) : null}
                         <button
                             type="button"
                             className={`header-action save-now ${saveStatus}`}

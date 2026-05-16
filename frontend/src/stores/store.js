@@ -15,7 +15,9 @@ import {
 import {
     getLastUsedGraphFilters,
     getNudgePreferences,
+    isDeveloperModeEnabled,
     saveLastUsedGraphFilters,
+    saveDeveloperMode,
     saveNudgePreferences
 } from '../config/localSettings';
 
@@ -219,6 +221,7 @@ const useStore = create((set, get) => ({
     activeView: 'mindmap',
     activeCanvasView: 'mindmap',
     activeGraphFilters: getLastUsedGraphFilters(),
+    developerMode: isDeveloperModeEnabled(),
     nudgePreferences: getNudgePreferences(),
     selectedBranchId: undefined,
     inspectorNodeId: undefined,
@@ -310,6 +313,9 @@ const useStore = create((set, get) => ({
     },
     setActiveGraphFilters: (filters = []) => {
         set({ activeGraphFilters: saveLastUsedGraphFilters(filters) });
+    },
+    setDeveloperMode: (enabled) => {
+        set({ developerMode: saveDeveloperMode(enabled) });
     },
     setNudgePreferences: (preferences = {}) => {
         set({ nudgePreferences: saveNudgePreferences(preferences) });

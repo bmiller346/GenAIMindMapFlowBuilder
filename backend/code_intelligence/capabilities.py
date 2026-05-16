@@ -31,11 +31,13 @@ def configured_code_intelligence_roots() -> list[Path]:
 def code_intelligence_capability_contract() -> dict[str, Any]:
     enabled = code_intelligence_enabled()
     roots = configured_code_intelligence_roots()
-    reason_code = ""
+    local_reason_code = ""
+    github_reason_code = ""
     if not enabled:
-        reason_code = "not_enabled"
+        local_reason_code = "not_enabled"
+        github_reason_code = "not_enabled"
     elif not roots:
-        reason_code = "no_allowlisted_roots"
+        local_reason_code = "no_allowlisted_roots"
     return {
         "contract_versions": {
             "capability_visibility": "1",
@@ -43,24 +45,36 @@ def code_intelligence_capability_contract() -> dict[str, Any]:
         },
         "capabilities": {
             "docmap:developerMode": {
-                "enabled": enabled and bool(roots),
+                "enabled": enabled,
                 "source": "server_entitlement",
-                "reason_code": reason_code,
+                "reason_code": github_reason_code,
             },
             "code_intelligence": {
                 "enabled": enabled and bool(roots),
                 "requires": ["docmap:developerMode"],
                 "relationship_visibility": "hidden" if not enabled else "developer_only",
                 "allowlisted_roots": [str(root) for root in roots] if enabled else [],
-                "reason_code": reason_code,
+                "reason_code": local_reason_code,
+            },
+            "github_code_intelligence": {
+                "enabled": enabled,
+                "requires": ["docmap:developerMode", "github_byo_token"],
+                "relationship_visibility": "hidden" if not enabled else "developer_only",
+                "token_storage": "request_header_only",
+                "writes_enabled": False,
+                "reason_code": github_reason_code,
             },
         },
     }
 
 
-def resolve_allowed_local_repo_root(requested_root: str | Path) -> Path:
+def require_code_intelligence_enabled() -> None:
     if not code_intelligence_enabled():
         raise CodeIntelligenceCapabilityError("Code intelligence is disabled.")
+
+
+def resolve_allowed_local_repo_root(requested_root: str | Path) -> Path:
+    require_code_intelligence_enabled()
     roots = configured_code_intelligence_roots()
     if not roots:
         raise CodeIntelligenceCapabilityError("No code intelligence repo roots are allowlisted.")

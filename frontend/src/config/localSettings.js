@@ -9,7 +9,8 @@ export const SETTINGS_KEYS = {
     theme: 'docmap.theme',
     nudgePreferences: 'docmap.nudgePreferences',
     dismissedNudges: 'docmap.dismissedNudges',
-    lastUsedGraphFilters: 'docmap.lastUsedGraphFilters'
+    lastUsedGraphFilters: 'docmap.lastUsedGraphFilters',
+    developerMode: 'docmap:developerMode'
 };
 
 export const NUDGE_CATEGORY_KEYS = [
@@ -128,6 +129,14 @@ export const setLocalSetting = (key, value) => {
     } catch {
         // Local settings are a convenience layer; requests still work without them.
     }
+};
+
+export const isDeveloperModeEnabled = () =>
+    getLocalSetting(SETTINGS_KEYS.developerMode) === 'true';
+
+export const saveDeveloperMode = (enabled) => {
+    setLocalSetting(SETTINGS_KEYS.developerMode, enabled ? 'true' : '');
+    return Boolean(enabled);
 };
 
 const getJsonLocalSetting = (key, fallback) => {

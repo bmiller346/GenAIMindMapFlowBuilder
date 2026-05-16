@@ -51,6 +51,10 @@ const DATA_SOURCES = [
 	{ img: SQLSvg, content: "Connect SQL", name: "sql", mode: "Data intake", detail: "Query analysis, not document citations." },
 ];
 
+const DEVELOPER_SOURCES = [
+	{ img: DRAWERSvg, content: "Scan GitHub repository", name: "code_intelligence", mode: "Developer", detail: "Creates a source-cited code graph and engineering report." },
+];
+
 const DataSourceSelect = ({
 	mode = "workspace_intake",
 	returnModal,
@@ -60,12 +64,13 @@ const DataSourceSelect = ({
 }) => {
 	const pushNode = modalStore((s) => s.pushNode);
 	const popNode = modalStore((s) => s.popNode);
-	const { nodes, edges, workspaceBrief, sourceLibrary } = useStore(
+	const { nodes, edges, workspaceBrief, sourceLibrary, developerMode } = useStore(
 		useShallow((state) => ({
 			nodes: state.nodes,
 			edges: state.edges,
 			workspaceBrief: state.workspaceBrief,
-			sourceLibrary: state.sourceLibrary
+			sourceLibrary: state.sourceLibrary,
+			developerMode: state.developerMode
 		}))
 	);
 	const isAskAIContext = mode === "ask_ai_context";
@@ -120,6 +125,7 @@ const DataSourceSelect = ({
 				{ title: "WEB", sources: WEB_SOURCES },
 				{ title: "MEDIA", sources: MEDIA_SOURCES },
 				{ title: "DATA", sources: DATA_SOURCES },
+				...(developerMode ? [{ title: "DEVELOPER", sources: DEVELOPER_SOURCES }] : []),
 			]),
 	];
 	const selectedCount = activeSourceIds.length;

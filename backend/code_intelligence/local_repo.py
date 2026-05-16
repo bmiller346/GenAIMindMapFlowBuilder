@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import fnmatch
 import hashlib
 import json
 import re
@@ -35,6 +36,32 @@ SECRET_FILENAMES = {
     ".env.production",
     "id_rsa",
     "id_dsa",
+    "id_ed25519",
+    "id_ecdsa",
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    "credentials.json",
+}
+SECRET_FILE_PATTERNS = {
+    ".env.*",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*.crt",
+    "*.cer",
+    "*.kdbx",
+    "service-account*.json",
+    "firebase*.json",
+    "secrets.*",
+}
+SECRET_CONTENT_PATTERNS = {
+    "private_key",
+    "client_secret",
+    "api_key",
+    "aws_secret_access_key",
+    "github_token",
 }
 CODE_INTELLIGENCE_NODE_TYPES = {
     "repo",
@@ -488,17 +515,34 @@ def _iter_supported_files(root: Path, *, max_file_bytes: int) -> list[Path]:
             continue
         if any(part in DEFAULT_IGNORE_PARTS for part in path.relative_to(root).parts):
             continue
-        if path.name in SECRET_FILENAMES or path.suffix.lower() == ".pem":
+        if _is_secret_path(path.relative_to(root).as_posix()):
             continue
         if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
             continue
         try:
             if path.stat().st_size > max_file_bytes:
                 continue
+            if path.suffix.lower() in {".json", ".yaml", ".yml", ".toml"} and _contains_secret_pattern(path):
+                continue
         except OSError:
             continue
         files.append(path)
     return files
+
+
+def _is_secret_path(path: str) -> bool:
+    name = Path(path).name.lower()
+    return name in SECRET_FILENAMES or any(
+        fnmatch.fnmatch(name, pattern) for pattern in SECRET_FILE_PATTERNS
+    )
+
+
+def _contains_secret_pattern(path: Path) -> bool:
+    try:
+        sample = path.read_text(encoding="utf-8", errors="replace")[:16_000].lower()
+    except OSError:
+        return True
+    return any(pattern in sample for pattern in SECRET_CONTENT_PATTERNS)
 
 
 def _parse_file(path: Path, text: str, file_source_ref: dict[str, Any]) -> dict[str, Any]:

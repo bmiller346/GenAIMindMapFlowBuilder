@@ -5,8 +5,10 @@ import {
     NUDGE_CATEGORY_KEYS,
     getLastUsedGraphFilters,
     getNudgePreferences,
+    isDeveloperModeEnabled,
     isNudgeCategoryEnabled,
     normalizeNudgePreferences,
+    saveDeveloperMode,
     saveLastUsedGraphFilters,
     saveNudgePreferences
 } from '../src/config/localSettings.js';
@@ -83,4 +85,14 @@ test('last-used graph filters persist locally', () => {
 
     assert.deepEqual(saved, ['needs-review', 'missing-source']);
     assert.deepEqual(getLastUsedGraphFilters(), ['needs-review', 'missing-source']);
+});
+
+test('developer mode defaults hidden and persists explicit opt-in', () => {
+    installLocalStorage();
+
+    assert.equal(isDeveloperModeEnabled(), false);
+    assert.equal(saveDeveloperMode(true), true);
+    assert.equal(isDeveloperModeEnabled(), true);
+    assert.equal(saveDeveloperMode(false), false);
+    assert.equal(isDeveloperModeEnabled(), false);
 });
