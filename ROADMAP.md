@@ -62,6 +62,8 @@ Known verification gap:
   `PRODUCT_GUIDE_SOFTWARE_INVENTORY.md`. The core contract, deterministic
   scoring, and review surfacing are implemented, but the realistic fixture and
   full e2e validation flow in that guide remain future hardening work.
+- Other capability boundaries that should become product guides versus
+  roadmap-only work are spelled out in `PRODUCT_GUIDE_SPLITS.md`.
 - The live OpenAI smoke script is available at `backend/tests/live_openai_smoke.py`,
   but could not run in this environment because neither `openai_api_key` nor
   `OPENAI_API_KEY` is configured.
