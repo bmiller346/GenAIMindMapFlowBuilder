@@ -610,9 +610,8 @@ const App = () => {
         };
     }, [canvasGraph, isStructuredCanvasView]);
     const selectedVisibleNodes = useMemo(() => {
-        const visibleIds = new Set(renderedCanvasGraph.nodes.filter((node) => !node.hidden).map((node) => node.id));
-        return selectedCanvasNodes.filter((node) => visibleIds.has(node.id));
-    }, [renderedCanvasGraph.nodes, selectedCanvasNodes]);
+        return renderedCanvasGraph.nodes.filter((node) => !node.hidden && node.selected);
+    }, [renderedCanvasGraph.nodes]);
     const selectedBranchNode = useMemo(
         () => nodes.find((node) => node.id === selectedBranchId),
         [nodes, selectedBranchId]
@@ -683,6 +682,40 @@ const App = () => {
         setSelectedNodes(undefined);
         setAskMultipleClass('deanimate');
     }, [setNodes]);
+
+    const syncCanvasSelection = useCallback((nextNodes) => {
+        const nextSelectedNodes = nextNodes.filter((node) => node.selected);
+        setSelectedCanvasNodes(nextSelectedNodes);
+        const responseNodes = nextSelectedNodes.filter((node) => node.type === 'response');
+        if (
+            responseNodes.length > 1 &&
+            responseNodes.length <= 4 &&
+            responseNodes.length === nextSelectedNodes.length
+        ) {
+            setSelectedNodes(responseNodes);
+            setAskMultipleClass('animate');
+        } else {
+            setSelectedNodes(undefined);
+            setAskMultipleClass('deanimate');
+        }
+    }, []);
+
+    const handleNodeClick = useCallback(
+        (event, node) => {
+            if (!event?.ctrlKey && !event?.metaKey) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            const currentNodes = useStore.getState().nodes;
+            const nextNodes = currentNodes.map((item) =>
+                item.id === node.id ? { ...item, selected: !item.selected } : item
+            );
+            setNodes(nextNodes);
+            syncCanvasSelection(nextNodes);
+        },
+        [setNodes, syncCanvasSelection]
+    );
 
     const deleteSelectedNodes = useCallback(() => {
         const currentNodes = useStore.getState().nodes;
@@ -1050,6 +1083,7 @@ const App = () => {
                 edges={renderedCanvasGraph.edges}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
+                onNodeClick={handleNodeClick}
                 onEdgeClick={openEdgeInspector}
                 onMoveEnd={(event, viewport) => setViewPort(viewport)}
                 colorMode={lightMode ? 'light' : 'dark'}

@@ -1448,9 +1448,30 @@ const ResponseNode = ({ id, data }) => {
     ]
         .filter(Boolean)
         .join(' ');
+    const handleNodeSurfaceClick = (event) => {
+        if (
+            event.target.closest(
+                'button, input, textarea, select, a, [contenteditable="true"], .nodrag'
+            )
+        ) {
+            return;
+        }
+
+        const additiveSelection = event.ctrlKey || event.metaKey;
+        event.stopPropagation();
+        setNodes(
+            nodes.map((node) =>
+                node.id === id
+                    ? { ...node, selected: additiveSelection ? !node.selected : true }
+                    : additiveSelection
+                      ? node
+                      : { ...node, selected: false }
+            )
+        );
+    };
 
     return (
-        <div className={nodeClassName}>
+        <div className={nodeClassName} onClick={handleNodeSurfaceClick}>
             <button
                 type="button"
                 className="node-quick-add"

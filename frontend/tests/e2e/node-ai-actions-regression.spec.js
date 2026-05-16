@@ -15,15 +15,55 @@ const emptyFlowJson = JSON.stringify({
 
 const parseSnapshot = (flowJson) => JSON.parse(flowJson || emptyFlowJson);
 
-const setupMockBackend = async (page) => {
+const scopedLensFlowJson = JSON.stringify({
+    nodes: [
+        {
+            id: 'root',
+            type: 'response',
+            position: { x: 0, y: 0 },
+            data: { title: 'Workspace root', node_type: 'concept', status: 'reviewed', manual: true }
+        },
+        {
+            id: 'branch-a',
+            type: 'response',
+            position: { x: 380, y: -120 },
+            data: { title: 'Branch A', node_type: 'concept', status: 'reviewed', manual: true }
+        },
+        {
+            id: 'branch-a-child',
+            type: 'response',
+            position: { x: 760, y: -120 },
+            data: { title: 'Branch A child', node_type: 'task', status: 'reviewed', manual: true }
+        },
+        {
+            id: 'sibling-b',
+            type: 'response',
+            position: { x: 380, y: 160 },
+            data: { title: 'Sibling B', node_type: 'concept', status: 'reviewed', manual: true }
+        }
+    ],
+    edges: [
+        { id: 'edge-root-a', source: 'root', target: 'branch-a', type: 'smoothstep', animated: false },
+        { id: 'edge-a-child', source: 'branch-a', target: 'branch-a-child', type: 'smoothstep', animated: false },
+        { id: 'edge-root-b', source: 'root', target: 'sibling-b', type: 'smoothstep', animated: false }
+    ],
+    viewport: { x: 40, y: 180, zoom: 0.8 },
+    workspace_brief: {},
+    source_library: [],
+    activity_events: [],
+    ai_action_runs: [],
+    automations: []
+});
+
+const setupMockBackend = async (page, { initialFlowJson = emptyFlowJson } = {}) => {
     await page.addInitScript(() => {
         window.localStorage.clear();
     });
 
     const state = {
         savedFlowName: 'AI Action QA',
-        savedFlowJson: emptyFlowJson,
-        createdFlow: false
+        savedFlowJson: initialFlowJson,
+        createdFlow: initialFlowJson !== emptyFlowJson
     };
     const savedRequests = [];
     const previewRequests = [];
@@ -527,6 +567,15 @@ const openNodeMenu = async (page) => {
     await expect(page.locator('.node-action-menu')).toBeVisible();
 };
 
+const nodeById = (page, id) => page.getByTestId(`rf__node-${id}`);
+
+const openNodeMenuById = async (page, id) => {
+    const node = nodeById(page, id);
+    await expect(node).toBeVisible();
+    await node.locator('.node-menu-trigger').dispatchEvent('click');
+    await expect(page.locator('.node-action-menu')).toBeVisible();
+};
+
 const createRoot = async (page, savedRequests, title) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Build' }).click();
@@ -536,6 +585,13 @@ const createRoot = async (page, savedRequests, title) => {
         savedRequests,
         (snapshot) => snapshot.nodes.length === 1 && snapshot.nodes[0].data.title === title
     );
+};
+
+const openExistingFlow = async (page) => {
+    await page.goto('/');
+    await page.getByAltText('Open workspaces').click();
+    await page.locator('.flow-row-main').filter({ hasText: 'AI Action QA' }).click();
+    await expect(page.locator('.node-title-input')).toHaveCount(4);
 };
 
 const previewChanges = async (page) => {
@@ -556,6 +612,69 @@ const openAskAi = async (page, buttonName = 'Advanced Ask AI') => {
     await page.locator('.node-action-menu').getByRole('button', { name: buttonName }).click();
     await expect(page.locator('.ai-action-modal')).toBeVisible();
 };
+
+test('branch lens dims surrounding graph instead of hiding workspace context', async ({ page }) => {
+    await setupMockBackend(page, { initialFlowJson: scopedLensFlowJson });
+    await openExistingFlow(page);
+
+    await openNodeMenuById(page, 'branch-a');
+    await page
+        .locator('.node-action-menu')
+        .getByRole('button', { name: 'Advanced branch AI' })
+        .evaluate((button) => button.click());
+
+    await expect(page.locator('.ai-action-modal')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Active canvas scope' })).toContainText('Branch A');
+    await expect(page.locator('.node-title-input')).toHaveCount(4);
+    await expect(nodeById(page, 'root')).toHaveClass(/canvas-node-out-of-scope/);
+    await expect(nodeById(page, 'sibling-b')).toHaveClass(/canvas-node-out-of-scope/);
+    await expect(nodeById(page, 'branch-a')).not.toHaveClass(/canvas-node-out-of-scope/);
+    await expect(nodeById(page, 'branch-a-child')).not.toHaveClass(/canvas-node-out-of-scope/);
+
+    await page
+        .getByRole('region', { name: 'Active canvas scope' })
+        .getByRole('button', { name: 'Clear' })
+        .evaluate((button) => button.click());
+    await expect(page.getByRole('region', { name: 'Active canvas scope' })).toHaveCount(0);
+    await expect(nodeById(page, 'root')).not.toHaveClass(/canvas-node-out-of-scope/);
+    await expect(nodeById(page, 'sibling-b')).not.toHaveClass(/canvas-node-out-of-scope/);
+});
+
+test('multi-select delete removes checked nodes without treating one selection as branch scope', async ({ page }) => {
+    const { savedRequests } = await setupMockBackend(page, { initialFlowJson: scopedLensFlowJson });
+    await openExistingFlow(page);
+
+    await nodeById(page, 'branch-a')
+        .locator('.node-response')
+        .evaluate((node) => node.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await nodeById(page, 'sibling-b')
+        .locator('.node-response')
+        .evaluate((node) =>
+            node.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }))
+        );
+
+    await expect(page.getByRole('region', { name: 'Selected node actions' })).toContainText('2 selected');
+    await page
+        .getByRole('region', { name: 'Selected node actions' })
+        .getByRole('button', { name: 'Delete' })
+        .click();
+
+    await waitForSavedSnapshot(savedRequests, (snapshot) => {
+        const nodeIds = snapshot.nodes.map((node) => node.id).sort();
+        return (
+            JSON.stringify(nodeIds) === JSON.stringify(['branch-a-child', 'root']) &&
+            snapshot.edges.every(
+                (edge) =>
+                    !['branch-a', 'sibling-b'].includes(edge.source) &&
+                    !['branch-a', 'sibling-b'].includes(edge.target)
+            )
+        );
+    });
+    await expect(page.locator('.node-title-input')).toHaveCount(2);
+    await expect(nodeById(page, 'root')).toBeVisible();
+    await expect(nodeById(page, 'branch-a-child')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Selected node actions' })).toHaveCount(0);
+});
 
 test('node Ask AI draft stays non-canonical until selected accept, then persists on reopen', async ({
     page
