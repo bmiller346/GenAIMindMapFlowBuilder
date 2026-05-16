@@ -1046,7 +1046,6 @@ const ResponseNode = ({ id, data }) => {
             setGeneratedHelperPreview('nodeAiActionRequest', legacyPreview);
             setActiveAIActionPreview(undefined);
             setActiveAIDraftSession(nextSession);
-            setSelectedBranchId(id);
             setInspectorNodeId(id);
             setActiveView('mindmap');
             recordActivity({
