@@ -485,7 +485,8 @@ const openNodeMenu = async (page) => {
 
 const createRoot = async (page, savedRequests, title) => {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Add root', exact: true }).click();
+    await page.getByRole('button', { name: 'Build' }).click();
+    await page.getByRole('button', { name: 'Add node', exact: true }).click();
     await page.locator('.node-title-input').first().fill(title);
     await waitForSavedSnapshot(
         savedRequests,
@@ -493,7 +494,20 @@ const createRoot = async (page, savedRequests, title) => {
     );
 };
 
-const openAskAi = async (page, buttonName = 'Ask AI about node') => {
+const previewChanges = async (page) => {
+    const textarea = promptTextarea(page);
+    if (!(await textarea.inputValue()).trim()) {
+        await textarea.fill('Generate a reviewable draft for this scope.');
+    }
+    await page
+        .locator('.ai-action-footer')
+        .getByRole('button', { name: /Preview changes|Generate preview/ })
+        .evaluate((button) => button.click());
+};
+
+const promptTextarea = (page) => page.locator('.ai-action-natural textarea');
+
+const openAskAi = async (page, buttonName = 'Advanced Ask AI') => {
     await openNodeMenu(page);
     await page.locator('.node-action-menu').getByRole('button', { name: buttonName }).click();
     await expect(page.locator('.ai-action-modal')).toBeVisible();
@@ -508,7 +522,7 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
 
     const beforePreview = latestSnapshot(savedRequests);
     await openAskAi(page);
-    await page.getByRole('button', { name: 'Generate preview' }).click();
+    await previewChanges(page);
     await expect(page.locator('.node-inspector')).toBeVisible();
     await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
     await expect(page.locator('.ai-draft-session-panel')).toContainText('General Mills');
@@ -609,8 +623,8 @@ test('branch Ask AI discard leaves graph unchanged', async ({ page }) => {
     await createRoot(page, savedRequests, 'Branch root');
 
     const beforePreview = latestSnapshot(savedRequests);
-    await openAskAi(page, 'Ask AI about branch');
-    await page.getByRole('button', { name: 'Generate preview' }).click();
+    await openAskAi(page, 'Advanced branch AI');
+    await previewChanges(page);
     await expect(page.locator('.ai-draft-session-panel')).toContainText('branch generated child');
     await expect(page.locator('.ai-draft-session-panel')).toContainText('1 item · all cited');
     expect(draftSessionRequests[0].scope).toBe('branch');
@@ -634,7 +648,7 @@ test('workspace Ask AI draft is available from the header and accepts all throug
     await expect(page.locator('.ai-action-modal')).toBeVisible();
     await expect(page.locator('.ai-action-scope')).toContainText('Whole workspace');
 
-    await page.getByRole('button', { name: 'Generate preview' }).click();
+    await previewChanges(page);
     await expect(page.locator('.node-inspector')).toBeVisible();
     await expect(page.locator('.ai-draft-session-panel')).toContainText('workspace generated child');
     expect(draftSessionRequests.at(-1).scope).toBe('workspace');
@@ -649,7 +663,7 @@ test('workspace Ask AI draft is available from the header and accepts all throug
     );
 
     await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
-    await page.getByRole('button', { name: 'Generate preview' }).click();
+    await previewChanges(page);
     await expect(page.locator('.ai-draft-session-panel')).toContainText('workspace generated child');
 
     await page
@@ -710,7 +724,7 @@ test('selected source Ask AI sends source scope and chunks to draft sessions', a
     await expect(page.locator('.ai-action-scope')).toContainText('Selected source');
     await expect(page.locator('.ai-action-scope')).toContainText('General Mills source');
 
-    await page.getByRole('button', { name: 'Generate preview' }).click();
+    await previewChanges(page);
     await expect(page.locator('.ai-draft-session-panel')).toContainText('source generated child');
     await expect.poll(() => draftSessionRequests.length, { timeout: 7000 }).toBe(1);
 
@@ -795,9 +809,9 @@ test('multi-selected node Ask AI sends nodes scope from AI helpers', async ({ pa
     await expect(page.locator('.ai-action-modal')).toBeVisible();
     await expect(page.locator('.ai-action-scope')).toContainText('Selected nodes');
     await expect(page.locator('.ai-action-scope')).toContainText('2 selected nodes');
-    await page.locator('.ai-action-custom textarea').fill('Find shared implementation themes across these selected nodes.');
+    await promptTextarea(page).fill('Find shared implementation themes across these selected nodes.');
 
-    await page.getByRole('button', { name: 'Generate preview' }).click();
+    await previewChanges(page);
     await expect(page.locator('.ai-draft-session-panel')).toContainText('nodes generated child');
     await expect.poll(() => draftSessionRequests.length, { timeout: 7000 }).toBe(1);
 
@@ -815,8 +829,10 @@ test('legacy personas and custom prompts remain discoverable in Ask AI', async (
     const { savedRequests } = await setupMockBackend(page);
     await createRoot(page, savedRequests, 'Persona root');
     await openAskAi(page);
+    await page.locator('.ai-action-advanced summary').click();
 
-    const roleOptions = await page.locator('.ai-action-modal').getByLabel('Role').locator('option').allTextContents();
+    const roleSelect = page.locator('.ai-action-modal').getByLabel('Role hint');
+    const roleOptions = await roleSelect.locator('option').allTextContents();
     expect(roleOptions).toEqual(expect.arrayContaining([
         'General: Strategic Advisor',
         'General: Research Assistant',
@@ -825,9 +841,9 @@ test('legacy personas and custom prompts remain discoverable in Ask AI', async (
         'General: Custom Prompts'
     ]));
 
-    await page.locator('.ai-action-modal').getByLabel('Role').selectOption('custom-prompts');
-    await page.locator('.ai-action-custom textarea').fill('Keep this as a legacy custom prompt.');
-    await expect(page.locator('.ai-action-custom textarea')).toHaveValue(
+    await roleSelect.selectOption('custom-prompts');
+    await promptTextarea(page).fill('Keep this as a legacy custom prompt.');
+    await expect(promptTextarea(page)).toHaveValue(
         'Keep this as a legacy custom prompt.'
     );
 });
