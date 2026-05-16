@@ -1,4 +1,5 @@
 const SOURCE_SET_COMPONENT_PREFIX = 'source-set';
+export const SOURCE_TRACEABLE_SOURCE_SET_EXTENSIONS = new Set(['pdf', 'docx', 'md', 'txt']);
 
 const extensionFromName = (name = '') => {
     const match = String(name).toLowerCase().match(/\.([a-z0-9]+)$/);
@@ -32,6 +33,36 @@ export const selectedSourceSetFiles = (fileList) =>
             file,
             relativePath: file.webkitRelativePath || file.relativePath || file.name || 'Untitled source'
         }));
+
+export const classifySourceSetSelection = (files = []) => {
+    const selected = Array.isArray(files) ? files : [];
+    const supported = [];
+    const unsupported = [];
+    selected.forEach((entry) => {
+        const extension = extensionFromName(entry.relativePath || entry.file?.name || '');
+        const record = {
+            ...entry,
+            extension,
+            supported: SOURCE_TRACEABLE_SOURCE_SET_EXTENSIONS.has(extension)
+        };
+        if (record.supported) {
+            supported.push(record);
+        } else {
+            unsupported.push({
+                ...record,
+                reason_code: 'unsupported_extension',
+                message: 'Unsupported for source-traceable folder review.'
+            });
+        }
+    });
+    return {
+        selected,
+        supported,
+        unsupported,
+        supportedCount: supported.length,
+        unsupportedCount: unsupported.length
+    };
+};
 
 export const buildBoundedSelectedSourcesForAI = (
     sources = [],
@@ -223,6 +254,13 @@ export const normalizeSourceSetUploadResult = ({
         };
     });
 };
+
+export const skippedSourceSetFilesFromResponse = (data = {}) =>
+    Array.isArray(data.skipped_sources)
+        ? data.skipped_sources
+        : Array.isArray(data.source_set?.skipped_sources)
+          ? data.source_set.skipped_sources
+          : [];
 
 export const sourceSetNodesFromRecords = (records = [], flowId = '') =>
     records.map((source, index) => ({

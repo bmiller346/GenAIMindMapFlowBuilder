@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     buildBoundedSelectedSourcesForAI,
+    classifySourceSetSelection,
     normalizeSourceSetUploadResult,
     selectedSourceSetFiles,
+    skippedSourceSetFilesFromResponse,
     sourceSetNodesFromRecords
 } from '../src/utils/sourceSetUpload.js';
 
@@ -23,6 +25,36 @@ test('selectedSourceSetFiles preserves webkit relative paths', () => {
     assert.deepEqual(
         files.map((entry) => entry.relativePath),
         ['standards/Policy.md', 'Readme.txt']
+    );
+});
+
+test('classifySourceSetSelection separates source-traceable and skipped files', () => {
+    const profile = classifySourceSetSelection(
+        selectedSourceSetFiles([
+            { name: 'Spec.PDF', size: 12, webkitRelativePath: 'Package/Spec.PDF' },
+            { name: 'Model.rvt', size: 24, webkitRelativePath: 'Package/Model.rvt' },
+            { name: 'Notes.docx', size: 16, webkitRelativePath: 'Package/Notes.docx' }
+        ])
+    );
+
+    assert.equal(profile.supportedCount, 2);
+    assert.equal(profile.unsupportedCount, 1);
+    assert.equal(profile.unsupported[0].extension, 'rvt');
+    assert.equal(profile.unsupported[0].reason_code, 'unsupported_extension');
+});
+
+test('skippedSourceSetFilesFromResponse reads top-level or source-set skipped records', () => {
+    assert.deepEqual(
+        skippedSourceSetFilesFromResponse({
+            skipped_sources: [{ relative_path: 'Models/model.rvt' }]
+        }),
+        [{ relative_path: 'Models/model.rvt' }]
+    );
+    assert.deepEqual(
+        skippedSourceSetFilesFromResponse({
+            source_set: { skipped_sources: [{ relative_path: 'Sheets/schedule.xlsx' }] }
+        }),
+        [{ relative_path: 'Sheets/schedule.xlsx' }]
     );
 });
 

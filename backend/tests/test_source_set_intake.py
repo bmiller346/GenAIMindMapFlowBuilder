@@ -4,13 +4,16 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
-from fastapi import UploadFile
+import pytest
+
+UploadFile = pytest.importorskip("fastapi").UploadFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import app
 from bson import ObjectId
 from documents.ingestion import (
+    DocumentIngestionError,
     build_source_document,
     build_source_set_metadata,
     source_document_with_source_set_metadata,
@@ -82,17 +85,29 @@ def test_upload_workspace_source_set_returns_library_ready_sources(monkeypatch):
             filename="Install.txt",
             file=BytesIO(b"Install SOP\n\nCrews must record QA checks."),
         ),
+        UploadFile(
+            filename="Model.rvt",
+            file=BytesIO(b"not currently source traceable"),
+        ),
     ]
 
     response = app.upload_workspace_source_set(
         flow_id,
         files=files,
-        relative_paths=["Standards/Policy.md", "Standards/SOPs/Install.txt"],
+        relative_paths=[
+            "Standards/Policy.md",
+            "Standards/SOPs/Install.txt",
+            "Models/Model.rvt",
+        ],
         source_set_label="Standards",
     )
 
     assert response["source_set"]["native_folder_upload"] is True
     assert response["source_set"]["source_count"] == 2
+    assert response["source_set"]["selected_count"] == 3
+    assert response["source_set"]["skipped_count"] == 1
+    assert response["skipped_sources"][0]["relative_path"] == "Models/Model.rvt"
+    assert response["skipped_sources"][0]["reason_code"] == "unsupported_extension"
     assert [source["relative_path"] for source in response["uploaded_sources"]] == [
         "Standards/Policy.md",
         "Standards/SOPs/Install.txt",
@@ -104,3 +119,21 @@ def test_upload_workspace_source_set_returns_library_ready_sources(monkeypatch):
         == response["uploaded_sources"][0]["source_document_id"]
     )
     assert response["source_library"]["source_set_review"]["source_set"]["native_folder_upload"] is True
+
+
+def test_source_set_upload_rejects_folder_with_no_source_traceable_documents():
+    files = [
+        UploadFile(filename="Model.rvt", file=BytesIO(b"model")),
+        UploadFile(filename="Schedule.xlsx", file=BytesIO(b"spreadsheet")),
+    ]
+
+    try:
+        app.prepare_source_set_uploads(
+            files,
+            flow_id=str(ObjectId()),
+            relative_paths=["Models/Model.rvt", "Reports/Schedule.xlsx"],
+        )
+    except DocumentIngestionError as exc:
+        assert "No source-traceable documents" in str(exc)
+    else:
+        raise AssertionError("Expected source-set upload with no supported files to fail.")

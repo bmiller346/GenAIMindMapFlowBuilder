@@ -1165,9 +1165,45 @@ def prepare_source_set_uploads(
 
     raw_paths = parse_source_set_relative_paths(relative_paths, len(files))
     prepared_uploads = []
+    skipped_sources = []
     for index, file in enumerate(files):
+        fallback_name = file.filename or f"source-{index + 1}"
+        relative_path = normalize_relative_source_path(
+            raw_paths[index] if raw_paths else "",
+            fallback_filename=fallback_name,
+        )
+        sanitized_filename = sanitize_filename(fallback_name)
+        extension = sanitized_filename.rsplit(".", 1)[-1].lower() if "." in sanitized_filename else ""
+        if extension not in ALLOWED_DOCUMENT_EXTENSIONS:
+            skipped_sources.append(
+                source_set_skip_record(
+                    filename=fallback_name,
+                    relative_path=relative_path,
+                    extension=extension,
+                    reason_code="unsupported_extension",
+                    message=(
+                        "Unsupported file type for source-traceable folder review. "
+                        "Supported types are PDF, DOCX, Markdown, and TXT."
+                    ),
+                )
+            )
+            continue
+
         file_bytes = read_upload_bytes(file)
-        upload = validate_upload_bytes(file.filename, file_bytes)
+        try:
+            upload = validate_upload_bytes(file.filename, file_bytes)
+        except DocumentIngestionError as exc:
+            skipped_sources.append(
+                source_set_skip_record(
+                    filename=fallback_name,
+                    relative_path=relative_path,
+                    extension=extension,
+                    reason_code=source_set_skip_reason(str(exc)),
+                    message=str(exc),
+                    size=len(file_bytes),
+                )
+            )
+            continue
         relative_path = normalize_relative_source_path(
             raw_paths[index] if raw_paths else "",
             fallback_filename=upload["original_filename"] or upload["filename"],
@@ -1181,11 +1217,12 @@ def prepare_source_set_uploads(
             }
         )
 
-    source_set = build_source_set_metadata(
-        [item["relative_path"] for item in prepared_uploads],
-        source_set_id=source_set_id,
-        label=source_set_label,
-    )
+    if not prepared_uploads:
+        raise DocumentIngestionError(
+            "No source-traceable documents were found in this folder. "
+            "Upload PDF, DOCX, Markdown, or TXT files for source-set review."
+        )
+
     existing_version_counts: dict[str, int] = {}
     try:
         for item in prepared_uploads:
@@ -1207,19 +1244,57 @@ def prepare_source_set_uploads(
         ) from exc
 
     batch_version_offsets: dict[str, int] = {}
-    prepared_contexts = []
+    ingested_contexts = []
     for item in prepared_uploads:
         filename = item["upload"]["filename"]
         batch_version_offsets[filename] = batch_version_offsets.get(filename, 0) + 1
         version = existing_version_counts.get(filename, 0) + batch_version_offsets[filename]
-        context = ingest_supported_document(
-            filename,
-            item["file_bytes"],
-            version=version,
+        try:
+            context = ingest_supported_document(
+                filename,
+                item["file_bytes"],
+                version=version,
+            )
+        except DocumentIngestionError as exc:
+            skipped_sources.append(
+                source_set_skip_record(
+                    filename=item["upload"]["original_filename"],
+                    relative_path=item["relative_path"],
+                    extension=item["upload"]["extension"],
+                    reason_code=source_set_skip_reason(str(exc)),
+                    message=str(exc),
+                    size=item["upload"].get("size", 0),
+                )
+            )
+            continue
+        context["relative_path"] = item["relative_path"]
+        ingested_contexts.append(context)
+
+    if not ingested_contexts:
+        raise DocumentIngestionError(
+            "No source-set files produced source-aware sections. "
+            "Check whether the PDFs have extractable text or whether the DOCX/TXT/Markdown files are empty."
         )
+
+    source_set = build_source_set_metadata(
+        [item["relative_path"] for item in ingested_contexts],
+        source_set_id=source_set_id,
+        label=source_set_label,
+    )
+    source_set.update(
+        {
+            "selected_count": len(files),
+            "skipped_count": len(skipped_sources),
+            "skipped_sources": skipped_sources,
+            "supported_extensions": sorted(ALLOWED_DOCUMENT_EXTENSIONS),
+        }
+    )
+
+    prepared_contexts = []
+    for context in ingested_contexts:
         source_document = source_document_with_source_set_metadata(
             context["source_document"],
-            relative_path=item["relative_path"],
+            relative_path=context["relative_path"],
             source_set=source_set,
         )
         context.update(
@@ -1235,6 +1310,41 @@ def prepare_source_set_uploads(
     return {
         "source_set": source_set,
         "sources": prepared_contexts,
+        "skipped_sources": skipped_sources,
+    }
+
+
+def source_set_skip_reason(message: str) -> str:
+    lowered = message.lower()
+    if "empty" in lowered or "did not contain extractable text" in lowered:
+        return "empty_or_no_extractable_text"
+    if "exceeds" in lowered or "upload limit" in lowered:
+        return "too_large"
+    if "malformed" in lowered:
+        return "malformed_document"
+    if "unsupported file type" in lowered:
+        return "unsupported_extension"
+    return "ingestion_error"
+
+
+def source_set_skip_record(
+    *,
+    filename: str,
+    relative_path: str,
+    extension: str,
+    reason_code: str,
+    message: str,
+    size: int = 0,
+) -> dict:
+    return {
+        "filename": sanitize_filename(filename),
+        "original_filename": filename,
+        "relative_path": relative_path or sanitize_filename(filename),
+        "extension": extension,
+        "size": size,
+        "reason_code": reason_code,
+        "message": message,
+        "status": "skipped",
     }
 
 
@@ -2746,9 +2856,11 @@ def upload_workspace_source_set(
 
     return {
         "uploaded_sources": uploaded_sources,
+        "skipped_sources": prepared.get("skipped_sources", []),
         "source_set": {
             **prepared["source_set"],
             "source_count": len(uploaded_sources),
+            "skipped_count": len(prepared.get("skipped_sources", [])),
         },
         "source_library": source_library,
     }

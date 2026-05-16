@@ -656,6 +656,21 @@ h4 {
   font-weight: 550;
 }
 
+.source-set-intake-profile {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.source-set-intake-profile span {
+  border: 1px solid var(--question-border);
+  border-radius: 999px;
+  color: var(--font-color);
+  font-size: 0.75rem;
+  font-weight: 750;
+  padding: 0.3rem 0.55rem;
+}
+
 .source-set-path-list {
   display: flex;
   flex-direction: column;

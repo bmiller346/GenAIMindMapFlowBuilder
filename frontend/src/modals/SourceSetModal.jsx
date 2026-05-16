@@ -26,8 +26,10 @@ import {
 } from '../utils/sourceReconciliationPreview';
 import {
     appendSourceSetFormData,
+    classifySourceSetSelection,
     normalizeSourceSetUploadResult,
     selectedSourceSetFiles,
+    skippedSourceSetFilesFromResponse,
     sourceSetNodesFromRecords
 } from '../utils/sourceSetUpload';
 
@@ -87,6 +89,7 @@ const SourceSetModal = ({
         (total, entry) => total + Number(entry.file?.size || 0),
         0
     );
+    const selectionProfile = classifySourceSetSelection(selectedFiles);
     const samplePaths = selectedFiles.slice(0, 8);
 
     const ensureWorkspace = async () => {
@@ -202,6 +205,10 @@ const SourceSetModal = ({
             showError(400, 'Choose a folder or select multiple files before uploading.');
             return;
         }
+        if (!selectionProfile.supportedCount) {
+            showError(400, 'This folder has no source-traceable files. Add PDF, DOCX, Markdown, or TXT files.');
+            return;
+        }
 
         let currentFlowId;
         try {
@@ -260,11 +267,14 @@ const SourceSetModal = ({
                         nodes
                     });
                 }
+                const skippedSources = skippedSourceSetFilesFromResponse(res.data);
                 updateActivity(activityId, {
                     type: 'source_set_upload_completed',
                     status: 'completed',
                     source_ids: records.map((record) => record.id),
-                    context: `${records.length} source-set files were added for review.`
+                    context: `${records.length} source-set files were added for review${
+                        skippedSources.length ? `; ${skippedSources.length} unsupported or unreadable files were skipped.` : '.'
+                    }`
                 });
             })
             .catch((err) => {
@@ -340,8 +350,28 @@ const SourceSetModal = ({
             <div className="source-set-selection">
                 <div className="source-set-selection-summary">
                     <span>{selectedCount ? `${selectedCount} files selected` : 'No files selected'}</span>
-                    <small>{selectedSize ? `${Math.ceil(selectedSize / 1024)} KB total` : 'Choose a folder or file set to review.'}</small>
+                    <small
+                        title="Folder/file-set upload may use AI extraction depending on file type and downstream review action. Code intelligence scans are deterministic and should remain a separate developer-only path."
+                    >
+                        {selectedSize
+                            ? `${Math.ceil(selectedSize / 1024)} KB total. Review actions may use AI depending on file type.`
+                            : 'Choose a folder or file set to review. Review actions may use AI depending on file type.'}
+                    </small>
                 </div>
+                {selectedCount ? (
+                    <div className="source-set-intake-profile">
+                        <span
+                            title="These files enter the source-traceable pipeline and preserve document chunks/source references."
+                        >
+                            {selectionProfile.supportedCount} source-traceable
+                        </span>
+                        <span
+                            title="Unsupported files are skipped instead of failing the whole folder. Current folder review supports PDF, DOCX, Markdown, and TXT."
+                        >
+                            {selectionProfile.unsupportedCount} skipped
+                        </span>
+                    </div>
+                ) : null}
                 {samplePaths.length ? (
                     <div className="source-set-path-list" aria-label="Selected relative paths">
                         {samplePaths.map((entry) => (
@@ -369,8 +399,8 @@ const SourceSetModal = ({
                 </button>
                 <button
                     id="add"
-                    style={{ opacity: selectedFiles.length ? '100%' : '40%' }}
-                    disabled={!selectedFiles.length}
+                    style={{ opacity: selectionProfile.supportedCount ? '100%' : '40%' }}
+                    disabled={!selectionProfile.supportedCount}
                     onClick={uploadSourceSet}
                 >
                     Add
