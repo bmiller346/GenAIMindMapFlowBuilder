@@ -8,6 +8,10 @@ const runGit = (args) =>
 
 const blockedTrackedPatterns = [
   /^artifacts\//,
+  /^backend\/chroma\//,
+  /^backend\/[^/]+VectorStore\//,
+  /^backend\/[^/]+\.(?:db|sqlite|sqlite3)$/i,
+  /(^|\/)[^/]+\.(?:sqlite|sqlite3)$/i,
   /(^|\/)test-results\//,
   /(^|\/)playwright-report\//,
   /(^|\/)\.pytest(?:-tmp|-cache|_cache)?(?:\/|$)/,
@@ -17,6 +21,10 @@ const blockedTrackedPatterns = [
 
 const noisyUntrackedPatterns = [
   /^artifacts\//,
+  /^backend\/chroma\//,
+  /^backend\/[^/]+VectorStore\//,
+  /^backend\/[^/]+\.(?:db|sqlite|sqlite3)$/i,
+  /(^|\/)[^/]+\.(?:sqlite|sqlite3)$/i,
   /(^|\/)test-results\//,
   /(^|\/)playwright-report\//,
   /(^|\/)\.pytest(?:-tmp|-cache|_cache)?(?:\/|$)/,

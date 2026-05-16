@@ -3,7 +3,6 @@ import Plot from './PlotlyBasic.jsx';
 const Graph = ({ data }) => {
     const graph = data;
     const jsonGraph = JSON.parse(graph);
-    console.log('This is a json', jsonGraph);
     return (
         <>
             <Plot

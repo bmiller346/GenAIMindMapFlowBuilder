@@ -50,7 +50,6 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
     const setupFlow = () => {
         pushNode(LoadingModal);
         setFlowId(data.flow_id);
-        console.log('DEDEDE', data);
         setFlowName(data.flow_name);
         setFlowType(data.flow_type || 'manual');
         if (data.flow_json?.length > 0) {
@@ -72,9 +71,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
                 data.flow_name,
                 data.flow_type || 'manual'
             );
-            console.log('NODEEEEEEEEEE', flow.nodes);
             if (flow.nodes.length === 0 && flow.edges.length === 0) {
-                console.log('not clled');
                 setNodes([]);
                 setEdges([]);
                 setWorkspaceBrief(flow.workspace_brief || {});
@@ -93,16 +90,9 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
                 setViewPort(x, y, zoom);
                 setViewport({ x, y, zoom });
                 // fitView();
-                console.log(
-                    'FLow selecteed sadassssssssssssssssssssss',
-                    flow_id,
-                    data.flow_id,
-                    nodes
-                );
                 setIsDrawer(false);
                 popNode();
             } else {
-                console.log('Flow error');
                 popNode();
             }
         } else {
@@ -129,12 +119,10 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
             setIsDrawer(false);
             popNode();
         }
-        console.log('IDDDARssssssssssssssssssss', isDrawer);
         // setTrigger(!trigger);
     };
 
     const deleteFlow = (e) => {
-        console.log('Delete Flow Called');
         const updatedFlowss = flows.filter(
             (ele) => ele.flow_id !== data.flow_id
         );

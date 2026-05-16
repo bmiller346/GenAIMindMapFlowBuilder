@@ -1,6 +1,6 @@
 import { Handle, useConnection, useReactFlow } from '@xyflow/react';
 import { nanoid } from 'nanoid';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import useStore from '../stores/store';
 import { useShallow } from 'zustand/shallow';
 import axios from 'axios';
@@ -23,7 +23,6 @@ import {
 } from '../utils/operationSnapshots';
 
 const QuestionNode = ({ id, position, data  }) => {
-    console.log('HERE QUESTION NODE', data, position, id);
     const { deleteElements, setViewport } = useReactFlow();
     const selector = (state) => ({
         trigger: state.trigger,
@@ -53,7 +52,6 @@ const QuestionNode = ({ id, position, data  }) => {
         setViewPort
     } = useStore(useShallow(selector));
     const currNodeObj = nodes.find((ele) => ele.id === id);
-    console.log('ASSSKSKSK QUESTION', currNodeObj);
     const [question, setQuestion] = useState(() => {
         const initialValue = '';
         return currNodeObj.data.question
@@ -76,19 +74,15 @@ const QuestionNode = ({ id, position, data  }) => {
             .filter((item) => item.type === 'response')
             .map((ele) => ele.data.id);
         const followUpIds = followUpNodes.map((ele) => ele.id);
-        console.log('Compare this', followUpIds, responseNodesAns);
         const commonId = responseNodesAns.filter((id) =>
             followUpIds.includes(id)
         );
-        console.log('Determine', commonId);
         const deleteNodes = followUpNodes.filter(
             (obj) => !commonId.includes(obj.id)
         );
-        // console.log("FollowUpNodesAnswere", followUpNodeAnswere)
         deleteNodes.forEach(({ id }) => {
             deleteElements({ nodes: [{ id }] });
         });
-        console.log('Deleted followUpNodes', deleteNodes);
     };
 
     const hasBriefContext = () =>
@@ -128,7 +122,6 @@ const QuestionNode = ({ id, position, data  }) => {
     });
 
     const setResponse = (resData) => {
-        console.log('HEre is response', resData);
         const currNode = nodes.filter((node) => node.id === id);
         if (!currNode) return 'Node not found';
         let node;
@@ -174,12 +167,7 @@ const QuestionNode = ({ id, position, data  }) => {
         setTrigger(!trigger);
     };
 
-    useEffect(() => {
-        console.log(question);
-    }, [question]);
-
     const askQuestion = (controller, activityId, undoAnswerDerivation) => {
-        console.log('THIS IS A TEST', data);
         const [url, body, config] = setQuestionApi(
             data.component_type,
             flowId,
@@ -219,7 +207,6 @@ const QuestionNode = ({ id, position, data  }) => {
         // 		flow_id: data.flow_id,
         // 		question: question
         // 	}
-        // 	console.log(dataString)
 
         // 	axios.post("http://localhost:8000/sql-component-qa", dataString, {
         // 		headers: {
@@ -227,7 +214,6 @@ const QuestionNode = ({ id, position, data  }) => {
         // 			'Content-Type': 'application/json'
         // 		}
         // 	}).then((res) => setResponse(res.data))
-        // 		.catch((err) => console.log(err))
     };
 
     const selector2 = (state) => ({
@@ -241,9 +227,6 @@ const QuestionNode = ({ id, position, data  }) => {
     );
 
     const manageErrors = (err) => {
-        console.log(err);
-        console.log('Errroro', err.status);
-        console.log('Errroross', err.response?.statusText);
         setStatus(err.response?.status || err.status || 500);
         setMsg(requestErrorMessage(err));
         popNode();

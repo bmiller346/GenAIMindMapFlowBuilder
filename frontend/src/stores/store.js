@@ -258,7 +258,6 @@ const useStore = create((set, get) => ({
     activeAIDraftSession: undefined,
     aiActionRuns: [],
     onNodesChange: (change) => {
-        console.log("Test");
         set({
             nodes: applyNodeChanges(change, get().nodes)
         });
@@ -398,7 +397,6 @@ const useStore = create((set, get) => ({
         set({
             nodes: get().nodes.map((node) => {
                 if (node.id === id) {
-                    console.log(file);
                     return { ...node, data: { ...node.data, file } };
                 }
                 return node;

@@ -12,7 +12,14 @@ backend/docmap_flows.json
 backend\ai-interview-poc-2b5cf8540f16.json
 ai-interview-poc-2b5cf8540f16.json
 chroma/
+backend/chroma/
+backend/*VectorStore/
 sqlite_data.db
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+*.sqlite
+*.sqlite3
 
 # Logs
 logs

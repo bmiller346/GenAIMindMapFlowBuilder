@@ -319,8 +319,6 @@ const DocxModal = ({
                         intakePrompt: intakeBrief.trim()
                     }
                 });
-            } else {
-                console.log('Flow error');
             }
         } else {
             fitView();
@@ -341,7 +339,6 @@ const DocxModal = ({
     );
 
     const manageErrors = (err) => {
-        console.log(err);
         const statusCode = err.response?.status || err.status || 500;
         const message = requestErrorMessage(err);
         setStatus(statusCode);

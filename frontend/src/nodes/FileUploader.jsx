@@ -32,7 +32,6 @@ const FileUploader = ({ id, data, position }) => {
     };
 
     const uploadFileToDB = (e) => {
-        console.log("uploadFileToDB" + "started")
         // Uploads and extracts file to MongoDb
         const node_id = []
         if (Array.isArray(nodes)) {
@@ -45,7 +44,6 @@ const FileUploader = ({ id, data, position }) => {
             return "Node not found"
 
         }
-        console.log(id)
         // if (!(id in node_id)) {
         // }
 
@@ -54,21 +52,17 @@ const FileUploader = ({ id, data, position }) => {
         const formData = new FormData();
         formData.append("flow_id", "6773dca11fedc7239c286b2b")
         formData.append("file", file)
-        console.log(file, "err")
         axios.post("http://localhost:8000/component-create-pdf", formData, {
             headers: {
                 'Content-Type': 'multipart/form-data'
             }
         }).then((res) => manageNodes(res.data))
-            .catch((err) => console.log(err))
+            .catch(() => undefined)
     }
 
     const manageNodes = (data) => {
-        console.log("Started")
         const currentNode = nodes.filter((node) => node.id === id)
         /* Only for development*/
-        console.log(currentNode[0])
-        console.log("manageNodes called")
         const resData = []
         for (let i = 0; i < 3; i++) {
             const obj = {
@@ -81,7 +75,6 @@ const FileUploader = ({ id, data, position }) => {
 
         }
         /* Till Here */
-        console.log("Starting Create Nodes")
         const updatedNodes = useCreatNode(resData);
         updatedNodes.push({
             id: generateHexId(),
@@ -89,9 +82,7 @@ const FileUploader = ({ id, data, position }) => {
             type: "question",
             position: { x: currentNode[0].position.x + 300, y: (resData.length + 1) * 100 }
         })
-        console.log("Nodes updated" + nodes.concat(updatedNodes))
         setNodes(nodes.concat(updatedNodes))
-        console.log("Creating Edges")
         const newEdges = []
         updatedNodes.forEach(element => {
             const edge = useCreateEdges(id, element.id);
@@ -100,7 +91,6 @@ const FileUploader = ({ id, data, position }) => {
 
         const updEdges = edges.concat(newEdges)
         setEdges(updEdges)
-        console.log("Setting edges completed")
     }
 
     const fileUpload = () => {

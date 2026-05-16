@@ -101,7 +101,6 @@ const SQLModal = () => {
             context: 'SQL source add was undone.'
         });
         const [url, body, headerConfig] = setRequestData('sql', flowId, data);
-        console.log('Testtttttt', url, body, headerConfig);
         axios
             .post(`http://localhost:8000/${url}`, body, {
                 headers: {
@@ -140,9 +139,6 @@ const SQLModal = () => {
     );
 
     const manageErrors = (err) => {
-        console.log(err);
-        console.log('Errroro', err.status);
-        console.log('Errroross', err.response?.statusText);
         setStatus(err.status);
         setMsg(requestErrorMessage(err));
         popNode();
@@ -150,7 +146,6 @@ const SQLModal = () => {
     };
 
     const manageNodes = (data) => {
-        console.log('Problem is here', nodes);
         const sourceRecord = sourceRecordFromUpload(data, { content: tableName }, flowId, {
             fallbackType: 'sql',
             fallbackTypeLabel: 'SQL',
@@ -184,7 +179,6 @@ const SQLModal = () => {
         });
         setTrigger(!trigger);
         popNode();
-        console.log('Managing nodes finished');
     };
 
     return (

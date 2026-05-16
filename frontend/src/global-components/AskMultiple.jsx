@@ -47,9 +47,7 @@ const AskMultiple = ({ data, selectedNodes }) => {
     };
 
     const manageNodes = (resData, nodeId) => {
-        console.log(nodeId);
         const parentNodeId = selectedNodes.map((ele) => ele.id);
-        console.log('Super', parentNodeId);
         const newNode = {
             id: generateHexId(),
             type: 'response',
@@ -76,9 +74,6 @@ const AskMultiple = ({ data, selectedNodes }) => {
     );
 
     const manageErrors = (err) => {
-        console.log(err);
-        console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
         setStatus(err.status);
         setMsg(err.response.statusText);
         popNode();

@@ -8,7 +8,6 @@ import { alignProperty } from '@mui/material/styles/cssUtils';
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 const TableComponent = ({ df }) => {
-    console.log('This is table component', df);
     // 	const columns = [
     //   { field: 'id', headerName: 'ID', width: 70 },
     //   { field: 'firstName', headerName: 'First name', width: 130 },
@@ -43,8 +42,6 @@ const TableComponent = ({ df }) => {
     // 	}
     // 	parseCols();
     // 	parseRows();
-    // 	console.log(rows)
-    // 	console.log(cols)
     // }, df)
     return (
         <div className="table-block">

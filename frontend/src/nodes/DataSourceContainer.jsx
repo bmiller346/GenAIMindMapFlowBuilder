@@ -4,7 +4,6 @@ import PromptSelector from "./PromptSelector"
 import NodeMetadataBadges from "./NodeMetadataBadges"
 
 const DataSourceContainer = ({ id, data }) => {
-	console.log("WHISTLEE", data)
 	return (
 		<div className="data-source-container">
 			<NodeMetadataBadges data={data} />

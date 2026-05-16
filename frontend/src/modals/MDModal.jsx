@@ -188,9 +188,6 @@ const MDModal = () => {
     );
 
     const manageErrors = (err) => {
-        console.log(err);
-        console.log('Errroro', err.status);
-        console.log('Errroross', err.response?.statusText);
         setStatus(err.response?.status || err.status || 500);
         setMsg(requestErrorMessage(err));
         popNode();

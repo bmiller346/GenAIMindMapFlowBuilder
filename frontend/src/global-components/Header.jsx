@@ -379,9 +379,6 @@ const Header = ({
     );
 
     const manageErrors = (err) => {
-        console.log(err);
-        console.log('Errroro', err.status);
-        console.log('Errroross', err.response?.statusText);
         const isNetworkError = !err.response;
         setStatus(err.response?.status || err.status || (isNetworkError ? 503 : 500));
         setMsg(
@@ -1006,7 +1003,6 @@ const Header = ({
 
     const setupFlowName = (event) => {
         const nextName = event.target.value;
-        console.log(nextName);
         setFlowName(nextName);
         syncActiveFlowName(nextName);
         if (flow_id) {

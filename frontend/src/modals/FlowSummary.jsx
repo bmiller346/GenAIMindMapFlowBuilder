@@ -12,7 +12,6 @@ const FlowSummary = () => {
     const flowSummary = flowStore((s) => s.flow_summary);
     const popNode = modalStore((s) => s.popNode);
     // const data = JSON.parse(flowSummary);
-    console.log('LOOKING FOR THIS', flowSummary);
     const flow_name = flowStore((s) => s.flow_name);
     {
         /* <div className="flow-summary">

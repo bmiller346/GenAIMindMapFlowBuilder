@@ -86,11 +86,14 @@ def test_source_librarian_deterministic_preview_suggests_nearby_source_ref():
     assert preview["metadata"]["ai_helper_preview_contract_version"] == (
         AI_HELPER_PREVIEW_CONTRACT_VERSION
     )
-    assert len(preview["preview_items"]) == 1
-    item = preview["preview_items"][0]
+    assert len(preview["preview_items"]) == 2
+    confidence_item = next(item for item in preview["preview_items"] if item["node_id"] == "root")
+    assert confidence_item["proposed_mutation"]["source_ref_repair"]["repair_kind"] == "confidence"
+    item = next(item for item in preview["preview_items"] if item["node_id"] == "child")
     assert item["node_id"] == "child"
     assert item["source_refs"][0]["document_id"] == "doc-1"
     assert item["proposed_mutation"]["source_ref_repair"]["suggested_from_node_id"] == "root"
+    assert item["proposed_mutation"]["source_ref_repair"]["repair_kind"] == "source_ref"
 
 
 def test_source_librarian_branch_scope_limits_preview_items():
@@ -111,7 +114,9 @@ def test_source_librarian_branch_scope_limits_preview_items():
         use_ai=False,
     )
 
-    assert [item["node_id"] for item in preview["preview_items"]] == ["child"]
+    assert [item["node_id"] for item in preview["preview_items"]] == ["root", "child"]
+    assert preview["preview_items"][0]["proposed_mutation"]["source_ref_repair"]["repair_kind"] == "confidence"
+    assert preview["preview_items"][1]["proposed_mutation"]["source_ref_repair"]["repair_kind"] == "source_ref"
 
 
 def test_source_librarian_source_coverage_reports_assumption_backed_gaps():
@@ -123,10 +128,12 @@ def test_source_librarian_source_coverage_reports_assumption_backed_gaps():
     )
 
     assert preview["action"] == "source_coverage"
-    assert preview["preview_items"][0]["preview_type"] == "source_coverage"
-    assert preview["preview_items"][0]["node_id"] == "child"
-    assert preview["preview_items"][0]["source_refs"] == []
-    assert "supporting source" in preview["preview_items"][0]["assumptions"][0]
+    child_item = next(item for item in preview["preview_items"] if item["node_id"] == "child")
+    assert child_item["preview_type"] == "source_coverage"
+    assert child_item["source_refs"] == []
+    assert "supporting source" in child_item["assumptions"][0]
+    root_item = next(item for item in preview["preview_items"] if item["node_id"] == "root")
+    assert root_item["proposed_mutation"]["source_coverage"]["issues"] == ["Missing confidence"]
 
 
 def test_source_librarian_source_coverage_reads_workspace_source_library():

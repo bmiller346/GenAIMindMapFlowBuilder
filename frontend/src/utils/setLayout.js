@@ -3,11 +3,9 @@ import dagre from "@dagrejs/dagre"
 const dagreGraph = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
 
 const getLayoutedElements = (nodes, edges) => {
-	console.log("Problem here cab be", nodes)
 	const graphDirection = 'LR' // horizontal
 	dagreGraph.setGraph({ rankdir: graphDirection })
 	nodes.forEach((node) => {
-		console.log(node)
 		dagreGraph.setNode(node.id, { width: node.measured.width, height: node.measured.height });
 	});
 

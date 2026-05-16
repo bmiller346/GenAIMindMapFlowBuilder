@@ -11,7 +11,6 @@ import LoadingModal from '../modals/LoadingModal';
 import errorStore from '../stores/errorStore';
 import ErrorModal from '../modals/ErrorModal';
 const FollowUpQuestionNode = ({ id, data }) => {
-    console.log('FollowUp Questions', data, id);
     const selector = (state) => ({
         trigger: state.trigger,
         setTrigger: state.setTrigger,
@@ -35,11 +34,9 @@ const FollowUpQuestionNode = ({ id, data }) => {
                 ele.type === 'followUp' &&
                 ele.id !== id
         );
-        console.log('Sibling Follow Up Nodes', followUpNodes);
         followUpNodes.forEach(({ id }) => {
             deleteElements({ nodes: [{ id }] });
         });
-        console.log('Sibling Follow Up Questions Deleted');
     };
     const setResponse = (resData) => {
         const currNode = nodes.filter((node) => node.id === id);
@@ -77,9 +74,6 @@ const FollowUpQuestionNode = ({ id, data }) => {
     );
 
     const manageErrors = (err) => {
-        console.log(err);
-        console.log('Errroro', err.status);
-        console.log('Errroross', err.response.statusText);
         setStatus(err.status);
         setMsg(err.response.statusText);
         popNode();
@@ -87,7 +81,6 @@ const FollowUpQuestionNode = ({ id, data }) => {
     };
 
     const askQuestion = () => {
-        console.log('THIS IS A TEST', data);
         const [url, body, config] = setQuestionApi(
             data.component_type,
             flowId,
@@ -103,12 +96,9 @@ const FollowUpQuestionNode = ({ id, data }) => {
     };
 
     const ifPressEnter = (e) => {
-        console.log('called');
         if (e.key === 'Enter') {
             pushNode(LoadingModal);
             askQuestion();
-        } else {
-            console.log('Problem');
         }
     };
     return (

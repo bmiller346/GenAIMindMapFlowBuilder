@@ -110,7 +110,6 @@ const YTModal = () => {
 			context: 'YouTube source add was undone.'
 		});
 		const [url_hit, body, headerConfig] = setRequestData("youtube", flowId, data);
-		console.log("Testtttttt", url_hit, body, headerConfig)
 		axios.post(`http://localhost:8000/${url_hit}`, body, {
 			headers: {
 				'Content-Type': headerConfig
@@ -173,9 +172,6 @@ const YTModal = () => {
 	const { status, message, setStatus, setMsg } = errorStore(useShallow(selector2))
 
 	const manageErrors = (err) => {
-		console.log(err)
-		console.log("Errroro", err.status)
-		console.log("Errroross", err.response?.statusText)
 		setStatus(err.response?.status || err.status || 500)
 		setMsg(requestErrorMessage(err))
 		popNode()

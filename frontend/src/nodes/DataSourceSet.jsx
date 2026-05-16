@@ -85,7 +85,6 @@ const DataSourceSet = ({ data, modalProps = {} }) => {
         '.csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel';
     const pdfAccept = 'application/pdf';
     // if (data.name === 'pdf') {
-    //     console.log('called');
     //     return (
     //         <div className="data-source-input">
     //             <label

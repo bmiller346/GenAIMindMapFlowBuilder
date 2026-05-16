@@ -141,9 +141,6 @@ const CSVModal = () => {
 	const { status, message, setStatus, setMsg } = errorStore(useShallow(selector2))
 
 	const manageErrors = (err) => {
-		console.log(err)
-		console.log("Errroro", err.status)
-		console.log("Errroross", err.response?.statusText)
 		setStatus(err.status)
 		setMsg(requestErrorMessage(err))
 		popNode()
