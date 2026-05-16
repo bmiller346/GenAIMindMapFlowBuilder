@@ -658,6 +658,35 @@ test('canvas command bar exposes node density and reflow without covering the ma
     await expect(page.getByLabel('Node display')).toHaveCount(0);
 });
 
+test('empty canvas Ask AI creates the initial graph through backend draft accept', async ({ page }) => {
+    const { draftSessionRequests, draftAcceptRequests, state } = await setupMockBackend(page);
+    state.createdFlow = true;
+    state.savedFlowName = 'Initial graph QA';
+    state.savedFlowJson = emptyFlowJson;
+
+    await page.goto('/');
+    await expect(page.getByRole('textbox', { name: 'Workspace name' })).toHaveValue('Initial graph QA');
+    await page
+        .getByRole('region', { name: 'Empty workspace' })
+        .getByRole('button', { name: 'Ask AI' })
+        .click();
+    await expect(page.locator('.ai-action-modal')).toBeVisible();
+    await page.locator('.ai-action-natural textarea').fill('Create a grilled cheese workflow');
+    await page
+        .getByRole('button', { name: 'Create initial graph' })
+        .evaluate((button) => button.click());
+
+    await expect.poll(() => draftSessionRequests.length, { timeout: 7000 }).toBe(1);
+    await expect.poll(() => draftAcceptRequests.length, { timeout: 7000 }).toBe(1);
+    expect(draftSessionRequests[0].scope).toBe('workspace');
+    expect(draftAcceptRequests[0].requestBody).toMatchObject({
+        mode: 'append',
+        apply_intent: 'accept'
+    });
+    await expect(page.locator('.node-response').filter({ hasText: 'workspace generated child' })).toBeVisible();
+    expect(parseSnapshot(state.savedFlowJson).nodes).toHaveLength(1);
+});
+
 test('multi-select delete removes checked nodes without treating one selection as branch scope', async ({ page }) => {
     const { savedRequests } = await setupMockBackend(page, { initialFlowJson: scopedLensFlowJson });
     await openExistingFlow(page);

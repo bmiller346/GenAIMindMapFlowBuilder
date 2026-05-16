@@ -790,6 +790,9 @@ const modelOptions = ['auto', ...supportedOpenAIModels];
 const draftSessionEndpoint = ({ flowId }) =>
     `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions`;
 
+const draftAcceptEndpoint = ({ flowId, sessionId }) =>
+    `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions/${sessionId}/accept`;
+
 const formatStageContextValue = (value, fallback = 'None') => {
     if (Array.isArray(value)) {
         return value.length ? value.join(', ') : fallback;
@@ -1346,7 +1349,7 @@ const PromptModal = ({
             window.setTimeout(() => popNode(), 150);
         };
 
-        const seedInitialGraph = (session) => {
+        const seedInitialGraph = async (session) => {
             const candidateSession = session?.session_id
                 ? session
                 : session?.draft_session?.session_id
@@ -1397,14 +1400,61 @@ const PromptModal = ({
             }
             setGenerationStage('Building preview');
             const nextSession = candidateSession;
-            const accepted = acceptAIDraftSession({
-                session: nextSession,
-                nodes: [],
-                edges: [],
-                mode: 'append'
-            });
+            let accepted = null;
+            let backendAcceptUsed = false;
+            if (flowId && nextSession.session_id) {
+                try {
+                    setGenerationStage('Saving starter graph');
+                    const acceptResponse = await axios.post(
+                        draftAcceptEndpoint({ flowId, sessionId: nextSession.session_id }),
+                        {
+                            mode: 'append',
+                            selected_item_ids: [],
+                            apply_intent: 'accept',
+                            change_intent: changeIntent
+                        }
+                    );
+                    const acceptPayload = acceptResponse?.data || {};
+                    const acceptedGraph =
+                        acceptPayload.graph || acceptPayload.workspace || acceptPayload;
+                    if (Array.isArray(acceptedGraph.nodes) || Array.isArray(acceptedGraph.edges)) {
+                        accepted = {
+                            nodes: Array.isArray(acceptedGraph.nodes) ? acceptedGraph.nodes : [],
+                            edges: Array.isArray(acceptedGraph.edges) ? acceptedGraph.edges : [],
+                            session:
+                                acceptPayload.session ||
+                                acceptPayload.draft_session ||
+                                {
+                                    ...nextSession,
+                                    status: 'accepted'
+                                },
+                            accept_result:
+                                acceptPayload.accept_result ||
+                                acceptPayload.result ||
+                                acceptPayload
+                        };
+                        backendAcceptUsed = true;
+                    }
+                } catch (acceptError) {
+                    setStageDebug((current) => ({
+                        ...(current || {}),
+                        backend_accept_error:
+                            acceptError?.response?.data?.detail ||
+                            acceptError?.message ||
+                            String(acceptError)
+                    }));
+                }
+            }
+            if (!accepted) {
+                accepted = acceptAIDraftSession({
+                    session: nextSession,
+                    nodes: [],
+                    edges: [],
+                    mode: 'append'
+                });
+            }
             recordDraftSessionRun({
-                session: nextSession,
+                session: accepted.session || nextSession,
                 status: 'accepted',
                 generatedNodeIds: accepted.accept_result.accepted_node_ids
             });
@@ -1444,6 +1494,7 @@ const PromptModal = ({
                     accepted_node_ids: accepted.accept_result.accepted_node_ids,
                     accepted_edge_ids: accepted.accept_result.accepted_edge_ids,
                     preview_diff: accepted.accept_result.preview_diff,
+                    backend_accept_used: backendAcceptUsed,
                     filters_changed: false,
                     model: selectedModel
                 },
@@ -1500,7 +1551,7 @@ const PromptModal = ({
                     });
                     return;
                 }
-                seedInitialGraph(response.data);
+                await seedInitialGraph(response.data);
             } else {
                 activateSession(response?.data || fallbackSession);
             }
