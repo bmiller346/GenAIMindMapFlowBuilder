@@ -21,7 +21,7 @@ import {
     saveNudgePreferences
 } from '../config/localSettings';
 
-const CANVAS_VIEW_IDS = new Set(['mindmap', 'knowledgeGraph', 'outline', 'executive', 'tasks', 'kanban', 'table']);
+const CANVAS_VIEW_IDS = new Set(['mindmap', 'knowledgeGraph', 'flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
 
 // Sample
 const data = {

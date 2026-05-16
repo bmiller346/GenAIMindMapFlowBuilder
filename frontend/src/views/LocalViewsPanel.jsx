@@ -35,6 +35,7 @@ import { createWorkspaceNode, getRootPosition } from '../utils/manualNodes';
 const CORE_VIEWS = [
     { id: 'mindmap', label: 'Map', ariaLabel: 'TraceSpace Map', detail: 'Map the workspace structure', group: 'Explore' },
     { id: 'knowledgeGraph', label: 'Connections', detail: 'Find relationships and overlaps', group: 'Explore' },
+    { id: 'flowchart', label: 'Flowchart', detail: 'Explore process steps, decisions, and handoffs', group: 'Explore' },
     { id: 'outline', label: 'Outline', detail: 'Review hierarchy as an outline', group: 'Review' },
     { id: 'executive', label: 'Executive', detail: 'Package summary and evidence', group: 'Review' },
     { id: 'table', label: 'Table', detail: 'View workspace data as table rows', group: 'Review' },
@@ -63,7 +64,6 @@ const REVIEW_VIEWS = [
 
 const AI_OUTPUT_VIEWS = [
     { id: 'connections', label: 'Find connections', detail: 'AI can propose relationship edges' },
-    { id: 'flowchart', label: 'Create flow chart', detail: 'AI can infer process structure' },
     { id: 'chartData', label: 'Create structured table', detail: 'AI can infer table columns and rows' },
     { id: 'preview', label: 'Generate task preview', detail: 'AI preview or current workspace tasks' },
     { id: 'checklist', label: 'Create checklist', detail: 'AI preview or current workspace checklist' }
@@ -105,7 +105,10 @@ const AI_ACTION_PRESETS = {
     flowchart: {
         role: 'workflow-mapper',
         action: 'custom_prompt',
-        scope: 'branch'
+        scope: 'branch',
+        initialVisual: 'flow_chart',
+        initialPrompt:
+            'Create a flowchart from this workspace with ordered steps, decision points, dependencies, handoffs, exception paths, and source-backed review notes.'
     },
     chartData: {
         role: 'data-table-interpreter',
@@ -145,7 +148,7 @@ const HANDOFF_VIEWS = [
 ];
 
 const WORKSPACE_OUTPUT_GROUPS = [
-    { label: 'Explore', views: AI_OUTPUT_VIEWS.filter((view) => ['connections', 'flowchart'].includes(view.id)) },
+    { label: 'Explore', views: AI_OUTPUT_VIEWS.filter((view) => ['connections'].includes(view.id)) },
     {
         label: 'Review',
         views: [
@@ -1693,14 +1696,10 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                 </div>
             ) : null}
 
-            {(activeView === 'flowchart' || activeView === 'chartData') && nodes.length > 0 ? (
+            {activeView === 'chartData' && nodes.length > 0 ? (
                 <div className="local-view-empty">
                     <span className="local-view-empty-kicker">Needs AI preview</span>
-                    <strong>
-                        {activeView === 'flowchart'
-                            ? 'Create flow chart'
-                            : 'Create structured table'}
-                    </strong>
+                    <strong>Create structured table</strong>
                     <span>
                         This view needs AI help. Generate a preview first, then review
                         the proposed structure before accepting anything into the graph.
@@ -1711,9 +1710,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             onClick={() => openAiPreset(activeView)}
                             disabled={!flowId}
                         >
-                            {activeView === 'flowchart'
-                                ? 'Ask AI to draft flow chart'
-                                : 'Ask AI to create table'}
+                            Ask AI to create table
                         </button>
                         <button type="button" onClick={() => setActiveView('gaps')}>
                             Review missing fields

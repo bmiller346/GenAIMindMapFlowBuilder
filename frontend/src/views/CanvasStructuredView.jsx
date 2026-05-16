@@ -6,6 +6,7 @@ import KanbanBoardView from './KanbanBoardView.jsx';
 import {
     buildFilteredGraphProjection,
     getExecutiveOutputProjection,
+    getFlowchartProjection,
     getKanbanColumns,
     getTaskCandidateRows,
     getTaskRows
@@ -16,7 +17,8 @@ const VIEW_LABELS = {
     outline: 'Outline',
     tasks: 'Tasks',
     kanban: 'Kanban',
-    table: 'Table'
+    table: 'Table',
+    flowchart: 'Flowchart'
 };
 
 const TASK_STATUS_OPTIONS = [
@@ -110,10 +112,18 @@ const OutlineItem = ({ node, projection, depth, onOpenNode }) => {
 
 const EmptyStructuredView = ({ view, label, onOpenSources, onAskAi, onStartManual }) => (
     <div className="canvas-structured-empty">
-        <strong>{view === 'kanban' ? 'Start a Kanban board' : 'No accepted graph nodes yet'}</strong>
+        <strong>
+            {view === 'kanban'
+                ? 'Start a Kanban board'
+                : view === 'flowchart'
+                  ? 'Start a flowchart'
+                  : 'No accepted graph nodes yet'}
+        </strong>
         <span>
             {view === 'kanban'
                 ? 'Ask AI to shape work into board columns, add sources, or create the first task node.'
+                : view === 'flowchart'
+                  ? 'Ask AI to identify steps, decisions, handoffs, and dependencies, or start from source material.'
                 : `${label} will populate after you accept or create nodes in the workspace.`}
         </span>
         <div className="canvas-structured-empty-actions">
@@ -129,6 +139,11 @@ const EmptyStructuredView = ({ view, label, onOpenSources, onAskAi, onStartManua
                                   initialVisual: 'kanban',
                                   initialPrompt: 'Create a Kanban board from this workspace with backlog, in-progress, blocked, done, and follow-up question cards.'
                               }
+                            : view === 'flowchart'
+                              ? {
+                                    initialVisual: 'flow_chart',
+                                    initialPrompt: 'Create a flowchart from this workspace with ordered steps, decision points, dependencies, handoffs, exception paths, and source-backed review notes.'
+                                }
                             : undefined
                     )
                 }
@@ -197,6 +212,85 @@ const ExecutiveList = ({ title, items = [], empty = 'No items projected.' }) => 
     </section>
 );
 
+const FlowchartView = ({ flowchart, onOpenNode, onAskAi }) => {
+    if (!flowchart.steps.length) {
+        return (
+            <div className="canvas-structured-empty inline">
+                <strong>No flowchart steps projected</strong>
+                <span>Ask AI to infer process steps, decisions, and handoffs from the current scope.</span>
+                <button
+                    type="button"
+                    onClick={() =>
+                        onAskAi?.({
+                            initialVisual: 'flow_chart',
+                            initialPrompt: 'Create a flowchart from this workspace with ordered steps, decision points, dependencies, handoffs, exception paths, and source-backed review notes.'
+                        })
+                    }
+                >
+                    Ask AI to draft flowchart
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="canvas-flowchart-view" aria-label="Flowchart">
+            <div className="canvas-flowchart-lane">
+                {flowchart.steps.map((step, index) => {
+                    const outgoing = flowchart.connectors.filter((connector) => connector.source === step.id);
+                    return (
+                        <div key={step.id} className="canvas-flowchart-step-wrap">
+                            <article className={`canvas-flowchart-step canvas-flowchart-step-${step.flow_kind}`}>
+                                <div>
+                                    <span>{step.flow_kind}</span>
+                                    <small>{step.source_backed ? 'source-backed' : 'needs source review'}</small>
+                                </div>
+                                <button type="button" onClick={() => onOpenNode?.(step.id)}>
+                                    {step.title}
+                                </button>
+                                {summaryText(step) ? <p>{summaryText(step)}</p> : null}
+                            </article>
+                            {index < flowchart.steps.length - 1 ? (
+                                <div className="canvas-flowchart-connectors">
+                                    {outgoing.length ? (
+                                        outgoing.map((connector) => (
+                                            <span key={connector.id}>
+                                                {connector.label}
+                                                {' -> '}
+                                                {connector.target_title}
+                                            </span>
+                                        ))
+                                    ) : (
+                                        <span>Next</span>
+                                    )}
+                                </div>
+                            ) : null}
+                        </div>
+                    );
+                })}
+            </div>
+            <aside className="canvas-flowchart-summary">
+                <strong>Flow signals</strong>
+                <span>{flowchart.metadata.step_count} steps</span>
+                <span>{flowchart.metadata.connector_count} connectors</span>
+                <span>{flowchart.metadata.decision_count} decisions</span>
+                <span>{flowchart.metadata.source_backed_count} sourced</span>
+                <button
+                    type="button"
+                    onClick={() =>
+                        onAskAi?.({
+                            initialVisual: 'flow_chart',
+                            initialPrompt: 'Improve this flowchart with clearer step order, decision paths, dependencies, handoffs, and source-backed review notes.'
+                        })
+                    }
+                >
+                    Ask AI to improve flow
+                </button>
+            </aside>
+        </div>
+    );
+};
+
 const CanvasStructuredView = ({
     view,
     nodes = [],
@@ -220,6 +314,7 @@ const CanvasStructuredView = ({
     );
     const taskRows = useMemo(() => getTaskRows(projection), [projection]);
     const kanbanColumns = useMemo(() => getKanbanColumns(projection), [projection]);
+    const flowchart = useMemo(() => getFlowchartProjection(projection), [projection]);
     const executiveOutput = useMemo(
         () => getExecutiveOutputProjection(projection, { title: 'Executive Output' }),
         [projection]
@@ -383,6 +478,14 @@ const CanvasStructuredView = ({
                     </button>
                 ) : null}
             </header>
+
+            {view === 'flowchart' ? (
+                <FlowchartView
+                    flowchart={flowchart}
+                    onOpenNode={onOpenNode}
+                    onAskAi={onAskAi}
+                />
+            ) : null}
 
             {view === 'outline' ? (
                 projection.roots.length > 0 ? (

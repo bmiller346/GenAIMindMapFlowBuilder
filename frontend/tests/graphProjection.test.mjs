@@ -9,6 +9,7 @@ import {
     getCrossLinkConnectionRows,
     getEnterpriseReadinessSummary,
     getEnterpriseScoreRows,
+    getFlowchartProjection,
     getGraphConfidenceSummary,
     getKanbanColumns,
     getSourceRepairPreviewRows,
@@ -349,6 +350,27 @@ test('connection projection separates hierarchy from cross-link edges', () => {
 
     assert.deepEqual(crossLinks.map((row) => row.id), ['edge-risk']);
     assert.equal(crossLinks[0].connection_kind, 'Cross-link');
+});
+
+test('flowchart projection orders process steps and decision connectors', () => {
+    const projection = buildGraphProjection(
+        [
+            supportedNode('intake', 'procedure', { title: 'Intake request' }),
+            supportedNode('decision', 'decision', { title: 'Approve scope' }),
+            supportedNode('handoff', 'handoff', { title: 'Handoff to delivery' })
+        ],
+        [
+            { id: 'edge-1', source: 'intake', target: 'decision', relationship_type: 'next' },
+            { id: 'edge-2', source: 'decision', target: 'handoff', relationship_type: 'handoff' }
+        ]
+    );
+
+    const flowchart = getFlowchartProjection(projection);
+
+    assert.deepEqual(flowchart.steps.map((step) => step.id), ['intake', 'decision', 'handoff']);
+    assert.deepEqual(flowchart.steps.map((step) => step.flow_kind), ['step', 'decision', 'handoff']);
+    assert.deepEqual(flowchart.connectors.map((connector) => connector.label), ['Next', 'Handoff']);
+    assert.equal(flowchart.metadata.decision_count, 1);
 });
 
 test('graph confidence flags unsourced creative graphs as needing source support', () => {
