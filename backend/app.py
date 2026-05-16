@@ -169,6 +169,7 @@ from documents.ingestion import (
     validate_upload_bytes,
 )
 from documents.source_refs import attach_source_refs_to_mindmap
+from structured_data import build_structured_data_artifacts
 from ai.roles import (
     UnknownSourceIntakeRole,
     build_source_intake_instruction as build_role_source_intake_instruction,
@@ -6569,6 +6570,16 @@ def CSV_QA(request: CSVNodeQueryRequest):
             plotyGraph = fig.to_json()
             df_dict = runSQLDF.to_dict(orient="records")
             df_dict = [{str(k): v for k, v in row.items()} for row in df_dict]
+            artifact_payload = build_structured_data_artifacts(
+                source_type="csv",
+                source_id=str(request.component_id),
+                question=request.query,
+                table_name=table_name,
+                sql=sqlQuery,
+                rows=df_dict,
+                summary=summSQL,
+                chart_json=plotyGraph,
+            )
             result_document = {
                 "_id": ObjectId(request.node_id),
                 "question": request.query,
@@ -6576,6 +6587,13 @@ def CSV_QA(request: CSVNodeQueryRequest):
                 "df": df_dict,
                 "summ": summSQL,
                 "graph": plotyGraph,
+                "node_type": artifact_payload["node_type"],
+                "artifact_type": artifact_payload["artifact_type"],
+                "artifact_ids": artifact_payload["artifact_ids"],
+                "review_state": artifact_payload["review_state"],
+                "source_refs": artifact_payload["source_refs"],
+                "generated_artifacts": artifact_payload["generated_artifacts"],
+                "metadata": artifact_payload["metadata"],
                 "flow_id": ObjectId(request.flow_id),
                 "component_id": ObjectId(request.component_id),
                 "type": "csv",
@@ -6589,9 +6607,17 @@ def CSV_QA(request: CSVNodeQueryRequest):
                 "type": "CSVNode",
                 "data": {
                     "question": request.query,
-                    "df": runSQLDF.to_dict(orient="records"),
+                    "query": sqlQuery,
+                    "df": df_dict,
                     "summ": summSQL,
                     "graph": plotyGraph,
+                    "node_type": artifact_payload["node_type"],
+                    "artifact_type": artifact_payload["artifact_type"],
+                    "artifact_ids": artifact_payload["artifact_ids"],
+                    "review_state": artifact_payload["review_state"],
+                    "source_refs": artifact_payload["source_refs"],
+                    "generated_artifacts": artifact_payload["generated_artifacts"],
+                    "metadata": artifact_payload["metadata"],
                     "flow_id": request.flow_id,
                     "component_id": request.component_id,
                     "component_type": "csv",
@@ -7445,6 +7471,16 @@ def SQL_QA(request: SQLNodeQueryRequest):
 
             df_dict = runSQLDF.to_dict(orient="records")
             df_dict = [{str(k): v for k, v in row.items()} for row in df_dict]
+            artifact_payload = build_structured_data_artifacts(
+                source_type="sql",
+                source_id=str(request.component_id),
+                question=request.question,
+                table_name=table_name,
+                sql=sqlQuery,
+                rows=df_dict,
+                summary=summSQL,
+                chart_json=plotyGraph,
+            )
             result_document = {
                 "_id": ObjectId(request.node_id),
                 "question": request.question,
@@ -7452,6 +7488,13 @@ def SQL_QA(request: SQLNodeQueryRequest):
                 "df": df_dict,
                 "summ": summSQL,
                 "graph": plotyGraph,
+                "node_type": artifact_payload["node_type"],
+                "artifact_type": artifact_payload["artifact_type"],
+                "artifact_ids": artifact_payload["artifact_ids"],
+                "review_state": artifact_payload["review_state"],
+                "source_refs": artifact_payload["source_refs"],
+                "generated_artifacts": artifact_payload["generated_artifacts"],
+                "metadata": artifact_payload["metadata"],
                 "flow_id": ObjectId(request.flow_id),
                 "component_id": ObjectId(request.component_id),
                 "type": "sql",
@@ -7469,9 +7512,16 @@ def SQL_QA(request: SQLNodeQueryRequest):
                 "data": {
                     "question": request.question,
                     "query": sqlQuery,
-                    "df": runSQLDF.to_dict(orient="records"),
+                    "df": df_dict,
                     "summ": summSQL,
                     "graph": plotyGraph,
+                    "node_type": artifact_payload["node_type"],
+                    "artifact_type": artifact_payload["artifact_type"],
+                    "artifact_ids": artifact_payload["artifact_ids"],
+                    "review_state": artifact_payload["review_state"],
+                    "source_refs": artifact_payload["source_refs"],
+                    "generated_artifacts": artifact_payload["generated_artifacts"],
+                    "metadata": artifact_payload["metadata"],
                     "flow_id": request.flow_id,
                     "component_id": request.component_id,
                     "component_type": "sql",
