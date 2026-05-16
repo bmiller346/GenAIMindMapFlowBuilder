@@ -90,6 +90,21 @@ def test_scan_local_repo_ignores_generated_and_secret_files(tmp_path):
     assert "do-not-ingest" not in serialized
 
 
+def test_scan_local_repo_honors_max_files_budget(tmp_path):
+    for index in range(4):
+        (tmp_path / f"module_{index}.py").write_text(
+            f"def run_{index}():\n    return {index}\n",
+            encoding="utf-8",
+        )
+
+    graph = scan_local_repo(tmp_path, max_files=2)
+
+    assert len(graph["files"]) == 2
+    assert graph["metadata"]["scan_budget"]["max_files"] == 2
+    assert graph["metadata"]["skipped_files"]["by_reason"]["max_files_reached"] == 2
+    assert graph["repo"]["skipped_file_count"] == graph["metadata"]["skipped_files"]["total"]
+
+
 def test_scan_local_repo_reports_missing_tests_and_docs(tmp_path):
     (tmp_path / "service.py").write_text(
         "\n".join(

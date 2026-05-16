@@ -15,7 +15,7 @@ const emptyForm = {
     ref: 'main',
     path: '',
     changedPaths: '',
-    maxFiles: 200
+    maxFiles: 500
 };
 
 const CodeIntelligenceModal = () => {
@@ -135,7 +135,7 @@ const CodeIntelligenceModal = () => {
                 <img src={CROSSSvg} alt="Close code intelligence" onClick={() => popNode()} />
             </div>
             <p className="settings-note">
-                Developer-only local tool. GitHub tokens are sent only with this request and are not saved by TraceSpace.
+                Developer-only local tool. Deterministic scans have no AI cost; later AI interpretation should be a separate opt-in. GitHub tokens are sent only with this request and are not saved by TraceSpace.
             </p>
             {!serverEnabled ? (
                 <p className="settings-warning">
@@ -187,7 +187,12 @@ const CodeIntelligenceModal = () => {
                 </div>
             </div>
             <div className="input-bar">
-                <label htmlFor="github-changed-paths">Changed files optional</label>
+                <label
+                    htmlFor="github-changed-paths"
+                    title="Optional PR impact input. Paste changed repo-relative paths to focus the handoff package."
+                >
+                    Changed files optional
+                </label>
                 <textarea
                     id="github-changed-paths"
                     rows={4}
@@ -197,12 +202,17 @@ const CodeIntelligenceModal = () => {
                 />
             </div>
             <div className="input-bar">
-                <label htmlFor="github-max-files">Max files</label>
+                <label
+                    htmlFor="github-max-files"
+                    title="Cost guardrail. This deterministic scan uses local/server compute only, not AI tokens. Higher limits may return larger graphs and take longer."
+                >
+                    Max files
+                </label>
                 <input
                     id="github-max-files"
                     type="number"
                     min="1"
-                    max="1000"
+                    max="5000"
                     value={form.maxFiles}
                     onChange={(event) => updateField('maxFiles', Number(event.target.value))}
                 />

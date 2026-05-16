@@ -52,7 +52,7 @@ const DATA_SOURCES = [
 ];
 
 const DEVELOPER_SOURCES = [
-	{ img: DRAWERSvg, content: "Scan GitHub repository", name: "code_intelligence", mode: "Developer", detail: "Creates a source-cited code graph and engineering report." },
+	{ img: DRAWERSvg, content: "Scan GitHub repository", name: "code_intelligence", mode: "Developer", detail: "Deterministic graph; no AI cost unless interpretation is added." },
 ];
 
 const DataSourceSelect = ({

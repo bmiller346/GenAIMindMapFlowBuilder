@@ -484,6 +484,7 @@ class LocalRepoScanRequest(BaseModel):
     root: str
     repo_label: str = ""
     changed_paths: list[str] = Field(default_factory=list)
+    max_files: int = Field(default=500, ge=1, le=5000)
     max_file_bytes: int = Field(default=256_000, ge=1, le=2_000_000)
     large_file_line_threshold: int = Field(default=500, ge=50, le=10_000)
 
@@ -628,6 +629,7 @@ def scan_local_repo_endpoint(request: LocalRepoScanRequest):
         return scan_local_repo(
             repo_root,
             repo_label=request.repo_label,
+            max_files=request.max_files,
             max_file_bytes=request.max_file_bytes,
             large_file_line_threshold=request.large_file_line_threshold,
         )

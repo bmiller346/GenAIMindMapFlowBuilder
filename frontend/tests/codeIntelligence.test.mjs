@@ -24,7 +24,7 @@ test('normalizes GitHub code intelligence request form', () => {
         ref: 'main',
         path: 'src/app',
         changedPaths: ['src/app.py', 'backend/service.py'],
-        maxFiles: 1000
+        maxFiles: 5000
     });
 });
 

@@ -101,10 +101,14 @@ def scan_local_repo(
     root: str | Path,
     *,
     repo_label: str = "",
+    max_files: int = 500,
     max_file_bytes: int = 256_000,
     large_file_line_threshold: int = 500,
 ) -> dict[str, Any]:
     """Build a deterministic, source-cited code graph for a local repo folder."""
+
+    if max_files < 1:
+        raise ValueError("max_files must be at least 1.")
 
     root_path = Path(root).resolve()
     if not root_path.exists() or not root_path.is_dir():
@@ -134,7 +138,13 @@ def scan_local_repo(
     symbol_nodes_by_name: dict[str, list[dict[str, Any]]] = {}
     symbol_nodes_by_file_id: dict[str, list[dict[str, Any]]] = {}
 
-    for path in _iter_supported_files(root_path, max_file_bytes=max_file_bytes):
+    selected_files, skipped_files = _iter_supported_files(
+        root_path,
+        max_files=max_files,
+        max_file_bytes=max_file_bytes,
+    )
+
+    for path in selected_files:
         relative_path = path.relative_to(root_path).as_posix()
         text = path.read_text(encoding="utf-8", errors="replace")
         lines = text.splitlines()
@@ -484,7 +494,12 @@ def scan_local_repo(
         "title": f"{repo_name} Code Knowledge Graph",
         "status": "source_backed",
         "source_type": "local_repo",
-        "repo": {"name": repo_name, "root": str(root_path), "file_count": len(files)},
+        "repo": {
+            "name": repo_name,
+            "root": str(root_path),
+            "file_count": len(files),
+            "skipped_file_count": skipped_files["total"],
+        },
         "source_documents": source_documents,
         "document_chunks": document_chunks,
         "nodes": nodes,
@@ -504,30 +519,68 @@ def scan_local_repo(
             "domain": "code",
             "artifact_type": "code_knowledge_graph",
             "capability_contract": _capability_contract(),
+            "scan_budget": {
+                "max_files": max_files,
+                "max_file_bytes": max_file_bytes,
+                "large_file_line_threshold": large_file_line_threshold,
+            },
+            "skipped_files": skipped_files,
         },
     }
 
 
-def _iter_supported_files(root: Path, *, max_file_bytes: int) -> list[Path]:
+def _iter_supported_files(
+    root: Path,
+    *,
+    max_files: int,
+    max_file_bytes: int,
+) -> tuple[list[Path], dict[str, Any]]:
     files: list[Path] = []
+    skipped_files = _empty_skipped_files()
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
         if any(part in DEFAULT_IGNORE_PARTS for part in path.relative_to(root).parts):
+            skipped_files = _record_skipped_file(skipped_files, "ignored_path", path.relative_to(root).as_posix())
             continue
         if _is_secret_path(path.relative_to(root).as_posix()):
+            skipped_files = _record_skipped_file(skipped_files, "secret_path", path.relative_to(root).as_posix())
             continue
         if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+            skipped_files = _record_skipped_file(skipped_files, "unsupported_extension", path.relative_to(root).as_posix())
             continue
         try:
             if path.stat().st_size > max_file_bytes:
+                skipped_files = _record_skipped_file(skipped_files, "too_large", path.relative_to(root).as_posix())
                 continue
             if path.suffix.lower() in {".json", ".yaml", ".yml", ".toml"} and _contains_secret_pattern(path):
+                skipped_files = _record_skipped_file(skipped_files, "secret_pattern", path.relative_to(root).as_posix())
                 continue
         except OSError:
+            skipped_files = _record_skipped_file(skipped_files, "read_error", path.relative_to(root).as_posix())
+            continue
+        if len(files) >= max_files:
+            skipped_files = _record_skipped_file(skipped_files, "max_files_reached", path.relative_to(root).as_posix())
             continue
         files.append(path)
-    return files
+    return files, skipped_files
+
+
+def _empty_skipped_files() -> dict[str, Any]:
+    return {
+        "total": 0,
+        "by_reason": {},
+        "samples": {},
+    }
+
+
+def _record_skipped_file(skipped_files: dict[str, Any], reason: str, path: str) -> dict[str, Any]:
+    skipped_files["total"] += 1
+    skipped_files["by_reason"][reason] = skipped_files["by_reason"].get(reason, 0) + 1
+    samples = skipped_files["samples"].setdefault(reason, [])
+    if len(samples) < 5:
+        samples.append(path)
+    return skipped_files
 
 
 def _is_secret_path(path: str) -> bool:

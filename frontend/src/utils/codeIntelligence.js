@@ -16,7 +16,7 @@ export const normalizeGitHubCodeIntelligenceForm = ({
     ref = 'main',
     path = '',
     changedPaths = '',
-    maxFiles = 200
+    maxFiles = 500
 } = {}) => {
     const normalizedChangedPaths = Array.isArray(changedPaths)
         ? changedPaths
@@ -30,7 +30,7 @@ export const normalizeGitHubCodeIntelligenceForm = ({
         changedPaths: normalizedChangedPaths
             .map((item) => String(item || '').trim().replace(/^\/+|\/+$/g, ''))
             .filter(Boolean),
-        maxFiles: Math.max(1, Math.min(1000, Number(maxFiles) || 200))
+        maxFiles: Math.max(1, Math.min(5000, Number(maxFiles) || 500))
     };
 
     if (normalized.owner.includes('/')) {
@@ -75,7 +75,7 @@ export const scanGitHubCodeIntelligence = async ({
     ref = 'main',
     path = '',
     changedPaths = '',
-    maxFiles = 200
+    maxFiles = 500
 }) => {
     const normalized = normalizeGitHubCodeIntelligenceForm({
         token,
@@ -114,7 +114,7 @@ export const generateGitHubCodeIntelligenceReport = async ({
     ref = 'main',
     path = '',
     changedPaths = '',
-    maxFiles = 200
+    maxFiles = 500
 }) => {
     const normalized = normalizeGitHubCodeIntelligenceForm({
         token,
@@ -153,7 +153,7 @@ export const generateGitHubCodeIntelligenceArtifacts = async ({
     ref = 'main',
     path = '',
     changedPaths = '',
-    maxFiles = 200
+    maxFiles = 500
 }) => {
     const normalized = normalizeGitHubCodeIntelligenceForm({
         token,
