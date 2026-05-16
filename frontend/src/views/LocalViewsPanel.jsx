@@ -47,6 +47,12 @@ const CORE_VIEW_GROUPS = ['Explore', 'Review', 'Act'].map((label) => ({
     views: CORE_VIEWS.filter((view) => view.group === label)
 }));
 
+const NODE_DENSITY_OPTIONS = [
+    { id: 'compact', label: 'Compact' },
+    { id: 'outline', label: 'Outline' },
+    { id: 'cards', label: 'Cards' }
+];
+
 const REVIEW_VIEWS = [
     { id: 'preview', label: 'Task preview' },
     { id: 'gaps', label: 'Missing info' },
@@ -485,6 +491,8 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
         clearGeneratedHelperPreview: state.clearGeneratedHelperPreview,
         activeGraphFilters: state.activeGraphFilters,
         setActiveGraphFilters: state.setActiveGraphFilters,
+        canvasNodeDensity: state.canvasNodeDensity,
+        setCanvasNodeDensity: state.setCanvasNodeDensity,
         nudgePreferences: state.nudgePreferences,
         sourceLibrary: state.sourceLibrary
     });
@@ -503,6 +511,8 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
         clearGeneratedHelperPreview,
         activeGraphFilters,
         setActiveGraphFilters,
+        canvasNodeDensity,
+        setCanvasNodeDensity,
         nudgePreferences,
         sourceLibrary
     } = useStore(useShallow(selector));
@@ -510,6 +520,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [outputMenuOpen, setOutputMenuOpen] = useState(false);
     const [viewMenuOpen, setViewMenuOpen] = useState(false);
+    const [nodeViewMenuOpen, setNodeViewMenuOpen] = useState(false);
     const [followUpActionsOpen, setFollowUpActionsOpen] = useState(false);
     const panelRef = useRef(null);
     const addActivity = useActivityStore((s) => s.addActivity);
@@ -657,7 +668,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const showCanvasNudges = isNudgeCategoryEnabled(nudgePreferences, 'canvas');
     const showTaskNudges = isNudgeCategoryEnabled(nudgePreferences, 'tasks');
     useEffect(() => {
-        if (!filtersOpen && !outputMenuOpen && !viewMenuOpen) {
+        if (!filtersOpen && !outputMenuOpen && !viewMenuOpen && !nodeViewMenuOpen) {
             return undefined;
         }
 
@@ -668,11 +679,12 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
             setFiltersOpen(false);
             setOutputMenuOpen(false);
             setViewMenuOpen(false);
+            setNodeViewMenuOpen(false);
         };
 
         document.addEventListener('pointerdown', handlePointerDown);
         return () => document.removeEventListener('pointerdown', handlePointerDown);
-    }, [filtersOpen, outputMenuOpen, viewMenuOpen]);
+    }, [filtersOpen, nodeViewMenuOpen, outputMenuOpen, viewMenuOpen]);
 
     const toggleGraphFilter = (filterId) => {
         const nextFilters = activeFilterSet.has(filterId)
@@ -936,6 +948,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             setViewMenuOpen((open) => !open);
                             setOutputMenuOpen(false);
                             setFiltersOpen(false);
+                            setNodeViewMenuOpen(false);
                         }}
                         aria-expanded={viewMenuOpen}
                         aria-label={activeCanvasOption?.ariaLabel || activeCanvasOption?.label || 'TraceSpace Map'}
@@ -964,6 +977,24 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                 Branch
                             </button>
                         </div>
+                        {nodes.length > 0 ? (
+                            <button
+                                type="button"
+                                className={`local-filter-menu-button local-canvas-menu-button ${nodeViewMenuOpen ? 'active' : ''}`}
+                                onClick={() => {
+                                    setNodeViewMenuOpen((open) => !open);
+                                    setViewMenuOpen(false);
+                                    setOutputMenuOpen(false);
+                                    setFiltersOpen(false);
+                                }}
+                                aria-expanded={nodeViewMenuOpen}
+                            >
+                                <span>Nodes</span>
+                                <span className="local-filter-menu-caret" aria-hidden="true">
+                                    {nodeViewMenuOpen ? '^' : 'v'}
+                                </span>
+                            </button>
+                        ) : null}
                         <button
                             type="button"
                             className={`local-output-menu-button local-canvas-menu-button ${
@@ -973,6 +1004,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                 setOutputMenuOpen((open) => !open);
                                 setViewMenuOpen(false);
                                 setFiltersOpen(false);
+                                setNodeViewMenuOpen(false);
                             }}
                             aria-expanded={outputMenuOpen}
                         >
@@ -988,6 +1020,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                 setFiltersOpen((open) => !open);
                                 setViewMenuOpen(false);
                                 setOutputMenuOpen(false);
+                                setNodeViewMenuOpen(false);
                             }}
                             aria-expanded={filtersOpen}
                         >
@@ -1018,6 +1051,33 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                 <strong>{view.label}</strong>
                             </button>
                         ))}
+                    </div>
+                ) : null}
+
+                {nodeViewMenuOpen ? (
+                    <div className="local-node-view-popover local-canvas-popover" aria-label="Node display">
+                        <div className="local-node-view-options">
+                            {NODE_DENSITY_OPTIONS.map((option) => (
+                                <button
+                                    key={option.id}
+                                    type="button"
+                                    className={canvasNodeDensity === option.id ? 'active' : ''}
+                                    onClick={() => setCanvasNodeDensity(option.id)}
+                                >
+                                    {option.label}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            type="button"
+                            className="local-node-view-reflow"
+                            onClick={() => {
+                                window.dispatchEvent(new CustomEvent('docmap:reflow-canvas'));
+                                setNodeViewMenuOpen(false);
+                            }}
+                        >
+                            Reflow map
+                        </button>
                     </div>
                 ) : null}
 

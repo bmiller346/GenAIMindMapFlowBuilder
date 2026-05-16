@@ -52,11 +52,6 @@ import useAutomationStore from './stores/automationStore';
 
 const CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'outline', 'executive', 'tasks', 'table']);
 const STRUCTURED_CANVAS_VIEWS = new Set(['outline', 'executive', 'tasks', 'table']);
-const NODE_DENSITY_OPTIONS = [
-    { id: 'compact', label: 'Compact' },
-    { id: 'outline', label: 'Outline' },
-    { id: 'cards', label: 'Cards' }
-];
 const STRUCTURED_AI_PRESETS = {
     tasks: {
         role: 'task-planner',
@@ -102,6 +97,16 @@ const nodeSourceRefs = (node) => {
           ? data.data.source_refs
           : [];
 };
+
+const hasSourceEvidence = (ref) =>
+    Boolean(
+        ref?.document_id ||
+            ref?.source_type ||
+            ref?.query_id ||
+            ref?.table_name ||
+            ref?.database_id ||
+            ref?.result_hash
+    );
 
 const nodeTypeValue = (node) => {
     const data = nodeData(node);
@@ -284,7 +289,7 @@ const nodeMatchesGraphFilter = (node, filterId) => {
     const sourceRefs = nodeSourceRefs(node);
 
     if (filterId === 'source-backed') {
-        return sourceRefs.some((ref) => ref?.document_id);
+        return sourceRefs.some(hasSourceEvidence);
     }
     if (filterId === 'needs-review') {
         return data.status === 'needs_review' || type === 'needs_review';
@@ -305,7 +310,7 @@ const nodeMatchesGraphFilter = (node, filterId) => {
         return TASK_CANVAS_TYPES.has(type) && !data.due_date;
     }
     if (filterId === 'missing-source') {
-        return node.type !== 'dataSource' && !sourceRefs.some((ref) => ref?.document_id);
+        return node.type !== 'dataSource' && !sourceRefs.some(hasSourceEvidence);
     }
     if (filterId === 'low-confidence') {
         const confidence = Number(data.confidence);
@@ -488,7 +493,6 @@ const App = () => {
         activeCanvasView: state.activeCanvasView,
         activeGraphFilters: state.activeGraphFilters,
         canvasNodeDensity: state.canvasNodeDensity,
-        setCanvasNodeDensity: state.setCanvasNodeDensity,
         selectedBranchId: state.selectedBranchId,
         setSelectedBranchId: state.setSelectedBranchId,
         inspectorNodeId: state.inspectorNodeId,
@@ -513,7 +517,6 @@ const App = () => {
         activeCanvasView,
         activeGraphFilters,
         canvasNodeDensity,
-        setCanvasNodeDensity,
         selectedBranchId,
         setSelectedBranchId,
         inspectorNodeId,
@@ -916,6 +919,11 @@ const App = () => {
         window.setTimeout(() => fitView({ nodes: layoutedNodes, maxZoom: 1 }), 50);
     }, [fitView, reactFlow, setEdges, setNodes, setSaveStatus]);
 
+    useEffect(() => {
+        window.addEventListener('docmap:reflow-canvas', reflowCanvasGraph);
+        return () => window.removeEventListener('docmap:reflow-canvas', reflowCanvasGraph);
+    }, [reflowCanvasGraph]);
+
     const onChange = useCallback(
         ({ nodes }) => {
             setSelectedCanvasNodes(nodes);
@@ -1161,12 +1169,14 @@ const App = () => {
                 />
                 {!isStructuredCanvasView ? (
                     <>
-                        <Controls
-                            position="bottom-right"
-                            fitViewOptions={{ maxZoom: 1 }}
-                            showInteractive={false}
-                        />
-                        {renderedCanvasGraph.nodes.length >= 5 ? (
+                        {renderedCanvasGraph.nodes.length > 0 ? (
+                            <Controls
+                                position="bottom-right"
+                                fitViewOptions={{ maxZoom: 1 }}
+                                showInteractive={false}
+                            />
+                        ) : null}
+                        {renderedCanvasGraph.nodes.length >= 5 && !isAiHelpersOpen ? (
                             <MiniMap
                                 position="bottom-right"
                                 pannable
@@ -1185,36 +1195,6 @@ const App = () => {
                                           : '#6ea8fe'
                                 }
                             />
-                        ) : null}
-                        {renderedCanvasGraph.nodes.length > 0 ? (
-                            <Panel
-                                position="bottom-right"
-                                className="canvas-node-view-panel"
-                                style={{ display: 'block' }}
-                            >
-                                <section className="canvas-node-view-controls" aria-label="Node view">
-                                    <span>Node view</span>
-                                    <div>
-                                        {NODE_DENSITY_OPTIONS.map((option) => (
-                                            <button
-                                                key={option.id}
-                                                type="button"
-                                                className={canvasNodeDensity === option.id ? 'active' : ''}
-                                                onClick={() => setCanvasNodeDensity(option.id)}
-                                            >
-                                                {option.label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <button
-                                        type="button"
-                                        className="canvas-node-reflow"
-                                        onClick={reflowCanvasGraph}
-                                    >
-                                        Reflow
-                                    </button>
-                                </section>
-                            </Panel>
                         ) : null}
                         {nodes.length === 0 ? (
                             <Panel

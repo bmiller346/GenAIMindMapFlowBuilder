@@ -640,6 +640,24 @@ test('branch lens dims surrounding graph instead of hiding workspace context', a
     await expect(nodeById(page, 'sibling-b')).not.toHaveClass(/canvas-node-out-of-scope/);
 });
 
+test('canvas command bar exposes node density and reflow without covering the map', async ({ page }) => {
+    const { savedRequests } = await setupMockBackend(page);
+    await createRoot(page, savedRequests, 'Density root');
+
+    const commandBar = page.locator('.local-canvas-command-bar');
+    await expect(commandBar).toBeVisible();
+    const graphNode = page.locator('.react-flow__node').first();
+    await expect(graphNode).toHaveClass(/canvas-node-density-compact/);
+
+    await commandBar.getByRole('button', { name: /Nodes/ }).click();
+    await expect(page.getByLabel('Node display')).toBeVisible();
+    await page.getByRole('button', { name: 'Cards' }).click();
+    await expect(graphNode).toHaveClass(/canvas-node-density-cards/);
+
+    await page.getByRole('button', { name: 'Reflow map' }).click();
+    await expect(page.getByLabel('Node display')).toHaveCount(0);
+});
+
 test('multi-select delete removes checked nodes without treating one selection as branch scope', async ({ page }) => {
     const { savedRequests } = await setupMockBackend(page, { initialFlowJson: scopedLensFlowJson });
     await openExistingFlow(page);

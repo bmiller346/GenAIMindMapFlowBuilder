@@ -340,12 +340,6 @@
   stroke: currentColor !important;
 }
 
-.react-flow__panel.canvas-node-view-panel {
-  bottom: 1rem !important;
-  right: 14rem !important;
-  z-index: 9;
-}
-
 .react-flow__panel.canvas-empty-state-panel {
   top: 48% !important;
   left: 50% !important;
@@ -402,54 +396,6 @@
 
 .canvas-empty-state button:first-child {
   border-color: color-mix(in srgb, #6ed6c5 55%, var(--question-border));
-}
-
-.canvas-node-view-controls {
-  display: grid;
-  gap: 0.35rem;
-  width: min(13.5rem, calc(100vw - 2rem));
-  border: 1px solid var(--question-border);
-  border-radius: 0.55rem;
-  background: color-mix(in srgb, var(--modal-container-color) 96%, transparent);
-  box-shadow: var(--border-box-shadow);
-  color: var(--font-color);
-  padding: 0.45rem;
-}
-
-.canvas-node-view-controls > span {
-  color: var(--input-color);
-  font-size: 0.66rem;
-  font-weight: 850;
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.canvas-node-view-controls > div {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.25rem;
-}
-
-.canvas-node-view-controls button {
-  min-height: 1.9rem;
-  border: 1px solid var(--question-border);
-  border-radius: 0.45rem;
-  background: transparent;
-  color: var(--font-color);
-  cursor: pointer;
-  font-size: 0.7rem;
-  font-weight: 850;
-  padding: 0.28rem 0.4rem;
-}
-
-.canvas-node-view-controls button.active,
-.canvas-node-view-controls button:hover {
-  background: var(--data-source-hover);
-}
-
-.canvas-node-view-controls .canvas-node-reflow {
-  width: 100%;
-  background: color-mix(in srgb, var(--data-source-hover) 72%, transparent);
 }
 
 .selection-action-bar {
@@ -6644,6 +6590,49 @@ img:hover {
 
 .local-canvas-popover {
   top: calc(100% + 0.45rem);
+}
+
+.local-node-view-popover {
+  position: absolute;
+  right: 0.4rem;
+  z-index: 16;
+  display: grid;
+  gap: 0.35rem;
+  width: min(15rem, calc(100vw - 2rem));
+  border: 1px solid var(--question-border);
+  border-radius: 0.5rem;
+  background-color: var(--modal-container-color);
+  box-shadow: var(--border-box-shadow);
+  padding: 0.45rem;
+}
+
+.local-node-view-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.local-node-view-popover button {
+  min-height: 2rem;
+  border: 1px solid var(--question-border);
+  border-radius: 0.42rem;
+  background: transparent;
+  color: var(--font-color);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 850;
+  padding: 0.3rem 0.45rem;
+}
+
+.local-node-view-popover button:hover,
+.local-node-view-popover button.active {
+  background: var(--data-source-hover);
+}
+
+.local-node-view-reflow {
+  width: 100%;
+  background: color-mix(in srgb, var(--data-source-hover) 72%, transparent) !important;
 }
 
 .local-canvas-command-bar .local-follow-up-panel-compact {
