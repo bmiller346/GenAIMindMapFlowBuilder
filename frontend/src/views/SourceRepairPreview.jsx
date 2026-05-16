@@ -314,7 +314,7 @@ const SourceRepairPreview = ({
             selectedSourceOnlyChunks.forEach((chunk, index) => {
                 const node = createWorkspaceNode({
                     title: titleFromSourceChunk(chunk, index),
-                    nodeType: 'needs_review',
+                    nodeType: 'source_section',
                     body: bodyFromSourceChunk(chunk),
                     sourceRefs: [refFromSourceChunk(generatedPreview, chunk)],
                     position: getChildPosition([...keptNodes, ...createdNodes], keptEdges, selectedBranchId),
@@ -338,7 +338,7 @@ const SourceRepairPreview = ({
         if (mode === 'keep_both_for_comparison') {
             const parent = createWorkspaceNode({
                 title: `Source comparison: ${sourceTitle}`,
-                nodeType: 'needs_review',
+                nodeType: 'source_comparison',
                 body: 'Source-only content staged for comparison against the accepted graph.',
                 position: getRootPosition(baseNodes),
                 status: 'needs_review'
@@ -355,7 +355,7 @@ const SourceRepairPreview = ({
         selectedSourceOnlyChunks.forEach((chunk, index) => {
             const node = createWorkspaceNode({
                 title: titleFromSourceChunk(chunk, index),
-                nodeType: 'needs_review',
+                nodeType: 'source_section',
                 body: bodyFromSourceChunk(chunk),
                 sourceRefs: [refFromSourceChunk(generatedPreview, chunk)],
                 position: parentId

@@ -770,7 +770,7 @@ test('uploaded business plan reconciles with generated graph and opens scoped AE
 });
 
 test('source-only reconciliation sections can be applied selectively', async ({ page }) => {
-    await setupMockBackend(page);
+    const { state } = await setupMockBackend(page);
 
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.goto('/');
@@ -806,4 +806,15 @@ test('source-only reconciliation sections can be applied selectively', async ({ 
 
     await expect(page.locator('.node-response').filter({ hasText: 'retained advisory' })).toBeVisible();
     await expect(page.locator('.node-response').filter({ hasText: 'diagnostic workshops' })).toHaveCount(0);
+    await expect
+        .poll(
+            () => {
+                const revenueNode = parseSnapshot(state.savedFlowJson).nodes.find(
+                    (node) => node.data?.reconciliation?.source_only_chunk_id === 'chunk-revenue'
+                );
+                return revenueNode?.data?.node_type;
+            },
+            { timeout: 1000 }
+        )
+        .toBe('source_section');
 });
