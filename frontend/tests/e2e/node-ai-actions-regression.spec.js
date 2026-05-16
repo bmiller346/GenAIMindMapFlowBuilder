@@ -221,6 +221,25 @@ const setupMockBackend = async (page) => {
                       metadata: {}
                   }))
                 : [];
+            const draftItems =
+                scopeType === 'node'
+                    ? [
+                          {
+                              id: `draft-relationship-${requestIndex}`,
+                              item_type: 'relationship_candidate',
+                              title: 'General Mills supports Uncited cereal branch',
+                              content: 'The cited manufacturer branch should be reviewed with the related uncited branch.',
+                              source_refs: [{ document_id: 'doc-cereal', page: 4 }],
+                              metadata: {
+                                  source_node_id: `draft-node-cited-${requestIndex}`,
+                                  target_node_id: `draft-node-uncited-${requestIndex}`,
+                                  relationship_type: 'supports',
+                                  relationship_edge_id: `draft-relationship-edge-${requestIndex}`,
+                                  confidence: 0.81
+                              }
+                          }
+                      ]
+                    : [];
             const session = {
                 session_id: sessionId,
                 workspace_id: flowId,
@@ -245,7 +264,7 @@ const setupMockBackend = async (page) => {
                         revision_id: `revision-${scopeType}-${requestIndex}-1`,
                         session_id: sessionId,
                         prompt: requestBody.prompt || requestBody.custom_prompt || 'Generate preview',
-                        draft_items: [],
+                        draft_items: draftItems,
                         draft_nodes: draftNodes,
                         draft_edges: draftEdges,
                         draft_annotations: [
@@ -400,20 +419,45 @@ const setupMockBackend = async (page) => {
                     type: 'step',
                     animated: true
                 }));
+            const acceptedRelationshipEdges = revision.draft_items
+                .filter((item) => {
+                    if (item.item_type !== 'relationship_candidate') {
+                        return false;
+                    }
+                    if (requestBody.mode === 'selected' && selectedIds.length && !selectedIds.includes(item.id)) {
+                        return false;
+                    }
+                    const sourceId = item.metadata?.source_node_id;
+                    const targetId = item.metadata?.target_node_id;
+                    return sourceId && targetId && acceptedNodeIds.includes(sourceId) && acceptedNodeIds.includes(targetId);
+                })
+                .map((item) => ({
+                    id: item.metadata.relationship_edge_id || item.id,
+                    source: item.metadata.source_node_id,
+                    target: item.metadata.target_node_id,
+                    type: 'step',
+                    animated: false,
+                    relationship_type: item.metadata.relationship_type,
+                    data: {
+                        relationship_type: item.metadata.relationship_type,
+                        source_refs: item.source_refs || [],
+                        confidence: item.metadata.confidence
+                    }
+                }));
             const graph = {
                 ...snapshot,
                 nodes: [...snapshot.nodes, ...acceptedNodes],
-                edges: [...snapshot.edges, ...acceptedEdges]
+                edges: [...snapshot.edges, ...acceptedEdges, ...acceptedRelationshipEdges]
             };
             const acceptResult = {
                 session_id: sessionId,
                 revision_id: revision.revision_id,
                 mode: requestBody.mode || 'append',
                 accepted_node_ids: acceptedNodeIds,
-                accepted_edge_ids: acceptedEdges.map((edge) => edge.id),
+                accepted_edge_ids: [...acceptedEdges, ...acceptedRelationshipEdges].map((edge) => edge.id),
                 preview_diff: {
                     added_nodes: acceptedNodes.length,
-                    added_edges: acceptedEdges.length,
+                    added_edges: acceptedEdges.length + acceptedRelationshipEdges.length,
                     updated_nodes: 0,
                     review_outputs: revision.draft_annotations.length,
                     needs_review_repairs: acceptedNodes.filter(
@@ -527,18 +571,26 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
     await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
     await expect(page.locator('.ai-draft-session-panel')).toContainText('General Mills');
     await expect(page.locator('.ai-draft-session-panel')).toContainText('Uncited cereal branch');
-    await expect(page.locator('.ai-draft-session-panel')).toContainText('2 items · 1 needs review');
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('3 items · 1 needs review');
     await expect(page.locator('.ai-draft-impact')).toContainText('Before accept');
     await expect(page.locator('.ai-draft-impact')).toContainText('Supplement');
     await expect(page.locator('.ai-draft-impact')).toContainText('2 new nodes before accept');
-    const citedDraftItem = page.locator('.ai-draft-item').filter({ hasText: 'General Mills' });
-    const reviewDraftItem = page.locator('.ai-draft-item').filter({ hasText: 'Uncited cereal branch' });
+    const citedDraftItem = page
+        .locator('.ai-draft-item')
+        .filter({ has: page.locator('strong', { hasText: /^General Mills$/ }) });
+    const reviewDraftItem = page
+        .locator('.ai-draft-item')
+        .filter({ has: page.locator('strong', { hasText: /^Uncited cereal branch$/ }) });
+    const relationshipDraftItem = page
+        .locator('.ai-draft-item')
+        .filter({ hasText: 'General Mills supports Uncited cereal branch' });
     await expect(citedDraftItem).toContainText('Source-backed');
     await expect(reviewDraftItem).toContainText('Needs review');
     await expect(reviewDraftItem).toContainText('Assumption');
     await expect(reviewDraftItem).toContainText('Low confidence');
     await expect(reviewDraftItem).toContainText('Duplicate');
     await expect(reviewDraftItem).toContainText('Conflict');
+    await expect(relationshipDraftItem).toContainText('Source-backed');
 
     expect(structuralNodes(latestSnapshot(savedRequests))).toEqual(
         structuralNodes(beforePreview)
@@ -572,6 +624,8 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
         .check();
     await expect(page.locator('.ai-draft-impact')).toContainText('2 new nodes before accept');
     await expect(page.locator('.ai-draft-impact')).toContainText('2 checked draft items will be accepted');
+    await relationshipDraftItem.locator('input[type="checkbox"]').first().check();
+    await expect(page.locator('.ai-draft-impact')).toContainText('3 checked draft items will be accepted');
     await page
         .locator('.node-inspector .ai-draft-accept')
         .getByRole('button', { name: 'Accept selected' })
@@ -583,6 +637,12 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
             snapshot.nodes.length === 3 &&
             snapshot.edges.some((edge) => edge.source === beforePreview.nodes[0].id && edge.target === cited?.id) &&
             snapshot.edges.some((edge) => edge.source === beforePreview.nodes[0].id && edge.target === uncited?.id) &&
+            snapshot.edges.some(
+                (edge) =>
+                    edge.source === cited?.id &&
+                    edge.target === uncited?.id &&
+                    edge.data?.relationship_type === 'supports'
+            ) &&
             cited?.data?.source_refs?.[0]?.document_id === 'doc-cereal' &&
             cited?.data?.confidence === 0.92 &&
             cited?.data?.metadata?.ai_draft_session_id === 'draft-session-node-1' &&
@@ -597,7 +657,7 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
     expect(draftAcceptRequests).toHaveLength(1);
     expect(draftAcceptRequests[0].requestBody).toMatchObject({
         mode: 'selected',
-        selected_item_ids: ['draft-node-cited-1', 'draft-node-uncited-1']
+        selected_item_ids: ['draft-node-cited-1', 'draft-node-uncited-1', 'draft-relationship-1']
     });
     expect(draftAcceptRequests[0].acceptResult.graph_revision_id).toBeTruthy();
     expect(parseSnapshot(draftAcceptRequests[0].acceptResult.metadata.undo_snapshot)).toEqual(beforePreview);
