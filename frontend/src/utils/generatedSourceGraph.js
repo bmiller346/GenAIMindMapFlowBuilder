@@ -6,6 +6,7 @@ import {
     uploadHasGraphDraft,
     upsertSource
 } from './sourceReconciliationPreview';
+import { chooseGeneratedWorkspaceName } from './workspaceNaming';
 
 const isBlankCanvas = ({ nodes = [], edges = [] } = {}) =>
     nodes.length === 0 && edges.length === 0;
@@ -78,10 +79,18 @@ export const handleGeneratedSourceGraph = ({
         sourceRecord
     });
     const viewport = normalizedGraph.viewport || {};
+    const workspaceName = chooseGeneratedWorkspaceName({
+        uploadData,
+        sourceInput,
+        fallbackTitle,
+        sourceRecord,
+        graph: normalizedGraph,
+        currentFlowName: flowState.flow_name
+    });
 
     if (isBlankCanvas(state)) {
         flowState.setFlow(flowId);
-        flowState.setFlowName(uploadData.flow_name || flowState.flow_name || 'Untitled workspace');
+        flowState.setFlowName(workspaceName);
         flowState.setFlowType(uploadData.flow_type || flowState.flow_type || 'automatic');
         state.setNodes(normalizedGraph.nodes);
         state.setEdges(normalizedGraph.edges);
@@ -103,7 +112,7 @@ export const handleGeneratedSourceGraph = ({
     state.setPendingSourceDraft({
         id: `source_draft_${uploadData.component_id || uploadData.flow_id || sourceRecord.id}`,
         flowId,
-        flowName: uploadData.flow_name || flowState.flow_name || 'Untitled workspace',
+        flowName: workspaceName,
         flowType: uploadData.flow_type || flowState.flow_type || 'automatic',
         componentId: uploadData.component_id,
         sourceType: uploadData.type || fallbackType || sourceRecord.type || 'source',
