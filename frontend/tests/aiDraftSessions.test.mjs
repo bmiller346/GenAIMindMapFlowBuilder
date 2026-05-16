@@ -176,7 +176,7 @@ test('buildAIDraftPreviewDiff explains before-accept semantics for each mode', (
         currentNodes,
         currentEdges
     });
-    assert.equal(replaceDiff.removed_nodes, 2);
+    assert.equal(replaceDiff.removed_nodes, 1);
     assert.equal(replaceDiff.removed_edges, 1);
     assert.match(replaceDiff.preview_lines[0], /may be removed/i);
 
@@ -426,6 +426,57 @@ test('acceptAIDraftSession supports accept all and reject preserves noncanonical
     assert.equal(rejected.status, 'discarded');
     assert.equal(rejected.metadata.canonical, false);
     assert.equal(rejected.metadata.rejection_reason, 'Try a narrower prompt.');
+});
+
+test('acceptAIDraftSession replace removes scoped descendants before local fallback accept', () => {
+    const root = createWorkspaceNode({ id: 'root', title: 'Cereals' });
+    const oldChild = createWorkspaceNode({
+        id: 'old-child',
+        title: 'Old child',
+        body: 'Replace this branch child.'
+    });
+    const oldGrandchild = createWorkspaceNode({
+        id: 'old-grandchild',
+        title: 'Old grandchild',
+        body: 'Replace this branch grandchild.'
+    });
+    const session = createAIDraftSession({
+        workspaceId: 'workspace-1',
+        scope: { type: 'branch', node_id: 'root' },
+        prompt: 'replace this cereal branch',
+        draftNodes: [draftNodes()[0]],
+        draftEdges: [draftEdges()[0]],
+        sessionId: 'session-replace-cereal',
+        revisionId: 'revision-replace-cereal-1'
+    });
+
+    const accepted = acceptAIDraftSession({
+        session,
+        nodes: [root, oldChild, oldGrandchild],
+        edges: [
+            { id: 'edge-root-old', source: 'root', target: 'old-child' },
+            { id: 'edge-old-grandchild', source: 'old-child', target: 'old-grandchild' }
+        ],
+        mode: 'replace',
+        acceptedAt: '2026-05-14T12:07:00.000Z'
+    });
+
+    const nodeIds = new Set(accepted.nodes.map((node) => node.id));
+    assert.ok(nodeIds.has('root'));
+    assert.ok(nodeIds.has('draft-kellogg'));
+    assert.equal(nodeIds.has('old-child'), false);
+    assert.equal(nodeIds.has('old-grandchild'), false);
+    assert.ok(
+        accepted.edges.every((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target))
+    );
+    assert.deepEqual(
+        accepted.accept_result.preview_diff.metadata.removed_node_ids.sort(),
+        ['old-child', 'old-grandchild']
+    );
+    assert.deepEqual(
+        accepted.accept_result.patch_operations.map((operation) => operation.op).sort(),
+        ['remove_edge', 'remove_edge', 'remove_node', 'remove_node']
+    );
 });
 
 test('buildSelectedSourceDraftPayload creates source scope and chunk context', () => {

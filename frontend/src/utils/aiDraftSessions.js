@@ -211,6 +211,34 @@ const collectScopedNodeIds = ({ nodes = [], edges = [], scope = {} } = {}) => {
     return new Set(asArray(nodes).map((node) => node.id).filter(Boolean));
 };
 
+const collectReplacementNodeIds = ({ nodes = [], edges = [], scope = {} } = {}) => {
+    const normalizedScope = normalizeAIDraftScope(scope);
+    if ((normalizedScope.type === 'branch' || normalizedScope.type === 'node') && normalizedScope.node_id) {
+        const scopedNodeIds = collectBranchNodeIds(edges, normalizedScope.node_id);
+        scopedNodeIds.delete(normalizedScope.node_id);
+        return scopedNodeIds;
+    }
+    if (normalizedScope.type === 'nodes') {
+        return new Set(asArray(normalizedScope.node_ids));
+    }
+    return collectScopedNodeIds({ nodes, edges, scope });
+};
+
+const graphAfterReplacementRemoval = ({ nodes = [], edges = [], scope = {} } = {}) => {
+    const removedNodeIds = collectReplacementNodeIds({ nodes, edges, scope });
+    const removedEdgeIds = new Set(
+        asArray(edges)
+            .filter((edge) => removedNodeIds.has(edgeSourceId(edge)) || removedNodeIds.has(edgeTargetId(edge)))
+            .map((edge) => firstText(edge.id, `${edgeSourceId(edge)}->${edgeTargetId(edge)}`))
+    );
+    return {
+        nodes: asArray(nodes).filter((node) => !removedNodeIds.has(node.id)),
+        edges: asArray(edges).filter((edge) => !removedEdgeIds.has(firstText(edge.id, `${edgeSourceId(edge)}->${edgeTargetId(edge)}`))),
+        removed_node_ids: [...removedNodeIds],
+        removed_edge_ids: [...removedEdgeIds]
+    };
+};
+
 const memoryNodeRecord = (node = {}) => {
     const data = node.data || {};
     const nestedData = data.data || {};
@@ -1109,15 +1137,12 @@ const scopedRemovalCounts = ({ mode = 'append', nodes = [], edges = [], scope = 
     if (mode !== 'replace') {
         return { removed_nodes: 0, removed_edges: 0, removed_node_ids: [], removed_edge_ids: [] };
     }
-    const scopedNodeIds = collectScopedNodeIds({ nodes, edges, scope });
-    const removedEdgeIds = asArray(edges)
-        .filter((edge) => scopedNodeIds.has(edgeSourceId(edge)) || scopedNodeIds.has(edgeTargetId(edge)))
-        .map((edge) => firstText(edge.id, `${edgeSourceId(edge)}->${edgeTargetId(edge)}`));
+    const removal = graphAfterReplacementRemoval({ nodes, edges, scope });
     return {
-        removed_nodes: scopedNodeIds.size,
-        removed_edges: removedEdgeIds.length,
-        removed_node_ids: [...scopedNodeIds],
-        removed_edge_ids: removedEdgeIds
+        removed_nodes: removal.removed_node_ids.length,
+        removed_edges: removal.removed_edge_ids.length,
+        removed_node_ids: removal.removed_node_ids,
+        removed_edge_ids: removal.removed_edge_ids
     };
 };
 
@@ -1306,17 +1331,28 @@ export const acceptAIDraftSession = ({
         relationshipItems: selectedRelationshipDraftItems({ revision, mode, selectedItemIds }),
         acceptedNodeIds: acceptedDraftIds
     });
-    const existingIds = new Set(nodes.map((node) => node.id));
+    const baseGraph =
+        mode === 'replace'
+            ? graphAfterReplacementRemoval({ nodes, edges, scope: session.scope })
+            : { nodes: asArray(nodes), edges: asArray(edges), removed_node_ids: [], removed_edge_ids: [] };
+    const existingIds = new Set(baseGraph.nodes.map((node) => node.id));
     const generatedNodes =
         mode === 'notes_only'
             ? []
             : acceptedDrafts
                   .map((draft, index) =>
-                      createAcceptedNode({ draft, session, revision, nodes, edges, index })
+                      createAcceptedNode({
+                          draft,
+                          session,
+                          revision,
+                          nodes: baseGraph.nodes,
+                          edges: baseGraph.edges,
+                          index
+                      })
                   )
                   .filter((node) => !existingIds.has(node.id));
     const generatedIds = new Set(generatedNodes.map((node) => node.id));
-    const existingEdgeKeys = new Set(edges.map((edge) => `${edge.source}->${edge.target}`));
+    const existingEdgeKeys = new Set(baseGraph.edges.map((edge) => `${edge.source}->${edge.target}`));
     const generatedHierarchyEdges =
         mode === 'notes_only'
             ? []
@@ -1378,13 +1414,18 @@ export const acceptAIDraftSession = ({
                   });
     const generatedEdges = [...generatedHierarchyEdges, ...generatedRelationshipEdges];
     const nextNodes = attachDraftNotes({
-        nodes: [...nodes, ...generatedNodes],
+        nodes: [...baseGraph.nodes, ...generatedNodes],
         session,
         revision,
         mode,
         acceptedAt
     });
-    const previewDiff = buildAIDraftPreviewDiff(session, { mode, selectedItemIds });
+    const previewDiff = buildAIDraftPreviewDiff(session, {
+        mode,
+        selectedItemIds,
+        currentNodes: nodes,
+        currentEdges: edges
+    });
     const acceptedSession = {
         ...session,
         status: 'accepted',
@@ -1404,7 +1445,7 @@ export const acceptAIDraftSession = ({
 
     return {
         nodes: nextNodes,
-        edges: [...edges, ...generatedEdges],
+        edges: [...baseGraph.edges, ...generatedEdges],
         session: acceptedSession,
         accept_result: {
             session_id: session.session_id,
@@ -1413,6 +1454,21 @@ export const acceptAIDraftSession = ({
             accepted_node_ids: [...generatedIds],
             accepted_edge_ids: generatedEdges.map((edge) => edge.id),
             preview_diff: previewDiff,
+            patch_operations: [
+                ...baseGraph.removed_edge_ids.map((edgeId) => ({
+                    op: 'remove_edge',
+                    edge_id: edgeId,
+                    metadata: { mode: 'replace' }
+                })),
+                ...baseGraph.removed_node_ids.map((nodeId) => ({
+                    op: 'remove_node',
+                    node_id: nodeId,
+                    metadata: {
+                        mode: 'replace',
+                        scope_node_id: session.scope?.node_id || ''
+                    }
+                }))
+            ],
             canonical_graph_mutated: mode !== 'notes_only'
         }
     };
