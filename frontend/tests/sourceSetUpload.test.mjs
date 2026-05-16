@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    buildBoundedSelectedSourcesForAI,
     normalizeSourceSetUploadResult,
     selectedSourceSetFiles,
     sourceSetNodesFromRecords
@@ -48,6 +49,7 @@ test('normalizeSourceSetUploadResult accepts backend uploaded source records', (
                     filename: 'Policy.md',
                     type: 'md',
                     relative_path: 'standards/Policy.md',
+                    source_refs: [{ document_id: 'src-policy', page: 2 }],
                     chunks: [{ id: 'chunk-1', text: 'Scope' }]
                 }
             ]
@@ -60,6 +62,7 @@ test('normalizeSourceSetUploadResult accepts backend uploaded source records', (
     assert.equal(records[0].path, 'standards/Policy.md');
     assert.equal(records[0].metadata.source_set_id, 'source-set-1');
     assert.equal(records[0].source_set.label, 'Standards');
+    assert.deepEqual(records[0].source_refs, [{ document_id: 'src-policy', page: 2 }]);
     assert.equal(records[0].chunks[0].id, 'chunk-1');
 });
 
@@ -110,6 +113,7 @@ test('sourceSetNodesFromRecords creates dataSource nodes with source metadata', 
                 metadata: { filename: 'Policy.md', relative_path: 'standards/Policy.md' },
                 chunks: [{ id: 'chunk-1' }],
                 segments: [],
+                source_refs: [{ document_id: 'src-policy', chunk_id: 'chunk-1' }],
                 source_set_id: 'source-set-1'
             }
         ],
@@ -121,5 +125,38 @@ test('sourceSetNodesFromRecords creates dataSource nodes with source metadata', 
     assert.equal(nodes[0].data.content, 'Policy.md');
     assert.equal(nodes[0].data.source_document_id, 'src-policy');
     assert.equal(nodes[0].data.relative_path, 'standards/Policy.md');
+    assert.deepEqual(nodes[0].data.source_refs, [{ document_id: 'src-policy', chunk_id: 'chunk-1' }]);
     assert.equal(nodes[0].data.source_set_upload, true);
+});
+
+test('buildBoundedSelectedSourcesForAI limits chunks while preserving existing refs', () => {
+    const boundedSources = buildBoundedSelectedSourcesForAI(
+        [
+            {
+                id: 'doc-a',
+                title: 'A',
+                chunks: Array.from({ length: 12 }, (_, index) => ({
+                    id: `a-${index}`,
+                    source_refs: [{ document_id: 'doc-a', chunk_id: `a-${index}` }]
+                })),
+                source_refs: [{ document_id: 'doc-a' }]
+            },
+            {
+                id: 'doc-b',
+                title: 'B',
+                chunks: Array.from({ length: 12 }, (_, index) => ({ id: `b-${index}` })),
+                source_refs: [{ document_id: 'doc-b' }]
+            }
+        ],
+        { maxSources: 2, maxChunks: 8, maxChunksPerSource: 6 }
+    );
+
+    assert.equal(boundedSources.length, 2);
+    assert.deepEqual(
+        boundedSources.map((source) => source.chunks.length),
+        [6, 2]
+    );
+    assert.deepEqual(boundedSources[0].source_refs, [{ document_id: 'doc-a' }]);
+    assert.equal(boundedSources[0].metadata.source_context_bounded, true);
+    assert.equal(boundedSources[0].metadata.source_context_original_chunk_count, 12);
 });

@@ -120,6 +120,44 @@ def test_build_workspace_graph_marks_low_confidence_ai_nodes_needs_review():
     WorkspaceGraph.model_validate(graph)
 
 
+def test_build_workspace_graph_marks_missing_confidence_ai_nodes_needs_review():
+    flow = {
+        "_id": "workspace-1",
+        "flow_name": "Workspace",
+        "summary": "",
+        "flow_type": "mind_map",
+        "flow_json": json.dumps(
+            {
+                "nodes": [
+                    {
+                        "id": "root",
+                        "type": "response",
+                        "position": {"x": 0, "y": 0},
+                        "data": {
+                            "title": "Missing confidence task",
+                            "node_type": "task",
+                            "source_refs": [{"document_id": "doc-1", "page": 2}],
+                        },
+                    }
+                ],
+                "edges": [],
+                "viewport": {},
+            }
+        ),
+    }
+
+    graph = build_workspace_graph(flow)
+
+    issue_codes = [
+        issue["code"]
+        for issue in graph["validation_report"]["issues"]
+    ]
+    assert graph["nodes"][0]["status"] == "needs_review"
+    assert graph["tasks"][0]["status"] == "needs_review"
+    assert issue_codes == ["missing_confidence"]
+    WorkspaceGraph.model_validate(graph)
+
+
 def test_build_workspace_graph_parses_percent_confidence_without_false_review():
     flow = {
         "_id": "workspace-1",
@@ -174,7 +212,7 @@ def test_build_workspace_graph_preserves_single_source_cited_root():
                         "position": {"x": 0, "y": 0},
                         "data": {
                             "title": "Cited Summary",
-                            "source_refs": [{"document_id": "doc-1", "page": 2}],
+                            "source_refs": [{"document_id": "doc-1", "page": 2, "confidence": 0.8}],
                         },
                     }
                 ],
@@ -207,7 +245,7 @@ def test_build_workspace_graph_reports_invalid_external_refs():
                         "data": {
                             "title": "Synced task",
                             "node_type": "task",
-                            "source_refs": [{"document_id": "doc-1", "page": 2}],
+                            "source_refs": [{"document_id": "doc-1", "page": 2, "confidence": 0.8}],
                             "external_refs": {
                                 "miro": {
                                     "board_id": "board-1",
@@ -269,7 +307,7 @@ def test_build_workspace_graph_accepts_complete_external_refs():
                         "data": {
                             "title": "Synced task",
                             "node_type": "task",
-                            "source_refs": [{"document_id": "doc-1", "page": 2}],
+                            "source_refs": [{"document_id": "doc-1", "page": 2, "confidence": 0.8}],
                             "external_refs": {
                                 "miro": {
                                     "board_id": "board-1",
@@ -315,7 +353,7 @@ def test_build_workspace_graph_accepts_staged_monday_selection_input():
                         "data": {
                             "title": "Accepted task",
                             "node_type": "task",
-                            "source_refs": [{"document_id": "doc-1", "page": 2}],
+                            "source_refs": [{"document_id": "doc-1", "page": 2, "confidence": 0.8}],
                             "monday_selection_input": {
                                 "selected": True,
                                 "selected_at": "2026-05-14T12:00:00Z",
@@ -369,7 +407,7 @@ def test_build_workspace_graph_warns_on_invalid_staged_monday_selection_input():
                         "data": {
                             "title": "Accepted task",
                             "node_type": "task",
-                            "source_refs": [{"document_id": "doc-1", "page": 2}],
+                            "source_refs": [{"document_id": "doc-1", "page": 2, "confidence": 0.8}],
                             "monday_selection_input": {
                                 "selected": True,
                                 "item": {

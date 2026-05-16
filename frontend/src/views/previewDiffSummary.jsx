@@ -30,6 +30,8 @@ export const previewDiffToChanges = (diff = {}, { acceptLabel = 'will be accepte
     const relationshipEdges = countFromDiff(diff, ['relationship_edges']);
     const reviewOutputs = countFromDiff(diff, ['review_outputs', 'artifacts']);
     const updatedNodes = countFromDiff(diff, ['updated_nodes', 'updates']);
+    const removedNodes = countFromDiff(diff, ['removed_nodes', 'removals']);
+    const removedEdges = countFromDiff(diff, ['removed_edges']);
     const needsReview = countFromDiff(diff, ['needs_review_repairs', 'needs_review_items']);
     const changes = [];
 
@@ -63,6 +65,18 @@ export const previewDiffToChanges = (diff = {}, { acceptLabel = 'will be accepte
         changes.push({
             tone: 'update',
             label: `${updatedNodes} node${updatedNodes === 1 ? '' : 's'} updated`
+        });
+    }
+    if (removedNodes > 0) {
+        changes.push({
+            tone: 'remove',
+            label: `${removedNodes} scoped node${removedNodes === 1 ? '' : 's'} removed`
+        });
+    }
+    if (removedEdges > 0) {
+        changes.push({
+            tone: 'remove',
+            label: `${removedEdges} connected edge${removedEdges === 1 ? '' : 's'} removed`
         });
     }
     if (needsReview > 0) {
@@ -147,11 +161,13 @@ export const PreviewDiffSummary = ({ title = 'Before accept', changes = [] }) =>
                         ? '+'
                         : change.tone === 'update'
                           ? '~'
-                          : change.tone === 'warn'
-                            ? '!'
-                            : change.tone === 'ai'
-                              ? '*'
-                              : '-'}{' '}
+                          : change.tone === 'remove'
+                            ? '-'
+                            : change.tone === 'warn'
+                              ? '!'
+                              : change.tone === 'ai'
+                                ? '*'
+                                : '-'}{' '}
                     {change.label}
                 </span>
             ))}

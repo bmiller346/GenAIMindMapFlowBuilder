@@ -28,7 +28,7 @@ def validate_and_repair_graph(graph: dict[str, Any]) -> dict[str, Any]:
     _repair_edges(repaired_graph, issues)
     _repair_parent_ids(repaired_graph, issues)
     _mark_uncited_ai_nodes(repaired_graph, issues)
-    _mark_low_confidence_ai_nodes(repaired_graph, issues)
+    _mark_confidence_ai_nodes(repaired_graph, issues)
     _validate_external_refs(repaired_graph, issues)
     _validate_monday_selection_input(repaired_graph, issues)
     root_node_id = _enforce_one_root(repaired_graph, issues)
@@ -179,7 +179,7 @@ def _mark_uncited_ai_nodes(
             )
         )
 
-def _mark_low_confidence_ai_nodes(
+def _mark_confidence_ai_nodes(
     graph: dict[str, Any],
     issues: list[GraphValidationIssue],
 ) -> None:
@@ -190,7 +190,24 @@ def _mark_low_confidence_ai_nodes(
             continue
 
         confidence = _parse_confidence(node.get("confidence"))
-        if confidence is None or confidence >= LOW_CONFIDENCE_THRESHOLD:
+        if confidence is None:
+            first_ref = _first_source_ref(node)
+            confidence = _parse_confidence(first_ref.get("confidence"))
+
+        if confidence is None:
+            node["status"] = "needs_review"
+            issues.append(
+                GraphValidationIssue(
+                    code="missing_confidence",
+                    severity="warning",
+                    message="AI-generated node is missing confidence and was marked needs_review.",
+                    node_id=str(node.get("id", "")),
+                    repaired=True,
+                )
+            )
+            continue
+
+        if confidence >= LOW_CONFIDENCE_THRESHOLD:
             continue
 
         node["status"] = "needs_review"
@@ -206,6 +223,12 @@ def _mark_low_confidence_ai_nodes(
                 repaired=True,
             )
         )
+
+
+def _first_source_ref(node: dict[str, Any]) -> dict[str, Any]:
+    refs = node.get("source_refs") if isinstance(node.get("source_refs"), list) else []
+    first_ref = refs[0] if refs and isinstance(refs[0], dict) else {}
+    return first_ref
 
 
 def _parse_confidence(value: Any) -> float | None:

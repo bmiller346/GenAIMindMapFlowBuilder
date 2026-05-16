@@ -62,6 +62,26 @@ const hasSource = (node) => node.source_refs?.some((ref) => ref?.document_id);
 
 const sourceIdsForNode = (node) => sortedIds((node.source_refs || []).map((ref) => ref.document_id));
 
+const numericConfidence = (value) => {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    const parsed = Number(String(value).trim().replace('%', ''));
+    if (!Number.isFinite(parsed)) {
+        return null;
+    }
+    return String(value).includes('%') || parsed > 1 ? parsed / 100 : parsed;
+};
+
+const nodeConfidenceIssue = (node) => {
+    const value = node.confidence || node.source_ref?.confidence;
+    if (!value) {
+        return 'missing';
+    }
+    const confidence = numericConfidence(value);
+    return confidence !== null && confidence < 0.6 ? 'low' : '';
+};
+
 const hasStructuredRows = (projection) =>
     projection.nodes.some((node) => Array.isArray(node.table_rows) && node.table_rows.length > 0);
 
@@ -346,6 +366,38 @@ const sourceCoverageNudges = ({ projection, sourceProjection, validationIssues =
                     type: 'open_view',
                     view: 'sources',
                     flow: 'source_reference_repair',
+                    node_ids: nodeIds
+                },
+                targetNodeIds: nodeIds
+            })
+        );
+    }
+
+    const confidenceRows = projection.nodes
+        .filter((node) => node.react_flow_type !== 'dataSource')
+        .map((node) => ({ node, issue: nodeConfidenceIssue(node) }))
+        .filter((row) => row.issue);
+
+    if (confidenceRows.length > 0) {
+        const missingRows = confidenceRows.filter((row) => row.issue === 'missing');
+        const lowRows = confidenceRows.filter((row) => row.issue === 'low');
+        const nodeIds = sortedIds(confidenceRows.map((row) => row.node.id));
+        nudges.push(
+            createNudge({
+                id: `source-coverage-confidence-repair-${stableKey(nodeIds)}`,
+                category: NUDGE_CATEGORIES.SOURCE_COVERAGE,
+                severity: lowRows.length > 2 || missingRows.length > 2 ? 'medium' : 'low',
+                title: `${plural(confidenceRows.length, 'node')} ${needsVerb(
+                    confidenceRows.length
+                )} confidence repair`,
+                detail: `${missingRows.length} missing and ${lowRows.length} low confidence rating${
+                    lowRows.length === 1 ? '' : 's'
+                } can be reviewed from source context.`,
+                actionLabel: 'Open repair queue',
+                action: {
+                    type: 'open_view',
+                    view: 'sources',
+                    flow: 'confidence_repair',
                     node_ids: nodeIds
                 },
                 targetNodeIds: nodeIds

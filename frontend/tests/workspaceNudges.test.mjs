@@ -36,6 +36,32 @@ test('nudge projection reports missing source coverage as an actionable nudge', 
     assert.equal(nudge.dismiss_key, nudge.id);
 });
 
+test('nudge projection reports missing and low confidence as repair queue items', () => {
+    const result = buildWorkspaceNudgeProjection({
+        nodes: [
+            node('claim-1', {
+                node_type: 'requirement',
+                source_refs: [{ document_id: 'source-1', page: 1 }]
+            }),
+            node('claim-2', {
+                node_type: 'risk',
+                confidence: 0.42,
+                source_refs: [{ document_id: 'source-1', page: 2, confidence: 0.42 }]
+            })
+        ],
+        edges: []
+    });
+    const nudge = result.nudges.find(
+        (item) =>
+            item.category === NUDGE_CATEGORIES.SOURCE_COVERAGE &&
+            item.action.flow === 'confidence_repair'
+    );
+
+    assert.equal(nudge.title, '2 nodes need confidence repair');
+    assert.equal(nudge.action_label, 'Open repair queue');
+    assert.deepEqual(nudge.target_node_ids, ['claim-1', 'claim-2']);
+});
+
 test('task readiness nudges include missing execution metadata', () => {
     const result = buildWorkspaceNudgeProjection({
         nodes: [
@@ -96,7 +122,7 @@ test('chart readiness requires structured or extracted data before projection', 
     assert.deepEqual(proseReadiness.chart.missing_required_fields, [
         { field: 'structured_or_extracted_data' }
     ]);
-    assert.equal(proseReadiness.chart.suggested_enrichment_action.label, 'Extract chart data');
+    assert.equal(proseReadiness.chart.suggested_enrichment_action.label, 'Create structured table');
 
     const tableProjection = buildGraphProjection(
         [node('table-1', { df: [{ Status: 'Open', Count: 3 }] })],

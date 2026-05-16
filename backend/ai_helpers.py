@@ -2820,8 +2820,26 @@ def _deterministic_source_librarian_preview(
             parent_by_child=parent_by_child,
             children_by_parent=children_by_parent,
         )
-        source_refs = [suggestion["source_ref"]] if suggestion else []
-        assumptions = [] if suggestion else ["Reviewer must identify a supporting source."]
+        needs_source_ref = any(
+            issue in {"Missing source document", "Missing source location", "Missing source quote"}
+            for issue in issues
+        )
+        source_refs = (
+            [suggestion["source_ref"]]
+            if suggestion and needs_source_ref
+            else _node_source_refs(node)
+            if not needs_source_ref
+            else []
+        )
+        assumptions = [] if source_refs else ["Reviewer must identify a supporting source."]
+        suggested_confidence = _suggested_confidence(node, suggestion)
+        repair_type = (
+            "suggest_source_ref"
+            if suggestion and needs_source_ref
+            else "request_source_ref"
+            if needs_source_ref
+            else "suggest_confidence"
+        )
         items.append(
             {
                 "id": f"source_repair_{_token(node.get('id', 'node'))}",
@@ -2832,20 +2850,23 @@ def _deterministic_source_librarian_preview(
                     f"{', '.join(issues)}. "
                     + (
                         f"Suggested from {suggestion['relationship']} node '{suggestion['title']}'."
-                        if suggestion
+                        if suggestion and needs_source_ref
+                        else f"Suggested confidence '{suggested_confidence}' from current source metadata."
+                        if not needs_source_ref
                         else "No nearby cited node was found."
                     )
                 ),
-                "confidence": "low" if suggestion else "needs_review",
+                "confidence": suggested_confidence if not needs_source_ref else "low" if suggestion else "needs_review",
                 "source_refs": source_refs,
                 "assumptions": assumptions,
                 "proposed_mutation": {
                     "source_refs": source_refs,
+                    "confidence": suggested_confidence,
                     "source_ref_repair": {
-                        "repair_type": "suggest_source_ref"
-                        if suggestion
-                        else "request_source_ref",
+                        "repair_type": repair_type,
+                        "repair_kind": "source_ref" if needs_source_ref else "confidence",
                         "issues": issues,
+                        "suggested_confidence": suggested_confidence,
                         "suggested_from_node_id": suggestion.get("node_id", "")
                         if suggestion
                         else "",
@@ -3555,14 +3576,52 @@ def _source_issues(node: dict[str, Any]) -> list[str]:
     issues = []
     if not first_ref.get("document_id"):
         issues.append("Missing source document")
-        return issues
-    if not first_ref.get("page") and not first_ref.get("section"):
-        issues.append("Missing source location")
-    if not first_ref.get("quote_snippet"):
-        issues.append("Missing source quote")
-    if not first_ref.get("confidence"):
-        issues.append("Missing source confidence")
+    else:
+        if not first_ref.get("page") and not first_ref.get("section"):
+            issues.append("Missing source location")
+        if not first_ref.get("quote_snippet"):
+            issues.append("Missing source quote")
+        source_confidence = _numeric_confidence(first_ref.get("confidence"))
+        if not first_ref.get("confidence"):
+            issues.append("Missing source confidence")
+        elif source_confidence is not None and source_confidence < 0.6:
+            issues.append("Low source confidence")
+
+    node_confidence = _numeric_confidence(node.get("confidence"))
+    if not node.get("confidence"):
+        issues.append("Missing confidence")
+    elif node_confidence is not None and node_confidence < 0.6:
+        issues.append("Low confidence")
     return issues
+
+
+def _numeric_confidence(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    is_percent = text.endswith("%")
+    try:
+        parsed = float(text.rstrip("%").strip())
+    except (TypeError, ValueError):
+        return None
+    if is_percent or parsed > 1:
+        parsed = parsed / 100
+    return parsed if parsed >= 0 else None
+
+
+def _suggested_confidence(node: dict[str, Any], suggestion: dict[str, Any] | None) -> str:
+    suggested_ref = suggestion.get("source_ref", {}) if suggestion else {}
+    for value in (
+        suggested_ref.get("confidence"),
+        node.get("confidence"),
+        (_node_source_refs(node)[0] if _node_source_refs(node) else {}).get("confidence"),
+    ):
+        confidence = _numeric_confidence(value)
+        if confidence is not None and confidence >= 0.6:
+            return str(value)
+    return "medium"
 
 
 def _nearest_source_ref(

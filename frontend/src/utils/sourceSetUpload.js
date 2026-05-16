@@ -33,6 +33,38 @@ export const selectedSourceSetFiles = (fileList) =>
             relativePath: file.webkitRelativePath || file.relativePath || file.name || 'Untitled source'
         }));
 
+export const buildBoundedSelectedSourcesForAI = (
+    sources = [],
+    { maxSources = 6, maxChunks = 36, maxChunksPerSource = 10 } = {}
+) => {
+    const selectedSources = Array.isArray(sources) ? sources.filter(Boolean) : [];
+    if (!selectedSources.length) {
+        return [];
+    }
+
+    let remainingChunks = maxChunks;
+    return selectedSources.slice(0, maxSources).map((source) => {
+        const chunks = Array.isArray(source.chunks) ? source.chunks : [];
+        const sourceRefs = Array.isArray(source.source_refs) ? source.source_refs : [];
+        const chunkLimit = Math.max(0, Math.min(maxChunksPerSource, remainingChunks));
+        const boundedChunks = chunks.slice(0, chunkLimit);
+        remainingChunks -= boundedChunks.length;
+
+        return {
+            ...source,
+            chunks: boundedChunks,
+            source_refs: sourceRefs,
+            metadata: {
+                ...(source.metadata || {}),
+                source_context_bounded: true,
+                source_context_original_chunk_count: chunks.length,
+                source_context_sent_chunk_count: boundedChunks.length,
+                source_context_preserve_refs_only: true
+            }
+        };
+    });
+};
+
 export const appendSourceSetFormData = (
     formData,
     { files = [], flowId, operationId, sourceIntent = 'source_set_review' } = {}
@@ -178,6 +210,11 @@ export const normalizeSourceSetUploadResult = ({
                 : Array.isArray(source.source_segments)
                   ? source.source_segments
                   : [],
+            source_refs: Array.isArray(source.source_refs)
+                ? source.source_refs
+                : Array.isArray(source.metadata?.source_refs)
+                  ? source.metadata.source_refs
+                  : [],
             normalized_document_id:
                 source.normalized_document_id || source.document_id || source.source_document_id || '',
             file: selected.file,
@@ -203,6 +240,7 @@ export const sourceSetNodesFromRecords = (records = [], flowId = '') =>
             source_document: source.metadata,
             document_chunks: source.chunks,
             source_segments: source.segments,
+            source_refs: source.source_refs || [],
             relative_path: source.path,
             source_set_id: source.source_set_id,
             source_set: source.source_set || source.metadata?.source_set || {},

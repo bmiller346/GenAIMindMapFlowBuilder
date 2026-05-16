@@ -20,7 +20,10 @@ import {
     stringifyFlowSnapshot
 } from '../utils/flowSnapshots';
 import { isCanceledRequest, requestErrorMessage } from '../utils/requestErrors';
-import { upsertSource } from '../utils/sourceReconciliationPreview';
+import {
+    stageUploadedSourcesReconciliationPreview,
+    upsertSource
+} from '../utils/sourceReconciliationPreview';
 import {
     appendSourceSetFormData,
     normalizeSourceSetUploadResult,
@@ -248,8 +251,15 @@ const SourceSetModal = ({
                 },
                 signal: controller.signal
             })
-            .then((res) => {
+            .then(async (res) => {
                 const records = applyUploadedSources(res.data, currentFlowId);
+                if (!isAskAIContextMode) {
+                    await stageUploadedSourcesReconciliationPreview({
+                        sources: records,
+                        flowId: currentFlowId,
+                        nodes
+                    });
+                }
                 updateActivity(activityId, {
                     type: 'source_set_upload_completed',
                     status: 'completed',

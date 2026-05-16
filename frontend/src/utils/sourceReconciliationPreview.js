@@ -125,10 +125,10 @@ export const upsertSource = (sources = [], source = {}) => {
     return normalizedSources.map((item, index) => (index === existingIndex ? { ...item, ...source } : item));
 };
 
-const hasExistingGraphNode = (nodes = []) =>
+export const hasExistingGraphNode = (nodes = []) =>
     nodes.some((node) => node && node.type !== 'dataSource');
 
-const previewHasReconciliationWork = (preview = {}) => {
+export const previewHasReconciliationWork = (preview = {}) => {
     const previewItems = Array.isArray(preview.preview_items) ? preview.preview_items : [];
     const matchedCount = Number(preview.metadata?.matched_node_count || 0);
     const sourceOnlyCount = Number(preview.metadata?.source_only_chunk_count || 0);
@@ -142,6 +142,27 @@ const previewHasReconciliationWork = (preview = {}) => {
         sourceOnlyCount > 0 ||
         sourceOnlyChunks.length > 0
     );
+};
+
+const combineReconciliationPreviews = (previews = [], sources = []) => {
+    const usefulPreviews = previews.filter(previewHasReconciliationWork);
+    if (!usefulPreviews.length) {
+        return null;
+    }
+    if (usefulPreviews.length === 1) {
+        return usefulPreviews[0];
+    }
+    return {
+        ...usefulPreviews[0],
+        preview_items: usefulPreviews.flatMap((preview) => preview.preview_items || []),
+        warnings: usefulPreviews.flatMap((preview) => preview.warnings || []),
+        metadata: {
+            ...(usefulPreviews[0].metadata || {}),
+            selected_source_count: usefulPreviews.length,
+            selected_source_ids: sources.map((source) => source.id).filter(Boolean),
+            staged_useful_preview_count: usefulPreviews.length
+        }
+    };
 };
 
 export const stageUploadedSourceReconciliationPreview = async ({
@@ -215,6 +236,79 @@ export const stageUploadedSourceReconciliationPreview = async ({
                 intent: 'reconcile_source_with_workspace',
                 source_id: nextSource.id,
                 trigger: 'source_upload'
+            }
+        });
+        return { opened: false, reason: 'failed', error };
+    }
+};
+
+export const stageUploadedSourcesReconciliationPreview = async ({
+    sources = [],
+    flowId = '',
+    nodes
+} = {}) => {
+    const selectedSources = Array.isArray(sources)
+        ? sources.filter((source) => source?.id)
+        : [];
+    const store = useStore.getState();
+    const currentFlowId = flowId || flowStore.getState().flow_id;
+
+    if (!currentFlowId || !selectedSources.length || !hasExistingGraphNode(nodes || store.nodes)) {
+        return { opened: false, reason: 'not_applicable' };
+    }
+
+    const addActivity = useActivityStore.getState().addActivity;
+    try {
+        const responses = await Promise.all(
+            selectedSources.map((source) =>
+                axios.post(
+                    `http://localhost:8000/api/workspaces/${currentFlowId}/sources/${encodeURIComponent(source.id)}/reconcile/preview`,
+                    { scope: { type: 'source', source_id: source.id } }
+                )
+            )
+        );
+        const previews = responses.map((response) => response.data || {});
+        const preview = combineReconciliationPreviews(previews, selectedSources);
+
+        if (!preview) {
+            return { opened: false, reason: 'no_overlap', previews };
+        }
+
+        store.setGeneratedHelperPreview('sourceLibrarianSources', preview);
+        store.setActiveView('sources');
+        addActivity({
+            type:
+                selectedSources.length > 1
+                    ? 'ai_multi_source_reconcile_previewed'
+                    : 'ai_source_reconcile_previewed',
+            title:
+                selectedSources.length > 1
+                    ? 'Multi-source reconciliation previewed'
+                    : 'Source reconciliation previewed',
+            summary:
+                selectedSources.length > 1
+                    ? `Detected useful overlap for ${selectedSources.length} uploaded sources.`
+                    : `Detected overlap between ${selectedSources[0].title} and the current graph.`,
+            status: 'completed',
+            source_ids: selectedSources.map((source) => source.id),
+            metadata: {
+                intent: 'reconcile_source_with_workspace',
+                trigger: 'source_set_upload',
+                selected_source_count: selectedSources.length,
+                preview_items: preview.preview_items?.length || 0
+            }
+        });
+        return { opened: true, preview };
+    } catch (error) {
+        addActivity({
+            type: 'ai_source_reconcile_failed',
+            title: 'Source reconciliation failed',
+            summary: requestErrorMessage(error),
+            status: 'failed',
+            source_ids: selectedSources.map((source) => source.id),
+            metadata: {
+                intent: 'reconcile_source_with_workspace',
+                trigger: 'source_set_upload'
             }
         });
         return { opened: false, reason: 'failed', error };

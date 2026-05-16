@@ -23,7 +23,7 @@ export const AI_DRAFT_ACCEPT_MODE_DETAILS = {
     },
     replace: {
         label: 'Replace selected scope',
-        help: 'Replace the scoped branch with this reviewed draft after acceptance.',
+        help: 'Replace the scoped branch with this reviewed draft after acceptance. Branch contents in scope may be removed.',
         user_choice: 'replace'
     },
     merge: {
@@ -111,6 +111,11 @@ const sourceRefsFromNode = (node = {}) => {
         mergeSourceRefs(asArray(nestedData.source_refs), asArray(nestedData.sourceRefs))
     );
 };
+
+const sourceRefsFromDraftItem = (item = {}) =>
+    mergeSourceRefs(asArray(item.source_refs), asArray(item.metadata?.source_refs));
+
+const hasSourceRefs = (item = {}) => sourceRefsFromDraftItem(item).length > 0;
 
 const normalizeMemorySourceRef = (ref = {}) => {
     if (!ref || typeof ref !== 'object') {
@@ -977,12 +982,15 @@ export const formatAIDraftPreviewDiffSummary = (diff = {}) => ({
     nodes: Number(diff.added_nodes || diff.nodes || 0),
     edges: Number(diff.added_edges || diff.edges || 0),
     updates: Number(diff.updated_nodes || diff.updates || 0),
+    removals: Number(diff.removed_nodes || diff.removals || 0),
+    removedEdges: Number(diff.removed_edges || 0),
     needsReview: Number(diff.needs_review_repairs || diff.needs_review_items || 0),
     reviewOutputs: Number(diff.review_outputs || 0),
     text: [
         `+${Number(diff.added_nodes || diff.nodes || 0)} nodes`,
         `+${Number(diff.added_edges || diff.edges || 0)} edges`,
         `~${Number(diff.updated_nodes || diff.updates || 0)} updates`,
+        `-${Number(diff.removed_nodes || diff.removals || 0)} removals`,
         `!${Number(diff.needs_review_repairs || diff.needs_review_items || 0)} needs_review items`
     ].join('  ')
 });
@@ -1032,6 +1040,9 @@ export const getAIDraftItemBadges = (item = {}) => {
 export const selectedDraftNodes = ({ revision = {}, mode = 'append', selectedItemIds = [] } = {}) => {
     const selected = new Set(asArray(selectedItemIds));
     let nodes = asArray(revision.draft_nodes).map(normalizeAIDraftNode);
+    if (mode === 'selected') {
+        return selected.size > 0 ? nodes.filter((node) => selected.has(node.id)) : [];
+    }
     if (selected.size > 0) {
         nodes = nodes.filter((node) => selected.has(node.id));
     }
@@ -1060,13 +1071,117 @@ const selectedRelationshipDraftItems = ({ revision = {}, mode = 'append', select
             if (['contains', 'child', 'parent'].includes(relationshipType)) {
                 return false;
             }
-            return mode !== 'selected' || selected.has(item.id);
+            if (mode === 'selected') {
+                return selected.size > 0 && selected.has(item.id);
+            }
+            if (mode === 'cited_only') {
+                return hasSourceRefs(item);
+            }
+            return true;
         });
+};
+
+const relationshipEndpointIds = (item = {}) => {
+    const metadata = item.metadata || {};
+    return {
+        sourceId: firstText(metadata.source_node_id, metadata.source, item.source_node_id),
+        targetId: firstText(metadata.target_node_id, metadata.target, item.target_node_id)
+    };
+};
+
+const filterRelationshipsForAcceptedDraftNodes = ({
+    revision = {},
+    relationshipItems = [],
+    acceptedNodeIds = new Set()
+} = {}) => {
+    const draftNodeIds = new Set(
+        asArray(revision.draft_nodes)
+            .map((node) => firstText(node.id, node.node_id))
+            .filter(Boolean)
+    );
+    return asArray(relationshipItems).filter((item) => {
+        const { sourceId, targetId } = relationshipEndpointIds(item);
+        return [sourceId, targetId].every((nodeId) => !draftNodeIds.has(nodeId) || acceptedNodeIds.has(nodeId));
+    });
+};
+
+const scopedRemovalCounts = ({ mode = 'append', nodes = [], edges = [], scope = {} } = {}) => {
+    if (mode !== 'replace') {
+        return { removed_nodes: 0, removed_edges: 0, removed_node_ids: [], removed_edge_ids: [] };
+    }
+    const scopedNodeIds = collectScopedNodeIds({ nodes, edges, scope });
+    const removedEdgeIds = asArray(edges)
+        .filter((edge) => scopedNodeIds.has(edgeSourceId(edge)) || scopedNodeIds.has(edgeTargetId(edge)))
+        .map((edge) => firstText(edge.id, `${edgeSourceId(edge)}->${edgeTargetId(edge)}`));
+    return {
+        removed_nodes: scopedNodeIds.size,
+        removed_edges: removedEdgeIds.length,
+        removed_node_ids: [...scopedNodeIds],
+        removed_edge_ids: removedEdgeIds
+    };
+};
+
+const describeAIDraftPreviewDiff = ({
+    mode = 'append',
+    nodes = [],
+    edges = [],
+    relationshipItems = [],
+    reviewOutputs = 0,
+    removedNodes = 0,
+    removedEdges = 0,
+    needsReviewRepairs = 0,
+    updatedNodes = 0
+} = {}) => {
+    const draftItemCount = nodes.length + relationshipItems.length;
+    if (mode === 'notes_only') {
+        return [
+            'Graph will not change.',
+            reviewOutputs
+                ? `${reviewOutputs} review artifact${reviewOutputs === 1 ? '' : 's'} stay available for reference.`
+                : 'Draft notes stay available for review.'
+        ];
+    }
+    if (mode === 'merge') {
+        return [
+            updatedNodes
+                ? `${updatedNodes} matching node${updatedNodes === 1 ? '' : 's'} will be updated.`
+                : 'No matching node updates are selected yet.',
+            'Existing content outside matching draft items stays in place.'
+        ];
+    }
+    if (mode === 'replace') {
+        return [
+            removedNodes || removedEdges
+                ? `${removedNodes} scoped node${removedNodes === 1 ? '' : 's'} and ${removedEdges} connected edge${removedEdges === 1 ? '' : 's'} may be removed before the draft is applied.`
+                : 'Selected scope will be replaced by the reviewed draft.',
+            `${nodes.length} draft node${nodes.length === 1 ? '' : 's'} and ${edges.length + relationshipItems.length} edge${edges.length + relationshipItems.length === 1 ? '' : 's'} will be added.`
+        ];
+    }
+    if (mode === 'selected') {
+        return [
+            draftItemCount
+                ? `${draftItemCount} checked draft item${draftItemCount === 1 ? '' : 's'} will be accepted.`
+                : 'No checked draft items will be accepted yet.',
+            'Unchecked draft items remain draft-only.'
+        ];
+    }
+    if (mode === 'cited_only') {
+        return [
+            draftItemCount
+                ? `${draftItemCount} source-backed draft item${draftItemCount === 1 ? '' : 's'} will be accepted.`
+                : 'No source-backed draft items are available to accept.',
+            needsReviewRepairs ? `${needsReviewRepairs} uncited item${needsReviewRepairs === 1 ? '' : 's'} stay draft-only.` : 'Uncited draft items stay out of the graph.'
+        ];
+    }
+    return [
+        `${nodes.length} draft node${nodes.length === 1 ? '' : 's'} will be added as supporting content.`,
+        'Existing workspace content stays in place.'
+    ];
 };
 
 export const buildAIDraftPreviewDiff = (
     session = {},
-    { mode = 'append', selectedItemIds = [] } = {}
+    { mode = 'append', selectedItemIds = [], currentNodes = [], currentEdges = [] } = {}
 ) => {
     const revision = latestAIDraftRevision(session);
     const changeIntent = changeIntentFromAIDraftSession(session, revision);
@@ -1077,29 +1192,61 @@ export const buildAIDraftPreviewDiff = (
         mode === 'notes_only'
             ? []
             : asArray(revision.draft_edges).filter((edge) => nodeIds.has(edge.target_node_id));
-    const relationshipItems = selectedRelationshipDraftItems({ revision, mode, selectedItemIds });
+    const relationshipItems = filterRelationshipsForAcceptedDraftNodes({
+        revision,
+        relationshipItems: selectedRelationshipDraftItems({ revision, mode, selectedItemIds }),
+        acceptedNodeIds: nodeIds
+    });
+    const removals = scopedRemovalCounts({
+        mode,
+        nodes: currentNodes,
+        edges: currentEdges,
+        scope: session.scope
+    });
     const needsReviewRepairs =
         mode === 'notes_only'
             ? 0
-            : nodes.filter((node) => node.node_type !== 'reference' && asArray(node.source_refs).length === 0)
-                  .length;
+            : mode === 'cited_only'
+              ? asArray(revision.draft_nodes).filter(
+                    (node) => node.node_type !== 'reference' && asArray(node.source_refs).length === 0
+                ).length
+              : nodes.filter((node) => node.node_type !== 'reference' && asArray(node.source_refs).length === 0)
+                    .length;
     const updatedNodes = mode === 'merge' ? nodes.length : 0;
+    const addedEdges = mode === 'merge' ? 0 : edges.length + relationshipItems.length;
+    const previewLines = describeAIDraftPreviewDiff({
+        mode,
+        nodes,
+        edges,
+        relationshipItems,
+        reviewOutputs: asArray(revision.draft_annotations).length,
+        removedNodes: removals.removed_nodes,
+        removedEdges: removals.removed_edges,
+        needsReviewRepairs,
+        updatedNodes
+    });
     const diff = {
         mode,
         added_nodes: mode === 'merge' ? 0 : nodes.length,
-        added_edges: mode === 'merge' ? 0 : edges.length + relationshipItems.length,
+        added_edges: addedEdges,
         updated_nodes: updatedNodes,
+        removed_nodes: removals.removed_nodes,
+        removed_edges: removals.removed_edges,
         review_outputs: asArray(revision.draft_annotations).length,
         needs_review_repairs: needsReviewRepairs,
         accepted_item_ids: asArray(selectedItemIds).length
             ? asArray(selectedItemIds)
             : [...nodes.map((node) => node.id), ...relationshipItems.map((item) => item.id)],
+        preview_lines: previewLines,
         metadata: {
             change_intent: changeIntent,
             accept_mode: mode,
             accept_mode_label: acceptModeDetail.label,
             accept_mode_help: acceptModeDetail.help,
             user_choice: acceptModeDetail.user_choice,
+            preview_lines: previewLines,
+            removed_node_ids: removals.removed_node_ids,
+            removed_edge_ids: removals.removed_edge_ids,
             follow_up_semantics: {
                 change_intent: changeIntent,
                 accept_mode: mode,
@@ -1118,6 +1265,7 @@ export const buildAIDraftPreviewDiff = (
         `+${diff.added_nodes} nodes`,
         `+${diff.added_edges} edges`,
         diff.updated_nodes ? `~${diff.updated_nodes} nodes updated` : '',
+        diff.removed_nodes ? `-${diff.removed_nodes} scoped nodes` : '',
         diff.needs_review_repairs ? `!${diff.needs_review_repairs} marked needs_review` : ''
     ]
         .filter(Boolean)
@@ -1152,7 +1300,12 @@ export const acceptAIDraftSession = ({
 } = {}) => {
     const revision = latestAIDraftRevision(session);
     const acceptedDrafts = selectedDraftNodes({ revision, mode, selectedItemIds });
-    const acceptedRelationships = selectedRelationshipDraftItems({ revision, mode, selectedItemIds });
+    const acceptedDraftIds = new Set(acceptedDrafts.map((draft) => draft.id));
+    const acceptedRelationships = filterRelationshipsForAcceptedDraftNodes({
+        revision,
+        relationshipItems: selectedRelationshipDraftItems({ revision, mode, selectedItemIds }),
+        acceptedNodeIds: acceptedDraftIds
+    });
     const existingIds = new Set(nodes.map((node) => node.id));
     const generatedNodes =
         mode === 'notes_only'

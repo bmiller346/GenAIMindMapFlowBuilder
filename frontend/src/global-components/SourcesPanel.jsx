@@ -9,6 +9,7 @@ import useStore from '../stores/store';
 import PromptModal from '../modals/PromptModal';
 import { sourceFirstActionPresets } from '../prompts/promptsModel';
 import { buildSourceLibraryProjection } from '../views/graphProjection';
+import { buildBoundedSelectedSourcesForAI } from '../utils/sourceSetUpload';
 
 const STATUS_LABELS = {
     uploaded: 'Uploaded',
@@ -139,11 +140,16 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
         if (sources.length === 0) {
             return;
         }
+        const boundedSources = buildBoundedSelectedSourcesForAI(sources);
+        const sourceChunkCount = boundedSources.reduce(
+            (total, source) => total + (Array.isArray(source.chunks) ? source.chunks.length : 0),
+            0
+        );
         pushNode(PromptModal, {
             scope: 'source',
-            sourceId: sources[0].id,
-            source: sources[0],
-            sources,
+            sourceId: boundedSources[0].id,
+            source: boundedSources[0],
+            sources: boundedSources,
             initialRoleId: preset.roleId || 'source-ref-repair',
             initialActionId: preset.actionId || 'find_missing_source_support',
             initialPrompt: preset.prompt || '',
@@ -158,13 +164,15 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                 sources.length > 1
                     ? `Opened Ask AI for ${sources.length} selected sources.`
                     : `Opened Ask AI for ${sources[0].title}.`,
-            source_ids: sources.map((source) => source.id),
+            source_ids: boundedSources.map((source) => source.id),
             metadata: {
                 scope: sources.length > 1 ? 'bounded_sources' : 'source',
-                source_ids: sources.map((source) => source.id),
+                source_ids: boundedSources.map((source) => source.id),
                 intent: preset.id || '',
                 action: preset.actionId || '',
-                requested_visual: preset.visual || ''
+                requested_visual: preset.visual || '',
+                bounded_source_count: boundedSources.length,
+                bounded_source_chunk_count: sourceChunkCount
             }
         });
     };
@@ -392,7 +400,7 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                                     <span>
                                         {hasGraphNodes
                                             ? 'Compare, supplement, or repair the current map'
-                                            : 'Start from selected source sections'}
+                                            : 'Create from loaded sources before graphing'}
                                     </span>
                                 </div>
                                 <div className="sources-citing-list">

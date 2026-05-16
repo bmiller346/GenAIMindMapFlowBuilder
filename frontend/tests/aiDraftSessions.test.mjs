@@ -123,8 +123,82 @@ test('buildAIDraftPreviewDiff summarizes accept selected', () => {
     assert.equal(diff.summary, '+1 nodes, +1 edges, !1 marked needs_review');
     assert.equal(
         formatAIDraftPreviewDiffSummary(diff).text,
-        '+1 nodes  +1 edges  ~0 updates  !1 needs_review items'
+        '+1 nodes  +1 edges  ~0 updates  -0 removals  !1 needs_review items'
     );
+});
+
+test('buildAIDraftPreviewDiff explains before-accept semantics for each mode', () => {
+    const session = createAIDraftSession({
+        scope: { type: 'branch', node_id: 'root' },
+        draftNodes: draftNodes(),
+        draftEdges: draftEdges(),
+        draftItems: [
+            {
+                id: 'draft-relationship-cited',
+                item_type: 'relationship_candidate',
+                title: 'Kellogg supports Mills',
+                content: 'Both are cereal manufacturers.',
+                source_refs: [{ document_id: 'doc-cereal', page: 7 }],
+                metadata: {
+                    source_node_id: 'draft-kellogg',
+                    target_node_id: 'draft-general-mills',
+                    relationship_type: 'related_to'
+                }
+            },
+            {
+                id: 'draft-relationship-uncited',
+                item_type: 'relationship_candidate',
+                title: 'Uncited relation',
+                content: 'Generated without source support.',
+                source_refs: [],
+                metadata: {
+                    source_node_id: 'draft-kellogg',
+                    target_node_id: 'draft-general-mills',
+                    relationship_type: 'conflicts_with'
+                }
+            }
+        ],
+        sessionId: 'session-mode-semantics',
+        revisionId: 'revision-mode-semantics'
+    });
+    const currentNodes = [
+        createWorkspaceNode({ id: 'root', title: 'Root', body: 'Root node' }),
+        createWorkspaceNode({
+            id: 'existing-child',
+            title: 'Existing child',
+            body: 'Existing scoped child'
+        })
+    ];
+    const currentEdges = [{ id: 'edge-existing-child', source: 'root', target: 'existing-child' }];
+
+    const replaceDiff = buildAIDraftPreviewDiff(session, {
+        mode: 'replace',
+        currentNodes,
+        currentEdges
+    });
+    assert.equal(replaceDiff.removed_nodes, 2);
+    assert.equal(replaceDiff.removed_edges, 1);
+    assert.match(replaceDiff.preview_lines[0], /may be removed/i);
+
+    const mergeDiff = buildAIDraftPreviewDiff(session, { mode: 'merge' });
+    assert.equal(mergeDiff.updated_nodes, 2);
+    assert.equal(mergeDiff.added_nodes, 0);
+    assert.match(mergeDiff.preview_lines[0], /matching node/i);
+
+    const notesOnlyDiff = buildAIDraftPreviewDiff(session, { mode: 'notes_only' });
+    assert.equal(notesOnlyDiff.added_nodes, 0);
+    assert.equal(notesOnlyDiff.metadata.follow_up_semantics.canonical_graph_mutated, false);
+    assert.match(notesOnlyDiff.preview_lines[0], /Graph will not change/);
+
+    const citedOnlyDiff = buildAIDraftPreviewDiff(session, { mode: 'cited_only' });
+    assert.deepEqual(citedOnlyDiff.accepted_item_ids.sort(), ['draft-kellogg']);
+    assert.equal(citedOnlyDiff.added_nodes, 1);
+    assert.equal(citedOnlyDiff.added_edges, 1);
+
+    const emptySelectedDiff = buildAIDraftPreviewDiff(session, { mode: 'selected' });
+    assert.equal(emptySelectedDiff.added_nodes, 0);
+    assert.equal(emptySelectedDiff.added_edges, 0);
+    assert.match(emptySelectedDiff.preview_lines[0], /No checked draft items/i);
 });
 
 test('accept mode details map product choices onto existing modes', () => {

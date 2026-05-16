@@ -24,6 +24,7 @@ import {
     reviseAIDraftSession
 } from '../utils/aiDraftSessions';
 import { buildSourceLibraryProjection } from '../views/graphProjection';
+import { PreviewDiffSummary, previewDiffToChanges } from '../views/previewDiffSummary';
 
 const ACCEPT_MODE_LABELS = {
     append: getAIDraftAcceptModeDetail('append').label,
@@ -245,6 +246,25 @@ const CANVAS_LABELS = {
     outline: 'Outline',
     tasks: 'Tasks',
     table: 'Table'
+};
+
+const modeNoun = (mode = 'append') => {
+    if (mode === 'replace') {
+        return 'Replacement';
+    }
+    if (mode === 'merge') {
+        return 'Update';
+    }
+    if (mode === 'selected') {
+        return 'Selection';
+    }
+    if (mode === 'cited_only') {
+        return 'Cited items';
+    }
+    if (mode === 'notes_only') {
+        return 'Preview';
+    }
+    return 'Supplement';
 };
 
 const MAP_REVIEW_SCOPES = new Set(['workspace', 'source', 'nodes']);
@@ -500,17 +520,20 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         () => {
             const diff = buildAIDraftPreviewDiff(session, {
                 mode: acceptMode,
-                selectedItemIds: acceptMode === 'selected' ? selectedItemIds : []
+                selectedItemIds: acceptMode === 'selected' ? selectedItemIds : [],
+                currentNodes: nodes,
+                currentEdges: edges
             });
             const nextCanvas = canvasForDraft(session, revision, activeCanvasView);
             return {
                 diff,
+                changes: previewDiffToChanges(diff, { acceptLabel: 'before accept' }),
                 nextCanvas,
                 canvasChanged: nextCanvas !== activeCanvasView,
                 activeFilters: asArray(activeGraphFilters)
             };
         },
-        [acceptMode, activeCanvasView, activeGraphFilters, revision, selectedItemIds, session]
+        [acceptMode, activeCanvasView, activeGraphFilters, edges, nodes, revision, selectedItemIds, session]
     );
     const primaryAcceptText =
         acceptMode === 'selected'
@@ -1070,22 +1093,16 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 <p>{acceptModeDetail.help}</p>
             </div>
 
-            <div className="ai-draft-impact" aria-label="Accept impact">
-                <span>After accept</span>
+            <div className="ai-draft-impact" aria-label="Before accept">
+                <span>Before accept</span>
+                <PreviewDiffSummary title={modeNoun(acceptMode)} changes={acceptImpact.changes} />
                 <div>
                     <strong>
                         {acceptImpact.diff.metadata?.accept_mode_label || acceptModeDetail.label}
                     </strong>
-                    <p>
-                        {acceptImpact.diff.metadata?.accept_mode_help || acceptModeDetail.help}{' '}
-                        +{acceptImpact.diff.added_nodes || 0} nodes · +{acceptImpact.diff.added_edges || 0} edges
-                        {acceptImpact.diff.updated_nodes
-                            ? ` · ~${acceptImpact.diff.updated_nodes} updates`
-                            : ''}
-                        {acceptImpact.diff.needs_review_repairs
-                            ? ` · ${acceptImpact.diff.needs_review_repairs} needs review`
-                            : ''}
-                    </p>
+                    {asArray(acceptImpact.diff.preview_lines).map((line) => (
+                        <p key={line}>{line}</p>
+                    ))}
                 </div>
                 <div>
                     <strong>Canvas</strong>

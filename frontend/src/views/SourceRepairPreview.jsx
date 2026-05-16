@@ -43,14 +43,14 @@ const sourceLabel = (sourceRef) => {
     return parts || 'No source candidate';
 };
 
-const mergeSourceRef = (currentRef, suggestedRef) => ({
+const mergeSourceRef = (currentRef, suggestedRef, suggestedConfidence = '') => ({
     document_id: currentRef?.document_id || suggestedRef?.document_id || '',
     chunk_id: currentRef?.chunk_id || suggestedRef?.chunk_id || '',
     page: currentRef?.page || suggestedRef?.page || '',
     section: currentRef?.section || suggestedRef?.section || '',
     quote_snippet:
         currentRef?.quote_snippet || suggestedRef?.quote_snippet || '',
-    confidence: currentRef?.confidence || suggestedRef?.confidence || ''
+    confidence: suggestedConfidence || currentRef?.confidence || suggestedRef?.confidence || ''
 });
 
 const sourceRepairRowsFromGeneratedPreview = (generatedPreview) => {
@@ -67,7 +67,13 @@ const sourceRepairRowsFromGeneratedPreview = (generatedPreview) => {
             repair_id: item.id,
             issues: repair.issues || [item.rationale].filter(Boolean),
             repair_type: repair.repair_type || repair.coverage_status || item.preview_type,
+            repair_kind: repair.repair_kind || (repair.suggested_confidence ? 'confidence' : 'source_ref'),
             suggested_source_ref: item.source_refs?.[0],
+            suggested_confidence:
+                repair.suggested_confidence ||
+                item.proposed_mutation?.confidence ||
+                item.source_refs?.[0]?.confidence ||
+                '',
             suggested_from_node_id: repair.suggested_from_node_id || '',
             suggested_from_title: repair.suggested_from_title || '',
             suggestion_relationship: repair.suggestion_relationship || '',
@@ -390,11 +396,14 @@ const SourceRepairPreview = ({
 
                 const existingRefs = getSourceRefs(node.data || {});
                 const repairedRef = row.suggested_source_ref
-                    ? mergeSourceRef(existingRefs[0], row.suggested_source_ref)
+                    ? mergeSourceRef(existingRefs[0], row.suggested_source_ref, row.suggested_confidence)
+                    : row.suggested_confidence && existingRefs[0]
+                      ? mergeSourceRef(existingRefs[0], existingRefs[0], row.suggested_confidence)
                     : undefined;
                 const sourceRefs = repairedRef
                     ? [repairedRef, ...existingRefs.slice(1)]
                     : existingRefs;
+                const repairedConfidence = row.suggested_confidence || repairedRef?.confidence || '';
                 const data = withLocalPreviewAcceptance(node.data, {
                     flow: row?.generated_preview_item
                         ? 'generated_source_librarian_preview'
@@ -407,7 +416,8 @@ const SourceRepairPreview = ({
                     repair_type: row.repair_type,
                     issues: row.issues,
                     suggested_from_node_id: row.suggested_from_node_id,
-                    applied_source_ref: repairedRef || null
+                    applied_source_ref: repairedRef || null,
+                    applied_confidence: repairedConfidence || null
                 });
 
                 return {
@@ -415,15 +425,24 @@ const SourceRepairPreview = ({
                     data: {
                         ...data,
                         source_refs: sourceRefs,
+                        ...(repairedConfidence ? { confidence: repairedConfidence } : {}),
+                        status:
+                            repairedConfidence || repairedRef
+                                ? data.status === 'needs_review'
+                                    ? 'reviewed'
+                                    : data.status
+                                : data.status,
                         source_ref_repair: {
                             accepted: true,
                             accepted_at: acceptedAt,
                             repair_type: row.repair_type,
+                            repair_kind: row.repair_kind,
                             issues: row.issues,
                             suggested_from_node_id: row.suggested_from_node_id,
                             suggested_from_title: row.suggested_from_title,
                             suggestion_relationship: row.suggestion_relationship,
-                            applied_source_ref: repairedRef || null
+                            applied_source_ref: repairedRef || null,
+                            applied_confidence: repairedConfidence || null
                         }
                     }
                 };
@@ -629,11 +648,17 @@ const SourceRepairPreview = ({
                                 </td>
                                 <td>{row.title}</td>
                                 <td>{row.issues.join(', ')}</td>
-                                <td>{sourceLabel(row.suggested_source_ref)}</td>
+                                <td>
+                                    {row.repair_kind === 'confidence'
+                                        ? `Set confidence to ${row.suggested_confidence || 'medium'}`
+                                        : sourceLabel(row.suggested_source_ref)}
+                                </td>
                                 <td>
                                     {row.suggested_from_title
                                         ? `${row.suggestion_relationship}: ${row.suggested_from_title}`
-                                        : 'Needs reviewer source lookup'}
+                                        : row.repair_kind === 'confidence'
+                                          ? 'Uses current source metadata'
+                                          : 'Needs reviewer source lookup'}
                                 </td>
                             </tr>
                         ))}

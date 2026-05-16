@@ -300,6 +300,16 @@ const buildValidationReport = (nodes, edges) => {
             });
         }
 
+        if (confidenceValue === '' && type !== 'reference') {
+            issues.push({
+                severity: 'warning',
+                label: 'Missing confidence',
+                nodeId: node.id,
+                detail: `${formatIssueTitle(node)} has no confidence rating.`,
+                code: 'missing_confidence'
+            });
+        }
+
         if (
             confidenceValue !== '' &&
             !Number.isNaN(parsedConfidence) &&
@@ -311,7 +321,8 @@ const buildValidationReport = (nodes, edges) => {
                 nodeId: node.id,
                 detail: `${formatIssueTitle(node)} is below ${Math.round(
                     LOW_CONFIDENCE_THRESHOLD * 100
-                )}% confidence.`
+                )}% confidence.`,
+                code: 'low_confidence'
             });
         }
 

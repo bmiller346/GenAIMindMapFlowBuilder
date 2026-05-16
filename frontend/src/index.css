@@ -6048,6 +6048,12 @@ img:hover {
   text-transform: uppercase;
 }
 
+.ai-draft-impact .preview-diff-summary {
+  grid-column: 1 / -1;
+  border: 1px solid var(--question-border);
+  border-radius: 0.5rem;
+}
+
 .ai-draft-impact > div {
   display: grid;
   gap: 0.22rem;
@@ -7845,7 +7851,8 @@ img:hover {
   color: #eece47;
 }
 
-.preview-diff-warn {
+.preview-diff-warn,
+.preview-diff-remove {
   color: #ff9f9f;
 }
 

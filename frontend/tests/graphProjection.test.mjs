@@ -10,6 +10,7 @@ import {
     getEnterpriseReadinessSummary,
     getEnterpriseScoreRows,
     getGraphConfidenceSummary,
+    getSourceRepairPreviewRows,
     getTeamRoadmapProjection,
     getTaskCandidateRows,
     getTaskRows
@@ -345,6 +346,57 @@ test('graph confidence reports healthy graphs without supplement actions', () =>
     assert.deepEqual(summary.reasons, []);
     assert.deepEqual(summary.supplement_actions, []);
     assert.deepEqual(summary.repair_items, []);
+});
+
+test('source repair rows distinguish source refs from confidence repair', () => {
+    const projection = buildGraphProjection(
+        [
+            supportedNode('claim-1', 'requirement', {
+                title: 'Missing citation',
+                confidence: 0.84,
+                source_refs: []
+            }),
+            supportedNode('claim-2', 'requirement', {
+                title: 'Missing confidence',
+                confidence: '',
+                source_refs: [
+                    {
+                        document_id: 'doc-1',
+                        page: 2,
+                        section: 'Controls',
+                        quote_snippet: 'Controls are required.'
+                    }
+                ]
+            }),
+            supportedNode('claim-3', 'risk', {
+                title: 'Low confidence',
+                confidence: 0.42,
+                source_refs: [
+                    {
+                        document_id: 'doc-1',
+                        page: 3,
+                        section: 'Risks',
+                        quote_snippet: 'Risks need review.',
+                        confidence: 0.42
+                    }
+                ]
+            })
+        ],
+        [{ id: 'edge-1', source: 'claim-2', target: 'claim-1', relationship_type: 'contains' }]
+    );
+
+    const rows = getSourceRepairPreviewRows(projection);
+    const sourceRow = rows.find((row) => row.id === 'claim-1');
+    const missingConfidenceRow = rows.find((row) => row.id === 'claim-2');
+    const lowConfidenceRow = rows.find((row) => row.id === 'claim-3');
+
+    assert.equal(sourceRow.repair_kind, 'source_ref');
+    assert.equal(sourceRow.repair_type, 'suggest_source_ref');
+    assert.equal(missingConfidenceRow.repair_kind, 'confidence');
+    assert.equal(missingConfidenceRow.repair_type, 'suggest_confidence');
+    assert.equal(missingConfidenceRow.suggested_confidence, 'medium');
+    assert.equal(lowConfidenceRow.repair_kind, 'confidence');
+    assert(lowConfidenceRow.issues.includes('Low confidence'));
 });
 
 test('executive output projection groups sourced findings, actions, risks, decisions, and appendix', () => {

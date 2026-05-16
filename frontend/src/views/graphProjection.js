@@ -170,6 +170,8 @@ const numericConfidence = (value) => {
     return String(value).includes('%') || parsed > 1 ? parsed / 100 : parsed;
 };
 
+const LOW_CONFIDENCE_THRESHOLD = 0.6;
+
 const hasSourceDocument = (sourceRef) => Boolean(sourceRef?.document_id);
 
 const hasCompleteSourceRef = (sourceRef) =>
@@ -193,9 +195,40 @@ const sourceRefIssues = (sourceRef) => {
     }
     if (!sourceRef.confidence) {
         issues.push('Missing source confidence');
+    } else {
+        const confidence = numericConfidence(sourceRef.confidence);
+        if (confidence !== null && confidence < LOW_CONFIDENCE_THRESHOLD) {
+            issues.push('Low source confidence');
+        }
     }
 
     return issues;
+};
+
+const nodeConfidenceIssues = (node) => {
+    const issues = [];
+    const confidence = numericConfidence(node.confidence);
+
+    if (!node.confidence) {
+        issues.push('Missing confidence');
+    } else if (confidence !== null && confidence < LOW_CONFIDENCE_THRESHOLD) {
+        issues.push('Low confidence');
+    }
+
+    return issues;
+};
+
+const suggestedConfidenceForRepair = (node, suggestion) => {
+    const suggested = numericConfidence(suggestion?.source_ref?.confidence);
+    const current = numericConfidence(node.confidence || node.source_ref?.confidence);
+
+    if (suggested !== null && suggested >= LOW_CONFIDENCE_THRESHOLD) {
+        return suggestion.source_ref.confidence;
+    }
+    if (current !== null && current >= LOW_CONFIDENCE_THRESHOLD) {
+        return node.confidence || node.source_ref?.confidence;
+    }
+    return 'medium';
 };
 
 export const normalizeGraphNode = (node) => {
@@ -2732,24 +2765,45 @@ export const getSourceRepairPreviewRows = (projection) => {
 
     return projection.nodes
         .map((node) => {
-            const issues = sourceRefIssues(node.source_ref);
+            const sourceIssues = sourceRefIssues(node.source_ref);
+            const confidenceIssues = nodeConfidenceIssues(node);
+            const issues = [...sourceIssues, ...confidenceIssues];
+
             if (issues.length === 0 && hasCompleteSourceRef(node.source_ref)) {
                 return undefined;
             }
 
             const suggestion = findSourceSuggestion(node, projection, parentByChild);
             const hasSuggestion = Boolean(suggestion?.source_ref?.document_id);
+            const needsSourceRepair = sourceIssues.some((issue) =>
+                ['Missing source document', 'Missing source location', 'Missing source quote'].includes(issue)
+            );
+            const needsConfidenceRepair =
+                confidenceIssues.length > 0 ||
+                sourceIssues.some((issue) => issue.includes('confidence'));
+            const suggestedConfidence = needsConfidenceRepair
+                ? suggestedConfidenceForRepair(node, suggestion)
+                : '';
+            const repairType = needsSourceRepair
+                ? hasSuggestion
+                    ? 'suggest_source_ref'
+                    : 'request_source_ref'
+                : needsConfidenceRepair
+                  ? 'suggest_confidence'
+                  : 'complete_source_ref';
 
             return {
                 ...node,
                 repair_id: `${node.id}-source-repair`,
                 issues,
-                repair_type: hasSuggestion ? 'suggest_source_ref' : 'request_source_ref',
+                repair_type: repairType,
+                repair_kind: needsSourceRepair ? 'source_ref' : 'confidence',
                 suggested_source_ref: hasSuggestion ? suggestion.source_ref : undefined,
+                suggested_confidence: suggestedConfidence,
                 suggested_from_node_id: suggestion?.node?.id || '',
                 suggested_from_title: suggestion?.node?.title || '',
                 suggestion_relationship: suggestion?.relationship || '',
-                repair_confidence: hasSuggestion ? 'low' : node.confidence || '',
+                repair_confidence: needsConfidenceRepair ? suggestedConfidence : hasSuggestion ? 'low' : '',
                 included: true
             };
         })
