@@ -15,14 +15,21 @@ export const normalizeGitHubCodeIntelligenceForm = ({
     repo = '',
     ref = 'main',
     path = '',
+    changedPaths = '',
     maxFiles = 200
 } = {}) => {
+    const normalizedChangedPaths = Array.isArray(changedPaths)
+        ? changedPaths
+        : String(changedPaths || '').split(/\r?\n|,/);
     const normalized = {
         token: String(token || '').trim(),
         owner: String(owner || '').trim().replace(/^\/+|\/+$/g, ''),
         repo: String(repo || '').trim().replace(/^\/+|\/+$/g, ''),
         ref: String(ref || '').trim() || 'main',
         path: String(path || '').trim().replace(/^\/+|\/+$/g, ''),
+        changedPaths: normalizedChangedPaths
+            .map((item) => String(item || '').trim().replace(/^\/+|\/+$/g, ''))
+            .filter(Boolean),
         maxFiles: Math.max(1, Math.min(1000, Number(maxFiles) || 200))
     };
 
@@ -67,6 +74,7 @@ export const scanGitHubCodeIntelligence = async ({
     repo,
     ref = 'main',
     path = '',
+    changedPaths = '',
     maxFiles = 200
 }) => {
     const normalized = normalizeGitHubCodeIntelligenceForm({
@@ -75,6 +83,7 @@ export const scanGitHubCodeIntelligence = async ({
         repo,
         ref,
         path,
+        changedPaths,
         maxFiles
     });
     const response = await fetch(`${API_BASE}/api/code-intelligence/github/scan`, {
@@ -88,6 +97,7 @@ export const scanGitHubCodeIntelligence = async ({
             repo: normalized.repo,
             ref: normalized.ref,
             path: normalized.path,
+            changed_paths: normalized.changedPaths,
             max_files: normalized.maxFiles
         })
     });
@@ -103,6 +113,7 @@ export const generateGitHubCodeIntelligenceReport = async ({
     repo,
     ref = 'main',
     path = '',
+    changedPaths = '',
     maxFiles = 200
 }) => {
     const normalized = normalizeGitHubCodeIntelligenceForm({
@@ -111,6 +122,7 @@ export const generateGitHubCodeIntelligenceReport = async ({
         repo,
         ref,
         path,
+        changedPaths,
         maxFiles
     });
     const response = await fetch(`${API_BASE}/api/code-intelligence/github/report.md`, {
@@ -124,6 +136,7 @@ export const generateGitHubCodeIntelligenceReport = async ({
             repo: normalized.repo,
             ref: normalized.ref,
             path: normalized.path,
+            changed_paths: normalized.changedPaths,
             max_files: normalized.maxFiles
         })
     });
@@ -131,4 +144,43 @@ export const generateGitHubCodeIntelligenceReport = async ({
         throw new Error(redactGitHubToken(await parseError(response), normalized.token));
     }
     return response.text();
+};
+
+export const generateGitHubCodeIntelligenceArtifacts = async ({
+    token,
+    owner,
+    repo,
+    ref = 'main',
+    path = '',
+    changedPaths = '',
+    maxFiles = 200
+}) => {
+    const normalized = normalizeGitHubCodeIntelligenceForm({
+        token,
+        owner,
+        repo,
+        ref,
+        path,
+        changedPaths,
+        maxFiles
+    });
+    const response = await fetch(`${API_BASE}/api/code-intelligence/github/artifacts`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-docmap-github-token': normalized.token
+        },
+        body: JSON.stringify({
+            owner: normalized.owner,
+            repo: normalized.repo,
+            ref: normalized.ref,
+            path: normalized.path,
+            changed_paths: normalized.changedPaths,
+            max_files: normalized.maxFiles
+        })
+    });
+    if (!response.ok) {
+        throw new Error(redactGitHubToken(await parseError(response), normalized.token));
+    }
+    return response.json();
 };

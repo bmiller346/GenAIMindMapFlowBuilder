@@ -108,6 +108,7 @@ from config import (
 from code_intelligence import (
     CodeIntelligenceCapabilityError,
     GitHubRepoScanError,
+    build_code_intelligence_artifacts,
     code_intelligence_capability_contract,
     code_intelligence_to_markdown,
     require_code_intelligence_enabled,
@@ -482,6 +483,7 @@ app = FastAPI()
 class LocalRepoScanRequest(BaseModel):
     root: str
     repo_label: str = ""
+    changed_paths: list[str] = Field(default_factory=list)
     max_file_bytes: int = Field(default=256_000, ge=1, le=2_000_000)
     large_file_line_threshold: int = Field(default=500, ge=50, le=10_000)
 
@@ -492,6 +494,7 @@ class GitHubRepoScanRequest(BaseModel):
     ref: str = "main"
     path: str = ""
     repo_label: str = ""
+    changed_paths: list[str] = Field(default_factory=list)
     max_files: int = Field(default=200, ge=1, le=1000)
     max_file_bytes: int = Field(default=256_000, ge=1, le=2_000_000)
     large_file_line_threshold: int = Field(default=500, ge=50, le=10_000)
@@ -641,6 +644,12 @@ def scan_local_repo_report_endpoint(request: LocalRepoScanRequest):
     )
 
 
+@app.post("/api/code-intelligence/local-repo/artifacts")
+def scan_local_repo_artifacts_endpoint(request: LocalRepoScanRequest):
+    graph = scan_local_repo_endpoint(request)
+    return build_code_intelligence_artifacts(graph, changed_paths=request.changed_paths)
+
+
 @app.post("/api/code-intelligence/github/scan")
 def scan_github_repo_endpoint(
     request: GitHubRepoScanRequest,
@@ -681,6 +690,15 @@ def scan_github_repo_report_endpoint(
         content=code_intelligence_to_markdown(graph),
         media_type="text/markdown",
     )
+
+
+@app.post("/api/code-intelligence/github/artifacts")
+def scan_github_repo_artifacts_endpoint(
+    request: GitHubRepoScanRequest,
+    x_docmap_github_token: str = Header(default=""),
+):
+    graph = scan_github_repo_endpoint(request, x_docmap_github_token)
+    return build_code_intelligence_artifacts(graph, changed_paths=request.changed_paths)
 LOCAL_AI_DRAFT_SESSION_STORE_PATH = Path(
     os.getenv("DOCMAP_LOCAL_AI_DRAFT_SESSION_STORE", "docmap_ai_draft_sessions.json")
 )

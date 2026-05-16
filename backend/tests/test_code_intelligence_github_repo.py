@@ -7,7 +7,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from code_intelligence import code_intelligence_to_markdown, scan_github_repo
+from code_intelligence import (
+    build_code_intelligence_artifacts,
+    code_intelligence_to_markdown,
+    scan_github_repo,
+)
 from integrations.github import GitHubClient, GitHubClientError
 
 
@@ -125,6 +129,30 @@ def test_code_intelligence_markdown_report_includes_engineering_sections():
     assert "## Dependencies" in markdown
     assert "react" in markdown
     assert "## Entrypoints" in markdown
+    assert "## Developer Handoff" in markdown
+
+
+def test_code_intelligence_artifact_bundle_contains_handoff_and_pr_impact():
+    client = FakeGitHubClient(
+        {
+            "src/app.py": "from src.service import run\n\n\ndef handler():\n    return run()\n",
+            "src/service.py": "def run():\n    return {'ok': True}\n",
+            "tests/test_app.py": "from src.app import handler\n\n\ndef test_handler():\n    assert handler()\n",
+        }
+    )
+    graph = scan_github_repo(client, repo="org/repo", ref="main")
+
+    bundle = build_code_intelligence_artifacts(graph, changed_paths=["src/service.py"])
+    artifacts = {artifact["artifact_type"]: artifact for artifact in bundle["artifacts"]}
+
+    assert bundle["artifact_type"] == "code_intelligence_artifact_bundle"
+    assert "implementation_handoff_package" in artifacts
+    assert "github_issue_candidates" in artifacts
+    assert "pr_impact_report" in artifacts
+    assert artifacts["pr_impact_report"]["data"]["changed_paths"] == ["src/service.py"]
+    assert artifacts["pr_impact_report"]["data"]["affected_symbols"]
+    assert artifacts["github_issue_candidates"]["data"]["issues"]
+    assert artifacts["implementation_handoff_package"]["data"]["write_policy"] == "no_external_writes_without_preview_confirmation"
 
 
 def test_github_client_uses_read_only_get_requests(monkeypatch):

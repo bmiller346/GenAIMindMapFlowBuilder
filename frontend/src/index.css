@@ -4694,6 +4694,27 @@ hr {
   white-space: pre-wrap;
 }
 
+.code-intelligence-artifact-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.code-intelligence-artifact-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid var(--question-border);
+  border-radius: 0.55rem;
+  color: var(--font-color);
+  padding: 0.65rem 0.75rem;
+}
+
+.code-intelligence-artifact-row span {
+  font-size: 0.78rem;
+  opacity: 0.68;
+  text-align: right;
+}
+
 .settings-secret-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

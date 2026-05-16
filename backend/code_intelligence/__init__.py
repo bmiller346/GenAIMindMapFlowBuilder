@@ -6,6 +6,7 @@ from .capabilities import (
     require_code_intelligence_enabled,
     resolve_allowed_local_repo_root,
 )
+from .artifacts import build_code_intelligence_artifacts
 from .github_repo import GitHubRepoScanError, scan_github_repo
 from .local_repo import (
     CODE_INTELLIGENCE_ARTIFACT_TYPES,
@@ -20,6 +21,7 @@ __all__ = [
     "CODE_INTELLIGENCE_ARTIFACT_TYPES",
     "CODE_INTELLIGENCE_NODE_TYPES",
     "CODE_INTELLIGENCE_RELATIONSHIP_TYPES",
+    "build_code_intelligence_artifacts",
     "code_intelligence_capability_contract",
     "code_intelligence_enabled",
     "code_intelligence_to_markdown",

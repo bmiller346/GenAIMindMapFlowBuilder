@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .artifacts import build_code_intelligence_artifacts
+
 
 def code_intelligence_to_markdown(graph: dict[str, Any]) -> str:
     title = graph.get("title") or "Code Intelligence Report"
@@ -22,6 +24,7 @@ def code_intelligence_to_markdown(graph: dict[str, Any]) -> str:
     lines.extend(_finding_section("Documentation Gaps", graph.get("reports", {}).get("documentation_gap_report", [])))
     lines.extend(_dependency_section(graph))
     lines.extend(_entrypoint_section(graph))
+    lines.extend(_handoff_section(graph))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -88,6 +91,37 @@ def _entrypoint_section(graph: dict[str, Any]) -> list[str]:
         suffix = f" - {command}" if command else ""
         lines.append(f"- {source.get('title', edge.get('source_node_id', ''))}: {metadata.get('entrypoint_kind', '')}{suffix}")
     return lines + [""]
+
+
+def _handoff_section(graph: dict[str, Any]) -> list[str]:
+    bundle = build_code_intelligence_artifacts(graph)
+    artifacts = {
+        artifact.get("artifact_type"): artifact
+        for artifact in bundle.get("artifacts", [])
+        if isinstance(artifact, dict)
+    }
+    issues = artifacts.get("github_issue_candidates", {}).get("data", {}).get("issues", [])
+    roadmap = artifacts.get("refactor_roadmap", {}).get("data", {}).get("phases", [])
+    lines = ["## Developer Handoff", ""]
+    lines.append(f"- GitHub issue candidates: {len(issues)}")
+    lines.append(f"- Roadmap phases: {len(roadmap)}")
+    lines.append("- External writes: preview required")
+    lines.append("")
+    if issues:
+        lines.append("### Top Issue Candidates")
+        lines.append("")
+        for issue in issues[:8]:
+            source = _first_source_label(issue)
+            suffix = f" ({source})" if source else ""
+            lines.append(f"- {issue.get('title', '')}{suffix}")
+        lines.append("")
+    if roadmap:
+        lines.append("### Refactor Roadmap")
+        lines.append("")
+        for phase in roadmap:
+            lines.append(f"- {phase.get('title', '')}: {len(phase.get('items', []))} items")
+        lines.append("")
+    return lines
 
 
 def _first_source_label(item: dict[str, Any]) -> str:

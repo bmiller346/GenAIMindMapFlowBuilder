@@ -3,6 +3,7 @@ import CROSSSvg from '../assets/cross.svg';
 import modalStore from '../stores/modalStore';
 import {
     fetchCodeIntelligenceCapabilities,
+    generateGitHubCodeIntelligenceArtifacts,
     generateGitHubCodeIntelligenceReport,
     scanGitHubCodeIntelligence
 } from '../utils/codeIntelligence';
@@ -13,6 +14,7 @@ const emptyForm = {
     repo: '',
     ref: 'main',
     path: '',
+    changedPaths: '',
     maxFiles: 200
 };
 
@@ -23,6 +25,7 @@ const CodeIntelligenceModal = () => {
     const [status, setStatus] = useState('');
     const [error, setError] = useState('');
     const [scanResult, setScanResult] = useState(null);
+    const [artifactBundle, setArtifactBundle] = useState(null);
     const [report, setReport] = useState('');
 
     useEffect(() => {
@@ -60,6 +63,23 @@ const CodeIntelligenceModal = () => {
             findings: scanResult.findings?.length || 0
         };
     }, [scanResult]);
+    const artifactSummary = useMemo(() => {
+        if (!artifactBundle?.artifacts?.length) {
+            return null;
+        }
+        const artifactsByType = Object.fromEntries(
+            artifactBundle.artifacts.map((artifact) => [artifact.artifact_type, artifact])
+        );
+        const issues =
+            artifactsByType.github_issue_candidates?.data?.issues?.length || 0;
+        const prImpact = artifactsByType.pr_impact_report?.data;
+        return {
+            artifactCount: artifactBundle.artifacts.length,
+            issues,
+            riskLevel: prImpact?.risk_level || 'none',
+            riskScore: prImpact?.risk_score || 0
+        };
+    }, [artifactBundle]);
 
     const updateField = (field, value) => {
         setForm((current) => ({ ...current, [field]: value }));
@@ -69,6 +89,7 @@ const CodeIntelligenceModal = () => {
         setError('');
         setStatus('Scanning GitHub repo...');
         setReport('');
+        setArtifactBundle(null);
         try {
             const result = await scanGitHubCodeIntelligence(form);
             setScanResult(result);
@@ -89,6 +110,19 @@ const CodeIntelligenceModal = () => {
         } catch (reportError) {
             setStatus('');
             setError(reportError.message || 'Report generation failed.');
+        }
+    };
+
+    const runArtifacts = async () => {
+        setError('');
+        setStatus('Building handoff artifacts...');
+        try {
+            const bundle = await generateGitHubCodeIntelligenceArtifacts(form);
+            setArtifactBundle(bundle);
+            setStatus('Handoff artifacts generated.');
+        } catch (artifactError) {
+            setStatus('');
+            setError(artifactError.message || 'Artifact generation failed.');
         }
     };
 
@@ -153,6 +187,16 @@ const CodeIntelligenceModal = () => {
                 </div>
             </div>
             <div className="input-bar">
+                <label htmlFor="github-changed-paths">Changed files optional</label>
+                <textarea
+                    id="github-changed-paths"
+                    rows={4}
+                    placeholder="src/app.py&#10;backend/service.py"
+                    value={form.changedPaths}
+                    onChange={(event) => updateField('changedPaths', event.target.value)}
+                />
+            </div>
+            <div className="input-bar">
                 <label htmlFor="github-max-files">Max files</label>
                 <input
                     id="github-max-files"
@@ -172,6 +216,9 @@ const CodeIntelligenceModal = () => {
                 </button>
                 <button id="report-code" type="button" disabled={!canRun} onClick={runReport}>
                     Report
+                </button>
+                <button id="handoff-code" type="button" disabled={!canRun} onClick={runArtifacts}>
+                    Handoff
                 </button>
             </div>
             {status ? <p className="settings-saved">{status}</p> : null}
@@ -197,6 +244,28 @@ const CodeIntelligenceModal = () => {
                         </div>
                     </div>
                     <pre className="code-intelligence-report">{report}</pre>
+                </section>
+            ) : null}
+            {artifactSummary ? (
+                <section className="settings-section">
+                    <div className="settings-section-title">
+                        <div>
+                            <strong>Handoff artifacts</strong>
+                            <span>
+                                {artifactSummary.artifactCount} artifacts | {artifactSummary.issues} issue candidates | PR risk {artifactSummary.riskLevel} ({artifactSummary.riskScore})
+                            </span>
+                        </div>
+                    </div>
+                    <div className="code-intelligence-artifact-list">
+                        {artifactBundle.artifacts.map((artifact) => (
+                            <article key={artifact.id} className="code-intelligence-artifact-row">
+                                <strong>{artifact.title}</strong>
+                                <span>
+                                    {artifact.artifact_type} | {artifact.review_state}
+                                </span>
+                            </article>
+                        ))}
+                    </div>
                 </section>
             ) : null}
         </div>

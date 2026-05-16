@@ -13,6 +13,7 @@ test('normalizes GitHub code intelligence request form', () => {
         repo: '/repo/',
         ref: '',
         path: '/src/app/',
+        changedPaths: 'src/app.py\n/backend/service.py',
         maxFiles: 5000
     });
 
@@ -22,6 +23,7 @@ test('normalizes GitHub code intelligence request form', () => {
         repo: 'repo',
         ref: 'main',
         path: 'src/app',
+        changedPaths: ['src/app.py', 'backend/service.py'],
         maxFiles: 1000
     });
 });
@@ -52,7 +54,8 @@ test('sends GitHub token only as request header', async () => {
         owner: 'org',
         repo: 'repo',
         ref: 'main',
-        path: 'src'
+        path: 'src',
+        changedPaths: 'src/app.py'
     });
 
     const body = JSON.parse(calls[0].options.body);
@@ -60,6 +63,7 @@ test('sends GitHub token only as request header', async () => {
     assert.equal(body.owner, 'org');
     assert.equal(body.repo, 'repo');
     assert.equal(body.path, 'src');
+    assert.deepEqual(body.changed_paths, ['src/app.py']);
     assert.equal(JSON.stringify(body).includes('ghp_SECRET_SENTINEL_123'), false);
 });
 
