@@ -58,9 +58,24 @@ const plural = (count, singular, multiple = `${singular}s`) =>
 
 const needsVerb = (count) => (count === 1 ? 'needs' : 'need');
 
-const hasSource = (node) => node.source_refs?.some((ref) => ref?.document_id);
+const hasSourceEvidence = (ref) =>
+    Boolean(
+        ref?.document_id ||
+            ref?.source_type ||
+            ref?.query_id ||
+            ref?.table_name ||
+            ref?.database_id ||
+            ref?.result_hash
+    );
 
-const sourceIdsForNode = (node) => sortedIds((node.source_refs || []).map((ref) => ref.document_id));
+const hasSource = (node) => node.source_refs?.some(hasSourceEvidence);
+
+const sourceIdsForNode = (node) =>
+    sortedIds(
+        (node.source_refs || []).map(
+            (ref) => ref.document_id || ref.source_id || ref.query_id || ref.table_name
+        )
+    );
 
 const numericConfidence = (value) => {
     if (value === undefined || value === null || value === '') {

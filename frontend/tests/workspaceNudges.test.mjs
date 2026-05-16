@@ -37,6 +37,44 @@ test('nudge projection reports missing source coverage as an actionable nudge', 
     assert.equal(nudge.dismiss_key, nudge.id);
 });
 
+test('structured data refs count as source evidence for nudges and connections', () => {
+    const structuredRef = {
+        source_type: 'sql_query',
+        query_id: 'query-licenses',
+        table_name: 'software_inventory',
+        result_hash: 'hash-licenses',
+        confidence: 0.92
+    };
+    const result = buildWorkspaceNudgeProjection({
+        nodes: [
+            node('licenses', {
+                node_type: 'artifact',
+                confidence: 0.92,
+                source_refs: [structuredRef]
+            }),
+            node('renewals', {
+                node_type: 'risk',
+                confidence: 0.88,
+                source_refs: [{ ...structuredRef, confidence: 0.88 }]
+            })
+        ],
+        edges: [],
+        workspaceBrief: { desired_outputs: ['knowledge_graph'] }
+    });
+
+    assert.equal(
+        result.nudges.some(
+            (item) =>
+                item.category === NUDGE_CATEGORIES.SOURCE_COVERAGE &&
+                item.action.flow === 'source_reference_repair'
+        ),
+        false
+    );
+    assert.deepEqual(findConnectionOpportunities(result.projection)[0].source_ids, [
+        'query-licenses'
+    ]);
+});
+
 test('nudge projection reports missing and low confidence as repair queue items', () => {
     const result = buildWorkspaceNudgeProjection({
         nodes: [

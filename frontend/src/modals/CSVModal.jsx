@@ -73,7 +73,7 @@ const CSVModal = () => {
 			workspaceBrief
 		});
 		const activityId = addActivity({
-			title: "Adding CSV source",
+			title: "Adding structured data source",
 			detail: file?.name,
 			context: "Uploading the table, reading columns, and preparing query context."
 		});
@@ -83,13 +83,13 @@ const CSVModal = () => {
 			operationId
 		}
 		pushNode(LoadingModal, {
-			...sourceUploadLoading("CSV", file?.name),
+			...sourceUploadLoading("data table", file?.name),
 			operationId,
 			onCancel: () => {
 				controller.abort();
 				updateActivity(activityId, {
 					status: "canceled",
-					context: "CSV upload request was canceled."
+					context: "Structured data upload request was canceled."
 				});
 				popNode();
 			}
@@ -103,7 +103,7 @@ const CSVModal = () => {
 			setWorkspaceBrief,
 			setViewPort,
 			setViewport,
-			context: "CSV source add was undone."
+			context: "Structured data source add was undone."
 		});
 		const [url, body, headerConfig] = setRequestData("csv", flowId, data);
 		axios.post(`http://localhost:8000/${url}`, body, {
@@ -114,7 +114,7 @@ const CSVModal = () => {
 		}).then((res) => {
 			updateActivity(activityId, {
 				status: "completed",
-				context: "CSV source was added to the workspace.",
+				context: "Structured data source was added to the workspace.",
 				undo: undoSourceAdd
 			});
 			manageNodes(res.data)
@@ -196,7 +196,7 @@ const CSVModal = () => {
 			<div className="title">
 				<div>
 					<img src={CSVSvg} alt="SQL SVG" />
-					<p>Load A CSV</p>
+					<p>Upload Data Table</p>
 				</div>
 				<img src={CROSSSvg} alt="Cross Svg" onClick={(e) => popNode()} />
 			</div>
@@ -205,13 +205,13 @@ const CSVModal = () => {
 					<div>
 						<img src={CSVSvg} alt="image will be here" />
 						{/* <p>Upload a CSV</p> */}
-						{file ? <p>{file.name}</p> : <p>Upload a CSV</p>}
+						{file ? <p>{file.name}</p> : <p>Upload CSV or spreadsheet</p>}
 					</div>
 					<img src={RIGHTArrow} alt={"RIght arrow"} />
 				</label>
 				<input id="filesUp" type="file" accept={csvAccept} style={{ "display": "none" }} onChange={(e) => handleFileUpload(e)} />
 			</div>
-			<InputBar data={{ type: "number", label: "Enter Column Row", placeholder: "eg: 1", setTableName: setHeaderRow }} />
+			<InputBar data={{ type: "number", label: "Header Row", placeholder: "eg: 1", setTableName: setHeaderRow }} />
 			<div className="buttons">
 				<button id="cancel" onClick={(e) => pushNode(DataSourceSelect)}>Back</button>
 				{/* <button id="add" onClick={(e) => addDataSource(e)}>Add</button> */}

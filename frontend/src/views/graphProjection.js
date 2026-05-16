@@ -174,17 +174,38 @@ const LOW_CONFIDENCE_THRESHOLD = 0.6;
 
 const hasSourceDocument = (sourceRef) => Boolean(sourceRef?.document_id);
 
+const hasSourceEvidence = (sourceRef) =>
+    Boolean(
+        sourceRef?.document_id ||
+            sourceRef?.source_type ||
+            sourceRef?.query_id ||
+            sourceRef?.table_name ||
+            sourceRef?.database_id ||
+            sourceRef?.result_hash
+    );
+
 const hasCompleteSourceRef = (sourceRef) =>
     Boolean(
-        sourceRef?.document_id &&
-            (sourceRef?.page || sourceRef?.section || sourceRef?.quote_snippet)
+        sourceRef?.document_id
+            ? sourceRef?.page || sourceRef?.section || sourceRef?.quote_snippet
+            : hasSourceEvidence(sourceRef) &&
+                  (sourceRef?.query_id || sourceRef?.table_name || sourceRef?.result_hash)
     );
 
 const sourceRefIssues = (sourceRef) => {
     const issues = [];
 
-    if (!sourceRef?.document_id) {
+    if (!sourceRef?.document_id && !hasSourceEvidence(sourceRef)) {
         issues.push('Missing source document');
+        return issues;
+    }
+    if (!sourceRef.document_id) {
+        if (!sourceRef.query_id && !sourceRef.table_name && !sourceRef.result_hash) {
+            issues.push('Missing structured data reference');
+        }
+        if (!sourceRef.confidence) {
+            issues.push('Missing source confidence');
+        }
         return issues;
     }
     if (!sourceRef.page && !sourceRef.section) {
@@ -403,7 +424,7 @@ const riskSeverityScore = (node) => {
     if (confidence !== null && confidence < 0.6) {
         return 70;
     }
-    if (!node.source_refs?.some((ref) => ref?.document_id)) {
+    if (!node.source_refs?.some(hasSourceEvidence)) {
         return 60;
     }
     return 35;
@@ -411,13 +432,33 @@ const riskSeverityScore = (node) => {
 
 const sourceCoverageScore = (node) => {
     const refs = node.source_refs || [];
-    if (refs.length === 0 || !refs.some((ref) => ref?.document_id)) {
+    if (refs.length === 0 || !refs.some(hasSourceEvidence)) {
         return 0;
     }
 
     const refScores = refs.map((ref) => {
-        if (!ref?.document_id) {
+        if (!hasSourceEvidence(ref)) {
             return 0;
+        }
+        if (!ref?.document_id) {
+            let score = 62;
+            if (ref.query_id) {
+                score += 12;
+            }
+            if (ref.result_hash) {
+                score += 12;
+            }
+            if (ref.table_name || ref.database_id) {
+                score += 8;
+            }
+            const confidence = numericConfidence(ref.confidence ?? node.confidence);
+            if (confidence !== null) {
+                score += Math.round(confidence * 8);
+                if (confidence < 0.6) {
+                    score -= 18;
+                }
+            }
+            return Math.max(0, Math.min(100, score));
         }
         let score = 55;
         if (ref.page || ref.section) {
@@ -1734,7 +1775,7 @@ const activeFilterIds = (filters = []) => {
 
 const nodeMatchesFilter = (node, filterId) => {
     if (filterId === 'source-backed') {
-        return node.source_refs?.some((ref) => ref?.document_id);
+        return node.source_refs?.some(hasSourceEvidence);
     }
     if (filterId === 'needs-review') {
         return node.status === 'needs_review' || node.node_type === 'needs_review';
@@ -1755,7 +1796,7 @@ const nodeMatchesFilter = (node, filterId) => {
         return TASK_CAPABLE_TYPES.has(node.node_type) && !node.due_date;
     }
     if (filterId === 'missing-source') {
-        return node.react_flow_type !== 'dataSource' && !node.source_refs?.some((ref) => ref?.document_id);
+        return node.react_flow_type !== 'dataSource' && !node.source_refs?.some(hasSourceEvidence);
     }
     if (filterId === 'low-confidence') {
         const confidence = Number(node.confidence);
@@ -1924,7 +1965,7 @@ export const getGraphConfidenceSummary = (projection) => {
     ).length;
     const crossLinkEdges = edgeCount - hierarchyEdges;
     const sourcedNodes = contentNodes.filter((node) =>
-        node.source_refs?.some((ref) => ref?.document_id)
+        node.source_refs?.some(hasSourceEvidence)
     ).length;
     const nodesWithSummary = contentNodes.filter((node) => node.summary).length;
     const nodesNeedingReview = contentNodes.filter(
@@ -1942,7 +1983,7 @@ export const getGraphConfidenceSummary = (projection) => {
         projection.edges.flatMap((edge) => [edge.source, edge.target]).filter(Boolean)
     );
     const missingSourceNodeIds = contentNodes
-        .filter((node) => !node.source_refs?.some((ref) => ref?.document_id))
+        .filter((node) => !node.source_refs?.some(hasSourceEvidence))
         .map((node) => node.id);
     const reviewNodeIds = contentNodes
         .filter((node) => node.status === 'needs_review' || node.node_type === 'needs_review')
@@ -2136,7 +2177,7 @@ export const getGraphConfidenceSummary = (projection) => {
 const nodeText = (node = {}) => `${node.title || ''} ${node.summary || ''}`.toLowerCase();
 
 const hasSourceSupport = (node = {}) =>
-    node.source_refs?.some((ref) => ref?.document_id) || Boolean(node.source_ref?.document_id);
+    node.source_refs?.some(hasSourceEvidence) || hasSourceEvidence(node.source_ref);
 
 const needsExecutiveReview = (node = {}) =>
     node.status === 'needs_review' || node.node_type === 'needs_review' || !hasSourceSupport(node);
@@ -2270,10 +2311,19 @@ const roadmapNodeItem = (node = {}, itemType = 'workstream') => ({
 const mergeRoadmapSourceRefs = (...refLists) => {
     const seen = new Set();
     return refLists.flatMap((refs) => (Array.isArray(refs) ? refs : [])).filter((ref) => {
-        if (!ref?.document_id) {
+        if (!hasSourceEvidence(ref)) {
             return false;
         }
-        const key = [ref.document_id, ref.page, ref.section, ref.quote_snippet].join('|');
+        const key = [
+            ref.document_id,
+            ref.source_type,
+            ref.query_id,
+            ref.table_name,
+            ref.page,
+            ref.section,
+            ref.quote_snippet,
+            ref.result_hash
+        ].join('|');
         if (seen.has(key)) {
             return false;
         }
@@ -2284,7 +2334,7 @@ const mergeRoadmapSourceRefs = (...refLists) => {
 
 const roadmapEdgeItem = (edge = {}, source = {}, target = {}) => {
     const sourceRefs = mergeRoadmapSourceRefs(source.source_refs, target.source_refs);
-    const sourceBacked = sourceRefs.some((ref) => ref?.document_id);
+    const sourceBacked = sourceRefs.some(hasSourceEvidence);
     return {
         id: `dependency-${edge.id || `${source.id || 'source'}-${target.id || 'target'}`}`,
         source_node_id: source.id || '',

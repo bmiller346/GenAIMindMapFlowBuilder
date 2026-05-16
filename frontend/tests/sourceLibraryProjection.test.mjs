@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    applyGraphFilters,
     buildGraphProjection,
     buildSourceLibraryProjection,
     createSourceLibrarySnapshot
@@ -280,4 +281,7 @@ test('buildGraphProjection keeps structured data artifact provenance with visual
         domain: 'structured_data',
         query_id: 'query-1'
     });
+
+    assert.equal(applyGraphFilters(projection, ['source-backed']).nodes.length, 1);
+    assert.equal(applyGraphFilters(projection, ['missing-source']).nodes.length, 0);
 });

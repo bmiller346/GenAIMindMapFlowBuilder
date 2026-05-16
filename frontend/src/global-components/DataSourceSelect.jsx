@@ -47,8 +47,8 @@ const MEDIA_SOURCES = [
 ];
 
 const DATA_SOURCES = [
-	{ img: CSVSvg, content: "CSV", name: "csv", mode: "Data intake", detail: "Table analysis, not document citations." },
-	{ img: SQLSvg, content: "Connect SQL", name: "sql", mode: "Data intake", detail: "Query analysis, not document citations." },
+	{ img: CSVSvg, content: "Upload data table", name: "csv", mode: "Structured evidence", detail: "Tables, charts, and findings keep query/source refs." },
+	{ img: SQLSvg, content: "Connect SQL table", name: "sql", mode: "Structured evidence", detail: "Query results can become source-backed artifacts." },
 ];
 
 const DEVELOPER_SOURCES = [
@@ -124,7 +124,7 @@ const DataSourceSelect = ({
 			: [
 				{ title: "WEB", sources: WEB_SOURCES },
 				{ title: "MEDIA", sources: MEDIA_SOURCES },
-				{ title: "DATA", sources: DATA_SOURCES },
+				{ title: "STRUCTURED EVIDENCE", sources: DATA_SOURCES },
 				...(developerMode ? [{ title: "DEVELOPER", sources: DEVELOPER_SOURCES }] : []),
 			]),
 	];

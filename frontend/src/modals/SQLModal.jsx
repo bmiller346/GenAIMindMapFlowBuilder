@@ -69,22 +69,22 @@ const SQLModal = () => {
             workspaceBrief
         });
         const activityId = addActivity({
-            title: 'Connecting SQL source',
+            title: 'Connecting structured data source',
             detail: tableName,
-            context: 'Reading schema, training query context, and adding a source node.'
+            context: 'Reading table context and adding a source-backed data node.'
         });
         const data = {
             content: tableName,
             operationId
         };
         pushNode(LoadingModal, {
-            ...structuredSourceLoading('SQL', tableName),
+            ...structuredSourceLoading('structured data', tableName),
             operationId,
             onCancel: () => {
                 controller.abort();
                 updateActivity(activityId, {
                     status: 'canceled',
-                    context: 'SQL source connection request was canceled.'
+                    context: 'Structured data source connection request was canceled.'
                 });
                 popNode();
             }
@@ -98,7 +98,7 @@ const SQLModal = () => {
             setWorkspaceBrief,
             setViewPort,
             setViewport,
-            context: 'SQL source add was undone.'
+            context: 'Structured data source add was undone.'
         });
         const [url, body, headerConfig] = setRequestData('sql', flowId, data);
         axios
@@ -111,7 +111,7 @@ const SQLModal = () => {
             .then((res) => {
                 updateActivity(activityId, {
                     status: 'completed',
-                    context: 'SQL source was added to the workspace.',
+                    context: 'Structured data source was added to the workspace.',
                     undo: undoSourceAdd
                 });
                 manageNodes(res.data);
@@ -189,7 +189,7 @@ const SQLModal = () => {
                         src={SQLSvg}
                         alt="SQL SVG"
                     />
-                    <p>Connect SQL</p>
+                    <p>Connect SQL Table</p>
                 </div>
                 <img
                     src={CROSSSvg}
