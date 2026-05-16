@@ -658,6 +658,20 @@ test('canvas command bar exposes node density and reflow without covering the ma
     await expect(page.getByLabel('Node display')).toHaveCount(0);
 });
 
+test('workspace dock can collapse back to a compact canvas rail', async ({ page }) => {
+    const { savedRequests } = await setupMockBackend(page);
+    await createRoot(page, savedRequests, 'Dock root');
+
+    await expect(page.getByRole('region', { name: 'Workspace tools' })).toBeVisible();
+    await expect(page.locator('.workspace-dock-content')).toBeVisible();
+    await page.getByRole('button', { name: 'Collapse workspace panel' }).click();
+    await expect(page.locator('.workspace-dock')).toHaveClass(/workspace-dock--collapsed/);
+    await expect(page.locator('.workspace-dock-content')).toBeHidden();
+    await page.getByRole('button', { name: 'Expand workspace panel' }).click();
+    await expect(page.locator('.workspace-dock')).not.toHaveClass(/workspace-dock--collapsed/);
+    await expect(page.locator('.workspace-dock-content')).toBeVisible();
+});
+
 test('empty canvas Ask AI creates the initial graph through backend draft accept', async ({ page }) => {
     const { draftSessionRequests, draftAcceptRequests, state } = await setupMockBackend(page);
     state.createdFlow = true;

@@ -1022,6 +1022,11 @@ h5 {
   pointer-events: auto;
 }
 
+.workspace-dock--collapsed {
+  grid-template-columns: 4.4rem;
+  max-width: 4.4rem;
+}
+
 .workspace-dock-tabs {
   display: grid;
   align-content: start;
@@ -1029,6 +1034,13 @@ h5 {
   border-right: 1px solid var(--question-border);
   background-color: rgba(0, 0, 0, 0.12);
   padding: 0.45rem;
+}
+
+.workspace-dock-panel-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+  margin-bottom: 0.1rem;
 }
 
 .workspace-dock-tabs button {
@@ -1042,6 +1054,29 @@ h5 {
   font-weight: 850;
 }
 
+.workspace-dock-tabs .workspace-dock-icon-button {
+  display: grid;
+  min-height: 1.85rem;
+  place-items: center;
+  border-color: var(--question-border);
+  background-color: color-mix(in srgb, var(--input-bar-color) 72%, transparent);
+  padding: 0;
+}
+
+.workspace-dock-tabs .workspace-dock-icon-button svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.workspace-dock-drag-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.workspace-dock-drag-handle:active {
+  cursor: grabbing;
+}
+
 .workspace-dock-tabs button:hover,
 .workspace-dock-tabs button.active {
   border-color: var(--question-border);
@@ -1053,6 +1088,10 @@ h5 {
   max-height: min(33rem, calc(100vh - 5rem));
   overflow: auto;
   padding: 0.7rem;
+}
+
+.workspace-dock--collapsed .workspace-dock-content {
+  display: none;
 }
 
 .workspace-dock-section {

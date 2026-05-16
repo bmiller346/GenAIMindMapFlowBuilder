@@ -15,7 +15,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import axios from 'axios';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FiMaximize2, FiMessageSquare, FiTrash2 } from 'react-icons/fi';
+import { FiChevronLeft, FiChevronRight, FiMaximize2, FiMessageSquare, FiMove, FiTrash2 } from 'react-icons/fi';
 import { nodeTypes } from './nodes/nodeTypes.js';
 import { useShallow } from 'zustand/shallow';
 import useStore from './stores/store.js';
@@ -545,6 +545,8 @@ const App = () => {
     const [selectedCanvasNodes, setSelectedCanvasNodes] = useState([]);
     const [validationReport, setValidationReport] = useState();
     const [workspaceDockTab, setWorkspaceDockTab] = useState('sources');
+    const [workspaceDockCollapsed, setWorkspaceDockCollapsed] = useState(false);
+    const [workspaceDockOffset, setWorkspaceDockOffset] = useState({ x: 0, y: 0 });
     const [aiUsage, setAIUsage] = useState();
     const [aiUsageStatus, setAIUsageStatus] = useState('');
     const [aiUsageReviewStatus, setAIUsageReviewStatus] = useState('');
@@ -582,6 +584,35 @@ const App = () => {
             refreshAIUsage();
         }
     }, [refreshAIUsage, workspaceDockTab]);
+
+    const startWorkspaceDockDrag = useCallback((event) => {
+        if (event.button !== 0) {
+            return;
+        }
+        event.preventDefault();
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const startOffset = workspaceDockOffset;
+
+        const handlePointerMove = (moveEvent) => {
+            const nextX = startOffset.x + moveEvent.clientX - startX;
+            const nextY = startOffset.y + moveEvent.clientY - startY;
+            setWorkspaceDockOffset({
+                x: Math.max(0, Math.min(nextX, window.innerWidth - 120)),
+                y: Math.max(-48, Math.min(nextY, window.innerHeight - 180))
+            });
+        };
+
+        const stopDrag = () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', stopDrag);
+            window.removeEventListener('pointercancel', stopDrag);
+        };
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', stopDrag);
+        window.addEventListener('pointercancel', stopDrag);
+    }, [workspaceDockOffset]);
 
     const openUsageDraftSession = useCallback(
         async (session) => {
@@ -1233,9 +1264,38 @@ const App = () => {
                         onCreateStructuredTable={() => openStructuredAiPreset('table')}
                     />
                 ) : null}
-                <Panel position="top-left" style={{ display: 'block' }}>
-                    <section className="workspace-dock" aria-label="Workspace tools">
+                <Panel
+                    position="top-left"
+                    style={{
+                        display: 'block',
+                        transform: `translate(${workspaceDockOffset.x}px, ${workspaceDockOffset.y}px)`
+                    }}
+                >
+                    <section
+                        className={`workspace-dock ${workspaceDockCollapsed ? 'workspace-dock--collapsed' : ''}`}
+                        aria-label="Workspace tools"
+                    >
                         <nav className="workspace-dock-tabs" aria-label="Workspace panel">
+                            <div className="workspace-dock-panel-actions">
+                                <button
+                                    type="button"
+                                    className="workspace-dock-icon-button workspace-dock-drag-handle"
+                                    title="Move panel"
+                                    aria-label="Move workspace panel"
+                                    onPointerDown={startWorkspaceDockDrag}
+                                >
+                                    <FiMove />
+                                </button>
+                                <button
+                                    type="button"
+                                    className="workspace-dock-icon-button"
+                                    title={workspaceDockCollapsed ? 'Expand panel' : 'Collapse panel'}
+                                    aria-label={workspaceDockCollapsed ? 'Expand workspace panel' : 'Collapse workspace panel'}
+                                    onClick={() => setWorkspaceDockCollapsed((current) => !current)}
+                                >
+                                    {workspaceDockCollapsed ? <FiChevronRight /> : <FiChevronLeft />}
+                                </button>
+                            </div>
                             {[
                                 ['sources', 'Sources'],
                                 ['health', 'Health'],
