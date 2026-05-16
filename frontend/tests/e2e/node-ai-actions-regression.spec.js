@@ -528,6 +528,9 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
     await expect(page.locator('.ai-draft-session-panel')).toContainText('General Mills');
     await expect(page.locator('.ai-draft-session-panel')).toContainText('Uncited cereal branch');
     await expect(page.locator('.ai-draft-session-panel')).toContainText('2 items · 1 needs review');
+    await expect(page.locator('.ai-draft-impact')).toContainText('Before accept');
+    await expect(page.locator('.ai-draft-impact')).toContainText('Supplement');
+    await expect(page.locator('.ai-draft-impact')).toContainText('2 new nodes before accept');
     const citedDraftItem = page.locator('.ai-draft-item').filter({ hasText: 'General Mills' });
     const reviewDraftItem = page.locator('.ai-draft-item').filter({ hasText: 'Uncited cereal branch' });
     await expect(citedDraftItem).toContainText('Source-backed');
@@ -558,12 +561,17 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
         .locator('input[type="checkbox"]')
         .first()
         .check();
+    await expect(page.locator('.ai-draft-impact')).toContainText('Accept selected');
+    await expect(page.locator('.ai-draft-impact')).toContainText('1 new node before accept');
+    await expect(page.locator('.ai-draft-impact')).toContainText('1 checked draft item will be accepted');
     await page
         .locator('.ai-draft-item')
         .filter({ hasText: 'Uncited cereal branch' })
         .locator('input[type="checkbox"]')
         .first()
         .check();
+    await expect(page.locator('.ai-draft-impact')).toContainText('2 new nodes before accept');
+    await expect(page.locator('.ai-draft-impact')).toContainText('2 checked draft items will be accepted');
     await page
         .locator('.node-inspector .ai-draft-accept')
         .getByRole('button', { name: 'Accept selected' })
@@ -616,6 +624,41 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
     await expect(page.locator('.node-response').filter({ hasText: 'Uncited cereal branch' })).toContainText('Duplicate');
     await expect(page.locator('.node-response').filter({ hasText: 'Uncited cereal branch' })).toContainText('Conflict');
     await expect(page.locator('.node-response').filter({ hasText: 'General Mills' })).toContainText('Source cited');
+});
+
+test('inline node Ask stages a canvas-native draft without opening branch scope', async ({ page }) => {
+    const { draftSessionRequests, savedRequests } = await setupMockBackend(page);
+    await createRoot(page, savedRequests, 'Inline root');
+    const beforePreview = latestSnapshot(savedRequests);
+    const rootId = beforePreview.nodes[0].id;
+    const rootNode = page.locator('.node-response').filter({ hasText: 'Inline root' });
+
+    await rootNode.getByLabel('Ask AI from this node').fill('add implementation tasks');
+    await rootNode.locator('.node-inline-ai-send').evaluate((button) => button.click());
+
+    await expect(page.locator('.node-inspector')).toBeVisible();
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('General Mills');
+    await expect(page.locator('.ai-action-modal')).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Active canvas scope' })).toHaveCount(0);
+    await expect.poll(() => draftSessionRequests.length, { timeout: 7000 }).toBe(1);
+
+    expect(draftSessionRequests[0]).toMatchObject({
+        scope: 'node',
+        nodeId: rootId
+    });
+    expect(draftSessionRequests[0].requestBody.scope).toEqual({
+        type: 'node',
+        node_id: rootId
+    });
+    expect(draftSessionRequests[0].requestBody.prompt).toBe('add implementation tasks');
+    expect(draftSessionRequests[0].requestBody.metadata).toMatchObject({
+        preview_mode: 'inline_node_prompt',
+        source_node_id: rootId
+    });
+    expect(structuralNodes(latestSnapshot(savedRequests))).toEqual(
+        structuralNodes(beforePreview)
+    );
 });
 
 test('branch Ask AI discard leaves graph unchanged', async ({ page }) => {
