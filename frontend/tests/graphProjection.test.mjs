@@ -5,6 +5,7 @@ import {
     buildGraphProjection,
     getExecutiveOutputProjection,
     getChecklistPreviewRows,
+    getConnectionRows,
     getCrossLinkConnectionRows,
     getEnterpriseReadinessSummary,
     getEnterpriseScoreRows,
@@ -55,6 +56,45 @@ test('task projections keep confirmed tasks separate from potential tasks', () =
 
     assert.deepEqual(getTaskRows(projection).map((row) => row.id), ['task-1']);
     assert.deepEqual(getTaskCandidateRows(projection).map((row) => row.id), ['concept-1']);
+});
+
+test('connection rows surface nested edge relationship details', () => {
+    const sourceRef = {
+        document_id: 'doc-edge',
+        section: 'Dependencies',
+        quote_snippet: 'The permit package depends on the site survey.',
+        confidence: 0.86
+    };
+    const projection = buildGraphProjection(
+        [
+            supportedNode('permit', 'task', { title: 'Permit package' }),
+            supportedNode('survey', 'dependency', { title: 'Site survey' })
+        ],
+        [
+            {
+                id: 'edge-nested-dependency',
+                source: 'permit',
+                target: 'survey',
+                data: {
+                    relationship_type: 'depends_on',
+                    confidence: 0.74,
+                    review_state: 'needs_review',
+                    rationale: 'Permit package cannot be submitted until survey inputs are confirmed.',
+                    source_refs: [sourceRef]
+                }
+            }
+        ]
+    );
+
+    const rows = getConnectionRows(projection);
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].relationship, 'Depends On');
+    assert.equal(rows[0].relationship_type, 'depends_on');
+    assert.equal(rows[0].connection_kind, 'Cross-link');
+    assert.equal(rows[0].confidence, 0.74);
+    assert.equal(rows[0].review_state, 'needs_review');
+    assert.equal(rows[0].source_refs[0].document_id, 'doc-edge');
 });
 
 test('accepted task projections become confirmed task rows', () => {

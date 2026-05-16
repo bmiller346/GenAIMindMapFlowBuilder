@@ -1766,6 +1766,15 @@ export const getConnectionRows = (projection) =>
         .map((edge) => {
             const source = projection.nodeLookup.get(edge.source);
             const target = projection.nodeLookup.get(edge.target);
+            const relationshipType =
+                edge.relationship_type ||
+                edge.data?.relationship_type ||
+                edge.data?.relationshipType ||
+                edge.metadata?.relationship_type ||
+                edge.data?.relationship ||
+                edge.data?.label ||
+                edge.label ||
+                '';
 
             if (!source || !target) {
                 return undefined;
@@ -1776,17 +1785,25 @@ export const getConnectionRows = (projection) =>
                 source,
                 target,
                 relationship:
-                    relationshipLabel(edge.relationship_type) ||
+                    relationshipLabel(relationshipType) ||
                     edge.label ||
                     edge.data?.relationship ||
                     edge.data?.label ||
                     'parent-child',
-                relationship_type: edge.relationship_type || '',
-                connection_kind: isHierarchyRelationship(edge.relationship_type)
+                relationship_type: relationshipType,
+                connection_kind: isHierarchyRelationship(relationshipType)
                     ? 'Hierarchy'
                     : 'Cross-link',
-                confidence: edge.confidence || edge.data?.confidence || '',
-                review_state: edge.review_state || edge.data?.review_state || '',
+                confidence:
+                    edge.confidence ||
+                    edge.data?.confidence ||
+                    edge.metadata?.confidence ||
+                    '',
+                review_state:
+                    edge.review_state ||
+                    edge.data?.review_state ||
+                    edge.metadata?.review_state ||
+                    '',
                 rationale:
                     edge.rationale ||
                     edge.data?.rationale ||

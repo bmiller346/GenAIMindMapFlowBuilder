@@ -1357,7 +1357,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                     <td>{row.connection_kind}</td>
                                     <td>{row.confidence || 'Not set'}</td>
                                     <td>
-                                        <OutputStatePill state="Locally projected" />
+                                        <OutputStatePill state={row.review_state || 'Locally projected'} />
                                     </td>
                                     <td>
                                         <button type="button" onClick={() => onSelectEdge?.(row.id)}>

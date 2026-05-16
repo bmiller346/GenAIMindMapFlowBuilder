@@ -194,6 +194,7 @@ const SemanticEdge = ({
     style,
     data
 }) => {
+    const setInspectorEdgeId = useStore((state) => state.setInspectorEdgeId);
     const semantic = data?.semantic_edge || {};
     const pathArgs = {
         sourceX,
@@ -216,6 +217,17 @@ const SemanticEdge = ({
     ]
         .filter(Boolean)
         .join(' ');
+    const openInspector = (event) => {
+        event?.stopPropagation?.();
+        setInspectorEdgeId(id);
+    };
+    const handleLabelKeyDown = (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+        }
+        event.preventDefault();
+        openInspector(event);
+    };
 
     return (
         <>
@@ -232,6 +244,11 @@ const SemanticEdge = ({
                         transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`
                     }}
                     title={semantic.tooltip || semantic.label || 'Graph edge'}
+                    role="button"
+                    tabIndex={0}
+                    onClick={openInspector}
+                    onKeyDown={handleLabelKeyDown}
+                    aria-label={`Open ${semantic.label || 'relationship'} edge details`}
                 >
                     {semantic.label || 'Relationship'}
                 </div>
