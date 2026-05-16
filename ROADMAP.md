@@ -13,11 +13,14 @@ PDF/DOCX/MD/TXT upload
 -> extracted document structure
 -> source-cited normalized graph
 -> editable mind map, outline, task list, table, and exports
--> optional post-review handoff actions to Miro and monday.com
+-> controlled post-review handoff to Miro and monday.com
 ```
 
 The TraceSpace graph is canonical. Miro and monday.com are handoff destinations,
-not replacements for the internal graph.
+not replacements for the internal graph. This matters for enterprise adoption:
+TraceSpace helps teams understand, structure, and validate work, then hands
+reviewed outputs into the collaboration and tracking systems where execution
+already lives.
 
 ## Current Status
 
@@ -58,12 +61,12 @@ Known verification gap:
 - The complete desktop/browser MVP loop still needs a live browser smoke with
   real OpenAI configuration: upload, generate, review source draft, edit, save,
   reopen, export JSON/Markdown, and confirm source/review indicators in the UI.
-- Software inventory overlap and rationalization now has a product guide at
-  `PRODUCT_GUIDE_SOFTWARE_INVENTORY.md`. The core contract, deterministic
-  scoring, and review surfacing are implemented, but the realistic fixture and
-  full e2e validation flow in that guide remain future hardening work.
-- Other capability boundaries that should become product guides versus
-  roadmap-only work are spelled out in `PRODUCT_GUIDE_SPLITS.md`.
+- Product intent is now split out from delivery tracking in `PRODUCT_GUIDES.md`.
+  Software inventory is only one lane; source-set review, Ask AI draft
+  sessions, structured work outputs, enterprise readiness, code intelligence,
+  and Miro/monday handoff have their own guide-level contracts. Roadmap items
+  below should track implementation and verification, not redefine product
+  intent.
 - The live OpenAI smoke script is available at `backend/tests/live_openai_smoke.py`,
   but could not run in this environment because neither `openai_api_key` nor
   `OPENAI_API_KEY` is configured.
@@ -749,30 +752,34 @@ Positioning:
 
 #### GitHub Source Model
 
-- [ ] Add `github_repo` as a source type.
+- [x] Add `github_repo` as a source type for scan results.
 - [ ] Add child source types for `github_file`, `github_directory`,
   `github_issue`, `github_pull_request`, `github_commit`,
   `github_workflow_run`, `github_code_search_result`, and
   `github_dependency_manifest`.
-- [ ] Store GitHub source refs with repo, branch, path, sha, language,
+- [x] Store GitHub file source refs with repo, branch, path, sha, language,
   source URL, and line ranges.
-- [ ] Support line-level citations for files, functions, routes, components,
-  findings, and generated roadmap items.
+- [x] Support line-level citations for files, functions, components, and
+  source-backed findings.
+- [ ] Add route, issue, PR, commit, workflow-run, and roadmap-item citations.
 - [ ] Preserve repo/source metadata through exports and draft-session
   provenance.
 
 #### Read-Only GitHub Ingestion
 
-- [ ] Add read-only GitHub auth/token configuration.
-- [ ] Select repo, branch, and folder scope.
-- [ ] Fetch file tree with ignore patterns.
-- [ ] Ingest supported first-pass file types: `.py`, `.js`, `.jsx`, `.ts`,
+- [x] Add BYO-token read-only GitHub client for per-request scans; tokens are
+  not persisted or echoed.
+- [x] Select repo, branch/ref, and folder scope through the backend scan
+  request.
+- [x] Fetch file tree with ignore patterns.
+- [x] Ingest supported first-pass file types: `.py`, `.js`, `.jsx`, `.ts`,
   `.tsx`, `.md`, `.json`, `.yaml`, `.yml`, and `.toml`.
-- [ ] Exclude generated/build folders by default: `node_modules`, `dist`,
+- [x] Exclude generated/build folders by default: `node_modules`, `dist`,
   `build`, `.venv`, `__pycache__`, and `coverage`.
-- [ ] Never ingest `.env`, private keys, or known secret files; warn on
-  suspected secrets without exposing values.
-- [ ] Add file size, repo scope, and token budget limits.
+- [x] Never ingest `.env`, private keys, or known secret files.
+- [x] Add file size, file count, and repo scope limits for GitHub scans.
+- [ ] Add warning metadata for skipped suspected secrets without exposing
+  values.
 
 #### Local-First Code Intelligence Foundation
 
@@ -794,6 +801,7 @@ Positioning:
   keep code intelligence hidden by default.
 - [x] Add server-side capability contract and gated local scan endpoint; scanning
   requires `DOCMAP_ENABLE_CODE_INTELLIGENCE=true` and an allowlisted repo root.
+- [x] Add gated BYO-token GitHub scan endpoint and Markdown report endpoint.
 
 #### Deterministic Code Graph
 
@@ -815,7 +823,9 @@ Positioning:
 
 #### AI Code Analysis Artifacts
 
-- [ ] Add artifact types for repo_architecture_map, code_knowledge_graph,
+- [x] Add deterministic `code_knowledge_graph` scan artifact and Markdown
+  engineering report projection.
+- [ ] Register AI-facing artifact types for repo_architecture_map,
   weak_spot_report, test_gap_report, dependency_risk_report, pr_impact_report,
   refactor_roadmap, developer_onboarding_map, and github_issue_candidates.
 - [ ] Generate architecture maps that distinguish frontend, backend,

@@ -12,6 +12,24 @@ UI polish, live verification, cleanup, or implementation sequencing.
 
 ## Already Split Out
 
+### Product Guide Index
+
+Guide:
+
+- `PRODUCT_GUIDES.md`
+
+Why it exists:
+
+- TraceSpace has several product lanes, not one dominant use case.
+- The guide index keeps software inventory from looking like the main product.
+- It makes source-set review, Ask AI drafting, structured outputs, enterprise
+  readiness, code intelligence, and external handoffs visible as first-class
+  capabilities.
+
+Roadmap should track:
+
+- Delivery status and verification for each guide.
+
 ### Software Inventory And Overlap
 
 Guide:
@@ -32,11 +50,9 @@ Roadmap should track:
 - End-to-end Software Inventory -> Software Overlap -> review -> accept tests.
 - Export and monday handoff hardening.
 
-## Should Get Product Guides
-
 ### Source-Set And Folder Completeness Review
 
-Recommended guide:
+Guide:
 
 - `PRODUCT_GUIDE_SOURCE_SET_REVIEW.md`
 
@@ -57,7 +73,7 @@ Roadmap should track:
 
 ### Ask AI Draft Sessions
 
-Recommended guide:
+Guide:
 
 - `PRODUCT_GUIDE_ASK_AI_DRAFT_SESSIONS.md`
 
@@ -78,7 +94,7 @@ Roadmap should track:
 
 ### External Handoffs: Miro And monday.com
 
-Recommended guide:
+Guide:
 
 - `PRODUCT_GUIDE_EXTERNAL_HANDOFFS.md`
 
@@ -88,6 +104,8 @@ Why it needs a guide:
 - The product rules are subtle: dry-run first, confirmation before writes,
   preserve internal IDs, persist external refs, and do not allow pullbacks to
   overwrite canonical graph fields without review.
+- Miro and monday are enterprise adoption infrastructure, not cosmetic export
+  buttons.
 - Miro and monday have different product meanings: Miro is collaboration and
   review visualization; monday is execution and task tracking.
 
@@ -101,7 +119,7 @@ Roadmap should track:
 
 ### Enterprise Readiness And Operating Graphs
 
-Recommended guide:
+Guide:
 
 - `PRODUCT_GUIDE_ENTERPRISE_READINESS.md`
 
@@ -125,7 +143,7 @@ Roadmap should track:
 
 ### Code Intelligence
 
-Recommended guide:
+Guide:
 
 - `PRODUCT_GUIDE_CODE_INTELLIGENCE.md`
 
@@ -145,6 +163,28 @@ Roadmap should track:
 - Refactor roadmap artifacts.
 - GitHub issue candidate preview.
 - Security and allowlist hardening.
+
+### Structured Work Outputs
+
+Guide:
+
+- `PRODUCT_GUIDE_STRUCTURED_WORK_OUTPUTS.md`
+
+Why it needs a guide:
+
+- Roadmaps, SOPs, checklists, training outlines, task plans, and implementation
+  packages are the practical work products users get from the graph.
+- These outputs need clear source, assumption, owner, evidence, and review
+  rules.
+- The app should not stop at making visual structure; it should help teams
+  produce usable work.
+
+Roadmap should track:
+
+- Output-specific UI polish.
+- Export snapshots.
+- Presentation sections.
+- Branch-to-output-to-handoff browser flows.
 
 ## Probably Roadmap-Only For Now
 
