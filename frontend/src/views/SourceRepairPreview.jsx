@@ -44,14 +44,34 @@ const sourceLabel = (sourceRef) => {
 };
 
 const mergeSourceRef = (currentRef, suggestedRef, suggestedConfidence = '') => ({
-    document_id: currentRef?.document_id || suggestedRef?.document_id || '',
-    chunk_id: currentRef?.chunk_id || suggestedRef?.chunk_id || '',
-    page: currentRef?.page || suggestedRef?.page || '',
-    section: currentRef?.section || suggestedRef?.section || '',
+    document_id: suggestedRef?.document_id || currentRef?.document_id || '',
+    chunk_id: suggestedRef?.chunk_id || currentRef?.chunk_id || '',
+    page: suggestedRef?.page || currentRef?.page || '',
+    section: suggestedRef?.section || currentRef?.section || '',
     quote_snippet:
-        currentRef?.quote_snippet || suggestedRef?.quote_snippet || '',
-    confidence: suggestedConfidence || currentRef?.confidence || suggestedRef?.confidence || ''
+        suggestedRef?.quote_snippet || currentRef?.quote_snippet || '',
+    confidence: suggestedConfidence || suggestedRef?.confidence || currentRef?.confidence || ''
 });
+
+const sourceRefKey = (sourceRef) =>
+    `${sourceRef?.document_id || ''}::${sourceRef?.chunk_id || ''}`;
+
+const sourceRefsWithPrimaryRepair = (existingRefs, repairedRef) => {
+    if (!repairedRef) {
+        return existingRefs;
+    }
+
+    const repairedKey = sourceRefKey(repairedRef);
+    return [
+        repairedRef,
+        ...existingRefs.filter((sourceRef, index) => {
+            if (index === 0 && !sourceRef?.document_id && !sourceRef?.chunk_id) {
+                return false;
+            }
+            return sourceRefKey(sourceRef) !== repairedKey;
+        })
+    ];
+};
 
 const sourceRepairRowsFromGeneratedPreview = (generatedPreview) => {
     const items = Array.isArray(generatedPreview?.preview_items)
@@ -120,6 +140,12 @@ const titleFromSourceChunk = (chunk, index) =>
 
 const bodyFromSourceChunk = (chunk) =>
     chunk.snippet || 'This source section needs review before it becomes accepted graph structure.';
+
+const requestImmediateWorkspaceSave = () => {
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('docmap:save-workspace-now'));
+    }
+};
 
 const refFromSourceChunk = (generatedPreview, chunk) => ({
     document_id: chunk.source_id || generatedPreview?.metadata?.source_id || '',
@@ -371,6 +397,7 @@ const SourceRepairPreview = ({
             }
             if (flowId) {
                 setSaveStatus('dirty');
+                requestImmediateWorkspaceSave();
             }
             addActivity({
                 status: 'completed',
@@ -400,9 +427,7 @@ const SourceRepairPreview = ({
                     : row.suggested_confidence && existingRefs[0]
                       ? mergeSourceRef(existingRefs[0], existingRefs[0], row.suggested_confidence)
                     : undefined;
-                const sourceRefs = repairedRef
-                    ? [repairedRef, ...existingRefs.slice(1)]
-                    : existingRefs;
+                const sourceRefs = sourceRefsWithPrimaryRepair(existingRefs, repairedRef);
                 const repairedConfidence = row.suggested_confidence || repairedRef?.confidence || '';
                 const data = withLocalPreviewAcceptance(node.data, {
                     flow: row?.generated_preview_item
@@ -451,6 +476,7 @@ const SourceRepairPreview = ({
         setSelectedIds(new Set());
         if (flowId) {
             setSaveStatus('dirty');
+            requestImmediateWorkspaceSave();
         }
         addActivity({
             status: 'completed',

@@ -9,6 +9,7 @@ import useStore from '../stores/store';
 import PromptModal from '../modals/PromptModal';
 import { sourceFirstActionPresets } from '../prompts/promptsModel';
 import { buildSourceLibraryProjection } from '../views/graphProjection';
+import { combineReconciliationPreviews } from '../utils/reconciliationPreviewCombine';
 import { buildBoundedSelectedSourcesForAI } from '../utils/sourceSetUpload';
 
 const STATUS_LABELS = {
@@ -200,20 +201,14 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
             const preview =
                 previews.length === 1
                     ? previews[0].data
-                    : {
-                          ...previews[0].data,
-                          preview_items: previews.flatMap(
-                              (response) => response.data?.preview_items || []
-                          ),
-                          warnings: previews.flatMap(
-                              (response) => response.data?.warnings || []
-                          ),
-                          metadata: {
-                              ...(previews[0].data?.metadata || {}),
-                              selected_source_count: previews.length,
-                              selected_source_ids: sources.map((source) => source.id)
-                          }
-                      };
+                    : combineReconciliationPreviews(
+                          previews.map((response) => response.data),
+                          sources
+                      );
+            if (!preview) {
+                setReconcileStatus('No reconciliation work found for the selected sources.');
+                return;
+            }
             setGeneratedHelperPreview('sourceLibrarianSources', preview);
             setActiveView('sources');
             setReconcileStatus('');

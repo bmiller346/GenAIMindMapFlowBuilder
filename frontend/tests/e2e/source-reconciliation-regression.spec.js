@@ -50,6 +50,15 @@ const flowJson = () =>
             createNode({
                 id: 'market',
                 title: 'Target market and positioning',
+                sourceRefs: [
+                    {
+                        document_id: 'old-generic-plan',
+                        chunk_id: 'old-market',
+                        section: 'Generic market notes',
+                        quote_snippet: 'Generic consulting buyers need advisory support.',
+                        confidence: 'low'
+                    }
+                ],
                 parent: 'plan-root',
                 position: { x: 520, y: 80 }
             }),
@@ -88,6 +97,17 @@ const flowJson = () =>
     });
 
 const parseSnapshot = (flowJsonValue) => JSON.parse(flowJsonValue || flowJson());
+
+const openWholeWorkspaceTasksView = async (page) => {
+    const panel = page.locator('.local-views-panel');
+    const compactWholeButton = panel.getByRole('button', { name: 'Whole', exact: true });
+    if ((await compactWholeButton.count()) > 0) {
+        await compactWholeButton.click();
+    } else {
+        await panel.getByRole('button', { name: 'Whole workspace', exact: true }).click();
+    }
+    await panel.getByRole('button', { name: 'Tasks', exact: true }).click();
+};
 
 const setupMockBackend = async (page) => {
     await page.addInitScript(() => {
@@ -579,7 +599,7 @@ const setupMockBackend = async (page) => {
 };
 
 test('uploaded business plan reconciles with generated graph and opens scoped AEC Ask AI', async ({ page }) => {
-    const { docxUploadRequests, reconcileUrls, draftSessionRequests, draftAcceptRequests, state } =
+    const { docxUploadRequests, reconcileUrls, draftSessionRequests, draftAcceptRequests, savedRequests, state } =
         await setupMockBackend(page);
 
     await page.setViewportSize({ width: 1440, height: 1100 });
@@ -614,6 +634,21 @@ test('uploaded business plan reconciles with generated graph and opens scoped AE
     await expect(page.getByRole('row', { name: /Target market and positioning/ })).toContainText(
         'aec business plan/2026 | AEC Market Focus'
     );
+    await expect
+        .poll(
+            () => {
+                const marketNode = parseSnapshot(state.savedFlowJson).nodes.find(
+                    (node) => node.id === 'market'
+                );
+                return Boolean(
+                    savedRequests.length > 0 &&
+                        marketNode?.data?.source_refs?.[0]?.document_id === sourceId &&
+                        marketNode?.data?.source_refs?.[0]?.chunk_id === 'chunk-market'
+                );
+            },
+            { timeout: 1000 }
+        )
+        .toBe(true);
 
     await page.getByRole('button', { name: 'Health' }).click();
     await expect(page.locator('.workspace-ai-usage')).toContainText('1,400 tokens');
@@ -669,9 +704,7 @@ test('uploaded business plan reconciles with generated graph and opens scoped AE
     await expect.poll(() => draftAcceptRequests.length, { timeout: 7000 }).toBe(1);
     await expect(page.locator('.node-response').filter({ hasText: 'AEC consulting target market' })).toBeVisible();
 
-    const workspaceViews = page.getByLabel('Workspace lenses and outputs');
-    await workspaceViews.getByRole('button', { name: 'Whole workspace', exact: true }).click();
-    await workspaceViews.getByRole('button', { name: 'Tasks', exact: true }).click();
+    await openWholeWorkspaceTasksView(page);
     const tasksRegion = page.getByRole('region', { name: 'Tasks' });
     const aecTaskCandidate = tasksRegion.locator('article').filter({ hasText: 'AEC consulting target market' });
     await expect(aecTaskCandidate).toContainText('strategy · candidate');
@@ -688,7 +721,13 @@ test('uploaded business plan reconciles with generated graph and opens scoped AE
                     taskNode?.data?.node_type === 'task' &&
                         taskNode?.data?.task_projection?.accepted === true &&
                         taskNode?.data?.task_projection?.preview_type === 'task' &&
-                        taskNode?.data?.metadata?.ai_draft_session_id === 'draft-session-aec-1'
+                        taskNode?.data?.metadata?.ai_draft_session_id === 'draft-session-aec-1' &&
+                        taskNode?.data?.source_refs?.some(
+                            (ref) => ref.document_id === sourceId && ref.chunk_id === 'chunk-market'
+                        ) &&
+                        taskNode?.data?.data?.source_refs?.some(
+                            (ref) => ref.document_id === sourceId && ref.chunk_id === 'chunk-market'
+                        )
                 );
             },
             { timeout: 10000 }
@@ -698,9 +737,7 @@ test('uploaded business plan reconciles with generated graph and opens scoped AE
     await page.reload();
     await page.getByAltText('Open workspaces').click();
     await page.locator('.flow-row-main').filter({ hasText: 'Source Reconcile Flow' }).click();
-    const reloadedWorkspaceViews = page.getByLabel('Workspace lenses and outputs');
-    await reloadedWorkspaceViews.getByRole('button', { name: 'Whole workspace', exact: true }).click();
-    await reloadedWorkspaceViews.getByRole('button', { name: 'Tasks', exact: true }).click();
+    await openWholeWorkspaceTasksView(page);
     await expect(page.getByRole('region', { name: 'Tasks' }).locator('table')).toContainText(
         'AEC consulting target market'
     );
@@ -712,6 +749,24 @@ test('uploaded business plan reconciles with generated graph and opens scoped AE
         preview_type: 'task',
         preview_status: 'needs_review'
     });
+    expect(reloadedTaskNode?.data?.source_refs).toEqual(
+        expect.arrayContaining([
+            expect.objectContaining({
+                document_id: sourceId,
+                chunk_id: 'chunk-market',
+                section: 'AEC Market Focus'
+            })
+        ])
+    );
+    expect(reloadedTaskNode?.data?.data?.source_refs).toEqual(
+        expect.arrayContaining([
+            expect.objectContaining({
+                document_id: sourceId,
+                chunk_id: 'chunk-market',
+                section: 'AEC Market Focus'
+            })
+        ])
+    );
 });
 
 test('source-only reconciliation sections can be applied selectively', async ({ page }) => {

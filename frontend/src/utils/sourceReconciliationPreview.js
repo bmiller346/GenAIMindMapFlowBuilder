@@ -4,6 +4,12 @@ import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
 import useStore from '../stores/store';
 import { requestErrorMessage } from './requestErrors';
+import {
+    combineReconciliationPreviews,
+    previewHasReconciliationWork
+} from './reconciliationPreviewCombine';
+
+export { combineReconciliationPreviews, previewHasReconciliationWork };
 
 export const parseMindmapJson = (mindmapJson) => {
     if (!mindmapJson) {
@@ -127,43 +133,6 @@ export const upsertSource = (sources = [], source = {}) => {
 
 export const hasExistingGraphNode = (nodes = []) =>
     nodes.some((node) => node && node.type !== 'dataSource');
-
-export const previewHasReconciliationWork = (preview = {}) => {
-    const previewItems = Array.isArray(preview.preview_items) ? preview.preview_items : [];
-    const matchedCount = Number(preview.metadata?.matched_node_count || 0);
-    const sourceOnlyCount = Number(preview.metadata?.source_only_chunk_count || 0);
-    const sourceOnlyChunks = Array.isArray(preview.metadata?.source_only_chunks)
-        ? preview.metadata.source_only_chunks
-        : [];
-
-    return (
-        previewItems.length > 0 ||
-        matchedCount > 0 ||
-        sourceOnlyCount > 0 ||
-        sourceOnlyChunks.length > 0
-    );
-};
-
-const combineReconciliationPreviews = (previews = [], sources = []) => {
-    const usefulPreviews = previews.filter(previewHasReconciliationWork);
-    if (!usefulPreviews.length) {
-        return null;
-    }
-    if (usefulPreviews.length === 1) {
-        return usefulPreviews[0];
-    }
-    return {
-        ...usefulPreviews[0],
-        preview_items: usefulPreviews.flatMap((preview) => preview.preview_items || []),
-        warnings: usefulPreviews.flatMap((preview) => preview.warnings || []),
-        metadata: {
-            ...(usefulPreviews[0].metadata || {}),
-            selected_source_count: usefulPreviews.length,
-            selected_source_ids: sources.map((source) => source.id).filter(Boolean),
-            staged_useful_preview_count: usefulPreviews.length
-        }
-    };
-};
 
 export const stageUploadedSourceReconciliationPreview = async ({
     uploadData,
