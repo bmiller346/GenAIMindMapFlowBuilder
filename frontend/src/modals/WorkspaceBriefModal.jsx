@@ -30,6 +30,7 @@ const OUTPUT_GROUPS = [
         options: [
             { id: 'tasks', label: 'Tasks' },
             { id: 'checklist', label: 'Checklist' },
+            { id: 'team_roadmap', label: 'Team roadmap' },
             { id: 'chart_data', label: 'Chart data' }
         ]
     },
@@ -38,7 +39,10 @@ const OUTPUT_GROUPS = [
         options: [
             { id: 'sme_questions', label: 'SME questions' },
             { id: 'missing_info_report', label: 'Missing info report' },
-            { id: 'source_coverage_report', label: 'Source coverage report' }
+            { id: 'completeness_review', label: 'Completeness review' },
+            { id: 'source_set_review', label: 'Source-set review' },
+            { id: 'source_coverage_report', label: 'Source coverage report' },
+            { id: 'software_overlap_report', label: 'Software overlap report' }
         ]
     },
 ];
@@ -80,6 +84,14 @@ const REVIEW_POLICIES = [
     {
         id: 'hide_uncited_from_exports',
         label: 'Hide uncited nodes from exports'
+    },
+    {
+        id: 'flag_potential_overlap_for_owner_review',
+        label: 'Flag potential software overlap for owner review'
+    },
+    {
+        id: 'separate_standard_tool_from_exception',
+        label: 'Separate standard tools from exceptions'
     }
 ];
 
@@ -142,15 +154,47 @@ const PRESETS = [
     {
         id: 'software_inventory',
         label: 'Software Inventory',
-        description: 'Applications, owners, status, approvals, and task-ready structure.',
-        goal: 'Convert source material into a software inventory map with ownership, status, and follow-up tasks.',
-        audience: 'IT reviewers, BIM managers, application owners, and project teams',
-        desired_outputs: ['table', 'tasks', 'source_coverage_report'],
+        description: 'Applications, capabilities, overlap, licensing, approvals, and rationalization actions.',
+        goal: 'Convert source material into a source-cited software inventory with ownership, approval status, capability overlap, license signals, replacement candidates, and rationalization actions.',
+        audience: 'IT reviewers, BIM managers, application owners, finance/license reviewers, and project teams',
+        desired_outputs: [
+            'table',
+            'knowledge_graph',
+            'software_overlap_report',
+            'tasks',
+            'missing_info_report',
+            'source_coverage_report'
+        ],
         source_mode: 'source_plus_context',
         assumptions_allowed: false,
         output_style: 'project_execution_map',
-        node_types: ['application', 'category', 'owner', 'license', 'approval_status', 'retired', 'task', 'needs_review'],
-        review_policy: ['mark_uncited_needs_review', 'hide_uncited_from_exports']
+        node_types: [
+            'application',
+            'vendor',
+            'category',
+            'business_function',
+            'workflow',
+            'department',
+            'owner',
+            'license_type',
+            'approval_status',
+            'security_status',
+            'integration',
+            'service_desk_request',
+            'retired',
+            'replacement_candidate',
+            'overlap_candidate',
+            'task',
+            'needs_review'
+        ],
+        review_policy: [
+            'mark_uncited_needs_review',
+            'mark_low_confidence_needs_review',
+            'flag_potential_overlap_for_owner_review',
+            'separate_standard_tool_from_exception',
+            'generate_sme_questions',
+            'hide_uncited_from_exports'
+        ]
     },
     {
         id: 'training_guide',
@@ -164,6 +208,39 @@ const PRESETS = [
         output_style: 'training_onboarding_map',
         node_types: ['concept', 'procedure', 'example', 'question', 'task', 'definition', 'needs_review'],
         review_policy: ['mark_uncited_needs_review', 'generate_sme_questions']
+    },
+    {
+        id: 'source_set_review',
+        label: 'Source Set Review',
+        description: 'Inventory loaded files, classify documents, and flag folder-review gaps.',
+        goal: 'Review the loaded source set as a folder-like package: inventory files, classify document types, identify topic coverage, stale or duplicate material, and missing expected artifacts.',
+        audience: 'Reviewers, SMEs, content owners, and project leads',
+        desired_outputs: [
+            'source_set_review',
+            'completeness_review',
+            'source_coverage_report',
+            'sme_questions'
+        ],
+        source_mode: 'source_only',
+        assumptions_allowed: false,
+        output_style: 'review_approval_map',
+        node_types: [
+            'source_set',
+            'document',
+            'standard',
+            'requirement',
+            'gap',
+            'duplicate',
+            'stale',
+            'question',
+            'needs_review'
+        ],
+        review_policy: [
+            'mark_uncited_needs_review',
+            'mark_low_confidence_needs_review',
+            'generate_sme_questions'
+        ],
+        expected_artifacts: ['standards or policy', 'SOP or workflow', 'owner or approval record']
     },
     {
         id: 'sop_workflow',
@@ -205,6 +282,7 @@ const DEFAULT_BRIEF = {
     output_style: 'technical_reference_map',
     node_types: DEFAULT_NODE_TYPES,
     review_policy: ['mark_uncited_needs_review'],
+    expected_artifacts: [],
     review_rules: ''
 };
 
@@ -261,7 +339,10 @@ const WorkspaceBriefModal = () => {
             : DEFAULT_BRIEF.node_types,
         review_policy: workspaceBrief?.review_policy?.length
             ? workspaceBrief.review_policy
-            : DEFAULT_BRIEF.review_policy
+            : DEFAULT_BRIEF.review_policy,
+        expected_artifacts: workspaceBrief?.expected_artifacts?.length
+            ? workspaceBrief.expected_artifacts
+            : DEFAULT_BRIEF.expected_artifacts
     });
     const [saved, setSaved] = useState(false);
     const sourceNames = getSourceNames(nodes);
@@ -277,6 +358,7 @@ const WorkspaceBriefModal = () => {
             ...preset,
             preset: preset.id,
             domain_context: current.domain_context,
+            expected_artifacts: preset.expected_artifacts || current.expected_artifacts || [],
             review_rules: current.review_rules
         }));
         setSaved(false);
@@ -376,7 +458,8 @@ const WorkspaceBriefModal = () => {
         review_rules: draft.review_rules.trim(),
         desired_outputs: uniqueValues(draft.desired_outputs || []),
         node_types: uniqueValues(draft.node_types || []),
-        review_policy: uniqueValues(draft.review_policy || [])
+        review_policy: uniqueValues(draft.review_policy || []),
+        expected_artifacts: uniqueValues(draft.expected_artifacts || [])
     });
 
     const saveBrief = () => {
@@ -727,6 +810,27 @@ const WorkspaceBriefModal = () => {
                             </label>
                         ))}
                     </div>
+                </div>
+
+                <div className="input-bar">
+                    <label htmlFor="workspace-brief-expected-artifacts">
+                        Expected source-set artifacts
+                    </label>
+                    <textarea
+                        id="workspace-brief-expected-artifacts"
+                        rows={3}
+                        placeholder="Example: standards or policy, SOP or workflow, owner or approval record"
+                        value={(draft.expected_artifacts || []).join('\n')}
+                        onChange={(event) =>
+                            updateDraft(
+                                'expected_artifacts',
+                                event.target.value
+                                    .split(/[\n,]+/)
+                                    .map((item) => item.trim())
+                                    .filter(Boolean)
+                            )
+                        }
+                    />
                 </div>
 
                 <div className="input-bar">

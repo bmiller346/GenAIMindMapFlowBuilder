@@ -31,7 +31,11 @@ export const sourceRecordFromUpload = (
     { fallbackType = '', fallbackTypeLabel = '', fallbackTitle = '' } = {}
 ) => {
     const flow = parseMindmapJson(data?.mindmap_json);
-    const sourceLibrary = Array.isArray(flow.source_library) ? flow.source_library : [];
+    const sourceLibrary = Array.isArray(flow.source_library)
+        ? flow.source_library
+        : Array.isArray(flow.source_library?.documents)
+          ? flow.source_library.documents
+          : [];
     const inputTitle =
         sourceInput?.name ||
         sourceInput?.title ||
@@ -49,13 +53,21 @@ export const sourceRecordFromUpload = (
     return {
         id:
             fromGraph.id ||
+            fromGraph.document_id ||
+            fromGraph.source_document_id ||
             data?.normalized_document_id ||
             data?.source_document_id ||
             data?.document_id ||
             data?.component_id ||
             inputTitle ||
             nanoid(),
-        title: fromGraph.title || inputTitle || data?.filename || 'Uploaded source',
+        title:
+            fromGraph.title ||
+            fromGraph.filename ||
+            fromGraph.original_filename ||
+            inputTitle ||
+            data?.filename ||
+            'Uploaded source',
         type: sourceType,
         type_label: fromGraph.type_label || fallbackTypeLabel || sourceType.toUpperCase(),
         status: fromGraph.status || 'parsed',
@@ -83,6 +95,8 @@ export const sourceRecordFromUpload = (
               : [],
         segments: Array.isArray(fromGraph.segments)
             ? fromGraph.segments
+            : Array.isArray(fromGraph.source_segments)
+              ? fromGraph.source_segments
             : Array.isArray(data?.source_segments)
               ? data.source_segments
               : [],
@@ -95,14 +109,20 @@ export const sourceRecordFromUpload = (
 };
 
 export const upsertSource = (sources = [], source = {}) => {
+    const normalizedSources = Array.isArray(sources)
+        ? sources
+        : Array.isArray(sources?.documents)
+          ? sources.documents
+          : [];
     if (!source.id) {
-        return sources;
+        return normalizedSources;
     }
-    const existingIndex = sources.findIndex((item) => item.id === source.id);
+    const sourceId = (item = {}) => item.id || item.document_id || item.source_document_id || '';
+    const existingIndex = normalizedSources.findIndex((item) => sourceId(item) === source.id);
     if (existingIndex < 0) {
-        return [...sources, source];
+        return [...normalizedSources, source];
     }
-    return sources.map((item, index) => (index === existingIndex ? { ...item, ...source } : item));
+    return normalizedSources.map((item, index) => (index === existingIndex ? { ...item, ...source } : item));
 };
 
 const hasExistingGraphNode = (nodes = []) =>

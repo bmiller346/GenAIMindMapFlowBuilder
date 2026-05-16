@@ -13,6 +13,7 @@ import TXTSvg from "../assets/text.svg"
 import VIDEOSvg from "../assets/video.svg"
 import YOUTUBESvg from "../assets/youtube.svg"
 import PROMPTSvg from "../assets/prompt.svg"
+import DRAWERSvg from "../assets/drawer.svg";
 import CROSSSvg from "../assets/cross.svg";
 import modalStore from "../stores/modalStore";
 import useStore from "../stores/store";
@@ -25,28 +26,29 @@ const WORKSPACE_SOURCES = [
 ];
 
 const DOCUMENT_SOURCES = [
-	{ img: PDFSvg, content: "Upload PDF", name: "pdf", mode: "Source-traceable", detail: "Extracts chunks and citations." },
-	{ img: DOCXSvg, content: "Upload DOCX", name: "docx", mode: "Source-traceable", detail: "Extracts chunks and citations." },
-	{ img: MDSvg, content: "Upload Markdown", name: "md", mode: "Source-traceable", detail: "Extracts chunks and citations." },
-	{ img: TXTSvg, content: "Upload TXT", name: "txt", mode: "Source-traceable", detail: "Extracts chunks and citations." },
-	{ img: PPTXSvg, content: "Upload PPTX", name: "pptx", mode: "AI intake", detail: "Reviewable draft; no chunk citations." },
-	{ img: HTMLSvg, content: "Upload HTML", name: "html", mode: "AI intake", detail: "Reviewable draft; no chunk citations." },
+	{ img: DRAWERSvg, content: "Review folder / file set", name: "source_set", mode: "Source-set review", detail: "Uploads multiple files with relative paths." },
+	{ img: PDFSvg, content: "Upload PDF", name: "pdf", mode: "Source-traceable", detail: "Extracts cited document sections." },
+	{ img: DOCXSvg, content: "Upload DOCX", name: "docx", mode: "Source-traceable", detail: "Extracts cited document sections." },
+	{ img: MDSvg, content: "Upload Markdown", name: "md", mode: "Source-traceable", detail: "Extracts cited document sections." },
+	{ img: TXTSvg, content: "Upload TXT", name: "txt", mode: "Source-traceable", detail: "Extracts cited document sections." },
+	{ img: PPTXSvg, content: "Upload PPTX", name: "pptx", mode: "AI intake", detail: "Reviewable draft; no section citations." },
+	{ img: HTMLSvg, content: "Upload HTML", name: "html", mode: "AI intake", detail: "Reviewable draft; no section citations." },
 ];
 
 const WEB_SOURCES = [
 	{ img: WEBSvg, content: "Enter URL", name: "web", mode: "AI intake", detail: "Web-derived draft; verify sources." },
-	{ img: YOUTUBESvg, content: "Connect YouTube", name: "youtube", mode: "AI intake", detail: "Reviewable draft; no chunk citations." },
+	{ img: YOUTUBESvg, content: "Connect YouTube", name: "youtube", mode: "AI intake", detail: "Reviewable draft; no section citations." },
 ];
 
 const MEDIA_SOURCES = [
-	{ img: AudioSvg, content: "Select Audio File", name: "audio", mode: "AI intake", detail: "Transcribed draft; no chunk citations." },
-	{ img: IMGSvg, content: "Select Image File", name: "img", mode: "AI intake", detail: "Vision draft; no chunk citations." },
-	{ img: VIDEOSvg, content: "Select Video File", name: "video", mode: "AI intake", detail: "Frame/audio draft; no chunk citations." },
+	{ img: AudioSvg, content: "Select Audio File", name: "audio", mode: "AI intake", detail: "Transcribed draft; no section citations." },
+	{ img: IMGSvg, content: "Select Image File", name: "img", mode: "AI intake", detail: "Vision draft; no section citations." },
+	{ img: VIDEOSvg, content: "Select Video File", name: "video", mode: "AI intake", detail: "Frame/audio draft; no section citations." },
 ];
 
 const DATA_SOURCES = [
-	{ img: CSVSvg, content: "CSV", name: "csv", mode: "Data intake", detail: "Table analysis, not source chunks." },
-	{ img: SQLSvg, content: "Connect SQL", name: "sql", mode: "Data intake", detail: "Query analysis, not source chunks." },
+	{ img: CSVSvg, content: "CSV", name: "csv", mode: "Data intake", detail: "Table analysis, not document citations." },
+	{ img: SQLSvg, content: "Connect SQL", name: "sql", mode: "Data intake", detail: "Query analysis, not document citations." },
 ];
 
 const DataSourceSelect = ({
@@ -109,7 +111,7 @@ const DataSourceSelect = ({
 		{
 			title: "DOCUMENTS",
 			sources: isAskAIContext
-				? DOCUMENT_SOURCES.filter((source) => ["pdf", "docx"].includes(source.name))
+				? DOCUMENT_SOURCES.filter((source) => ["source_set", "pdf", "docx"].includes(source.name))
 				: DOCUMENT_SOURCES
 		},
 		...(isAskAIContext
@@ -185,7 +187,7 @@ const DataSourceSelect = ({
 											{[
 												source.type_label || source.type || "Source",
 												source.status,
-												source.chunk_count ? `${source.chunk_count} chunks` : ""
+												source.chunk_count ? `${source.chunk_count} sections` : ""
 											].filter(Boolean).join(" | ")}
 										</small>
 									</span>
@@ -205,8 +207,8 @@ const DataSourceSelect = ({
 				{group.title === "DOCUMENTS" ? (
 					<p className="data-source-group-note">
 						{isAskAIContext
-							? "Attach a PDF or DOCX to the current Ask AI prompt. The workspace will return to Ask AI after upload."
-							: "PDF, DOCX, Markdown, and TXT are the MVP source-traceable paths. Other inputs create reviewable drafts and should be verified before export."}
+							? "Attach a PDF, DOCX, or source set to the current Ask AI prompt. The workspace will return to Ask AI after upload."
+							: "Use source-set review for folder-like packages. PDF, DOCX, Markdown, and TXT remain source-traceable single-file paths; other inputs create reviewable drafts."}
 					</p>
 				) : null}
 				<div className="data-source-select-container">

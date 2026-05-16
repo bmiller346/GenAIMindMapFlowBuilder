@@ -53,12 +53,13 @@ source refs are returned as preview items, and unmatched source sections are
 flagged as source-only coverage gaps. This is intentionally narrower and more
 auditable than a generic "summarize this document" workflow.
 
-Source-set review is represented as a first-class contract over the currently
-loaded sources. It can inventory files, classify document types, summarize topic
-coverage, flag stale or duplicate material, and list missing expected artifacts
-for folder-review style work. Native filesystem folder upload is not part of the
-current MVP; users add files through existing intake paths and TraceSpace treats
-that loaded collection as the reviewable source set.
+Source-set review is represented as a first-class contract over grouped source
+material. Users can add individual sources or upload a folder/file set; supported
+PDF, DOCX, Markdown, and TXT files keep folder-relative paths, source-set
+metadata, deterministic chunks, and source-library records. TraceSpace can then
+inventory files, classify document types, summarize topic coverage, flag stale
+or duplicate material, and list missing expected artifacts for folder-review
+style work.
 
 ## Repository Layout
 

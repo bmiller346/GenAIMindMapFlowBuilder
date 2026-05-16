@@ -8,6 +8,7 @@ import {
 } from './previewDiffSummary';
 import useActivityStore from '../stores/activityStore';
 import flowStore from '../stores/flowStore';
+import { sourceFirstActionPresets } from '../prompts/promptsModel';
 import {
     createWorkspaceEdge,
     createWorkspaceNode,
@@ -123,6 +124,13 @@ const refFromSourceChunk = (generatedPreview, chunk) => ({
     confidence: 'medium'
 });
 
+const sourceActionPresetsForGraphState = (hasGraphNodes) =>
+    sourceFirstActionPresets.filter((preset) =>
+        hasGraphNodes
+            ? preset.availability === 'graph' || preset.availability === 'always'
+            : preset.availability === 'source_only' || preset.availability === 'always'
+    );
+
 const SourceRepairPreview = ({
     nodes,
     projection,
@@ -183,6 +191,12 @@ const SourceRepairPreview = ({
     const addActivity = useActivityStore((s) => s.addActivity);
     const flowId = flowStore((s) => s.flow_id);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
+    const hasGraphNodes = nodes.some((node) => node?.type !== 'dataSource');
+    const sourceActionPresets = sourceActionPresetsForGraphState(hasGraphNodes);
+    const repairLabel = hasGraphNodes ? 'Source-reference repair' : 'Source-first actions';
+    const repairSummary = hasGraphNodes
+        ? `${previewRows.length} nodes need source repair`
+        : 'Create map, table, task, summary, or connection drafts from source sections';
     const isSourceOnlyMode = applyMode !== 'update_matches';
     const sourceOnlyModeBlocked = isSourceOnlyMode && selectedSourceOnlyChunks.length === 0;
     const sourceOnlyModeMessage =
@@ -447,25 +461,27 @@ const SourceRepairPreview = ({
         <div className="local-source-repair-preview">
             <div className="local-task-preview-header">
                 <div>
-                    <strong>Source-reference repair</strong>
+                    <strong>{repairLabel}</strong>
                     <span>
                     {generatedPreview ? 'AI-generated source artifact' : 'Accepted source coverage'} |{' '}
-                        {previewRows.length} nodes need source repair
+                        {repairSummary}
                     </span>
                 </div>
                 <span className="output-state-pill">
                     {generatedPreview ? 'AI-generated' : 'Accepted workspace'}
                 </span>
-                <button type="button" onClick={acceptRepairs} disabled={sourceOnlyModeBlocked}>
-                    {applyMode === 'update_matches' ? 'Accept selected' : 'Apply mode'}
-                </button>
+                {hasGraphNodes ? (
+                    <button type="button" onClick={acceptRepairs} disabled={sourceOnlyModeBlocked}>
+                        {applyMode === 'update_matches' ? 'Accept selected' : 'Apply mode'}
+                    </button>
+                ) : null}
                 {generatedPreview ? (
                     <button type="button" onClick={rejectGeneratedPreview}>
                         Reject generated
                     </button>
                 ) : null}
             </div>
-            <PreviewDiffSummary changes={diffSummary} />
+            {hasGraphNodes ? <PreviewDiffSummary changes={diffSummary} /> : null}
             {generatedPreview?.warnings?.length ? (
                 <div className="local-preview-warning">
                     {generatedPreview.warnings.map((warning) => (
@@ -473,7 +489,30 @@ const SourceRepairPreview = ({
                     ))}
                 </div>
             ) : null}
-            {generatedPreview?.metadata?.recommended_modes?.length ? (
+            {sourceActionPresets.length ? (
+                <section className="source-only-sections compact" aria-label="Source actions">
+                    <div>
+                        <strong>{hasGraphNodes ? 'Source + workspace actions' : 'Start from source sections'}</strong>
+                        <span>
+                            {hasGraphNodes
+                                ? 'Compare, supplement, or reconcile the current workspace with the selected source.'
+                                : 'Use Ask AI to create reviewable outputs before a map exists.'}
+                        </span>
+                    </div>
+                    <div className="source-only-section-actions">
+                        {sourceActionPresets.map((preset) => (
+                            <button
+                                key={preset.id}
+                                type="button"
+                                onClick={() => onAskAi?.(preset)}
+                            >
+                                {preset.label}
+                            </button>
+                        ))}
+                    </div>
+                </section>
+            ) : null}
+            {hasGraphNodes && generatedPreview?.metadata?.recommended_modes?.length ? (
                 <div className="source-reconcile-modes">
                     <div>
                         <strong>Apply mode</strong>

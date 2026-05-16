@@ -71,6 +71,12 @@ const setRequestData = (component_name, flow_id, data) => {
 				["intake_model", data.intakeModel],
 				["intake_prompt", data.intakePrompt]
 			]), "multipart/form-data"];
+		case "source_set":
+			return [`api/workspaces/${flow_id}/sources/source-set`, createFormData([
+				["flow_id", flow_id],
+				["source_intent", data.sourceIntent],
+				["operation_id", data.operationId]
+			]), "multipart/form-data"];
 		case "pptx":
 			return ["component-create-pptx", createFormData([
 				["file", data.file],

@@ -63,6 +63,7 @@ const VISUAL_OPTIONS = [
     { id: 'chart', label: 'Chart' },
     { id: 'kanban', label: 'Kanban' },
     { id: 'sme_questions', label: 'SME Questions' },
+    { id: 'software_overlap_report', label: 'Software Overlap' },
     { id: 'implementation_handoff_package', label: 'Handoff' },
     { id: 'no_visual', label: 'No visual' }
 ];
@@ -81,6 +82,7 @@ const OUTPUT_SHAPE_VIEW = {
     review_annotations: 'gaps',
     sme_questions: 'sme',
     source_coverage: 'sources',
+    software_overlap_report: 'gaps',
     implementation_handoff_package: 'preview',
     no_visual: 'mindmap'
 };
@@ -96,6 +98,7 @@ const OUTPUT_SHAPE_ROUTE = {
     kanban: { roleId: 'task-planner', actionId: 'generate_tasks' },
     sme_questions: { roleId: 'sme-question-generator', actionId: 'create_sme_questions' },
     source_coverage: { roleId: 'source-ref-repair', actionId: 'find_missing_source_support' },
+    software_overlap_report: { roleId: 'enterprise-tool-rationalization', actionId: 'find_duplicate_tools' },
     implementation_handoff_package: { roleId: 'integration-readiness-reviewer', actionId: 'custom_prompt' },
     review_annotations: { roleId: 'gap-analyst', actionId: 'find_gaps' },
     no_visual: { roleId: 'custom', actionId: 'custom_prompt' },
@@ -105,6 +108,13 @@ const OUTPUT_SHAPE_ROUTE = {
 
 const inferOutputShape = (prompt, actionId = '') => {
     const text = `${prompt || ''} ${actionId || ''}`.toLowerCase();
+    if (
+        actionId === 'find_duplicate_tools' ||
+        /\b(software|tool|application|app|system)s?\b.*\b(overlap|duplicate|rationali[sz]ation|redundant)\b/.test(text) ||
+        /\b(overlap|duplicate|rationali[sz]ation|redundant)\b.*\b(software|tool|application|app|system)s?\b/.test(text)
+    ) {
+        return 'software_overlap_report';
+    }
     if (/\b(kanban|board|columns)\b/.test(text)) {
         return 'kanban';
     }
@@ -153,6 +163,19 @@ const inferOutputShape = (prompt, actionId = '') => {
 
 const viewForOutputShape = (shape, actionId) =>
     OUTPUT_SHAPE_VIEW[shape] || viewForAction(actionId || 'custom_prompt');
+
+const MAP_REVIEW_SCOPES = new Set(['workspace', 'source', 'nodes']);
+const MAP_CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph']);
+
+const viewForDraftReview = ({ scopeType, requestedView, activeCanvasView }) => {
+    if (!MAP_REVIEW_SCOPES.has(scopeType)) {
+        return requestedView;
+    }
+    if (MAP_CANVAS_VIEWS.has(requestedView)) {
+        return requestedView;
+    }
+    return MAP_CANVAS_VIEWS.has(activeCanvasView) ? activeCanvasView : 'mindmap';
+};
 
 const shapeFromSession = (session, fallbackShape) => {
     const latestRevision = Array.isArray(session?.revisions) ? session.revisions.at(-1) : undefined;
@@ -814,6 +837,7 @@ const PromptModal = ({
         edges: state.edges,
         setNodes: state.setNodes,
         setEdges: state.setEdges,
+        activeCanvasView: state.activeCanvasView,
         setActiveView: state.setActiveView,
         setSelectedBranchId: state.setSelectedBranchId,
         setGeneratedHelperPreview: state.setGeneratedHelperPreview,
@@ -831,6 +855,7 @@ const PromptModal = ({
         edges,
         setNodes,
         setEdges,
+        activeCanvasView,
         setActiveView,
         setSelectedBranchId,
         setGeneratedHelperPreview,
@@ -1288,7 +1313,14 @@ const PromptModal = ({
             }
             recordDraftSessionRun({ session: nextSession, status: 'previewed' });
             const resolvedShape = shapeFromSession(nextSession, inferredShape);
-            setActiveView(viewForOutputShape(resolvedShape, effectiveAction.id));
+            const requestedView = viewForOutputShape(resolvedShape, effectiveAction.id);
+            setActiveView(
+                viewForDraftReview({
+                    scopeType: normalizedScope.type,
+                    requestedView,
+                    activeCanvasView
+                })
+            );
             recordActivity({
                 type: 'ai_preview_requested',
                 title: `${effectiveRole.label}: ${effectiveAction.label}`,

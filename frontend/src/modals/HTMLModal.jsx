@@ -25,8 +25,10 @@ import {
 } from '../utils/sourceOperationActivity';
 import {
     sourceRecordFromUpload,
+    uploadHasGraphDraft,
     stageUploadedSourceReconciliationPreview
 } from '../utils/sourceReconciliationPreview';
+import { handleGeneratedSourceGraph } from '../utils/generatedSourceGraph';
 
 const HTMLModal = () => {
     const selector = (state) => ({
@@ -136,7 +138,7 @@ const HTMLModal = () => {
     };
 
     const setupNodes = (data) => {
-        if (data.flow_type === 'automatic') {
+        if (uploadHasGraphDraft(data) || data.flow_type === 'automatic') {
             manageAutomaticNode(data);
         } else {
             manageNodes(data);
@@ -148,45 +150,18 @@ const HTMLModal = () => {
     };
 
     const setupFlow = (data) => {
-        console.log('SETUUUUUUUUUUUUUUUUUUP new flow');
-        setFlowId(data.flow_id);
-        console.log('DEDEDE', data);
-        setFlowName(data.flow_name);
-        const jsonString = JSON.stringify(data.mindmap_json);
-        console.log(jsonString, 'JSON STRINGGGGGGGGGGGGGG');
-        if (jsonString.length > 0) {
-            const flow = JSON.parse(jsonString);
-            console.log('NODEEEEEEEEEE', flow.nodes);
-            if (flow.nodes.length === 0 && flow.edges.length === 0) {
-                console.log('not clled');
-                setTrigger(!trigger);
-                setViewPort(0, 0, 1);
-                popNode();
-            }
-            if (flow) {
-                const { x = 0, y = 0, zoom = 1.25 } = flow.viewport;
-                setNodes(flow.nodes || []);
-                setEdges(flow.edges || []);
-                setViewPort(x, y, zoom);
-                // fitView();
-                console.log(
-                    'FLow selecteed sadassssssssssssssssssssss',
-                    flow_id,
-                    data.flow_id,
-                    nodes
-                );
-                popNode();
-            } else {
-                console.log('Flow error');
-            }
-        } else {
-            setNodes([]);
-            setEdges([]);
-            // setViewPort({});
+        const handled = handleGeneratedSourceGraph({
+            uploadData: data,
+            sourceInput: file,
+            fallbackType: 'html',
+            fallbackTypeLabel: 'HTML',
+            popNode,
+            fitView
+        });
+        if (!handled) {
             fitView();
             popNode();
         }
-        // setTrigger(!trigger);
     };
 
 

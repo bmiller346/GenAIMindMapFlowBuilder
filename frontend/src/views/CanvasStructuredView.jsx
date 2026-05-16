@@ -4,11 +4,13 @@ import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
 import {
     buildFilteredGraphProjection,
+    getExecutiveOutputProjection,
     getTaskCandidateRows,
     getTaskRows
 } from './graphProjection.js';
 
 const VIEW_LABELS = {
+    executive: 'Executive',
     outline: 'Outline',
     tasks: 'Tasks',
     table: 'Table'
@@ -110,7 +112,7 @@ const EmptyStructuredView = ({ label }) => (
 const EmptyFilteredView = ({ label }) => (
     <div className="canvas-structured-empty inline">
         <strong>No rows match this view</strong>
-        <span>{label} is a live projection of the graph. Clear filters or select a broader branch to see rows.</span>
+        <span>{label} is built from the current workspace. Clear filters or select a broader branch to see rows.</span>
     </div>
 );
 
@@ -127,6 +129,40 @@ const ActiveFilterChips = ({ filters = [] }) => {
         </div>
     );
 };
+
+const ExecutiveList = ({ title, items = [], empty = 'No items projected.' }) => (
+    <section className="canvas-structured-executive-section">
+        <div className="canvas-structured-section-header">
+            <strong>{title}</strong>
+            <span>{items.length}</span>
+        </div>
+        {items.length ? (
+            <div className="canvas-structured-executive-list">
+                {items.map((item) => (
+                    <article key={item.id} className="canvas-structured-executive-item">
+                        <strong>{item.title}</strong>
+                        {item.description ? <p>{item.description}</p> : null}
+                        <small>
+                            {[
+                                item.status,
+                                item.priority ? `priority: ${item.priority}` : '',
+                                item.owner_id ? `owner: ${item.owner_id}` : '',
+                                item.due_date ? `due: ${item.due_date}` : '',
+                                item.source_backed ? 'source-backed' : 'needs review'
+                            ]
+                                .filter(Boolean)
+                                .join(' | ')}
+                        </small>
+                    </article>
+                ))}
+            </div>
+        ) : (
+            <div className="canvas-structured-empty inline">
+                <strong>{empty}</strong>
+            </div>
+        )}
+    </section>
+);
 
 const CanvasStructuredView = ({
     view,
@@ -147,6 +183,10 @@ const CanvasStructuredView = ({
         [activeGraphFilters, edges, nodes, selectedBranchId]
     );
     const taskRows = useMemo(() => getTaskRows(projection), [projection]);
+    const executiveOutput = useMemo(
+        () => getExecutiveOutputProjection(projection, { title: 'Executive Output' }),
+        [projection]
+    );
     const potentialTaskRows = useMemo(
         () => getTaskCandidateRows(projection).slice(0, 24),
         [projection]
@@ -306,6 +346,28 @@ const CanvasStructuredView = ({
                 ) : (
                     <EmptyFilteredView label={label} />
                 )
+            ) : null}
+
+            {view === 'executive' ? (
+                <div className="canvas-structured-executive">
+                    <section className="canvas-structured-executive-summary">
+                        <strong>Summary</strong>
+                        <p>{executiveOutput.summary}</p>
+                        <div>
+                            <span>{executiveOutput.metadata.source_backed_node_count} sourced</span>
+                            <span>{executiveOutput.metadata.task_count} actions</span>
+                            <span>{executiveOutput.metadata.needs_review_count} review</span>
+                        </div>
+                    </section>
+                    <ExecutiveList title="Key Findings" items={executiveOutput.key_findings} />
+                    <ExecutiveList title="Recommended Actions" items={executiveOutput.recommended_actions} />
+                    <ExecutiveList title="Risks" items={executiveOutput.risks} />
+                    <ExecutiveList title="Required Decisions" items={executiveOutput.required_decisions} />
+                    <ExecutiveList
+                        title="Source-backed Appendix"
+                        items={executiveOutput.source_backed_appendix}
+                    />
+                </div>
             ) : null}
 
             {view === 'tasks' ? (

@@ -11,6 +11,7 @@ import PPTXSvg from "../assets/pptx.svg"
 import TXTSvg from "../assets/text.svg"
 import VIDEOSvg from "../assets/video.svg"
 import YOUTUBESvg from "../assets/youtube.svg"
+import DRAWERSvg from "../assets/drawer.svg"
 
 const setDataSource = (data) => {
 	switch (data.name) {
@@ -66,6 +67,12 @@ const setDataSource = (data) => {
 			return {
 				img: DOCXSvg,
 				title: "Source",
+				content: data.content
+			}
+		case ("source_set"):
+			return {
+				img: DRAWERSvg,
+				title: "Source set",
 				content: data.content
 			}
 		case ("pptx"):

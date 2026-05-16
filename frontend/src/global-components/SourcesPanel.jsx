@@ -7,12 +7,13 @@ import flowStore from '../stores/flowStore';
 import modalStore from '../stores/modalStore';
 import useStore from '../stores/store';
 import PromptModal from '../modals/PromptModal';
+import { sourceFirstActionPresets } from '../prompts/promptsModel';
 import { buildSourceLibraryProjection } from '../views/graphProjection';
 
 const STATUS_LABELS = {
     uploaded: 'Uploaded',
     parsed: 'Parsed',
-    chunked: 'Chunked',
+    chunked: 'Sections ready',
     'used in graph': 'Used in graph',
     failed: 'Failed',
     'brief only': 'Brief only'
@@ -36,10 +37,13 @@ const sourceStatusLabel = (status) => STATUS_LABELS[status] || status || 'Unknow
 
 const sourceRepairText = (projection, source) => {
     if (!source) {
-        return 'Select a source to inspect coverage and repair options.';
+        return 'Select a source to inspect source sections and AI actions.';
+    }
+    if (projection.total_graph_nodes === 0) {
+        return 'No map exists yet. Start from source sections by creating a mind map, table, tasks, summary, or entity review.';
     }
     if (source.coverage_count === 0) {
-        return 'No graph nodes cite this source yet. Review uncited nodes or attach source refs in node metadata.';
+        return 'No graph nodes cite this source yet. Compare, supplement, or reconcile it with the current workspace.';
     }
     if (projection.incomplete_refs.length > 0) {
         return 'Some citations are missing page, section, quote, or confidence. Use the Source repair preview to apply suggested refs.';
@@ -50,6 +54,18 @@ const sourceRepairText = (projection, source) => {
 
     return 'Coverage looks healthy for the current graph.';
 };
+
+const firstClassification = (projection, sourceId) =>
+    projection.source_set_review?.document_classification?.find(
+        (classification) => classification.source_id === sourceId
+    );
+
+const sourceActionPresetsForGraphState = (hasGraphNodes) =>
+    sourceFirstActionPresets.filter((preset) =>
+        hasGraphNodes
+            ? preset.availability === 'graph' || preset.availability === 'always'
+            : preset.availability === 'source_only' || preset.availability === 'always'
+    );
 
 const FailureList = ({ failures }) => {
     if (failures.length === 0) {
@@ -119,7 +135,7 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
     );
     const aiSources = checkedSources.length > 0 ? checkedSources : selectedSource ? [selectedSource] : [];
 
-    const openAskAIForSources = (sources) => {
+    const openAskAIForSources = (sources, preset = {}) => {
         if (sources.length === 0) {
             return;
         }
@@ -128,12 +144,16 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
             sourceId: sources[0].id,
             source: sources[0],
             sources,
-            initialRoleId: 'source-ref-repair',
-            initialActionId: 'find_missing_source_support'
+            initialRoleId: preset.roleId || 'source-ref-repair',
+            initialActionId: preset.actionId || 'find_missing_source_support',
+            initialPrompt: preset.prompt || '',
+            initialVisual: preset.visual || 'auto'
         });
         recordActivity({
             type: sources.length > 1 ? 'ai_multi_source_draft_requested' : 'ai_source_draft_requested',
-            title: sources.length > 1 ? 'Multi-source Ask AI opened' : 'Source Ask AI opened',
+            title:
+                preset.label ||
+                (sources.length > 1 ? 'Multi-source Ask AI opened' : 'Source Ask AI opened'),
             summary:
                 sources.length > 1
                     ? `Opened Ask AI for ${sources.length} selected sources.`
@@ -141,7 +161,10 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
             source_ids: sources.map((source) => source.id),
             metadata: {
                 scope: sources.length > 1 ? 'bounded_sources' : 'source',
-                source_ids: sources.map((source) => source.id)
+                source_ids: sources.map((source) => source.id),
+                intent: preset.id || '',
+                action: preset.actionId || '',
+                requested_visual: preset.visual || ''
             }
         });
     };
@@ -227,14 +250,18 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
     const citedPercent = projection.total_graph_nodes
         ? Math.round((projection.cited_node_count / projection.total_graph_nodes) * 100)
         : 0;
+    const sourceSetReview = projection.source_set_review || {};
+    const selectedClassification = firstClassification(projection, selectedSource?.id);
+    const hasGraphNodes = projection.total_graph_nodes > 0;
+    const sourceActionPresets = sourceActionPresetsForGraphState(hasGraphNodes);
 
     return (
         <aside className="sources-panel">
             <div className="sources-panel-header">
                 <div>
-                    <p>Sources / Media</p>
+                    <p>Source set / Media</p>
                     <span>
-                        {projection.sources.length} sources | {citedPercent}% cited
+                        {projection.sources.length} loaded sources | {citedPercent}% cited
                     </span>
                 </div>
                 <button type="button" onClick={onClose}>
@@ -246,6 +273,7 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                 <span>{projection.cited_node_count} cited nodes</span>
                 <span>{projection.uncited_nodes.length} uncited</span>
                 <span>{projection.incomplete_refs.length} citation gaps</span>
+                <span>{sourceSetReview.review_flags?.length || 0} set flags</span>
             </div>
 
             <div className="sources-panel-body">
@@ -274,7 +302,7 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                                         );
                                     }}
                                 />
-                                Compare
+                                Select source
                             </label>
                             <button type="button" onClick={() => setSelectedSourceId(source.id)}>
                                 <span>{source.type_label}</span>
@@ -322,19 +350,23 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                                         </dd>
                                     </div>
                                 ) : null}
+                                {selectedClassification ? (
+                                    <div>
+                                        <dt>Classification</dt>
+                                        <dd>{selectedClassification.label}</dd>
+                                    </div>
+                                ) : null}
+                                {selectedSource.path ? (
+                                    <div>
+                                        <dt>Path</dt>
+                                        <dd>{selectedSource.path}</dd>
+                                    </div>
+                                ) : null}
                             </dl>
 
                             <section className="sources-repair-note">
                                 <p>{sourceRepairText(projection, selectedSource)}</p>
                                 {reconcileStatus ? <span>{reconcileStatus}</span> : null}
-                                <button
-                                    type="button"
-                                    onClick={() => openSourceReconciliation(aiSources)}
-                                >
-                                    {aiSources.length > 1
-                                        ? `Reconcile ${aiSources.length} sources`
-                                        : 'Reconcile with workspace'}
-                                </button>
                                 <button
                                     type="button"
                                     onClick={() => openAskAIForSources(aiSources)}
@@ -352,6 +384,33 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                                 >
                                     Open repair preview
                                 </button>
+                            </section>
+
+                            <section className="sources-detail-section">
+                                <div className="sources-section-heading">
+                                    <p>{hasGraphNodes ? 'Source + workspace actions' : 'Source-first actions'}</p>
+                                    <span>
+                                        {hasGraphNodes
+                                            ? 'Compare, supplement, or repair the current map'
+                                            : 'Start from selected source sections'}
+                                    </span>
+                                </div>
+                                <div className="sources-citing-list">
+                                    {sourceActionPresets.map((preset) => (
+                                        <button
+                                            key={preset.id}
+                                            type="button"
+                                            onClick={() =>
+                                                preset.reconciliation
+                                                    ? openSourceReconciliation(aiSources)
+                                                    : openAskAIForSources(aiSources, preset)
+                                            }
+                                        >
+                                            <strong>{preset.label}</strong>
+                                            <span>{preset.description}</span>
+                                        </button>
+                                    ))}
+                                </div>
                             </section>
 
                             <section className="sources-detail-section">
@@ -425,6 +484,33 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                         {node.title}
                     </button>
                 ))}
+            </div>
+
+            <div className="sources-set-review">
+                <div className="sources-section-heading">
+                    <p>Source-set review</p>
+                    <span>
+                        {sourceSetReview.source_set?.native_folder_upload
+                            ? 'Folder source'
+                            : 'Loaded files only'}
+                    </span>
+                </div>
+                <div className="sources-set-review-grid">
+                    <span>{sourceSetReview.file_inventory?.length || 0} inventory rows</span>
+                    <span>{sourceSetReview.topic_coverage?.length || 0} covered topics</span>
+                    <span>{sourceSetReview.stale_sources?.length || 0} stale signals</span>
+                    <span>{sourceSetReview.duplicate_sources?.length || 0} duplicate groups</span>
+                    <span>
+                        {sourceSetReview.missing_expected_artifacts?.length || 0} missing expected
+                    </span>
+                </div>
+                {sourceSetReview.missing_expected_artifacts?.length ? (
+                    <div className="sources-set-review-list">
+                        {sourceSetReview.missing_expected_artifacts.slice(0, 4).map((artifact) => (
+                            <span key={artifact.id}>{artifact.artifact}</span>
+                        ))}
+                    </div>
+                ) : null}
             </div>
 
             <FailureList failures={failedSourceActivities} />

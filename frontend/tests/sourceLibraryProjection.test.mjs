@@ -80,6 +80,97 @@ test('single uploaded source folds normalized citation ids onto that source', ()
     assert.equal(projection.sources[0].coverage_count, 1);
 });
 
+test('backend source library document object is normalized for frontend projection', () => {
+    const backendLibrary = {
+        documents: [
+            {
+                document_id: 'src_backend_doc',
+                component_id: 'component-backend',
+                filename: 'Backend Source.docx',
+                original_filename: 'Backend Source Original.docx',
+                type: 'docx',
+                citation_count: 2,
+                chunks: [
+                    {
+                        id: 'chunk-backend',
+                        document_id: 'src_backend_doc',
+                        snippet: 'Backend chunk text'
+                    }
+                ],
+                source_segments: [{ snippet: 'Backend segment text' }]
+            }
+        ]
+    };
+
+    const projection = buildSourceLibraryProjection([], [], {}, backendLibrary);
+
+    assert.equal(projection.sources.length, 1);
+    assert.equal(projection.sources[0].id, 'src_backend_doc');
+    assert.equal(projection.sources[0].title, 'Backend Source.docx');
+    assert.equal(projection.sources[0].component_id, 'component-backend');
+    assert.equal(projection.sources[0].chunks[0].id, 'chunk-backend');
+    assert.equal(projection.sources[0].segments[0].snippet, 'Backend segment text');
+});
+
+test('source library projection exposes source-set review intelligence', () => {
+    const stalePolicySource = {
+        id: 'component-old-policy',
+        type: 'dataSource',
+        data: {
+            name: 'md',
+            content: 'Old BIM Policy.md',
+            source_document_id: 'src_policy_old',
+            source_document: {
+                id: 'src_policy_old',
+                filename: 'Old-BIM-Policy.md',
+                type: 'md',
+                file_hash: 'policy-hash',
+                path: 'standards/old/Old-BIM-Policy.md'
+            }
+        }
+    };
+    const duplicatePolicySource = {
+        id: 'component-policy-copy',
+        type: 'dataSource',
+        data: {
+            name: 'md',
+            content: 'BIM Policy Copy.md',
+            source_document_id: 'src_policy_copy',
+            source_document: {
+                id: 'src_policy_copy',
+                filename: 'BIM-Policy-Copy.md',
+                type: 'md',
+                file_hash: 'policy-hash'
+            }
+        }
+    };
+    const projection = buildSourceLibraryProjection(
+        [stalePolicySource, duplicatePolicySource, citedNode],
+        [],
+        {
+            configured: true,
+            desired_outputs: ['source_set_review'],
+            expected_artifacts: ['SOP or workflow']
+        }
+    );
+
+    assert.equal(projection.source_set_review.contract_version, '1');
+    assert.equal(projection.source_sets[0].native_folder_upload, false);
+    assert.equal(projection.source_set_review.file_inventory.length, 3);
+    assert.equal(
+        projection.source_set_review.document_classification.find(
+            (entry) => entry.source_id === 'src_policy_old'
+        ).classification,
+        'standards_or_policy'
+    );
+    assert.equal(projection.source_set_review.duplicate_sources.length, 1);
+    assert.equal(projection.source_set_review.stale_sources[0].source_id, 'src_policy_old');
+    assert.deepEqual(
+        projection.source_set_review.missing_expected_artifacts.map((entry) => entry.artifact),
+        ['SOP or workflow', 'source-set review']
+    );
+});
+
 test('projection reports uncited nodes and incomplete refs', () => {
     const uncitedNode = {
         id: 'node-2',

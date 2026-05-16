@@ -16,6 +16,7 @@ export const nodeAiActions = [
     { id: 'convert_to_checklist', label: 'Convert to checklist' },
     { id: 'create_sme_questions', label: 'Create SME questions' },
     { id: 'find_missing_source_support', label: 'Find missing source support' },
+    { id: 'assess_standards_completeness', label: 'Assess standards completeness' },
     { id: 'interpret_table_data', label: 'Interpret table/data' },
     { id: 'generate_tasks', label: 'Generate tasks' },
     { id: 'custom_prompt', label: 'Custom prompt' }
@@ -25,8 +26,19 @@ export const branchAiActions = [
     { id: 'summarize_branch', label: 'Summarize branch' },
     { id: 'reorganize_branch', label: 'Reorganize branch' },
     { id: 'split_branch_into_categories', label: 'Split branch into categories' },
+    { id: 'assess_standards_completeness', label: 'Assess standards completeness' },
+    { id: 'create_team_roadmap', label: 'Create team roadmap' },
+    { id: 'find_process_bottlenecks', label: 'Find process bottlenecks' },
+    { id: 'find_duplicate_tools', label: 'Find software overlap' },
+    { id: 'find_ownership_gaps', label: 'Find ownership gaps' },
+    {
+        id: 'find_unsupported_business_critical_systems',
+        label: 'Find unsupported business-critical systems'
+    },
     { id: 'generate_tasks', label: 'Generate tasks' },
     { id: 'generate_checklist', label: 'Generate checklist' },
+    { id: 'create_30_60_90_day_improvement_plan', label: 'Create 30/60/90 day plan' },
+    { id: 'create_stakeholder_review_package', label: 'Create stakeholder review package' },
     { id: 'generate_training_outline', label: 'Generate training outline' },
     { id: 'export_branch_as_sop_draft', label: 'Export branch as SOP draft' },
     { id: 'find_gaps', label: 'Find gaps' },
@@ -39,6 +51,17 @@ export const workspaceAiActions = [
     { id: 'find_missing_source_support', label: 'Find missing source support' },
     { id: 'find_unsupported_assumptions', label: 'Find unsupported assumptions' },
     { id: 'find_duplicate_overlapping_nodes', label: 'Find duplicate or overlapping nodes' },
+    { id: 'assess_standards_completeness', label: 'Assess standards completeness' },
+    { id: 'create_team_roadmap', label: 'Create team roadmap' },
+    { id: 'find_process_bottlenecks', label: 'Find process bottlenecks' },
+    { id: 'find_duplicate_tools', label: 'Find software overlap' },
+    { id: 'find_ownership_gaps', label: 'Find ownership gaps' },
+    {
+        id: 'find_unsupported_business_critical_systems',
+        label: 'Find unsupported business-critical systems'
+    },
+    { id: 'create_30_60_90_day_improvement_plan', label: 'Create 30/60/90 day plan' },
+    { id: 'create_stakeholder_review_package', label: 'Create stakeholder review package' },
     { id: 'create_sme_questions', label: 'Create SME questions' },
     { id: 'generate_tasks', label: 'Generate tasks' },
     { id: 'generate_checklist', label: 'Generate checklist' },
@@ -49,10 +72,99 @@ export const workspaceAiActions = [
 ];
 
 export const sourceAiActions = [
+    { id: 'generate_child_nodes', label: 'Create mind map' },
+    { id: 'interpret_table_data', label: 'Create table' },
+    { id: 'generate_tasks', label: 'Create tasks' },
+    { id: 'summarize_branch', label: 'Summarize source' },
     { id: 'find_missing_source_support', label: 'Review source coverage' },
-    { id: 'generate_child_nodes', label: 'Draft cited branches' },
+    { id: 'assess_standards_completeness', label: 'Assess standards completeness' },
+    { id: 'create_team_roadmap', label: 'Create team roadmap' },
     { id: 'create_sme_questions', label: 'Create source review questions' },
     { id: 'custom_prompt', label: 'Custom prompt' }
+];
+
+export const sourceFirstActionPresets = [
+    {
+        id: 'source_to_mind_map',
+        label: 'Create mind map',
+        description: 'Build reviewable branches from selected source sections.',
+        prompt: 'Create a source-backed mind map from the selected source sections. Group the main ideas into clear branches, preserve source references, and mark unsupported inferences as needs_review.',
+        visual: 'mind_map',
+        roleId: 'workflow-mapper',
+        actionId: 'generate_child_nodes',
+        availability: 'source_only'
+    },
+    {
+        id: 'source_to_table',
+        label: 'Create table',
+        description: 'Extract structured rows, fields, and caveats.',
+        prompt: 'Create a table from the selected source sections. Normalize the key rows and columns, include source-backed values only, and list caveats or missing fields separately.',
+        visual: 'table',
+        roleId: 'data-table-interpreter',
+        actionId: 'interpret_table_data',
+        availability: 'source_only'
+    },
+    {
+        id: 'source_entities_connections',
+        label: 'Find entities/connections',
+        description: 'Extract people, systems, requirements, relationships, and dependencies.',
+        prompt: 'Find the important entities and connections in the selected source sections. Include relationship types, rationale, confidence, source references, and review flags for inferred links.',
+        visual: 'knowledge_graph',
+        roleId: 'standards-extractor',
+        actionId: 'custom_prompt',
+        availability: 'always'
+    },
+    {
+        id: 'source_to_tasks',
+        label: 'Create tasks',
+        description: 'Turn requirements and decisions into reviewable work items.',
+        prompt: 'Create tasks from the selected source sections. Include task title, acceptance criteria, owner to assign, dependencies, due-date cues when present, source references, and needs_review flags for assumptions.',
+        visual: 'tasks',
+        roleId: 'task-planner',
+        actionId: 'generate_tasks',
+        availability: 'source_only'
+    },
+    {
+        id: 'source_summary',
+        label: 'Summarize source',
+        description: 'Summarize the selected sections with evidence and open questions.',
+        prompt: 'Summarize the selected source sections. Include the key points, decisions, risks, named entities, source-backed facts, and follow-up questions.',
+        visual: 'outline',
+        roleId: 'research-assistant',
+        actionId: 'summarize_branch',
+        availability: 'always'
+    },
+    {
+        id: 'source_compare_workspace',
+        label: 'Compare to workspace',
+        description: 'Compare selected source sections with the current workspace graph.',
+        prompt: 'Compare the selected source sections to the current workspace. Identify matching content, source-only sections, contradictions, weak citations, and suggested updates or additions.',
+        visual: 'source_coverage',
+        roleId: 'source-ref-repair',
+        actionId: 'find_missing_source_support',
+        availability: 'graph'
+    },
+    {
+        id: 'source_supplement_workspace',
+        label: 'Supplement workspace',
+        description: 'Add source-backed candidate branches without replacing current work.',
+        prompt: 'Supplement the current workspace with source-backed additions from the selected source sections. Preserve existing graph structure, add only well-supported candidates, and mark assumptions as needs_review.',
+        visual: 'mind_map',
+        roleId: 'workflow-mapper',
+        actionId: 'generate_child_nodes',
+        availability: 'graph'
+    },
+    {
+        id: 'source_reconcile_workspace',
+        label: 'Reconcile source',
+        description: 'Find citation repairs and source-only sections for review.',
+        prompt: 'Reconcile the selected source sections with the current workspace graph. Match source-backed content to existing nodes, identify source-only sections, flag conflicts, and propose citation repairs.',
+        visual: 'source_coverage',
+        roleId: 'source-ref-repair',
+        actionId: 'find_missing_source_support',
+        availability: 'graph',
+        reconciliation: true
+    }
 ];
 
 export const starterTransformations = [
@@ -175,6 +287,106 @@ export const starterTransformations = [
         roleId: 'standards-extractor',
         actionId: 'custom_prompt',
         scopes: ['branch', 'workspace', 'source']
+    },
+    {
+        id: 'standards_completeness_review',
+        label: 'Standards completeness',
+        description: 'Check a folder or source set for missing standards and weak coverage.',
+        prompt: 'Review these standards files for completeness. Identify expected sections, documented items, missing or stale guidance, contradictions, weak source coverage, ownership gaps, and SME questions. For Revit or BIM standards, include templates, families, parameters, views, sheets, worksharing, naming, QA/QC, content ownership, and training/support coverage when relevant.',
+        visual: 'missing_info_report',
+        roleId: 'standards-completeness-reviewer',
+        actionId: 'assess_standards_completeness',
+        scopes: ['node', 'branch', 'workspace', 'source']
+    },
+    {
+        id: 'complex_issue_team_roadmap',
+        label: 'Issue to roadmap',
+        description: 'Turn dense source context into a team-facing roadmap.',
+        prompt: 'Turn this complex issue into a roadmap my team can understand. Include plain-language context, workstreams, decisions needed, dependencies, risks, milestones, owners to assign, source-backed facts, assumptions, and a 30/60/90 style next-step plan.',
+        visual: 'outline',
+        roleId: 'roadmap-planner',
+        actionId: 'create_team_roadmap',
+        scopes: ['branch', 'workspace', 'source']
+    },
+    {
+        id: 'reconcile_source_with_workspace',
+        label: 'Reconcile source',
+        description: 'Compare uploaded source material against the current graph.',
+        prompt: 'Reconcile the selected source material with the current workspace graph. Match source-backed content to existing nodes, identify source-only sections to add, flag generated assumptions that conflict with the source, suggest citation repairs, and separate recommendations into update matching nodes, supplement graph, replace branch, or keep both for comparison.',
+        visual: 'source_coverage',
+        roleId: 'source-ref-repair',
+        actionId: 'find_missing_source_support',
+        scopes: ['workspace', 'source']
+    },
+    {
+        id: 'specialize_branch',
+        label: 'Specialize branch',
+        description: 'Make a node or branch specific to a domain or audience.',
+        prompt: 'Specialize this selected node or branch for the requested domain. Preserve the useful existing structure, rewrite generic nodes into domain-specific claims, add missing domain-specific child nodes, keep source-backed content intact, and mark new assumptions as needs_review.',
+        visual: 'mind_map',
+        roleId: 'workflow-mapper',
+        actionId: 'custom_prompt',
+        scopes: ['node', 'branch']
+    },
+    {
+        id: 'find_process_bottlenecks',
+        label: 'Process bottlenecks',
+        description: 'Surface delays, rework loops, queues, and handoff friction.',
+        prompt: 'Find process bottlenecks in this enterprise workflow. Identify the impacted step or team, symptom, likely cause, owner or decision needed, source support, and priority for review.',
+        visual: 'review_annotations',
+        roleId: 'enterprise-process-analyst',
+        actionId: 'find_process_bottlenecks',
+        scopes: ['branch', 'workspace']
+    },
+    {
+        id: 'find_duplicate_tools',
+        label: 'Software overlap',
+        description: 'Compare overlapping applications, systems, capabilities, licensing, and ownership.',
+        prompt: 'Create a software overlap and rationalization report for this workspace. Compare applications by category, business function, supported workflows, user groups, owners, approval/security status, integrations, license type, usage or ServiceDesk signals, replacement/retired status, source support, confidence, assumptions, and recommended owner review. Use "potential overlap" language unless the evidence proves a duplicate.',
+        visual: 'software_overlap_report',
+        roleId: 'enterprise-tool-rationalization',
+        actionId: 'find_duplicate_tools',
+        scopes: ['branch', 'workspace']
+    },
+    {
+        id: 'find_ownership_gaps',
+        label: 'Ownership gaps',
+        description: 'Find unowned systems, decisions, tasks, and review loops.',
+        prompt: 'Find ownership gaps across this enterprise context. Flag systems, processes, decisions, and tasks with unclear accountable owners, missing backup owners, weak review cadence, or unresolved escalation path.',
+        visual: 'review_annotations',
+        roleId: 'enterprise-process-analyst',
+        actionId: 'find_ownership_gaps',
+        scopes: ['branch', 'workspace']
+    },
+    {
+        id: 'find_unsupported_business_critical_systems',
+        label: 'Unsupported critical systems',
+        description: 'Find critical systems with weak evidence, ownership, or support.',
+        prompt: 'Find unsupported business-critical systems. Identify criticality rationale, missing source evidence, owner gaps, support or recovery gaps, integration dependencies, user impact, and review priority.',
+        visual: 'source_coverage',
+        roleId: 'enterprise-tool-rationalization',
+        actionId: 'find_unsupported_business_critical_systems',
+        scopes: ['branch', 'workspace']
+    },
+    {
+        id: 'create_30_60_90_day_improvement_plan',
+        label: '30/60/90 plan',
+        description: 'Turn findings into phased enterprise improvement work.',
+        prompt: 'Create a 30/60/90 day improvement plan from this enterprise readiness context. Include phased outcomes, owners to assign, dependencies, evidence gaps, quick wins, governance checkpoints, and measurable success criteria.',
+        visual: 'tasks',
+        roleId: 'enterprise-readiness-planner',
+        actionId: 'create_30_60_90_day_improvement_plan',
+        scopes: ['branch', 'workspace']
+    },
+    {
+        id: 'create_stakeholder_review_package',
+        label: 'Stakeholder package',
+        description: 'Package findings, decisions, risks, and review asks.',
+        prompt: 'Create a stakeholder review package for enterprise readiness. Include executive summary, key findings, risks, decisions needed, owner asks, evidence gaps, proposed agenda, and follow-up actions.',
+        visual: 'presentation_sections',
+        roleId: 'enterprise-readiness-planner',
+        actionId: 'create_stakeholder_review_package',
+        scopes: ['branch', 'workspace']
     }
 ];
 
@@ -189,12 +401,43 @@ export const TraceSpacePromptProfiles = [
             'expand_this_node',
             'generate_child_nodes',
             'find_missing_source_support',
+            'assess_standards_completeness',
             'summarize_branch',
             'find_gaps',
             'find_unsupported_assumptions',
             'custom_prompt'
         ],
-        preferredActions: ['expand_this_node', 'generate_child_nodes', 'find_missing_source_support']
+        preferredActions: ['assess_standards_completeness', 'expand_this_node', 'find_missing_source_support']
+    },
+    {
+        id: 'standards-completeness-reviewer',
+        label: 'Standards Completeness Reviewer',
+        group: 'TraceSpace',
+        description: 'Check grouped standards or technical files for missing, weak, stale, or contradictory guidance.',
+        scopes: ['node', 'branch', 'workspace', 'source'],
+        supportedActions: [
+            'assess_standards_completeness',
+            'find_missing_source_support',
+            'find_gaps',
+            'create_sme_questions',
+            'custom_prompt'
+        ],
+        preferredActions: ['assess_standards_completeness', 'find_missing_source_support']
+    },
+    {
+        id: 'roadmap-planner',
+        label: 'Roadmap Planner',
+        group: 'TraceSpace',
+        description: 'Turn complex source material into a team-facing roadmap, milestones, and decision path.',
+        scopes: ['branch', 'workspace', 'source'],
+        supportedActions: [
+            'create_team_roadmap',
+            'generate_tasks',
+            'generate_checklist',
+            'create_sme_questions',
+            'custom_prompt'
+        ],
+        preferredActions: ['create_team_roadmap', 'generate_tasks']
     },
     {
         id: 'workflow-mapper',
@@ -247,7 +490,7 @@ export const TraceSpacePromptProfiles = [
         label: 'Task Planner',
         group: 'TraceSpace',
         description: 'Convert map structure into accountable tasks and checklists.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: [
             'generate_tasks',
             'convert_to_checklist',
@@ -261,7 +504,7 @@ export const TraceSpacePromptProfiles = [
         label: 'Data/Table Interpreter',
         group: 'TraceSpace',
         description: 'Explain table-like node data and surface useful rows, fields, or anomalies.',
-        scopes: ['node', 'branch', 'workspace'],
+        scopes: ['node', 'branch', 'workspace', 'source'],
         supportedActions: ['interpret_table_data', 'generate_tasks', 'custom_prompt'],
         preferredActions: ['interpret_table_data', 'generate_child_nodes']
     },
@@ -289,9 +532,61 @@ export const TraceSpacePromptProfiles = [
         supportedActions: [
             'find_missing_source_support',
             'find_unsupported_assumptions',
+            'generate_child_nodes',
             'custom_prompt'
         ],
         preferredActions: ['find_missing_source_support', 'find_unsupported_assumptions']
+    },
+    {
+        id: 'enterprise-process-analyst',
+        label: 'Enterprise Process Analyst',
+        group: 'TraceSpace Enterprise',
+        description: 'Find process bottlenecks, handoff friction, and ownership gaps.',
+        scopes: ['branch', 'workspace'],
+        supportedActions: [
+            'find_process_bottlenecks',
+            'find_ownership_gaps',
+            'find_gaps',
+            'create_sme_questions',
+            'custom_prompt'
+        ],
+        preferredActions: ['find_process_bottlenecks', 'find_ownership_gaps']
+    },
+    {
+        id: 'enterprise-tool-rationalization',
+        label: 'Enterprise Tool Rationalization',
+        group: 'TraceSpace Enterprise',
+        description: 'Find software overlap, rationalization candidates, and unsupported business-critical systems.',
+        scopes: ['branch', 'workspace'],
+        supportedActions: [
+            'find_duplicate_tools',
+            'find_unsupported_business_critical_systems',
+            'find_missing_source_support',
+            'find_gaps',
+            'custom_prompt'
+        ],
+        preferredActions: [
+            'find_duplicate_tools',
+            'find_unsupported_business_critical_systems'
+        ]
+    },
+    {
+        id: 'enterprise-readiness-planner',
+        label: 'Enterprise Readiness Planner',
+        group: 'TraceSpace Enterprise',
+        description: 'Create phased improvement plans and stakeholder review packages.',
+        scopes: ['branch', 'workspace'],
+        supportedActions: [
+            'create_30_60_90_day_improvement_plan',
+            'create_stakeholder_review_package',
+            'generate_tasks',
+            'generate_checklist',
+            'custom_prompt'
+        ],
+        preferredActions: [
+            'create_30_60_90_day_improvement_plan',
+            'create_stakeholder_review_package'
+        ]
     },
     {
         id: 'integration-readiness-reviewer',

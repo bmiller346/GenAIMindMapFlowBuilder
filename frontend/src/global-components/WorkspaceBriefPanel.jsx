@@ -18,9 +18,12 @@ const OUTPUT_LABELS = {
     table: 'Table',
     tasks: 'Tasks',
     checklist: 'Checklist',
+    team_roadmap: 'Team roadmap',
     chart_data: 'Chart data',
     sme_questions: 'SME questions',
     missing_info_report: 'Missing info',
+    completeness_review: 'Completeness review',
+    source_set_review: 'Source-set review',
     source_coverage_report: 'Coverage report',
     miro_handoff: 'Miro',
     monday_handoff: 'monday',
@@ -31,6 +34,7 @@ const PRESET_LABELS = {
     autodesk_standards: 'Autodesk Standards',
     revit_building_blocks: 'Revit Building Blocks',
     software_inventory: 'Software Inventory',
+    source_set_review: 'Source Set Review',
     training_guide: 'Training Guide',
     sop_workflow: 'SOP / Workflow',
     custom: 'Custom'
@@ -43,6 +47,7 @@ const hasBriefContent = (brief = {}) =>
             brief.audience?.trim() ||
             brief.domain_context?.trim() ||
             brief.review_rules?.trim() ||
+            brief.expected_artifacts?.length ||
             brief.desired_outputs?.some((output) => output !== 'mind_map')
     );
 

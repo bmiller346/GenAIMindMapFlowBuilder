@@ -9,25 +9,35 @@ import useActivityStore from '../stores/activityStore';
 import {
     AI_DRAFT_ACCEPT_MODES,
     acceptAIDraftSession,
+    acceptModeForChangeIntent,
     buildAIDraftMemoryContext,
     buildAIDraftPreviewDiff,
     buildSelectedSourceDraftPayload,
+    changeIntentFromAIDraftSession,
+    getAIDraftAcceptModeDetail,
     getAIDraftItemBadges,
     getAIDraftModelMetadata,
     inferAIDraftChangeIntent,
     latestAIDraftRevision,
+    normalizeSoftwareOverlapReports,
     rejectAIDraftSession,
     reviseAIDraftSession
 } from '../utils/aiDraftSessions';
 import { buildSourceLibraryProjection } from '../views/graphProjection';
 
 const ACCEPT_MODE_LABELS = {
-    append: 'Append',
-    replace: 'Replace branch',
-    merge: 'Merge matches',
-    selected: 'Selected',
-    cited_only: 'Cited only',
-    notes_only: 'Notes only'
+    append: getAIDraftAcceptModeDetail('append').label,
+    replace: getAIDraftAcceptModeDetail('replace').label,
+    merge: getAIDraftAcceptModeDetail('merge').label,
+    selected: getAIDraftAcceptModeDetail('selected').label,
+    cited_only: getAIDraftAcceptModeDetail('cited_only').label,
+    notes_only: getAIDraftAcceptModeDetail('notes_only').label
+};
+
+const CHANGE_INTENT_LABELS = {
+    update: 'Update existing graph context',
+    supplement: 'Supplement current workspace',
+    compare: 'Compare and keep both'
 };
 
 const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
@@ -221,6 +231,12 @@ const CANVAS_LABELS = {
     table: 'Table'
 };
 
+const MAP_REVIEW_SCOPES = new Set(['workspace', 'source', 'nodes']);
+const MAP_CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph']);
+
+const mapFallbackCanvas = (fallback) =>
+    MAP_CANVAS_VIEWS.has(fallback) ? fallback : 'mindmap';
+
 const canvasForDraft = (session = {}, revision = {}, fallback = 'mindmap') => {
     const metadata = {
         ...(session.metadata || {}),
@@ -232,15 +248,18 @@ const canvasForDraft = (session = {}, revision = {}, fallback = 'mindmap') => {
             session.intent ||
             ''
     ).toLowerCase();
+    const scopeType =
+        typeof session.scope === 'string' ? session.scope : session.scope?.type || '';
+    const keepMapVisible = MAP_REVIEW_SCOPES.has(scopeType);
 
     if (shape.includes('task') || shape.includes('checklist')) {
-        return 'tasks';
+        return keepMapVisible ? mapFallbackCanvas(fallback) : 'tasks';
     }
     if (shape.includes('table') || shape.includes('chart')) {
-        return 'table';
+        return keepMapVisible ? mapFallbackCanvas(fallback) : 'table';
     }
     if (shape.includes('outline')) {
-        return 'outline';
+        return keepMapVisible ? mapFallbackCanvas(fallback) : 'outline';
     }
     if (shape.includes('knowledge')) {
         return 'knowledgeGraph';
@@ -285,6 +304,17 @@ const sourceCoverage = (items = []) => {
         uncited: Math.max(items.length - cited, 0),
         total: items.length
     };
+};
+
+const formatScore = (value) => {
+    if (value === undefined || value === null || value === '') {
+        return 'Not scored';
+    }
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return String(value);
+    }
+    return numeric <= 1 ? `${Math.round(numeric * 100)}%` : `${Math.round(numeric)}`;
 };
 
 const draftNodeId = (node = {}) => node.id || node.node_id || '';
@@ -420,7 +450,9 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
     const recordActivity = useActivityStore((state) => state.recordActivity);
     const { setViewport } = useReactFlow();
     const [prompt, setPrompt] = useState('');
-    const [acceptMode, setAcceptMode] = useState('append');
+    const [acceptMode, setAcceptMode] = useState(() =>
+        acceptModeForChangeIntent(changeIntentFromAIDraftSession(session))
+    );
     const [selectedItemIds, setSelectedItemIds] = useState([]);
     const [message, setMessage] = useState('');
     const [progressMessage, setProgressMessage] = useState('');
@@ -430,8 +462,13 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
     const [sourceToAddId, setSourceToAddId] = useState('');
     const promptRef = useRef(null);
     const revision = useMemo(() => latestAIDraftRevision(session), [session]);
+    const sessionChangeIntent = useMemo(
+        () => changeIntentFromAIDraftSession(session, revision),
+        [revision, session]
+    );
     const items = useMemo(() => extractRevisionItems(revision), [revision]);
     const reviewNotes = useMemo(() => extractRevisionNotes(revision), [revision]);
+    const overlapReports = useMemo(() => normalizeSoftwareOverlapReports(revision), [revision]);
     const coverage = useMemo(() => sourceCoverage(items), [items]);
     const outlinePreview = useMemo(
         () => buildDraftOutlinePreview(revision, session),
@@ -439,6 +476,10 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
     );
     const selectedSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
     const modelMeta = useMemo(() => getAIDraftModelMetadata(session, revision), [revision, session]);
+    const acceptModeDetail = useMemo(
+        () => getAIDraftAcceptModeDetail(acceptMode),
+        [acceptMode]
+    );
     const acceptImpact = useMemo(
         () => {
             const diff = buildAIDraftPreviewDiff(session, {
@@ -473,6 +514,10 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
     useEffect(() => {
         promptRef.current?.focus();
     }, [session?.session_id]);
+
+    useEffect(() => {
+        setAcceptMode(acceptModeForChangeIntent(sessionChangeIntent));
+    }, [revision?.revision_id, session?.session_id, sessionChangeIntent]);
 
     const toggleItem = (itemId) => {
         setSelectedItemIds((current) => {
@@ -609,6 +654,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
 
     const acceptDraft = async (modeOverride) => {
         const mode = modeOverride || acceptMode;
+        const activeAcceptModeDetail = getAIDraftAcceptModeDetail(mode);
         const effectiveSelectedIds = mode === 'selected' ? selectedItemIds : [];
         if (mode === 'selected' && effectiveSelectedIds.length === 0) {
             setMessage('Select at least one draft item before accepting selected changes.');
@@ -622,7 +668,9 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 flowId && session.session_id
                     ? await axios.post(acceptEndpoint({ flowId, sessionId: session.session_id }), {
                           mode,
-                          selected_item_ids: effectiveSelectedIds
+                          selected_item_ids: effectiveSelectedIds,
+                          apply_intent: activeAcceptModeDetail.user_choice,
+                          change_intent: sessionChangeIntent
                       })
                     : null;
             const result = response?.data || {};
@@ -665,7 +713,9 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 metadata: {
                     session_id: session.session_id,
                     revision_id: revision.revision_id,
-                    mode
+                    mode,
+                    apply_intent: activeAcceptModeDetail.user_choice,
+                    change_intent: sessionChangeIntent
                 },
                 status: 'completed'
             });
@@ -917,6 +967,8 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
 
             {renderProjection()}
 
+            {overlapReports.length ? <SoftwareOverlapReports reports={overlapReports} /> : null}
+
             {reviewNotes.length ? (
                 <details className="ai-draft-details">
                     <summary>{reviewNotes.length} review {reviewNotes.length === 1 ? 'note' : 'notes'}</summary>
@@ -980,7 +1032,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                         {isAddingSource ? 'Reconciling' : 'Reconcile source'}
                     </button>
                     <label>
-                        Accept mode
+                        Apply mode
                         <select
                             value={acceptMode}
                             onChange={(event) => setAcceptMode(event.target.value)}
@@ -991,15 +1043,25 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                                 </option>
                             ))}
                         </select>
+                        <small>{acceptModeDetail.help}</small>
                     </label>
                 </div>
             </details>
 
+            <div className="ai-draft-apply-mode" aria-label="Draft apply mode">
+                <span>{CHANGE_INTENT_LABELS[sessionChangeIntent] || 'Supplement current workspace'}</span>
+                <strong>{acceptModeDetail.label}</strong>
+                <p>{acceptModeDetail.help}</p>
+            </div>
+
             <div className="ai-draft-impact" aria-label="Accept impact">
                 <span>After accept</span>
                 <div>
-                    <strong>Structure</strong>
+                    <strong>
+                        {acceptImpact.diff.metadata?.accept_mode_label || acceptModeDetail.label}
+                    </strong>
                     <p>
+                        {acceptImpact.diff.metadata?.accept_mode_help || acceptModeDetail.help}{' '}
                         +{acceptImpact.diff.added_nodes || 0} nodes · +{acceptImpact.diff.added_edges || 0} edges
                         {acceptImpact.diff.updated_nodes
                             ? ` · ~${acceptImpact.diff.updated_nodes} updates`
@@ -1151,3 +1213,59 @@ const DraftBadges = ({ item, compact = false }) => {
         </span>
     );
 };
+
+const SoftwareOverlapReports = ({ reports = [] }) => (
+    <details className="ai-draft-details ai-draft-overlap-review" open>
+        <summary>
+            {reports.reduce((count, report) => count + asArray(report.candidates).length, 0)} potential overlap{' '}
+            {reports.reduce((count, report) => count + asArray(report.candidates).length, 0) === 1
+                ? 'candidate'
+                : 'candidates'}
+        </summary>
+        <div className="ai-draft-overlap-list">
+            {reports.map((report) => (
+                <section key={report.id} className="ai-draft-overlap-report">
+                    <div className="ai-draft-overlap-report-header">
+                        <span>Potential overlap</span>
+                        <strong>{report.title}</strong>
+                        {report.summary ? <p>{report.summary}</p> : null}
+                    </div>
+                    {asArray(report.candidates).map((candidate) => (
+                        <article key={`${report.id}-${candidate.id}`} className="ai-draft-overlap-candidate">
+                            <div className="ai-draft-overlap-title">
+                                <strong>{candidate.title}</strong>
+                                <span>{candidate.reviewState || report.reviewState || 'needs_review'}</span>
+                            </div>
+                            <div className="ai-draft-overlap-metrics">
+                                <span>Score: {formatScore(candidate.score)}</span>
+                                <span>Confidence: {candidate.confidence || 'Not set'}</span>
+                            </div>
+                            {candidate.rationale ? <p>{candidate.rationale}</p> : null}
+                            {candidate.recommendation ? <small>{candidate.recommendation}</small> : null}
+                            {candidate.factors.length ? (
+                                <div className="ai-draft-overlap-chips" aria-label="Overlap scoring factors">
+                                    {candidate.factors.slice(0, 4).map((factor) => (
+                                        <span key={`${candidate.id}-${factor.id}`}>
+                                            {factor.label}
+                                            {factor.value ? `: ${factor.value}` : ''}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : null}
+                            {candidate.evidence.length ? (
+                                <ul className="ai-draft-overlap-evidence">
+                                    {candidate.evidence.slice(0, 3).map((evidence) => (
+                                        <li key={`${candidate.id}-${evidence.id}`}>
+                                            <span>{evidence.label}</span>
+                                            {evidence.source ? <small>{evidence.source}</small> : null}
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : null}
+                        </article>
+                    ))}
+                </section>
+            ))}
+        </div>
+    </details>
+);

@@ -15,6 +15,57 @@ export const AI_DRAFT_ACCEPT_MODES = [
     'notes_only'
 ];
 
+export const AI_DRAFT_ACCEPT_MODE_DETAILS = {
+    append: {
+        label: 'Supplement',
+        help: 'Keep the current workspace visible and add this draft as reviewed supporting content.',
+        user_choice: 'supplement'
+    },
+    replace: {
+        label: 'Replace selected scope',
+        help: 'Replace the scoped branch with this reviewed draft after acceptance.',
+        user_choice: 'replace'
+    },
+    merge: {
+        label: 'Update matching',
+        help: 'Update matching nodes and keep existing content that is not touched by the draft.',
+        user_choice: 'update_matching'
+    },
+    selected: {
+        label: 'Accept selected',
+        help: 'Apply only the checked draft items and leave the rest as draft-only.',
+        user_choice: 'accept_selected'
+    },
+    cited_only: {
+        label: 'Accept cited only',
+        help: 'Apply only draft items that include source references.',
+        user_choice: 'accept_cited_only'
+    },
+    notes_only: {
+        label: 'Preview only',
+        help: 'Leave the workspace graph unchanged and preserve the draft notes for review.',
+        user_choice: 'preview_only'
+    }
+};
+
+export const acceptModeForChangeIntent = (intent = '', fallback = 'append') => {
+    const normalizedIntent = normalizeAIDraftChangeIntent(intent, 'supplement');
+    if (normalizedIntent === 'update') {
+        return 'merge';
+    }
+    if (normalizedIntent === 'compare') {
+        return 'append';
+    }
+    return AI_DRAFT_ACCEPT_MODES.includes(fallback) ? fallback : 'append';
+};
+
+export const getAIDraftAcceptModeDetail = (mode = 'append') =>
+    AI_DRAFT_ACCEPT_MODE_DETAILS[mode] || {
+        label: firstText(mode, 'Accept draft'),
+        help: 'Review the draft before applying changes.',
+        user_choice: firstText(mode, 'accept')
+    };
+
 const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 const firstText = (...values) =>
     values.find((value) => typeof value === 'string' && value.trim()) || '';
@@ -222,19 +273,39 @@ export const normalizeAIDraftChangeIntent = (intent = '', fallback = 'supplement
         : 'supplement';
 };
 
+export const changeIntentFromAIDraftSession = (session = {}, revision = latestAIDraftRevision(session)) => {
+    const sessionMetadata =
+        session.metadata && typeof session.metadata === 'object' ? session.metadata : {};
+    const revisionMetadata =
+        revision.metadata && typeof revision.metadata === 'object' ? revision.metadata : {};
+    const promptHistory = asArray(session.prompt_history);
+    return normalizeAIDraftChangeIntent(
+        firstText(
+            revisionMetadata.change_intent,
+            sessionMetadata.change_intent,
+            session.change_intent,
+            revision.change_intent
+        ),
+        inferAIDraftChangeIntent(
+            firstText(revision.prompt, promptHistory.at(-1)?.content, session.prompt),
+            'supplement'
+        )
+    );
+};
+
 export const inferAIDraftChangeIntent = (prompt = '', fallback = 'supplement') => {
     const text = String(prompt || '').toLowerCase();
     if (/\b(compare|contrast|versus|vs\.?|difference|differences|tradeoff|trade-off)\b/.test(text)) {
         return 'compare';
+    }
+    if (/\b(add|include|also|expand|extend|more|what about|supplement|another|additional)\b/.test(text)) {
+        return 'supplement';
     }
     if (
         /\b(make|revise|rewrite|update|change|tailor|adapt|speciali[sz]e|refine|convert|turn)\b/.test(text) ||
         /\b(specific to|more specific|instead of|replace|swap)\b/.test(text)
     ) {
         return 'update';
-    }
-    if (/\b(add|include|also|expand|extend|more|what about|supplement|another|additional)\b/.test(text)) {
-        return 'supplement';
     }
     return normalizeAIDraftChangeIntent(fallback);
 };
@@ -272,6 +343,7 @@ export const buildAIDraftMemoryContext = ({
         ...asArray(activeRevision.draft_nodes).flatMap((node) => asArray(node.source_refs)),
         ...asArray(activeRevision.draft_annotations).flatMap((annotation) => asArray(annotation.source_refs))
     ];
+    const sessionSourceRefs = asArray(activeDraftSession?.source_refs);
     const normalizedChangeIntent = normalizeAIDraftChangeIntent(
         changeIntent || inferAIDraftChangeIntent(prompt)
     );
@@ -296,7 +368,8 @@ export const buildAIDraftMemoryContext = ({
             sourceRefs,
             selectedSourcePayload?.source_refs,
             nodeSourceRefs,
-            revisionSourceRefs
+            revisionSourceRefs,
+            sessionSourceRefs
         ),
         source_context: selectedSourcePayload?.metadata || null,
         prior_draft_session: activeDraftSession?.session_id
@@ -483,6 +556,7 @@ export const buildAIDraftSessionRequestPayload = ({
 export const normalizeAIDraftItem = (item = {}) => {
     const title = firstText(item.title, item.label, 'AI draft item');
     return {
+        ...item,
         id: firstText(item.id, item.node_id, `draft_item_${nanoid(8)}`),
         item_type: firstText(item.item_type, item.type, 'note'),
         title,
@@ -493,6 +567,178 @@ export const normalizeAIDraftItem = (item = {}) => {
         selected: item.selected !== false,
         metadata: item.metadata && typeof item.metadata === 'object' ? { ...item.metadata } : {}
     };
+};
+
+const softwareOverlapArtifactTypes = new Set([
+    'software_overlap_report',
+    'software_overlap_candidate',
+    'overlap_candidate',
+    'tool_overlap',
+    'duplicate_tool',
+    'software_rationalization'
+]);
+
+const normalizeSoftwareFactor = (factor = {}, index = 0) => {
+    if (typeof factor === 'string') {
+        return {
+            id: `factor-${index + 1}`,
+            label: factor,
+            value: ''
+        };
+    }
+    return {
+        id: firstText(factor.id, factor.key, factor.name, `factor-${index + 1}`),
+        label: firstText(factor.label, factor.name, factor.key, factor.factor, `Factor ${index + 1}`),
+        value: firstText(factor.value, factor.score, factor.weight, factor.detail, factor.summary)
+    };
+};
+
+const normalizeSoftwareEvidence = (evidence = {}, index = 0) => {
+    if (typeof evidence === 'string') {
+        return {
+            id: `evidence-${index + 1}`,
+            label: evidence,
+            source: ''
+        };
+    }
+    return {
+        id: firstText(evidence.id, evidence.source_id, evidence.document_id, `evidence-${index + 1}`),
+        label: firstText(
+            evidence.label,
+            evidence.quote_snippet,
+            evidence.snippet,
+            evidence.text,
+            evidence.summary,
+            evidence.title,
+            `Evidence ${index + 1}`
+        ),
+        source: [
+            firstText(evidence.document_id, evidence.source_id, evidence.source),
+            evidence.page ? `p. ${evidence.page}` : '',
+            firstText(evidence.section)
+        ]
+            .filter(Boolean)
+            .join(' | ')
+    };
+};
+
+const collectSoftwareOverlapCandidates = (artifact = {}) =>
+    [
+        artifact.candidates,
+        artifact.overlap_candidates,
+        artifact.software_overlap_candidates,
+        artifact.items,
+        artifact.findings,
+        artifact.matches,
+        artifact.metadata?.candidates,
+        artifact.metadata?.overlap_candidates,
+        artifact.metadata?.software_overlap_candidates
+    ].find((value) => Array.isArray(value) && value.length) || [];
+
+const artifactType = (item = {}) =>
+    firstText(
+        item.artifact_type,
+        item.candidate_type,
+        item.item_type,
+        item.type,
+        item.metadata?.artifact_type,
+        item.metadata?.candidate_type,
+        item.metadata?.type
+    ).toLowerCase();
+
+const isSoftwareOverlapArtifact = (item = {}) => {
+    const type = artifactType(item);
+    const title = firstText(item.title, item.label).toLowerCase();
+    return (
+        softwareOverlapArtifactTypes.has(type) ||
+        type.includes('software_overlap') ||
+        type.includes('tool_overlap') ||
+        (type.includes('overlap') && /\b(software|tool|application|app|system)\b/.test(title))
+    );
+};
+
+const normalizeSoftwareOverlapCandidate = (candidate = {}, index = 0) => {
+    const metadata = candidate.metadata && typeof candidate.metadata === 'object' ? candidate.metadata : {};
+    const applications = [
+        ...asArray(candidate.applications),
+        ...asArray(candidate.tools),
+        ...asArray(candidate.systems),
+        candidate.source_application,
+        candidate.target_application,
+        candidate.source_tool,
+        candidate.target_tool
+    ]
+        .map((value) =>
+            typeof value === 'string'
+                ? value
+                : firstText(value?.name, value?.title, value?.label, value?.id)
+        )
+        .filter(Boolean);
+    const evidence = [
+        ...asArray(candidate.evidence),
+        ...asArray(candidate.evidence_refs),
+        ...asArray(candidate.source_refs),
+        ...asArray(metadata.evidence)
+    ].map(normalizeSoftwareEvidence);
+    const factors = [
+        ...asArray(candidate.factors),
+        ...asArray(candidate.scoring_factors),
+        ...asArray(metadata.factors)
+    ].map(normalizeSoftwareFactor);
+
+    return {
+        id: firstText(candidate.id, candidate.candidate_id, `software-overlap-${index + 1}`),
+        title: firstText(candidate.title, candidate.label, applications.join(' / '), `Potential overlap ${index + 1}`),
+        applications,
+        score: candidate.score ?? candidate.overlap_score ?? candidate.similarity_score ?? metadata.score ?? '',
+        confidence: firstText(candidate.confidence, metadata.confidence),
+        reviewState: firstText(
+            candidate.review_state,
+            candidate.review_status,
+            candidate.status,
+            metadata.review_state,
+            'needs_review'
+        ),
+        recommendation: firstText(
+            candidate.recommendation,
+            candidate.recommended_action,
+            candidate.owner_review,
+            metadata.recommendation
+        ),
+        rationale: firstText(candidate.rationale, candidate.reason, candidate.summary, candidate.content),
+        factors,
+        evidence
+    };
+};
+
+export const normalizeSoftwareOverlapReports = (revision = {}) => {
+    const artifacts = [
+        ...asArray(revision.generated_artifacts),
+        ...asArray(revision.artifacts),
+        ...asArray(revision.draft_items),
+        ...asArray(revision.draft_annotations)
+    ].filter(isSoftwareOverlapArtifact);
+
+    return artifacts.map((artifact, artifactIndex) => {
+        const candidates = collectSoftwareOverlapCandidates(artifact);
+        const fallbackCandidate =
+            candidates.length === 0 && isSoftwareOverlapArtifact(artifact)
+                ? [artifact]
+                : candidates;
+        return {
+            id: firstText(artifact.id, artifact.artifact_id, `software-overlap-report-${artifactIndex + 1}`),
+            title: firstText(artifact.title, artifact.label, 'Software overlap report'),
+            summary: firstText(artifact.summary, artifact.content, artifact.body, artifact.description),
+            reviewState: firstText(
+                artifact.review_state,
+                artifact.review_status,
+                artifact.status,
+                artifact.metadata?.review_state,
+                'needs_review'
+            ),
+            candidates: fallbackCandidate.map(normalizeSoftwareOverlapCandidate)
+        };
+    });
 };
 
 export const normalizeAIDraftNode = (node = {}) => ({
@@ -609,7 +855,8 @@ export const createAIDraftSession = ({
         draftAnnotations,
         revisionId,
         createdAt,
-        model: selectedModel
+        model: selectedModel,
+        metadata
     });
     return {
         session_id: sessionId,
@@ -773,6 +1020,9 @@ export const getAIDraftItemBadges = (item = {}) => {
     if (metadata.duplicate === true || metadata.duplicate_of || type.includes('duplicate')) {
         badges.push({ id: 'duplicate', label: 'Duplicate', tone: 'caution' });
     }
+    if (isSoftwareOverlapArtifact(item)) {
+        badges.push({ id: 'potential-overlap', label: 'Potential overlap', tone: 'caution' });
+    }
     if (metadata.conflict === true || metadata.conflicts || type.includes('conflict')) {
         badges.push({ id: 'conflict', label: 'Conflict', tone: 'danger' });
     }
@@ -799,6 +1049,8 @@ export const buildAIDraftPreviewDiff = (
     { mode = 'append', selectedItemIds = [] } = {}
 ) => {
     const revision = latestAIDraftRevision(session);
+    const changeIntent = changeIntentFromAIDraftSession(session, revision);
+    const acceptModeDetail = getAIDraftAcceptModeDetail(mode);
     const nodes = selectedDraftNodes({ revision, mode, selectedItemIds });
     const nodeIds = new Set(nodes.map((node) => node.id));
     const edges =
@@ -820,7 +1072,26 @@ export const buildAIDraftPreviewDiff = (
         needs_review_repairs: needsReviewRepairs,
         accepted_item_ids: asArray(selectedItemIds).length
             ? asArray(selectedItemIds)
-            : nodes.map((node) => node.id)
+            : nodes.map((node) => node.id),
+        metadata: {
+            change_intent: changeIntent,
+            accept_mode: mode,
+            accept_mode_label: acceptModeDetail.label,
+            accept_mode_help: acceptModeDetail.help,
+            user_choice: acceptModeDetail.user_choice,
+            follow_up_semantics: {
+                change_intent: changeIntent,
+                accept_mode: mode,
+                accept_mode_label: acceptModeDetail.label,
+                accept_mode_help: acceptModeDetail.help,
+                user_choice: acceptModeDetail.user_choice,
+                preserves_existing: mode !== 'replace',
+                canonical_graph_mutated: mode !== 'notes_only',
+                selected_only: mode === 'selected',
+                adds_as_alternate: mode === 'append',
+                source_backed_only: mode === 'cited_only'
+            }
+        }
     };
     diff.summary = [
         `+${diff.added_nodes} nodes`,

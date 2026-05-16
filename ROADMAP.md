@@ -621,10 +621,14 @@ but do not gate enterprise graph work on live integration execution.
   file inventory, document classification, topic coverage, stale guidance,
   duplicate materials, and missing expected artifacts are now projected from
   the loaded source set.
-- [ ] Add a standards-completeness intent for source folders and grouped files:
+- [x] Add native folder/file-set intake for source review:
+  supported PDF, DOCX, Markdown, and TXT files preserve relative paths,
+  source-set metadata, source-library records, and `native_folder_upload`
+  status for review projections.
+- [x] Add a standards-completeness intent for source folders and grouped files:
   identify required sections, missing standards, stale guidance, contradictions,
   weak source coverage, unclear ownership, and SME review questions.
-- [ ] Add starter guidance for Revit/BIM standards review, while keeping the
+- [x] Add starter guidance for Revit/BIM standards review, while keeping the
   pattern reusable for other technical standards libraries.
 - [ ] Add source coverage and completeness scoring for standards packs:
   documented, partially documented, missing, conflicting, outdated, and
@@ -632,7 +636,7 @@ but do not gate enterprise graph work on live integration execution.
 
 #### Team Roadmap From Complex Sources
 
-- [ ] Add a complex-issue-to-team-roadmap intent that turns dense source
+- [x] Add a complex-issue-to-team-roadmap intent that turns dense source
   material into a team-facing roadmap with context, decisions, workstreams,
   dependencies, risks, milestones, owners to assign, and source-backed appendix.
 - [ ] Support roadmap outputs as outline, tasks, presentation sections, and
@@ -782,6 +786,8 @@ Positioning:
   public symbol documentation.
 - [x] Include developer-only capability visibility metadata so later UI work can
   keep code intelligence hidden by default.
+- [x] Add server-side capability contract and gated local scan endpoint; scanning
+  requires `DOCMAP_ENABLE_CODE_INTELLIGENCE=true` and an allowlisted repo root.
 
 #### Deterministic Code Graph
 
@@ -852,6 +858,8 @@ Positioning:
 - [ ] Treat frontend hiding as UX only; backend endpoints must still enforce
   read-only scope, repo allowlists, and capability checks before scanning or
   connecting repositories.
+- [x] Enforce backend capability checks and local repo root allowlists for the
+  local-first scanner endpoint.
 
 ## Test Strategy
 

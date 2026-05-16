@@ -26,8 +26,10 @@ import {
 } from '../utils/sourceOperationActivity';
 import {
     sourceRecordFromUpload,
+    uploadHasGraphDraft,
     stageUploadedSourceReconciliationPreview
 } from '../utils/sourceReconciliationPreview';
+import { handleGeneratedSourceGraph } from '../utils/generatedSourceGraph';
 
 const AudioModal = () => {
     const selector = (state) => ({
@@ -59,7 +61,7 @@ const AudioModal = () => {
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const audioAccept = 'audio/*';
-    const { setViewport } = useReactFlow();
+    const { fitView, setViewport } = useReactFlow();
     const addActivity = useActivityStore((s) => s.addActivity);
     const updateActivity = useActivityStore((s) => s.updateActivity);
 
@@ -119,7 +121,7 @@ const AudioModal = () => {
                     context: 'Audio source was added to the workspace.',
                     undo: undoSourceAdd
                 });
-                manageNodes(res.data);
+                setupNodes(res.data);
             })
             .catch((err) => {
                 if (isCanceledRequest(err)) {
@@ -188,6 +190,23 @@ const AudioModal = () => {
 
         setTrigger(!trigger);
         popNode();
+    };
+
+    const setupNodes = (data) => {
+        if (uploadHasGraphDraft(data) || data.flow_type === 'automatic') {
+            const handled = handleGeneratedSourceGraph({
+                uploadData: data,
+                sourceInput: file,
+                fallbackType: 'audio',
+                fallbackTypeLabel: 'Audio',
+                popNode,
+                fitView
+            });
+            if (handled) {
+                return;
+            }
+        }
+        manageNodes(data);
     };
 
     const handleFileUpload = (e) => {

@@ -102,9 +102,13 @@ test('derives a reviewable map from a workspace brief and preserves MVP actions'
     await page.getByRole('button', { name: 'Blank workspace' }).click();
 
     await page.getByText('Add New Source').click();
-    await expect(page.getByText('PDF, DOCX, Markdown, and TXT are the MVP source-traceable paths.')).toBeVisible();
-    await expect(page.getByText('Source-traceable | Extracts chunks and citations.').first()).toBeVisible();
-    await expect(page.getByText('AI intake | Reviewable draft; no chunk citations.').first()).toBeVisible();
+    await expect(
+        page.getByText(
+            'Use source-set review for folder-like packages. PDF, DOCX, Markdown, and TXT remain source-traceable single-file paths; other inputs create reviewable drafts.'
+        )
+    ).toBeVisible();
+    await expect(page.getByText('Source-traceable | Extracts cited document sections.').first()).toBeVisible();
+    await expect(page.getByText('AI intake | Reviewable draft; no section citations.').first()).toBeVisible();
     await page.getByRole('button', { name: 'Close source picker' }).click({ force: true });
 
     await page.getByAltText('Open workspaces').click();
@@ -119,7 +123,8 @@ test('derives a reviewable map from a workspace brief and preserves MVP actions'
 
     await page.getByRole('button', { name: 'Derive from brief' }).click();
     await expect(page.getByText('Workspace Goal')).toBeVisible();
-    await expect(page.getByRole('button', { name: /Graph validation/ })).toBeVisible();
+    await page.getByRole('button', { name: 'Health' }).click();
+    await expect(page.getByRole('button', { name: /Workspace health/ })).toBeVisible();
 
     await expect
         .poll(() => {
@@ -145,8 +150,11 @@ test('derives a reviewable map from a workspace brief and preserves MVP actions'
         })
     ).toBe(true);
 
-    await page.getByRole('button', { name: /Graph validation/ }).click();
-    await page.getByRole('button', { name: 'Inspect' }).first().click();
+    await page.getByRole('button', { name: /Workspace health/ }).click();
+    await page.getByRole('button', { name: 'TraceSpace Map', exact: true }).click();
+    const workspaceGoalNode = page.locator('.node-response').filter({ hasText: 'Workspace Goal' }).first();
+    await workspaceGoalNode.locator('.node-menu-trigger').click();
+    await page.locator('.node-action-menu').getByRole('button', { name: 'Node settings' }).click();
     await expect(
         page.locator('.node-inspector').getByRole('heading', { name: 'Workspace Goal' })
     ).toBeVisible();

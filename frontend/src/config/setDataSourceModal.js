@@ -12,6 +12,7 @@ import HTMLModal from '../modals/HTMLModal.jsx';
 import TextModal from '../modals/TextModal.jsx';
 import VideoModal from '../modals/VideoModal.jsx';
 import WorkspaceBriefModal from '../modals/WorkspaceBriefModal.jsx';
+import SourceSetModal from '../modals/SourceSetModal.jsx';
 
 const setDataSourceModal = (name, pushNode, props = {}) => {
     switch (name) {
@@ -29,6 +30,9 @@ const setDataSourceModal = (name, pushNode, props = {}) => {
             break;
         case 'brief':
             pushNode(WorkspaceBriefModal, props);
+            break;
+        case 'source_set':
+            pushNode(SourceSetModal, props);
             break;
         case 'sql':
             pushNode(SQLModal, props);

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { useReactFlow } from '@xyflow/react';
+import { Panel, useReactFlow } from '@xyflow/react';
 import { useShallow } from 'zustand/shallow';
 import flowStore from '../stores/flowStore';
 import useStore from '../stores/store';
@@ -53,6 +53,8 @@ const SourceDraftReviewPanel = () => {
         setViewPort(viewport.x || 0, viewport.y || 0, viewport.zoom || 1.25);
         if (Array.isArray(draftGraph.source_library)) {
             setSourceLibrary(draftGraph.source_library);
+        } else if (Array.isArray(draftGraph.source_library?.documents)) {
+            setSourceLibrary(draftGraph.source_library.documents);
         }
         setSaveStatus('dirty');
         addActivity({
@@ -85,6 +87,11 @@ const SourceDraftReviewPanel = () => {
     };
 
     return (
+        <Panel
+            position="top-right"
+            className="source-draft-review-panel-shell"
+            style={{ display: 'block' }}
+        >
         <aside className="source-draft-review-panel" aria-label="Source draft review">
             <div className="source-draft-review-panel__header">
                 <div>
@@ -170,6 +177,7 @@ const SourceDraftReviewPanel = () => {
                 </button>
             </div>
         </aside>
+        </Panel>
     );
 };
 

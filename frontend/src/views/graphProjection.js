@@ -7,6 +7,29 @@ const TASK_CAPABLE_TYPES = new Set([
     'needs_review',
     'requirement'
 ]);
+const RISK_TYPES = new Set(['risk', 'blocker', 'issue', 'dependency', 'needs_review']);
+const DECISION_TYPES = new Set(['decision', 'question', 'approval', 'needs_review']);
+export const EXECUTIVE_OUTPUT_CONTRACT_VERSION = '1';
+export const TEAM_ROADMAP_CONTRACT_VERSION = '1';
+
+const WORKSTREAM_TYPES = new Set(['workstream', 'workflow', 'procedure', 'category', 'concept']);
+const MILESTONE_TYPES = new Set(['milestone', 'phase', 'checkpoint', 'release']);
+const DEPENDENCY_NODE_TYPES = new Set(['dependency', 'blocker']);
+const DEPENDENCY_RELATIONSHIP_TYPES = new Set([
+    'depends_on',
+    'dependency',
+    'requires',
+    'blocked_by',
+    'blocks',
+    'prerequisite'
+]);
+
+const ENTERPRISE_ACTION_TYPES = new Set([
+    ...TASK_CAPABLE_TYPES,
+    'risk',
+    'decision',
+    'milestone'
+]);
 
 const acceptedProjection = (projection) =>
     projection && typeof projection === 'object' && projection.accepted
@@ -89,6 +112,13 @@ const normalizeDelimitedValues = (value) => {
     }
     return [];
 };
+
+const normalizeSignal = (value = '') =>
+    String(value || '')
+        .trim()
+        .toLowerCase()
+        .replaceAll('_', '-')
+        .replace(/\s+/g, '-');
 
 const relationshipTypeForEdge = (edge = {}) =>
     edge.relationship_type ||
@@ -194,6 +224,13 @@ export const normalizeGraphNode = (node) => {
         node_type: nodeType,
         status: workspaceData.status || firstValue(node, ['status'], 'ai_generated'),
         priority: workspaceData.priority || firstValue(node, ['priority']),
+        business_impact: firstValue(node, ['business_impact', 'impact', 'value_score']),
+        implementation_effort: firstValue(node, [
+            'implementation_effort',
+            'effort',
+            'complexity'
+        ]),
+        risk_severity: firstValue(node, ['risk_severity', 'severity', 'risk_level']),
         owner_id: workspaceData.ownerId || firstValue(node, ['owner_id', 'assignee', 'owner']),
         due_date: workspaceData.dueDate || firstValue(node, ['due_date']),
         confidence:
@@ -221,6 +258,177 @@ export const normalizeGraphNode = (node) => {
     };
 };
 
+const SCORE_BY_SIGNAL = {
+    critical: 100,
+    urgent: 100,
+    high: 85,
+    medium: 60,
+    moderate: 60,
+    low: 35,
+    minimal: 20,
+    none: 0
+};
+
+const EFFORT_READINESS_BY_SIGNAL = {
+    low: 100,
+    small: 100,
+    medium: 70,
+    moderate: 70,
+    high: 40,
+    large: 40,
+    critical: 25,
+    complex: 25
+};
+
+const scoreFromSignal = (value, fallback = 0) => {
+    const normalized = normalizeSignal(value);
+    if (Object.hasOwn(SCORE_BY_SIGNAL, normalized)) {
+        return SCORE_BY_SIGNAL[normalized];
+    }
+
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+        return Math.max(0, Math.min(100, parsed > 1 ? parsed : parsed * 100));
+    }
+
+    return fallback;
+};
+
+const implementationReadinessScore = (node) => {
+    const explicit = normalizeSignal(node.implementation_effort);
+    if (Object.hasOwn(EFFORT_READINESS_BY_SIGNAL, explicit)) {
+        return EFFORT_READINESS_BY_SIGNAL[explicit];
+    }
+
+    const parsed = Number(node.implementation_effort);
+    if (Number.isFinite(parsed)) {
+        const effortScore = Math.max(0, Math.min(100, parsed > 1 ? parsed : parsed * 100));
+        return 100 - effortScore;
+    }
+
+    if (node.node_type === 'workflow' || node.node_type === 'procedure') {
+        return 60;
+    }
+    if (node.node_type === 'risk') {
+        return 55;
+    }
+    return 72;
+};
+
+const businessImpactScore = (node) => {
+    const explicitScore = scoreFromSignal(node.business_impact, null);
+    if (explicitScore !== null) {
+        return explicitScore;
+    }
+    if (normalizeSignal(node.priority) === 'high') {
+        return 85;
+    }
+    if (normalizeSignal(node.priority) === 'medium') {
+        return 60;
+    }
+    if (normalizeSignal(node.priority) === 'low') {
+        return 35;
+    }
+    if (node.node_type === 'requirement' || node.node_type === 'decision') {
+        return 75;
+    }
+    if (node.node_type === 'task' || node.node_type === 'workflow') {
+        return 65;
+    }
+    if (node.node_type === 'risk') {
+        return 70;
+    }
+    return 50;
+};
+
+const riskSeverityScore = (node) => {
+    const explicitScore = scoreFromSignal(node.risk_severity, null);
+    if (explicitScore !== null) {
+        return explicitScore;
+    }
+    if (node.node_type === 'risk' || node.status === 'needs_review') {
+        return 75;
+    }
+    const confidence = numericConfidence(node.confidence);
+    if (confidence !== null && confidence < 0.6) {
+        return 70;
+    }
+    if (!node.source_refs?.some((ref) => ref?.document_id)) {
+        return 60;
+    }
+    return 35;
+};
+
+const sourceCoverageScore = (node) => {
+    const refs = node.source_refs || [];
+    if (refs.length === 0 || !refs.some((ref) => ref?.document_id)) {
+        return 0;
+    }
+
+    const refScores = refs.map((ref) => {
+        if (!ref?.document_id) {
+            return 0;
+        }
+        let score = 55;
+        if (ref.page || ref.section) {
+            score += 15;
+        }
+        if (ref.quote_snippet) {
+            score += 20;
+        }
+        const confidence = numericConfidence(ref.confidence ?? node.confidence);
+        if (confidence !== null) {
+            score += Math.round(confidence * 10);
+            if (confidence < 0.6) {
+                score -= 18;
+            }
+        }
+        return Math.max(0, Math.min(100, score));
+    });
+
+    return Math.round(refScores.reduce((total, score) => total + score, 0) / refScores.length);
+};
+
+const ownerClarityScore = (node) => {
+    const requiresOwner = ENTERPRISE_ACTION_TYPES.has(node.node_type);
+    if (node.owner_id && node.due_date) {
+        return 100;
+    }
+    if (node.owner_id) {
+        return requiresOwner ? 75 : 90;
+    }
+    if (node.due_date) {
+        return requiresOwner ? 45 : 70;
+    }
+    return requiresOwner ? 15 : 60;
+};
+
+const readinessBand = (score) =>
+    score >= 80 ? 'enterprise_ready' : score >= 60 ? 'watchlist' : 'not_ready';
+
+const enterpriseReasons = (node, scores) => {
+    const reasons = [];
+    if (scores.business_impact >= 80 && scores.owner_clarity < 75) {
+        reasons.push('High-impact item needs clearer ownership');
+    }
+    if (scores.source_coverage < 60) {
+        reasons.push('Weak source coverage');
+    }
+    if (scores.risk_severity >= 75) {
+        reasons.push('High risk severity');
+    }
+    if (scores.implementation_effort < 50) {
+        reasons.push('High implementation effort');
+    }
+    if (scores.owner_clarity < 60) {
+        reasons.push('Owner or due date missing');
+    }
+    if (node.status === 'needs_review' || node.node_type === 'needs_review') {
+        reasons.push('Needs review before handoff');
+    }
+    return reasons;
+};
+
 const SOURCE_TYPE_LABELS = {
     pdf: 'PDF',
     docx: 'DOCX',
@@ -239,7 +447,100 @@ const SOURCE_TYPE_LABELS = {
     brief: 'Brief'
 };
 
+export const SOURCE_SET_INTELLIGENCE_CONTRACT_VERSION = '1';
+
+const DOCUMENT_CLASSIFICATIONS = [
+    {
+        id: 'standards_or_policy',
+        label: 'Standards / policy',
+        keywords: ['standard', 'policy', 'guideline', 'requirement', 'compliance']
+    },
+    {
+        id: 'sop_or_workflow',
+        label: 'SOP / workflow',
+        keywords: ['sop', 'procedure', 'workflow', 'process', 'playbook']
+    },
+    {
+        id: 'inventory_or_register',
+        label: 'Inventory / register',
+        keywords: ['inventory', 'register', 'list', 'catalog', 'matrix']
+    },
+    {
+        id: 'training_or_onboarding',
+        label: 'Training / onboarding',
+        keywords: ['training', 'onboarding', 'guide', 'lesson', 'tutorial']
+    },
+    {
+        id: 'roadmap_or_plan',
+        label: 'Roadmap / plan',
+        keywords: ['roadmap', 'plan', 'milestone', 'schedule', 'timeline']
+    },
+    {
+        id: 'reference_material',
+        label: 'Reference material',
+        keywords: ['reference', 'manual', 'handbook', 'specification', 'spec']
+    }
+];
+
 const sourceTypeLabel = (type = '') => SOURCE_TYPE_LABELS[type] || type || 'Source';
+
+const normalizedText = (value = '') =>
+    String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+
+const stableToken = (value = '') =>
+    normalizedText(value).replace(/\s+/g, '-') || 'item';
+
+const uniqueValues = (values = []) => Array.from(new Set(values.filter(Boolean)));
+
+const classifyDocument = (source = {}) => {
+    const explicit =
+        source.classification ||
+        source.document_classification ||
+        source.metadata?.classification ||
+        source.metadata?.document_classification;
+    if (explicit) {
+        return {
+            id: stableToken(explicit),
+            label: String(explicit),
+            confidence: 'explicit',
+            signals: ['metadata']
+        };
+    }
+
+    const text = normalizedText(
+        [
+            source.title,
+            source.filename,
+            source.original_filename,
+            source.path,
+            source.metadata?.path,
+            source.metadata?.original_filename,
+            source.type
+        ].filter(Boolean).join(' ')
+    );
+    const match = DOCUMENT_CLASSIFICATIONS.find((classification) =>
+        classification.keywords.some((keyword) => text.includes(keyword))
+    );
+
+    if (match) {
+        return {
+            id: match.id,
+            label: match.label,
+            confidence: 'inferred',
+            signals: match.keywords.filter((keyword) => text.includes(keyword))
+        };
+    }
+
+    return {
+        id: 'unclassified',
+        label: 'Unclassified',
+        confidence: 'unknown',
+        signals: []
+    };
+};
 
 const sourceTitle = (data = {}) =>
     data.source_document?.original_filename ||
@@ -267,7 +568,14 @@ const sourceIdFromData = (node) => {
 
 const normalizePersistedSource = (source = {}) => ({
     id: source.id || source.source_document_id || source.document_id || '',
-    title: source.title || source.name || source.filename || 'Untitled source',
+    title:
+        source.title ||
+        source.name ||
+        source.filename ||
+        source.original_filename ||
+        source.id ||
+        source.document_id ||
+        'Untitled source',
     type: source.type || '',
     type_label: source.type_label || sourceTypeLabel(source.type),
     status: source.status || 'uploaded',
@@ -275,11 +583,23 @@ const normalizePersistedSource = (source = {}) => ({
     component_id: source.component_id || '',
     flow_id: source.flow_id || '',
     file_hash: source.file_hash || source.metadata?.file_hash || '',
+    path: source.path || source.relative_path || source.metadata?.path || source.metadata?.relative_path || '',
     size: source.size || source.metadata?.size || 0,
     version: source.version || source.metadata?.version || '',
     metadata: source.metadata || {},
+    classification: source.classification || source.document_classification || '',
+    modified_at:
+        source.modified_at ||
+        source.last_modified_at ||
+        source.metadata?.modified_at ||
+        source.metadata?.last_modified_at ||
+        '',
     chunks: Array.isArray(source.chunks) ? source.chunks : [],
-    segments: Array.isArray(source.segments) ? source.segments : [],
+    segments: Array.isArray(source.segments)
+        ? source.segments
+        : Array.isArray(source.source_segments)
+          ? source.source_segments
+          : [],
     normalized_document_id: source.normalized_document_id || ''
 });
 
@@ -297,9 +617,20 @@ const sourceRecordFromNode = (node) => {
         component_id: data.component_id || node?.id || '',
         flow_id: data.flow_id || '',
         file_hash: data.file_hash || data.source_document?.file_hash || '',
+        path:
+            data.path ||
+            data.relative_path ||
+            data.source_document?.path ||
+            data.source_document?.relative_path ||
+            '',
         size: data.size || data.source_document?.size || data.file?.size || 0,
         version: data.source_document?.version || '',
         metadata: data.source_document || {},
+        classification: data.source_document?.classification || '',
+        modified_at:
+            data.source_document?.modified_at ||
+            data.source_document?.last_modified_at ||
+            '',
         chunks: Array.isArray(data.document_chunks) ? data.document_chunks : [],
         segments: Array.isArray(data.source_segments) ? data.source_segments : []
     });
@@ -326,12 +657,257 @@ const sourceRecordFromRef = (ref) => ({
     node_id: '',
     component_id: '',
     metadata: {},
+    path: '',
     chunks: [],
     segments: []
 });
 
 const sourceLocationLabel = (ref = {}) =>
     [ref.page ? `p. ${ref.page}` : '', ref.section].filter(Boolean).join(' | ');
+
+const COMPLETENESS_REVIEW_CONTRACT_VERSION = '1';
+const STALE_COMPLETENESS_SIGNALS = [
+    'deprecated',
+    'obsolete',
+    'superseded',
+    'retired',
+    'legacy',
+    'archived',
+    'outdated',
+    'old standard'
+];
+const CONFLICT_COMPLETENESS_SIGNALS = [
+    'conflict',
+    'contradict',
+    'duplicate',
+    'overlap',
+    'inconsistent',
+    'superseded'
+];
+const REVIT_BIM_COMPLETENESS_EXPECTATIONS = [
+    'Templates',
+    'Families and content library',
+    'Shared parameters',
+    'Views and view templates',
+    'Sheets and titleblocks',
+    'Worksharing and model coordination',
+    'Naming conventions',
+    'QA/QC review process',
+    'Content ownership',
+    'Training and support'
+];
+const STANDARDS_COMPLETENESS_EXPECTATIONS = [
+    'Governance and ownership',
+    'Naming conventions',
+    'Procedures and workflows',
+    'QA/QC review process',
+    'Exceptions and approvals',
+    'Version and change management',
+    'Training and support'
+];
+const COMPLETENESS_STOPWORDS = new Set(['and', 'or', 'the', 'a', 'an', 'of', 'for', 'to', 'in', 'on']);
+
+const sourceDuplicateKey = (source = {}) =>
+    source.file_hash
+        ? `hash:${source.file_hash}`
+        : `title:${normalizedText(source.title || source.id)}`;
+
+const staleSignalsForSource = (source = {}) => {
+    const text = normalizedText(
+        [
+            source.title,
+            source.path,
+            source.status,
+            source.version,
+            source.metadata?.status,
+            source.metadata?.version
+        ].filter(Boolean).join(' ')
+    );
+    const signals = [];
+
+    if (/\b(old|archive|archived|deprecated|obsolete|superseded|stale)\b/.test(text)) {
+        signals.push('name_or_status_suggests_stale');
+    }
+    if (source.metadata?.superseded_by || source.metadata?.replaced_by) {
+        signals.push('metadata_superseded');
+    }
+
+    return signals;
+};
+
+const expectedArtifactsFromBrief = (workspaceBrief = {}) => {
+    const explicit = Array.isArray(workspaceBrief.expected_artifacts)
+        ? workspaceBrief.expected_artifacts
+        : [];
+    const outputExpectations = {
+        source_coverage_report: ['source coverage report'],
+        completeness_review: ['completeness review'],
+        source_set_review: ['source-set review'],
+        missing_info_report: ['missing information report'],
+        team_roadmap: ['team roadmap'],
+        tasks: ['task list'],
+        checklist: ['checklist']
+    };
+
+    return uniqueValues([
+        ...explicit,
+        ...(workspaceBrief.desired_outputs || []).flatMap(
+            (output) => outputExpectations[output] || []
+        )
+    ]);
+};
+
+const sourceMatchesExpectedArtifact = (source = {}, artifact = '') => {
+    const artifactText = normalizedText(artifact);
+    if (!artifactText) {
+        return true;
+    }
+    const genericTokens = new Set(['source', 'set', 'review', 'report', 'artifact']);
+    const sourceText = normalizedText(
+        [source.title, source.path, source.classification, source.type_label].join(' ')
+    );
+    return artifactText
+        .split(/\s+/)
+        .filter((token) => token.length > 2 && !genericTokens.has(token))
+        .some((token) => sourceText.includes(token));
+};
+
+const topicKeyForNode = (node = {}) =>
+    stableToken(node.node_type && node.node_type !== 'concept' ? node.node_type : node.title);
+
+const topicLabelForNode = (node = {}) =>
+    node.node_type && node.node_type !== 'concept'
+        ? relationshipLabel(node.node_type)
+        : node.title || 'Untitled topic';
+
+const buildSourceSetReview = ({ sources, workspaceBrief = {}, uncitedNodes = [] }) => {
+    const duplicateGroups = Array.from(
+        sources.reduce((groups, source) => {
+            const key = sourceDuplicateKey(source);
+            const group = groups.get(key) || [];
+            group.push(source);
+            groups.set(key, group);
+            return groups;
+        }, new Map())
+    )
+        .map(([key, group]) => ({
+            id: stableToken(key),
+            reason: key.startsWith('hash:') ? 'matching_file_hash' : 'matching_title',
+            source_ids: group.map((source) => source.id),
+            titles: group.map((source) => source.title)
+        }))
+        .filter((group) => group.source_ids.length > 1);
+    const duplicateSourceIds = new Set(duplicateGroups.flatMap((group) => group.source_ids));
+    const classifiedSources = sources.map((source) => {
+        const classification = classifyDocument(source);
+        return { source, classification };
+    });
+    const topicMap = new Map();
+
+    sources.forEach((source) => {
+        (source.citing_nodes || []).forEach((node) => {
+            const key = topicKeyForNode(node);
+            const entry =
+                topicMap.get(key) || {
+                    id: key,
+                    topic: topicLabelForNode(node),
+                    source_ids: new Set(),
+                    cited_node_ids: new Set(),
+                    evidence_count: 0
+                };
+            entry.source_ids.add(source.id);
+            entry.cited_node_ids.add(node.id);
+            entry.evidence_count += 1;
+            topicMap.set(key, entry);
+        });
+    });
+
+    const missingExpectedArtifacts = expectedArtifactsFromBrief(workspaceBrief)
+        .filter((artifact) => !sources.some((source) => sourceMatchesExpectedArtifact(source, artifact)))
+        .map((artifact) => ({
+            id: stableToken(artifact),
+            artifact,
+            status: 'missing_or_not_loaded',
+            review_state: 'needs_review'
+        }));
+
+    return {
+        contract_version: SOURCE_SET_INTELLIGENCE_CONTRACT_VERSION,
+        source_set: {
+            id: 'workspace-source-set',
+            label: 'Loaded source set',
+            scope_type: 'loaded_sources',
+            upload_mode: 'individual_sources',
+            native_folder_upload: false,
+            source_count: sources.length
+        },
+        file_inventory: sources.map((source) => {
+            const classification = classifyDocument(source);
+            return {
+                source_id: source.id,
+                title: source.title,
+                type: source.type,
+                type_label: source.type_label,
+                path: source.path || '',
+                size: source.size || 0,
+                file_hash: source.file_hash || '',
+                status: source.status,
+                classification: classification.id,
+                classification_label: classification.label,
+                coverage_count: source.coverage_count || 0,
+                chunk_count: source.chunk_count || 0,
+                duplicate_group_id: duplicateSourceIds.has(source.id)
+                    ? duplicateGroups.find((group) => group.source_ids.includes(source.id))?.id || ''
+                    : '',
+                stale_signals: staleSignalsForSource(source)
+            };
+        }),
+        document_classification: classifiedSources.map(({ source, classification }) => ({
+            source_id: source.id,
+            classification: classification.id,
+            label: classification.label,
+            confidence: classification.confidence,
+            signals: classification.signals
+        })),
+        topic_coverage: Array.from(topicMap.values()).map((topic) => ({
+            id: topic.id,
+            topic: topic.topic,
+            source_ids: Array.from(topic.source_ids).sort(),
+            cited_node_ids: Array.from(topic.cited_node_ids).sort(),
+            evidence_count: topic.evidence_count,
+            coverage_status: topic.evidence_count > 1 ? 'documented' : 'thin'
+        })),
+        stale_sources: sources
+            .map((source) => ({
+                source_id: source.id,
+                title: source.title,
+                signals: staleSignalsForSource(source)
+            }))
+            .filter((source) => source.signals.length > 0),
+        duplicate_sources: duplicateGroups,
+        missing_expected_artifacts: missingExpectedArtifacts,
+        review_flags: [
+            ...(uncitedNodes.length
+                ? [
+                      {
+                          code: 'uncited_graph_nodes',
+                          severity: uncitedNodes.length > 3 ? 'high' : 'medium',
+                          count: uncitedNodes.length
+                      }
+                  ]
+                : []),
+            ...(missingExpectedArtifacts.length
+                ? [
+                      {
+                          code: 'missing_expected_artifacts',
+                          severity: 'medium',
+                          count: missingExpectedArtifacts.length
+                      }
+                  ]
+                : [])
+        ]
+    };
+};
 
 export const buildSourceLibraryProjection = (
     nodes,
@@ -347,7 +923,13 @@ export const buildSourceLibraryProjection = (
     const incompleteRefs = [];
     const uncitedNodes = [];
 
-    persistedSources.map(normalizePersistedSource).forEach((source) => {
+    const persistedSourceList = Array.isArray(persistedSources)
+        ? persistedSources
+        : Array.isArray(persistedSources?.documents)
+          ? persistedSources.documents
+          : [];
+
+    persistedSourceList.map(normalizePersistedSource).forEach((source) => {
         if (source.id) {
             sourceMap.set(source.id, mergeSourceRecord(sourceMap.get(source.id), source));
         }
@@ -457,15 +1039,550 @@ export const buildSourceLibraryProjection = (
             };
         })
         .sort((a, b) => b.coverage_count - a.coverage_count || a.title.localeCompare(b.title));
+    const sourceSetReview = buildSourceSetReview({
+        sources,
+        workspaceBrief,
+        uncitedNodes
+    });
 
     return {
         sources,
+        source_sets: [sourceSetReview.source_set],
+        source_set_review: sourceSetReview,
         uncited_nodes: uncitedNodes,
         incomplete_refs: incompleteRefs,
         total_graph_nodes: projection.nodes.filter((node) => node.react_flow_type !== 'dataSource').length,
         cited_node_count: projection.nodes.filter(
             (node) => node.react_flow_type !== 'dataSource' && node.source_refs?.some((ref) => ref?.document_id)
         ).length
+    };
+};
+
+const completenessTokens = (value = '') =>
+    new Set(String(value || '').toLowerCase().match(/[a-z0-9]+/g) || []);
+
+const completenessKey = (value = '') =>
+    [...completenessTokens(value)]
+        .filter((token) => !COMPLETENESS_STOPWORDS.has(token))
+        .join('-');
+
+const normalizeCompletenessExpectations = (values, source) => {
+    if (!Array.isArray(values)) {
+        return [];
+    }
+
+    return values
+        .map((value, index) => {
+            if (typeof value === 'string') {
+                return {
+                    id: `expected-${stableToken(value || String(index))}`,
+                    title: value.trim(),
+                    description: '',
+                    priority: '',
+                    aliases: [],
+                    expectation_sources: [source]
+                };
+            }
+            if (value && typeof value === 'object') {
+                const title = String(
+                    value.title || value.name || value.label || value.area || ''
+                ).trim();
+                return {
+                    id: `expected-${stableToken(title || String(index))}`,
+                    title,
+                    description: value.description || value.rationale || '',
+                    priority: value.priority || '',
+                    aliases: Array.isArray(value.aliases) ? value.aliases.map(String) : [],
+                    expectation_sources: [source]
+                };
+            }
+            return undefined;
+        })
+        .filter((item) => item?.title);
+};
+
+const profileCompletenessExpectations = (profile = {}) => {
+    if (!profile || typeof profile !== 'object') {
+        return [];
+    }
+    const expectations = [];
+    ['expected_coverage', 'coverage_areas', 'required_sections', 'expectations'].forEach((key) => {
+        expectations.push(
+            ...normalizeCompletenessExpectations(profile[key], `domain_profile.${key}`)
+        );
+    });
+    if (profile.completeness_review && typeof profile.completeness_review === 'object') {
+        ['expected_coverage', 'coverage_areas', 'required_sections'].forEach((key) => {
+            expectations.push(
+                ...normalizeCompletenessExpectations(
+                    profile.completeness_review[key],
+                    `domain_profile.completeness_review.${key}`
+                )
+            );
+        });
+    }
+    return expectations;
+};
+
+const reviewRuleCompletenessExpectations = (reviewRules = '') => {
+    if (!reviewRules || typeof reviewRules !== 'string') {
+        return [];
+    }
+    return normalizeCompletenessExpectations(
+        reviewRules
+            .split(/\r?\n/)
+            .map((line) => line.replace(/^[-*0-9.\s]+/, '').trim())
+            .filter((line) => line.length >= 4 && line.length <= 80),
+        'workspace_brief.review_rules'
+    );
+};
+
+const dedupeCompletenessExpectations = (expectations = []) => {
+    const deduped = new Map();
+    expectations.forEach((expectation) => {
+        const key = completenessKey(expectation.title);
+        if (!key) {
+            return;
+        }
+        if (!deduped.has(key)) {
+            deduped.set(key, expectation);
+            return;
+        }
+        const existing = deduped.get(key);
+        existing.aliases = uniqueValues([...(existing.aliases || []), ...(expectation.aliases || [])]);
+        existing.expectation_sources = uniqueValues([
+            ...(existing.expectation_sources || []),
+            ...(expectation.expectation_sources || [])
+        ]);
+    });
+    return Array.from(deduped.values());
+};
+
+const completenessExpectations = ({
+    projection,
+    workspaceBrief = {},
+    domainProfile = {},
+    expectedCoverage = []
+}) => {
+    const explicit = [
+        ...normalizeCompletenessExpectations(expectedCoverage, 'explicit_expected_coverage'),
+        ...profileCompletenessExpectations(domainProfile),
+        ...normalizeCompletenessExpectations(workspaceBrief.expected_coverage, 'workspace_brief'),
+        ...normalizeCompletenessExpectations(workspaceBrief.coverage_areas, 'workspace_brief'),
+        ...reviewRuleCompletenessExpectations(workspaceBrief.review_rules)
+    ];
+    if (explicit.length > 0) {
+        return dedupeCompletenessExpectations(explicit);
+    }
+
+    const domainText = normalizedText(
+        [workspaceBrief.domain_context, workspaceBrief.goal, workspaceBrief.review_rules].join(' ')
+    );
+    if (/\b(revit|bim|building information model)\b/.test(domainText)) {
+        return normalizeCompletenessExpectations(
+            REVIT_BIM_COMPLETENESS_EXPECTATIONS,
+            'revit_bim_fallback'
+        );
+    }
+    if (/\b(standard|standards|compliance)\b/.test(domainText)) {
+        return normalizeCompletenessExpectations(
+            STANDARDS_COMPLETENESS_EXPECTATIONS,
+            'standards_fallback'
+        );
+    }
+    return normalizeCompletenessExpectations(
+        projection.roots
+            .filter((node) => node.react_flow_type !== 'dataSource')
+            .slice(0, 12)
+            .map((node) => node.title),
+        'graph_root_nodes'
+    );
+};
+
+const completenessMatchesText = (tokens, text = '') => {
+    const textTokens = completenessTokens(text);
+    if ([...tokens].some((token) => textTokens.has(token))) {
+        return true;
+    }
+    const joined = [...textTokens].join(' ');
+    return [...tokens].some((token) => token.length >= 7 && joined.includes(token));
+};
+
+const sourceEvidenceForCompleteness = (sourceProjection) =>
+    sourceProjection.sources.flatMap((source) => {
+        const snippets = [
+            ...(Array.isArray(source.snippets) ? source.snippets : []),
+            ...(Array.isArray(source.chunks)
+                ? source.chunks.map((chunk) => ({
+                      text: chunk.snippet || chunk.text || '',
+                      location: chunk.page ? `p. ${chunk.page}` : '',
+                      source_ref: {
+                          document_id: source.id,
+                          chunk_id: chunk.id || chunk.chunk_id || '',
+                          page: chunk.page,
+                          section: chunk.heading || '',
+                          quote_snippet: chunk.snippet || chunk.text || ''
+                      }
+                  }))
+                : []),
+            ...(Array.isArray(source.segments)
+                ? source.segments.map((segment) => ({
+                      text: segment.snippet || segment.text || '',
+                      location: segment.page ? `p. ${segment.page}` : '',
+                      source_ref: {
+                          document_id: source.id,
+                          page: segment.page,
+                          section: segment.heading || '',
+                          quote_snippet: segment.snippet || segment.text || ''
+                      }
+                  }))
+                : [])
+        ];
+        return snippets
+            .filter((snippet) => snippet.text)
+            .map((snippet) => ({
+                document_id: source.id,
+                filename: source.title,
+                text: [source.title, snippet.location, snippet.text].filter(Boolean).join(' '),
+                source_ref: {
+                    document_id: source.id,
+                    document_title: source.title,
+                    ...(snippet.source_ref || {}),
+                    quote_snippet: snippet.text
+                }
+            }));
+    });
+
+const completenessAreaItem = (expectation, projection, sourceProjection) => {
+    const tokens = new Set([
+        ...[...completenessTokens(expectation.title)].filter(
+            (token) => token.length > 2 && !COMPLETENESS_STOPWORDS.has(token)
+        ),
+        ...(expectation.aliases || []).flatMap((alias) =>
+            [...completenessTokens(alias)].filter(
+                (token) => token.length > 2 && !COMPLETENESS_STOPWORDS.has(token)
+            )
+        )
+    ]);
+    const matchedNodes = projection.nodes.filter(
+        (node) =>
+            node.react_flow_type !== 'dataSource' &&
+            completenessMatchesText(tokens, `${node.title || ''} ${node.summary || ''}`)
+    );
+    const matchedSources = sourceEvidenceForCompleteness(sourceProjection).filter((source) =>
+        completenessMatchesText(tokens, source.text)
+    );
+    const sourceRefs = matchedNodes
+        .flatMap((node) =>
+            (node.source_refs || [])
+                .filter((ref) => ref?.document_id)
+                .map((ref) => ({
+                    ...ref,
+                    node_id: node.id,
+                    document_title:
+                        sourceProjection.sources.find((source) => source.id === ref.document_id)
+                            ?.title || ''
+                }))
+        )
+        .slice(0, 6);
+    const completeRefs = sourceRefs.filter((ref) => ref.document_id && (ref.page || ref.section));
+    let confidence = matchedNodes.length || matchedSources.length ? 0.2 : 0;
+    if (matchedSources.length) confidence += 0.25;
+    if (matchedNodes.length) confidence += 0.2;
+    if (completeRefs.length) confidence += 0.25;
+    const refConfidence = completeRefs
+        .map((ref) => numericConfidence(ref.confidence))
+        .filter((value) => value !== null);
+    if (refConfidence.length) {
+        confidence += Math.min(
+            0.1,
+            (refConfidence.reduce((total, value) => total + value, 0) / refConfidence.length) *
+                0.1
+        );
+    }
+    confidence = Math.max(0, Math.min(1, confidence));
+    const coverageStatus =
+        completeRefs.length && confidence >= 0.72
+            ? 'covered'
+            : matchedNodes.length || matchedSources.length || sourceRefs.length
+              ? 'partial'
+              : 'missing';
+
+    return {
+        id: expectation.id,
+        title: expectation.title,
+        description: expectation.description || '',
+        coverage_status: coverageStatus,
+        priority: expectation.priority || '',
+        confidence: Number(confidence.toFixed(2)),
+        source_refs: sourceRefs,
+        matched_node_ids: matchedNodes.slice(0, 6).map((node) => node.id),
+        matched_documents: Array.from(
+            new Map(
+                matchedSources.map((source) => [
+                    source.document_id,
+                    { document_id: source.document_id, title: source.filename }
+                ])
+            ).values()
+        ).slice(0, 6),
+        rationale:
+            coverageStatus === 'covered'
+                ? 'Graph nodes and precise source references cover this expected area.'
+                : coverageStatus === 'partial'
+                  ? 'Some graph or source-library evidence exists, but coverage needs SME confirmation.'
+                  : 'No graph or source-library evidence matched this expected area.',
+        needs_review: coverageStatus !== 'covered',
+        metadata: {
+            expectation_sources: expectation.expectation_sources || [],
+            aliases: expectation.aliases || []
+        }
+    };
+};
+
+const duplicateConflictCompletenessCandidates = (projection, sourceProjection) => {
+    const candidates = [];
+    const nodeGroups = projection.nodes
+        .filter((node) => node.react_flow_type !== 'dataSource')
+        .reduce((groups, node) => {
+            const key = completenessKey(node.title);
+            if (!key) return groups;
+            groups.set(key, [...(groups.get(key) || []), node]);
+            return groups;
+        }, new Map());
+    nodeGroups.forEach((group, key) => {
+        if (group.length < 2) return;
+        candidates.push({
+            id: `duplicate-node-${key}`,
+            title: group[0].title,
+            candidate_type: 'duplicate_node',
+            severity: 'medium',
+            matched_node_ids: group.map((node) => node.id),
+            source_refs: group.flatMap((node) => node.source_refs || []).filter((ref) => ref?.document_id),
+            rationale: `${group.length} graph nodes use the same normalized title.`,
+            needs_review: true
+        });
+    });
+
+    const sourceGroups = sourceProjection.sources.reduce((groups, source) => {
+        const key = source.file_hash || completenessKey(source.title);
+        if (!key) return groups;
+        groups.set(key, [...(groups.get(key) || []), source]);
+        return groups;
+    }, new Map());
+    sourceGroups.forEach((group, key) => {
+        if (group.length < 2) return;
+        candidates.push({
+            id: `duplicate-source-${String(key).slice(0, 72)}`,
+            title: group[0].title,
+            candidate_type: 'duplicate_source',
+            severity: 'medium',
+            matched_documents: group.map((source) => source.id),
+            source_refs: group.map((source) => ({
+                document_id: source.id,
+                document_title: source.title
+            })),
+            rationale: `${group.length} source records appear to represent the same file or filename.`,
+            needs_review: true
+        });
+    });
+
+    sourceEvidenceForCompleteness(sourceProjection).forEach((source) => {
+        const text = normalizedText(source.text);
+        if (!CONFLICT_COMPLETENESS_SIGNALS.some((signal) => text.includes(signal))) return;
+        candidates.push({
+            id: `conflict-${stableToken(`${source.document_id}-${source.text.slice(0, 40)}`)}`,
+            title: source.filename,
+            candidate_type: 'conflict_signal',
+            severity: 'high',
+            source_refs: [source.source_ref],
+            matched_documents: [source.document_id],
+            rationale: 'Source text contains overlap, duplicate, superseded, or conflict language.',
+            needs_review: true
+        });
+    });
+    return candidates.slice(0, 20);
+};
+
+const staleCompletenessCandidates = (projection, sourceProjection) => {
+    const candidates = [];
+    projection.nodes
+        .filter((node) => node.react_flow_type !== 'dataSource')
+        .forEach((node) => {
+            const text = normalizedText(`${node.title || ''} ${node.summary || ''}`);
+            if (!STALE_COMPLETENESS_SIGNALS.some((signal) => text.includes(signal))) return;
+            candidates.push({
+                id: `stale-node-${node.id}`,
+                title: node.title,
+                candidate_type: 'stale_node',
+                severity: 'medium',
+                matched_node_ids: [node.id],
+                source_refs: (node.source_refs || []).filter((ref) => ref?.document_id),
+                rationale: 'Graph node includes stale or deprecated language.',
+                needs_review: true
+            });
+        });
+    sourceProjection.sources.forEach((source) => {
+        const sourceOnlyProjection = { sources: [source] };
+        const text = normalizedText(
+            [
+                source.title,
+                source.status,
+                ...sourceEvidenceForCompleteness(sourceOnlyProjection).map((item) => item.text)
+            ].join(' ')
+        );
+        if (!STALE_COMPLETENESS_SIGNALS.some((signal) => text.includes(signal))) return;
+        candidates.push({
+            id: `stale-source-${stableToken(source.id || source.title)}`,
+            title: source.title,
+            candidate_type: 'stale_source',
+            severity: 'medium',
+            matched_documents: [source.id],
+            source_refs: [{ document_id: source.id, document_title: source.title }],
+            rationale: 'Source metadata or text includes stale or deprecated language.',
+            needs_review: true
+        });
+    });
+    return candidates.slice(0, 20);
+};
+
+const completenessQuestion = (item, question, reason) => ({
+    id: `question-${reason}-${stableToken(item.id || item.title)}`,
+    question,
+    target_area_id: item.id || '',
+    target_title: item.title || '',
+    reason,
+    priority: item.priority || item.severity || 'medium',
+    source_refs: item.source_refs || []
+});
+
+const completenessRoadmapItem = (order, item, action, priority) => ({
+    id: `roadmap-${order}-${stableToken(item.id || item.title)}`,
+    order,
+    title: item.title || 'Completeness item',
+    action,
+    priority: item.priority || item.severity || priority,
+    status: 'needs_review',
+    area_id: item.id || '',
+    checklist: [
+        'Confirm the expected coverage area with an SME.',
+        'Attach source document, page, section, and quote evidence.',
+        'Mark the area reviewed after conflicts and stale guidance are resolved.'
+    ],
+    source_refs: item.source_refs || []
+});
+
+export const buildCompletenessReviewProjection = ({
+    nodes = [],
+    edges = [],
+    workspaceBrief = {},
+    sourceLibrary = [],
+    domainProfile = {},
+    expectedCoverage = [],
+    title = 'Completeness Review'
+} = {}) => {
+    const projection = buildGraphProjection(nodes, edges);
+    const sourceProjection = buildSourceLibraryProjection(nodes, edges, workspaceBrief, sourceLibrary);
+    const expectations = completenessExpectations({
+        projection,
+        workspaceBrief,
+        domainProfile,
+        expectedCoverage
+    });
+    const areaItems = expectations.map((expectation) =>
+        completenessAreaItem(expectation, projection, sourceProjection)
+    );
+    const covered = areaItems.filter((item) => item.coverage_status === 'covered');
+    const partial = areaItems.filter((item) => item.coverage_status === 'partial');
+    const missing = areaItems.filter((item) => item.coverage_status === 'missing');
+    const duplicateConflicting = duplicateConflictCompletenessCandidates(projection, sourceProjection);
+    const staleDeprecated = staleCompletenessCandidates(projection, sourceProjection);
+    const roadmapInputs = [
+        ...duplicateConflicting.slice(0, 5).map((item) => ({
+            item,
+            action: 'Resolve conflicting or duplicate guidance',
+            priority: 'high'
+        })),
+        ...staleDeprecated.slice(0, 5).map((item) => ({
+            item,
+            action: 'Review stale or deprecated guidance',
+            priority: 'high'
+        })),
+        ...missing.slice(0, 8).map((item) => ({
+            item,
+            action: 'Create or attach missing source coverage',
+            priority: 'medium'
+        })),
+        ...partial.slice(0, 8).map((item) => ({
+            item,
+            action: 'Strengthen partial coverage with precise citations',
+            priority: 'medium'
+        }))
+    ];
+    const recommendedRoadmap = roadmapInputs
+        .slice(0, 25)
+        .map(({ item, action, priority }, index) =>
+            completenessRoadmapItem(index + 1, item, action, priority)
+        );
+    const smeQuestions = [
+        ...missing.slice(0, 8).map((item) =>
+            completenessQuestion(
+                item,
+                `Should "${item.title}" be part of the expected standard, and who owns the source of truth?`,
+                'missing_area'
+            )
+        ),
+        ...partial.slice(0, 8).map((item) =>
+            completenessQuestion(
+                item,
+                `What source, page, or section completes coverage for "${item.title}"?`,
+                'partial_area'
+            )
+        ),
+        ...duplicateConflicting.slice(0, 5).map((item) =>
+            completenessQuestion(
+                item,
+                `Which item is authoritative for "${item.title}", and should duplicates be merged or retired?`,
+                'duplicate_or_conflict'
+            )
+        ),
+        ...staleDeprecated.slice(0, 5).map((item) =>
+            completenessQuestion(
+                item,
+                `Is "${item.title}" current guidance, or should it be updated or deprecated?`,
+                'stale_or_deprecated'
+            )
+        )
+    ].slice(0, 20);
+
+    return {
+        contract_version: COMPLETENESS_REVIEW_CONTRACT_VERSION,
+        title,
+        summary: `${expectations.length} expected area${expectations.length === 1 ? '' : 's'}, ${covered.length} covered, ${partial.length} partial, ${missing.length} missing, ${duplicateConflicting.length} duplicate/conflicting candidate${duplicateConflicting.length === 1 ? '' : 's'}, and ${staleDeprecated.length} stale/deprecated candidate${staleDeprecated.length === 1 ? '' : 's'}.`,
+        covered_areas: covered,
+        missing_areas: missing,
+        partial_areas: partial,
+        duplicate_conflicting_areas: duplicateConflicting,
+        stale_deprecated_candidates: staleDeprecated,
+        sme_questions: smeQuestions,
+        recommended_roadmap: recommendedRoadmap,
+        checklist_suggestions: recommendedRoadmap.map((item, index) => ({
+            id: `checklist-${item.id || index}`,
+            label: item.title,
+            note: item.action,
+            priority: item.priority,
+            review_required: true,
+            source_refs: item.source_refs || []
+        })),
+        metadata: {
+            expected_area_count: expectations.length,
+            source_document_count: sourceProjection.sources.length,
+            source_backed_area_count:
+                covered.length + partial.filter((item) => item.source_refs?.length).length,
+            expectation_sources: uniqueValues(
+                expectations.flatMap((item) => item.expectation_sources || [])
+            ).sort(),
+            projection_source: 'workspace_graph_source_library'
+        }
     };
 };
 
@@ -704,6 +1821,33 @@ export const getKnowledgeGraphRows = (projection) =>
         locally_projected: true
     }));
 
+const repairItem = ({
+    id,
+    label,
+    severity = 'medium',
+    count,
+    suggestedAction,
+    actionPreset,
+    targetView,
+    targetNodeIds = [],
+    metadata = {}
+}) => ({
+    id,
+    label,
+    severity,
+    ...(count !== undefined ? { count } : {}),
+    suggested_action: suggestedAction,
+    ...(actionPreset ? { action_preset: actionPreset } : {}),
+    ...(targetView ? { target_view: targetView } : {}),
+    ...(targetNodeIds.length > 0 ? { target_node_ids: targetNodeIds } : {}),
+    ...(Object.keys(metadata).length > 0 ? { metadata } : {})
+});
+
+const sectionKeyForRef = (ref = {}) =>
+    ref.document_id && (ref.page || ref.section)
+        ? [ref.document_id, ref.page || '', ref.section || ''].join('::')
+        : '';
+
 export const getGraphConfidenceSummary = (projection) => {
     const contentNodes = projection.nodes.filter((node) => node.react_flow_type !== 'dataSource');
     const nodeCount = contentNodes.length;
@@ -727,6 +1871,30 @@ export const getGraphConfidenceSummary = (projection) => {
         return confidence !== null && confidence < 0.6;
     }).length;
     const roots = projection.roots.filter((node) => node.react_flow_type !== 'dataSource').length;
+    const connectedNodeIds = new Set(
+        projection.edges.flatMap((edge) => [edge.source, edge.target]).filter(Boolean)
+    );
+    const missingSourceNodeIds = contentNodes
+        .filter((node) => !node.source_refs?.some((ref) => ref?.document_id))
+        .map((node) => node.id);
+    const reviewNodeIds = contentNodes
+        .filter((node) => node.status === 'needs_review' || node.node_type === 'needs_review')
+        .map((node) => node.id);
+    const isolatedSourceSectionKeys = uniqueValues(
+        contentNodes
+            .filter((node) => !connectedNodeIds.has(node.id))
+            .flatMap((node) => node.source_refs || [])
+            .map(sectionKeyForRef)
+    );
+    const missingSourceNodes = nodeCount - sourcedNodes;
+    const missingSummaryNodes = nodeCount - nodesWithSummary;
+    const reviewRatio = nodeCount === 0 ? 0 : nodesNeedingReview / nodeCount;
+    const isUnsourcedGraph = nodeCount > 0 && sourcedNodes === 0;
+    const isSparseGraph = nodeCount > 2 && edgeCount < Math.max(1, Math.floor(nodeCount / 2));
+    const isHierarchyOnlyGraph = nodeCount > 2 && edgeCount > 0 && crossLinkEdges === 0;
+    const hasSourceOnlySections = isolatedSourceSectionKeys.length > 0;
+    const hasManyReviewNodes =
+        nodeCount > 0 && (nodesNeedingReview >= 4 || reviewRatio >= 0.4);
     const averageConfidence =
         confidenceValues.length > 0
             ? confidenceValues.reduce((total, value) => total + value, 0) / confidenceValues.length
@@ -743,7 +1911,7 @@ export const getGraphConfidenceSummary = (projection) => {
     const reviewScore = nodeCount === 0 ? 0 : 1 - nodesNeedingReview / nodeCount;
     const confidenceScore = averageConfidence ?? (lowConfidenceNodes > 0 ? 0.45 : 0.62);
 
-    const score = Math.round(
+    const rawScore = Math.round(
         100 *
             (structureScore * 0.22 +
                 connectionScore * 0.18 +
@@ -752,21 +1920,38 @@ export const getGraphConfidenceSummary = (projection) => {
                 reviewScore * 0.14 +
                 confidenceScore * 0.08)
     );
+    const trustCap = Math.min(
+        100,
+        isUnsourcedGraph ? 58 : 100,
+        isSparseGraph ? 68 : 100,
+        isHierarchyOnlyGraph ? 78 : 100,
+        hasManyReviewNodes ? 74 : 100
+    );
+    const score = Math.min(rawScore, trustCap);
 
     const reasons = [];
     if (nodeCount === 0) {
         reasons.push('No graph nodes yet');
     }
-    if (nodeCount > 2 && crossLinkEdges === 0) {
+    if (isSparseGraph) {
+        reasons.push('Sparse graph structure');
+    }
+    if (isHierarchyOnlyGraph) {
         reasons.push('No accepted cross-branch connections');
     }
-    if (sourceScore < 0.5) {
-        reasons.push(`${nodeCount - sourcedNodes} nodes missing source support`);
+    if (isUnsourcedGraph) {
+        reasons.push('Graph has no source-backed nodes');
+    } else if (sourceScore < 0.5) {
+        reasons.push(`${missingSourceNodes} nodes missing source support`);
+    } else if (sourceScore < 0.75) {
+        reasons.push(`${missingSourceNodes} nodes need stronger source coverage`);
     }
     if (summaryScore < 0.75) {
-        reasons.push(`${nodeCount - nodesWithSummary} nodes missing summaries`);
+        reasons.push(`${missingSummaryNodes} nodes missing summaries`);
     }
-    if (nodesNeedingReview > 0) {
+    if (hasManyReviewNodes) {
+        reasons.push(`${nodesNeedingReview} nodes need review before handoff`);
+    } else if (nodesNeedingReview > 0) {
         reasons.push(`${nodesNeedingReview} nodes marked needs review`);
     }
     if (lowConfidenceNodes > 0) {
@@ -774,17 +1959,94 @@ export const getGraphConfidenceSummary = (projection) => {
     }
 
     const supplementActions = [];
-    if (nodeCount > 2 && crossLinkEdges === 0) {
+    if (isSparseGraph) {
+        supplementActions.push('Find connections for sparse graph');
+    } else if (isHierarchyOnlyGraph) {
         supplementActions.push('Find cross-branch connections');
     }
-    if (sourceScore < 0.75) {
+    if (isUnsourcedGraph) {
+        supplementActions.push('Add source support');
+    } else if (sourceScore < 0.75) {
         supplementActions.push('Review source coverage');
     }
-    if (summaryScore < 0.75 || nodesNeedingReview > 0) {
+    if (hasManyReviewNodes) {
+        supplementActions.push('Resolve review flags');
+    } else if (summaryScore < 0.75 || nodesNeedingReview > 0) {
         supplementActions.push('Find gaps');
     }
     if (edgeCount > 0 && roots > 1) {
         supplementActions.push('Create mind map from connections');
+    }
+
+    const repairItems = [];
+    if (isUnsourcedGraph || sourceScore < 0.75) {
+        repairItems.push(
+            repairItem({
+                id: 'missing_sources',
+                label: isUnsourcedGraph
+                    ? 'Add source support to generated graph'
+                    : 'Review nodes missing source support',
+                severity: isUnsourcedGraph ? 'high' : sourceScore < 0.5 ? 'high' : 'medium',
+                count: missingSourceNodes,
+                suggestedAction: isUnsourcedGraph ? 'Add source support' : 'Review source coverage',
+                targetView: 'sources',
+                targetNodeIds: missingSourceNodeIds
+            })
+        );
+    }
+    if (hasManyReviewNodes || nodesNeedingReview > 0) {
+        repairItems.push(
+            repairItem({
+                id: 'review_flags',
+                label: hasManyReviewNodes
+                    ? 'Resolve review-heavy graph before handoff'
+                    : 'Review flagged graph nodes',
+                severity: hasManyReviewNodes ? 'high' : 'medium',
+                count: nodesNeedingReview,
+                suggestedAction: hasManyReviewNodes ? 'Resolve review flags' : 'Find gaps',
+                targetView: 'gaps',
+                targetNodeIds: reviewNodeIds
+            })
+        );
+    }
+    if (isHierarchyOnlyGraph) {
+        repairItems.push(
+            repairItem({
+                id: 'weak_connections',
+                label: 'Add cross-branch relationships',
+                severity: 'medium',
+                count: nodeCount,
+                suggestedAction: 'Find cross-branch connections',
+                actionPreset: 'connections'
+            })
+        );
+    }
+    if (isSparseGraph) {
+        repairItems.push(
+            repairItem({
+                id: 'sparse_branch',
+                label: 'Connect sparse graph branches',
+                severity: 'medium',
+                count: nodeCount,
+                suggestedAction: 'Find connections for sparse graph',
+                actionPreset: 'connections'
+            })
+        );
+    }
+    if (hasSourceOnlySections) {
+        repairItems.push(
+            repairItem({
+                id: 'source_only_sections',
+                label: 'Connect isolated source-backed sections',
+                severity: isSparseGraph ? 'medium' : 'low',
+                count: isolatedSourceSectionKeys.length,
+                suggestedAction: 'Review source-only sections',
+                targetView: 'sources',
+                metadata: {
+                    section_keys: isolatedSourceSectionKeys
+                }
+            })
+        );
     }
 
     return {
@@ -799,7 +2061,402 @@ export const getGraphConfidenceSummary = (projection) => {
         low_confidence_nodes: lowConfidenceNodes,
         average_confidence: averageConfidence,
         reasons,
-        supplement_actions: supplementActions
+        supplement_actions: supplementActions,
+        repair_items: repairItems
+    };
+};
+
+const nodeText = (node = {}) => `${node.title || ''} ${node.summary || ''}`.toLowerCase();
+
+const hasSourceSupport = (node = {}) =>
+    node.source_refs?.some((ref) => ref?.document_id) || Boolean(node.source_ref?.document_id);
+
+const needsExecutiveReview = (node = {}) =>
+    node.status === 'needs_review' || node.node_type === 'needs_review' || !hasSourceSupport(node);
+
+const isLowConfidence = (node = {}) => {
+    const confidence = numericConfidence(node.confidence);
+    return confidence !== null && confidence < 0.6;
+};
+
+const executiveItem = (node = {}, itemType = 'finding') => ({
+    id: `${itemType}-${node.id || 'item'}`,
+    title: node.title || 'Untitled',
+    description: node.summary || node.query || '',
+    status: node.status || '',
+    priority: node.priority || '',
+    owner_id: node.owner_id || '',
+    due_date: node.due_date || '',
+    source_refs: node.source_refs || [],
+    source_backed: hasSourceSupport(node),
+    needs_review: needsExecutiveReview(node),
+    metadata: {
+        source: 'workspace_graph_projection',
+        scope: 'workspace',
+        artifact_type: 'executive_output',
+        layout_hint: itemType,
+        rationale: `Projected from ${node.node_type || 'node'} as ${itemType}.`,
+        review_reason: needsExecutiveReview(node) ? 'Confirm source support before executive use.' : '',
+        source_signal: hasSourceSupport(node) ? 'explicit_source_ref' : 'graph_projection'
+    }
+});
+
+const sortExecutiveNodes = (nodes = []) =>
+    [...nodes].sort(
+        (a, b) =>
+            Number(!hasSourceSupport(a)) - Number(!hasSourceSupport(b)) ||
+            Number(needsExecutiveReview(a)) - Number(needsExecutiveReview(b)) ||
+            (a.title || '').localeCompare(b.title || '')
+    );
+
+export const getExecutiveOutputProjection = (projection, { title = 'Executive Output' } = {}) => {
+    const contentNodes = projection.nodes.filter((node) => node.react_flow_type !== 'dataSource');
+    const sourceBackedNodes = contentNodes.filter(hasSourceSupport);
+    const reviewNodes = contentNodes.filter(needsExecutiveReview);
+    const taskRows = getTaskRows(projection);
+    const keyFindings = sortExecutiveNodes(sourceBackedNodes.length ? sourceBackedNodes : contentNodes)
+        .slice(0, 8)
+        .map((node) => executiveItem(node, 'finding'));
+    const recommendedActions = taskRows
+        .slice(0, 8)
+        .map((node) => executiveItem(node, 'recommended_action'));
+    const risks = contentNodes
+        .filter(
+            (node) =>
+                RISK_TYPES.has(node.node_type) ||
+                node.status === 'needs_review' ||
+                isLowConfidence(node)
+        )
+        .slice(0, 8)
+        .map((node) => executiveItem(node, 'risk'));
+    const requiredDecisions = contentNodes
+        .filter(
+            (node) =>
+                DECISION_TYPES.has(node.node_type) ||
+                nodeText(node).includes('decision') ||
+                nodeText(node).includes('approve')
+        )
+        .slice(0, 8)
+        .map((node) => executiveItem(node, 'required_decision'));
+    const sourceBackedAppendix = sourceBackedNodes.map((node) =>
+        executiveItem(node, 'source_appendix')
+    );
+    const summary = `${contentNodes.length} content node${contentNodes.length === 1 ? '' : 's'}, ${sourceBackedNodes.length} source-backed, ${taskRows.length} action candidate${taskRows.length === 1 ? '' : 's'}, and ${reviewNodes.length} review item${reviewNodes.length === 1 ? '' : 's'}.`;
+
+    return {
+        contract_version: EXECUTIVE_OUTPUT_CONTRACT_VERSION,
+        title,
+        summary,
+        key_findings: keyFindings,
+        recommended_actions: recommendedActions,
+        risks,
+        required_decisions: requiredDecisions,
+        source_backed_appendix: sourceBackedAppendix,
+        assumptions: [
+            ...(contentNodes.length && sourceBackedNodes.length === 0
+                ? ['No source-backed graph nodes are available; executive sections require review.']
+                : []),
+            ...(reviewNodes.length ? [`${reviewNodes.length} graph node(s) require review.`] : [])
+        ],
+        metadata: {
+            node_count: contentNodes.length,
+            source_backed_node_count: sourceBackedNodes.length,
+            needs_review_count: reviewNodes.length,
+            task_count: taskRows.length
+        }
+    };
+};
+
+const roadmapMetadata = (node = {}, itemType = 'workstream') => ({
+    source: 'workspace_graph_projection',
+    scope: 'workspace',
+    artifact_type: 'team_roadmap',
+    layout_hint: itemType,
+    rationale: [
+        `Projected from ${node.node_type || 'node'} as ${itemType}.`,
+        hasSourceSupport(node) ? 'Source-backed.' : 'No source reference available.',
+        needsExecutiveReview(node) ? 'Requires review before team handoff.' : ''
+    ]
+        .filter(Boolean)
+        .join(' '),
+    review_reason: needsExecutiveReview(node)
+        ? 'Confirm source support before roadmap use.'
+        : '',
+    source_signal: hasSourceSupport(node) ? 'explicit_source_ref' : 'graph_projection'
+});
+
+const roadmapNodeItem = (node = {}, itemType = 'workstream') => ({
+    id: `${itemType}-${node.id || 'item'}`,
+    node_id: node.id || '',
+    title: node.title || 'Untitled',
+    description: node.summary || node.query || '',
+    status: node.status || '',
+    priority: node.priority || '',
+    owner_id: node.owner_id || '',
+    due_date: node.due_date || '',
+    source_refs: node.source_refs || [],
+    source_backed: hasSourceSupport(node),
+    needs_review: needsExecutiveReview(node),
+    metadata: roadmapMetadata(node, itemType)
+});
+
+const mergeRoadmapSourceRefs = (...refLists) => {
+    const seen = new Set();
+    return refLists.flatMap((refs) => (Array.isArray(refs) ? refs : [])).filter((ref) => {
+        if (!ref?.document_id) {
+            return false;
+        }
+        const key = [ref.document_id, ref.page, ref.section, ref.quote_snippet].join('|');
+        if (seen.has(key)) {
+            return false;
+        }
+        seen.add(key);
+        return true;
+    });
+};
+
+const roadmapEdgeItem = (edge = {}, source = {}, target = {}) => {
+    const sourceRefs = mergeRoadmapSourceRefs(source.source_refs, target.source_refs);
+    const sourceBacked = sourceRefs.some((ref) => ref?.document_id);
+    return {
+        id: `dependency-${edge.id || `${source.id || 'source'}-${target.id || 'target'}`}`,
+        source_node_id: source.id || '',
+        target_node_id: target.id || '',
+        title: `${source.title || 'Source'} -> ${target.title || 'Target'}`,
+        description: `${target.title || 'Target'} is linked by ${edge.relationship_type || 'dependency'}.`,
+        relationship_type: edge.relationship_type || 'dependency',
+        status: target.status || '',
+        priority: target.priority || '',
+        owner_id: target.owner_id || '',
+        due_date: target.due_date || '',
+        source_refs: sourceRefs,
+        source_backed: sourceBacked,
+        needs_review: !sourceBacked,
+        metadata: {
+            ...roadmapMetadata(target, 'dependency'),
+            review_reason: sourceBacked ? '' : 'Confirm source support before roadmap use.',
+            source_signal: sourceBacked ? 'explicit_source_ref' : 'graph_projection'
+        }
+    };
+};
+
+const dedupeRoadmapItems = (items = []) => {
+    const seen = new Set();
+    return items.filter((item) => {
+        if (!item?.id || seen.has(item.id)) {
+            return false;
+        }
+        seen.add(item.id);
+        return true;
+    });
+};
+
+const derivedRoadmapAction = (item = {}, title = '') => ({
+    ...item,
+    id: `recommended_next_action-${item.id || 'item'}`,
+    title,
+    metadata: {
+        ...(item.metadata || {}),
+        layout_hint: 'recommended_next_action',
+        rationale: 'Projected as a recommended roadmap action from the accepted graph.'
+    }
+});
+
+export const getTeamRoadmapProjection = (projection, { title = 'Team Roadmap' } = {}) => {
+    const contentNodes = projection.nodes.filter((node) => node.react_flow_type !== 'dataSource');
+    const sourceBackedNodes = contentNodes.filter(hasSourceSupport);
+    const taskRows = getTaskRows(projection);
+    const typedWorkstreams = contentNodes.filter((node) => WORKSTREAM_TYPES.has(node.node_type));
+    const directWorkstreamNodes = dedupeRoadmapItems([
+        ...projection.roots.filter((node) => WORKSTREAM_TYPES.has(node.node_type)),
+        ...typedWorkstreams
+    ].map((node) => roadmapNodeItem(node, 'workstream')));
+    const workstreamNodes = directWorkstreamNodes.length
+        ? directWorkstreamNodes
+        : sortExecutiveNodes(contentNodes)
+              .slice(0, 6)
+              .map((node) => roadmapNodeItem(node, 'workstream'));
+    const workstreams = workstreamNodes.slice(0, 8).map((item) => {
+        const childNodeIds = projection.childrenByParent.get(item.node_id) || [];
+        const taskNodeIds = childNodeIds.filter((nodeId) =>
+            taskRows.some((task) => task.id === nodeId)
+        );
+        return {
+            ...item,
+            child_node_ids: childNodeIds,
+            task_node_ids: taskNodeIds
+        };
+    });
+    const milestoneItems = [
+        ...contentNodes
+            .filter((node) => MILESTONE_TYPES.has(node.node_type))
+            .map((node) => roadmapNodeItem(node, 'milestone')),
+        ...taskRows
+            .filter((task) => task.due_date)
+            .map((task) => roadmapNodeItem(task, 'milestone'))
+    ];
+    const milestones = dedupeRoadmapItems(milestoneItems)
+        .sort((a, b) => {
+            if (a.due_date && b.due_date) {
+                return String(a.due_date).localeCompare(String(b.due_date));
+            }
+            return Number(!a.due_date) - Number(!b.due_date) || a.title.localeCompare(b.title);
+        })
+        .slice(0, 8);
+    const dependencies = dedupeRoadmapItems([
+        ...projection.edges
+            .filter((edge) =>
+                DEPENDENCY_RELATIONSHIP_TYPES.has(String(edge.relationship_type || '').toLowerCase())
+            )
+            .map((edge) =>
+                roadmapEdgeItem(
+                    edge,
+                    projection.nodeLookup.get(edge.source),
+                    projection.nodeLookup.get(edge.target)
+                )
+            ),
+        ...contentNodes
+            .filter((node) => DEPENDENCY_NODE_TYPES.has(node.node_type))
+            .map((node) => roadmapNodeItem(node, 'dependency'))
+    ]).slice(0, 8);
+    const risks = contentNodes
+        .filter(
+            (node) =>
+                RISK_TYPES.has(node.node_type) ||
+                node.status === 'needs_review' ||
+                isLowConfidence(node)
+        )
+        .slice(0, 8)
+        .map((node) => roadmapNodeItem(node, 'risk'));
+    const requiredDecisions = contentNodes
+        .filter(
+            (node) =>
+                DECISION_TYPES.has(node.node_type) ||
+                nodeText(node).includes('decision') ||
+                nodeText(node).includes('approve')
+        )
+        .slice(0, 8)
+        .map((node) => roadmapNodeItem(node, 'required_decision'));
+    const recommendedNextActions = dedupeRoadmapItems([
+        ...taskRows.map((task) => roadmapNodeItem(task, 'recommended_next_action')),
+        ...requiredDecisions
+            .slice(0, 3)
+            .map((item) => derivedRoadmapAction(item, `Resolve decision: ${item.title}`)),
+        ...risks
+            .slice(0, 3)
+            .map((item) => derivedRoadmapAction(item, `Mitigate risk: ${item.title}`))
+    ]).slice(0, 10);
+    const context = `${contentNodes.length} content node${contentNodes.length === 1 ? '' : 's'}, ${sourceBackedNodes.length} source-backed, ${workstreams.length} workstream${workstreams.length === 1 ? '' : 's'}, ${dependencies.length} dependenc${dependencies.length === 1 ? 'y' : 'ies'}, ${risks.length} risk item${risks.length === 1 ? '' : 's'}, ${requiredDecisions.length} required decision${requiredDecisions.length === 1 ? '' : 's'}, and ${milestones.length} milestone${milestones.length === 1 ? '' : 's'}.`;
+
+    return {
+        contract_version: TEAM_ROADMAP_CONTRACT_VERSION,
+        title,
+        context,
+        workstreams,
+        dependencies,
+        risks,
+        required_decisions: requiredDecisions,
+        milestones,
+        recommended_next_actions: recommendedNextActions,
+        source_backed_appendix: sourceBackedNodes.map((node) =>
+            roadmapNodeItem(node, 'source_appendix')
+        ),
+        assumptions: [
+            ...(contentNodes.length && sourceBackedNodes.length === 0
+                ? ['No source-backed graph nodes are available; roadmap sections require review.']
+                : []),
+            ...(dependencies.some((item) => !item.source_backed)
+                ? ['Some dependencies are inferred from graph relationships and need confirmation.']
+                : [])
+        ],
+        metadata: {
+            node_count: contentNodes.length,
+            source_backed_node_count: sourceBackedNodes.length,
+            workstream_count: workstreams.length,
+            dependency_count: dependencies.length,
+            risk_count: risks.length,
+            required_decision_count: requiredDecisions.length,
+            milestone_count: milestones.length,
+            recommended_next_action_count: recommendedNextActions.length
+        }
+    };
+};
+
+export const getEnterpriseScoreRows = (projection) =>
+    projection.nodes
+        .filter((node) => node.react_flow_type !== 'dataSource')
+        .map((node) => {
+            const scores = {
+                business_impact: businessImpactScore(node),
+                implementation_effort: implementationReadinessScore(node),
+                risk_severity: riskSeverityScore(node),
+                source_coverage: sourceCoverageScore(node),
+                owner_clarity: ownerClarityScore(node)
+            };
+            const readinessScore = Math.round(
+                scores.business_impact * 0.22 +
+                    scores.implementation_effort * 0.18 +
+                    (100 - scores.risk_severity) * 0.22 +
+                    scores.source_coverage * 0.22 +
+                    scores.owner_clarity * 0.16
+            );
+
+            return {
+                ...node,
+                enterprise_score: Math.max(0, Math.min(100, readinessScore)),
+                enterprise_readiness: readinessBand(readinessScore),
+                enterprise_scores: scores,
+                enterprise_reasons: enterpriseReasons(node, scores)
+            };
+        });
+
+export const getEnterpriseReadinessSummary = (projection) => {
+    const rows = getEnterpriseScoreRows(projection);
+    const nodeCount = rows.length;
+    const averageScore =
+        nodeCount === 0
+            ? 0
+            : Math.round(
+                  rows.reduce((total, row) => total + row.enterprise_score, 0) / nodeCount
+              );
+    const dimensionAverages = [
+        'business_impact',
+        'implementation_effort',
+        'risk_severity',
+        'source_coverage',
+        'owner_clarity'
+    ].reduce((averages, key) => {
+        averages[key] =
+            nodeCount === 0
+                ? 0
+                : Math.round(
+                      rows.reduce((total, row) => total + row.enterprise_scores[key], 0) /
+                          nodeCount
+                  );
+        return averages;
+    }, {});
+    const blockers = rows.filter(
+        (row) =>
+            row.enterprise_readiness === 'not_ready' ||
+            row.enterprise_scores.risk_severity >= 75 ||
+            row.enterprise_scores.source_coverage < 60 ||
+            row.enterprise_scores.owner_clarity < 60
+    );
+
+    return {
+        score: averageScore,
+        label: averageScore >= 80 ? 'Enterprise ready' : averageScore >= 60 ? 'Watchlist' : 'Not ready',
+        node_count: nodeCount,
+        ready_count: rows.filter((row) => row.enterprise_readiness === 'enterprise_ready').length,
+        watchlist_count: rows.filter((row) => row.enterprise_readiness === 'watchlist').length,
+        not_ready_count: rows.filter((row) => row.enterprise_readiness === 'not_ready').length,
+        dimension_averages: dimensionAverages,
+        blockers: blockers.map((row) => ({
+            id: row.id,
+            title: row.title,
+            enterprise_score: row.enterprise_score,
+            reasons: row.enterprise_reasons
+        }))
     };
 };
 

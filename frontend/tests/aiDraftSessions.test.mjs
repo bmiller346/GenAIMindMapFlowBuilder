@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    AI_DRAFT_ACCEPT_MODE_DETAILS,
     acceptAIDraftSession,
+    acceptModeForChangeIntent,
     buildAIDraftMemoryContext,
     buildAIDraftSessionRequestPayload,
     buildSelectedSourceDraftPayload,
@@ -9,15 +11,18 @@ import {
     buildAIDraftPreviewDiff,
     createAIDraftSession,
     formatAIDraftPreviewDiffSummary,
+    getAIDraftAcceptModeDetail,
     getAIDraftItemBadges,
     getAIDraftModelMetadata,
     inferAIDraftChangeIntent,
+    normalizeSoftwareOverlapReports,
     rejectAIDraftSession,
     reviseAIDraftSession
 } from '../src/utils/aiDraftSessions.js';
 import {
     getActionsForProfileAndScope,
     getPromptProfilesForScope,
+    sourceFirstActionPresets,
     starterTransformations
 } from '../src/prompts/promptsModel.js';
 import { createWorkspaceNode } from '../src/utils/manualNodes.js';
@@ -122,6 +127,53 @@ test('buildAIDraftPreviewDiff summarizes accept selected', () => {
     );
 });
 
+test('accept mode details map product choices onto existing modes', () => {
+    assert.equal(AI_DRAFT_ACCEPT_MODE_DETAILS.notes_only.label, 'Preview only');
+    assert.equal(AI_DRAFT_ACCEPT_MODE_DETAILS.replace.label, 'Replace selected scope');
+    assert.equal(AI_DRAFT_ACCEPT_MODE_DETAILS.merge.label, 'Update matching');
+    assert.equal(AI_DRAFT_ACCEPT_MODE_DETAILS.append.label, 'Supplement');
+    assert.equal(AI_DRAFT_ACCEPT_MODE_DETAILS.selected.label, 'Accept selected');
+    assert.equal(getAIDraftAcceptModeDetail('notes_only').user_choice, 'preview_only');
+    assert.match(getAIDraftAcceptModeDetail('merge').help, /matching nodes/i);
+    assert.equal(acceptModeForChangeIntent('update'), 'merge');
+    assert.equal(acceptModeForChangeIntent('compare'), 'append');
+    assert.equal(acceptModeForChangeIntent('supplement'), 'append');
+});
+
+test('buildAIDraftPreviewDiff carries follow-up intent and accept semantics', () => {
+    const session = createAIDraftSession({
+        scope: { type: 'branch', node_id: 'root' },
+        prompt: 'make this specific to AEC consulting firm',
+        draftNodes: draftNodes(),
+        draftEdges: draftEdges(),
+        sessionId: 'session-aec-follow-up',
+        revisionId: 'revision-aec-follow-up',
+        metadata: { change_intent: 'update' }
+    });
+
+    const alternateDiff = buildAIDraftPreviewDiff(session, { mode: 'append' });
+    assert.equal(session.revisions[0].preview_diff.metadata.change_intent, 'update');
+    assert.equal(alternateDiff.metadata.change_intent, 'update');
+    assert.equal(alternateDiff.metadata.accept_mode_label, 'Supplement');
+    assert.equal(alternateDiff.metadata.user_choice, 'supplement');
+    assert.equal(alternateDiff.metadata.follow_up_semantics.adds_as_alternate, true);
+
+    const keepExistingDiff = buildAIDraftPreviewDiff(session, { mode: 'notes_only' });
+    assert.equal(keepExistingDiff.added_nodes, 0);
+    assert.equal(keepExistingDiff.metadata.accept_mode_label, 'Preview only');
+    assert.equal(keepExistingDiff.metadata.follow_up_semantics.canonical_graph_mutated, false);
+
+    const compareSession = createAIDraftSession({
+        scope: { type: 'branch', node_id: 'root' },
+        prompt: 'compare this against an AEC consulting positioning source',
+        draftNodes: draftNodes().slice(0, 1),
+        draftEdges: draftEdges().slice(0, 1)
+    });
+    const compareDiff = buildAIDraftPreviewDiff(compareSession, { mode: 'merge' });
+    assert.equal(compareDiff.metadata.change_intent, 'compare');
+    assert.equal(compareDiff.metadata.follow_up_semantics.user_choice, 'update_matching');
+});
+
 test('getAIDraftItemBadges renders source and review risk badges', () => {
     const cited = getAIDraftItemBadges({
         id: 'cited',
@@ -144,6 +196,65 @@ test('getAIDraftItemBadges renders source and review risk badges', () => {
         'duplicate',
         'conflict'
     ]);
+
+    const overlap = getAIDraftItemBadges({
+        id: 'overlap',
+        item_type: 'software_overlap_report',
+        source_refs: [{ document_id: 'inventory' }]
+    }).map((badge) => badge.id);
+    assert.deepEqual(overlap, ['source-backed', 'potential-overlap']);
+});
+
+test('normalizeSoftwareOverlapReports exposes score confidence review state factors and evidence', () => {
+    const reports = normalizeSoftwareOverlapReports({
+        generated_artifacts: [
+            {
+                id: 'software-report-1',
+                artifact_type: 'software_overlap_report',
+                title: 'Software overlap report',
+                summary: 'Review possible duplicate capabilities.',
+                candidates: [
+                    {
+                        id: 'candidate-1',
+                        title: 'Slack / Teams',
+                        overlap_score: 0.82,
+                        confidence: 'medium',
+                        review_state: 'owner_review',
+                        rationale: 'Both tools support team messaging and file sharing.',
+                        recommended_action: 'Ask owners to confirm approved collaboration standard.',
+                        factors: [
+                            { key: 'capability', value: 'messaging' },
+                            'shared user group'
+                        ],
+                        evidence: [
+                            {
+                                document_id: 'software-inventory',
+                                page: 4,
+                                section: 'Collaboration',
+                                quote_snippet: 'Slack and Teams are both used for project channels.'
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    });
+
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].title, 'Software overlap report');
+    assert.equal(reports[0].candidates.length, 1);
+    assert.equal(reports[0].candidates[0].score, 0.82);
+    assert.equal(reports[0].candidates[0].confidence, 'medium');
+    assert.equal(reports[0].candidates[0].reviewState, 'owner_review');
+    assert.deepEqual(
+        reports[0].candidates[0].factors.map((factor) => `${factor.label}:${factor.value}`),
+        ['capability:messaging', 'shared user group:']
+    );
+    assert.deepEqual(reports[0].candidates[0].evidence[0], {
+        id: 'software-inventory',
+        label: 'Slack and Teams are both used for project channels.',
+        source: 'software-inventory | p. 4 | Collaboration'
+    });
 });
 
 test('getAIDraftModelMetadata prefers actual model and exposes risk cost fields', () => {
@@ -340,12 +451,30 @@ test('draft request carries visual routing metadata and desired outputs', () => 
 });
 
 test('follow-up memory captures scoped graph context and update intent', () => {
+    const nodeSourceRef = { document_id: 'doc-aec', chunk_id: 'chunk-1' };
+    const priorSourceRef = { document_id: 'doc-reconciled', chunk_id: 'chunk-9' };
+    const selectedSourcePayload = buildSelectedSourceDraftPayload({
+        id: 'doc-context',
+        title: 'AEC consulting discovery notes',
+        chunks: [
+            {
+                id: 'chunk-context-1',
+                heading: 'Positioning',
+                snippet: 'AEC consulting firms need owner representation and BIM coordination.',
+                source_ref: {
+                    document_id: 'doc-context',
+                    chunk_id: 'chunk-context-1',
+                    quote_snippet: 'AEC consulting firms need owner representation and BIM coordination.'
+                }
+            }
+        ]
+    });
     const nodes = [
         createWorkspaceNode({
             id: 'aec-root',
             title: 'Consulting Offer',
             body: 'Generic consulting business plan',
-            sourceRefs: [{ document_id: 'doc-aec', chunk_id: 'chunk-1' }]
+            sourceRefs: [nodeSourceRef]
         }),
         createWorkspaceNode({
             id: 'aec-child',
@@ -373,12 +502,14 @@ test('follow-up memory captures scoped graph context and update intent', () => {
         draftNodes: draftNodes().slice(0, 1),
         draftEdges: draftEdges().slice(0, 1)
     });
+    session.source_refs = [priorSourceRef];
     const prompt = 'make this specific to AEC consulting';
     const changeIntent = inferAIDraftChangeIntent(prompt);
     const memoryContext = buildAIDraftMemoryContext({
         nodes,
         edges,
         scope: { type: 'branch', node_id: 'aec-root' },
+        selectedSourcePayload,
         activeDraftSession: session,
         prompt,
         changeIntent
@@ -389,30 +520,68 @@ test('follow-up memory captures scoped graph context and update intent', () => {
         action: { id: 'custom_prompt', label: 'Custom prompt' },
         scope: { type: 'branch', node_id: 'aec-root' },
         prompt,
+        selectedSourcePayload,
         memoryContext,
         changeIntent
     });
 
     assert.equal(changeIntent, 'update');
     assert.equal(request.change_intent, 'update');
+    assert.deepEqual(request.scope, { type: 'branch', node_id: 'aec-root' });
     assert.equal(request.memory_context.scope.node_id, 'aec-root');
     assert.equal(request.memory_context.graph_context.scoped_node_count, 2);
+    assert.deepEqual(
+        request.memory_context.graph_context.nodes.map((node) => node.id),
+        ['aec-root', 'aec-child']
+    );
+    assert.deepEqual(request.memory_context.graph_context.edges[0], {
+        id: 'edge-aec-child',
+        source: 'aec-root',
+        target: 'aec-child',
+        relationship_type: 'step',
+        confidence: '',
+        rationale: 'Delivery model is part of the offer.'
+    });
     assert.equal(request.memory_context.prior_draft_session.session_id, 'session-aec');
+    assert.equal(request.memory_context.source_context.selected_source_id, 'doc-context');
+    assert.deepEqual(
+        request.source_refs.map((ref) => ref.document_id),
+        ['doc-context', 'doc-aec', 'doc-cereal', 'doc-reconciled']
+    );
     assert.equal(request.metadata.follow_up_memory.change_intent, 'update');
+});
+
+test('follow-up intent preserves supplement and compare prompts over update wording', () => {
+    assert.equal(
+        inferAIDraftChangeIntent('add AEC consulting examples to make this more specific'),
+        'supplement'
+    );
+    assert.equal(
+        inferAIDraftChangeIntent('compare this with an AEC consulting firm positioning'),
+        'compare'
+    );
 });
 
 test('starter transformation catalog includes operational prompt defaults', () => {
     const ids = new Set(starterTransformations.map((starter) => starter.id));
 
-    assert.equal(starterTransformations.length, 14);
+    assert.equal(starterTransformations.length, 22);
     assert.ok(ids.has('sop_to_checklist'));
     assert.ok(ids.has('pdf_to_training_outline'));
     assert.ok(ids.has('requirements_to_tasks'));
     assert.ok(ids.has('source_coverage_report'));
+    assert.ok(ids.has('standards_completeness_review'));
+    assert.ok(ids.has('complex_issue_team_roadmap'));
     assert.ok(ids.has('sme_review_packet'));
     assert.ok(ids.has('implementation_handoff_package'));
     assert.ok(ids.has('reconcile_source_with_workspace'));
     assert.ok(ids.has('specialize_branch'));
+    assert.ok(ids.has('find_process_bottlenecks'));
+    assert.ok(ids.has('find_duplicate_tools'));
+    assert.ok(ids.has('find_ownership_gaps'));
+    assert.ok(ids.has('find_unsupported_business_critical_systems'));
+    assert.ok(ids.has('create_30_60_90_day_improvement_plan'));
+    assert.ok(ids.has('create_stakeholder_review_package'));
     assert.ok(
         starterTransformations.every(
             (starter) =>
@@ -424,6 +593,114 @@ test('starter transformation catalog includes operational prompt defaults', () =
                 Array.isArray(starter.scopes) &&
                 starter.scopes.length
         )
+    );
+
+    const toolOverlap = starterTransformations.find(
+        (starter) => starter.id === 'find_duplicate_tools'
+    );
+    assert.equal(toolOverlap.label, 'Software overlap');
+    assert.equal(toolOverlap.visual, 'software_overlap_report');
+    assert.match(toolOverlap.description, /overlapping applications/i);
+    assert.match(toolOverlap.prompt, /potential overlap/i);
+});
+
+test('intent prompt profiles include standards review and roadmap actions', () => {
+    const profiles = getPromptProfilesForScope('workspace');
+    const standardsProfile = profiles.find((profile) => profile.id === 'standards-completeness-reviewer');
+    const roadmapProfile = profiles.find((profile) => profile.id === 'roadmap-planner');
+
+    assert.equal(standardsProfile.group, 'TraceSpace');
+    assert.deepEqual(
+        getActionsForProfileAndScope(standardsProfile, 'workspace').map((action) => action.id),
+        [
+            'find_missing_source_support',
+            'assess_standards_completeness',
+            'create_sme_questions',
+            'custom_prompt'
+        ]
+    );
+    assert.deepEqual(
+        getActionsForProfileAndScope(roadmapProfile, 'workspace').map((action) => action.id),
+        ['create_team_roadmap', 'create_sme_questions', 'generate_tasks', 'generate_checklist', 'custom_prompt']
+    );
+});
+
+test('source-first action presets cover source-only and graph-aware routing', () => {
+    const sourceOnlyIds = sourceFirstActionPresets
+        .filter((preset) => preset.availability === 'source_only')
+        .map((preset) => preset.id);
+    const graphIds = sourceFirstActionPresets
+        .filter((preset) => preset.availability === 'graph')
+        .map((preset) => preset.id);
+
+    assert.deepEqual(sourceOnlyIds, [
+        'source_to_mind_map',
+        'source_to_table',
+        'source_to_tasks'
+    ]);
+    assert.ok(sourceFirstActionPresets.some((preset) => preset.id === 'source_entities_connections'));
+    assert.ok(sourceFirstActionPresets.some((preset) => preset.id === 'source_summary'));
+    assert.deepEqual(graphIds, [
+        'source_compare_workspace',
+        'source_supplement_workspace',
+        'source_reconcile_workspace'
+    ]);
+    assert.ok(
+        sourceFirstActionPresets.every(
+            (preset) =>
+                preset.label &&
+                preset.description &&
+                preset.prompt &&
+                preset.visual &&
+                preset.roleId &&
+                preset.actionId &&
+                !/chunk/i.test(`${preset.label} ${preset.description}`)
+        )
+    );
+
+    assert.deepEqual(
+        getActionsForProfileAndScope(
+            getPromptProfilesForScope('source').find((profile) => profile.id === 'data-table-interpreter'),
+            'source'
+        ).map((action) => action.id),
+        ['interpret_table_data', 'generate_tasks', 'custom_prompt']
+    );
+});
+
+test('enterprise prompt profiles expose guided readiness actions', () => {
+    const profiles = getPromptProfilesForScope('workspace');
+    const processProfile = profiles.find((profile) => profile.id === 'enterprise-process-analyst');
+    const toolsProfile = profiles.find((profile) => profile.id === 'enterprise-tool-rationalization');
+    const plannerProfile = profiles.find((profile) => profile.id === 'enterprise-readiness-planner');
+
+    assert.equal(processProfile.group, 'TraceSpace Enterprise');
+    assert.deepEqual(
+        getActionsForProfileAndScope(processProfile, 'workspace').map((action) => action.id),
+        ['find_process_bottlenecks', 'find_ownership_gaps', 'create_sme_questions', 'custom_prompt']
+    );
+    assert.deepEqual(
+        getActionsForProfileAndScope(toolsProfile, 'workspace').map((action) => action.id),
+        [
+            'find_missing_source_support',
+            'find_duplicate_tools',
+            'find_unsupported_business_critical_systems',
+            'custom_prompt'
+        ]
+    );
+    assert.deepEqual(
+        getActionsForProfileAndScope(toolsProfile, 'workspace').map((action) => action.label),
+        [
+            'Find missing source support',
+            'Find software overlap',
+            'Find unsupported business-critical systems',
+            'Custom prompt'
+        ]
+    );
+    assert.match(toolsProfile.description, /software overlap/i);
+    assert.ok(
+        getActionsForProfileAndScope(plannerProfile, 'workspace')
+            .map((action) => action.id)
+            .includes('create_stakeholder_review_package')
     );
 });
 

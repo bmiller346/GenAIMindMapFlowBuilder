@@ -303,7 +303,7 @@
 .landing-work-grid,
 .landing-use-cases {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr));
   gap: 0.75rem;
   margin-top: 1.5rem;
 }
@@ -373,10 +373,6 @@
 
 .landing-difference-panel svg {
   color: #2a8178;
-}
-
-.landing-use-cases {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .landing-use-cases article {

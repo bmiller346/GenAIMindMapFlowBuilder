@@ -10,6 +10,7 @@ import {
     buildFilteredGraphProjection,
     getConnectionRows,
     getCrossLinkConnectionRows,
+    getExecutiveOutputProjection,
     getGraphConfidenceSummary,
     getKnowledgeGraphRows,
     getTaskPreviewRows,
@@ -35,6 +36,7 @@ const CORE_VIEWS = [
     { id: 'mindmap', label: 'TraceSpace Map', detail: 'Map the workspace structure', group: 'Explore' },
     { id: 'knowledgeGraph', label: 'Connections', detail: 'Find relationships and overlaps', group: 'Explore' },
     { id: 'outline', label: 'Outline', detail: 'Review hierarchy as an outline', group: 'Review' },
+    { id: 'executive', label: 'Executive', detail: 'Package summary and evidence', group: 'Review' },
     { id: 'table', label: 'Table', detail: 'View workspace data as table rows', group: 'Review' },
     { id: 'tasks', label: 'Tasks', detail: 'Act on confirmed and potential tasks', group: 'Act' }
 ];
@@ -76,6 +78,14 @@ const AI_ACTION_PRESETS = {
         initialVisual: 'knowledge_graph',
         initialPrompt:
             'Find cross-branch connection candidates in the current workspace. Do not rewrite the hierarchy. Propose relationship edges only when there is a clear signal, and include duplicates, overlaps, dependencies, supporting relationships, conflicts, blockers, rationale, confidence, and review state.'
+    },
+    softwareOverlap: {
+        role: 'enterprise-tool-rationalization',
+        action: 'find_duplicate_tools',
+        scope: 'workspace',
+        initialVisual: 'software_overlap_report',
+        initialPrompt:
+            'Create a software overlap and rationalization report for this workspace. Compare applications, systems, capabilities, supported workflows, user groups, owners, approval/security status, integrations, license or usage signals, replacement or retired status, source support, confidence, scoring factors, evidence, and recommended owner review. Label findings as potential overlap unless the evidence proves a duplicate.'
     },
     mindmapFromConnections: {
         role: 'workflow-mapper',
@@ -142,6 +152,111 @@ const WORKSPACE_OUTPUT_GROUPS = [
 
 const WORKSPACE_OUTPUT_OPTIONS = WORKSPACE_OUTPUT_GROUPS.flatMap((group) => group.views);
 
+const NEXT_ACTION_DETAILS = {
+    connections: {
+        title: 'Find connections keeps your map intact',
+        description:
+            'AI will propose cross-branch relationship edges, including potential software overlap, not rewrite the map hierarchy.',
+        expected: [
+            'Relationship candidates',
+            'Tool overlap signals',
+            'Confidence and rationale',
+            'Review before accepting'
+        ],
+        emptyHint:
+            'The Connections lens becomes useful after accepted relationship edges exist.'
+    },
+    flowchart: {
+        title: 'Create a flow chart preview',
+        description:
+            'AI will infer steps, decisions, dependencies, and handoffs for review.',
+        expected: ['Process structure', 'Decision points', 'Review before accepting']
+    },
+    chartData: {
+        title: 'Create a structured table preview',
+        description:
+            'AI will infer useful columns and rows from the current context for review.',
+        expected: ['Table columns', 'Candidate rows', 'Review before accepting']
+    },
+    preview: {
+        title: 'Generate task candidates',
+        description:
+            'AI will suggest task-ready rows from the current workspace or selected branch.',
+        expected: ['Task candidates', 'Owners and due-date cues', 'Review before accepting']
+    },
+    checklist: {
+        title: 'Create checklist candidates',
+        description:
+            'AI will suggest verification-ready checklist items without changing the map first.',
+        expected: ['Checklist items', 'Review flags', 'Review before accepting']
+    }
+};
+
+const FOLLOW_UP_ACTIONS = [
+    {
+        id: 'update-this',
+        label: 'Update this',
+        intent: 'Updates',
+        role: 'workflow-mapper',
+        action: 'custom_prompt',
+        initialVisual: 'mind_map',
+        prompt:
+            'Update the current scope with focused, reviewable improvements. Preserve useful structure, tighten vague wording, add missing details where needed, and mark new assumptions for review.',
+        description:
+            'AI proposes focused edits for the current scope; you review before applying.'
+    },
+    {
+        id: 'supplement-source',
+        label: 'Supplement with source',
+        intent: 'Supplements',
+        role: 'source-ref-repair',
+        action: 'find_missing_source_support',
+        requiresSource: true,
+        initialVisual: 'auto',
+        prompt:
+            'Use the loaded source material to supplement the current scope. Add missing support, stronger details, and source-backed child items without replacing existing useful content.',
+        description:
+            'Uses loaded sources to add missing support or details.'
+    },
+    {
+        id: 'compare-source',
+        label: 'Compare against source',
+        intent: 'Compares',
+        role: 'source-ref-repair',
+        action: 'find_missing_source_support',
+        requiresSource: true,
+        initialVisual: 'auto',
+        prompt:
+            'Compare the current scope against the loaded source material. Flag missing claims, mismatches, unsupported assumptions, and source-only ideas that should be reviewed.',
+        description:
+            'Checks the current scope against source material and flags differences.'
+    },
+    {
+        id: 'find-gaps',
+        label: 'Find gaps',
+        intent: 'Reviews',
+        role: 'gap-analyst',
+        action: 'find_gaps',
+        initialVisual: 'review_annotations',
+        prompt:
+            'Find missing decisions, risks, weak assumptions, duplicate ideas, or unclear handoffs in the current scope. Return reviewable findings with suggested next steps.',
+        description:
+            'Looks for missing decisions, risks, or weak areas.'
+    },
+    {
+        id: 'create-tasks',
+        label: 'Create tasks',
+        intent: 'Generates tasks',
+        role: 'task-planner',
+        action: 'generate_tasks',
+        initialVisual: 'tasks',
+        prompt:
+            'Create task candidates from the current scope. Include action-oriented titles, owner cues, due-date cues where implied, and review state before anything is applied.',
+        description:
+            'Generates task candidates from the current scope.'
+    }
+];
+
 const GRAPH_FILTERS = [
     { id: 'source-backed', label: 'Source-backed' },
     { id: 'needs-review', label: 'Needs review' },
@@ -205,6 +320,38 @@ const OutputStatePill = ({ state }) => (
     <span className={`output-state-pill output-state-${state.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>
         {OUTPUT_STATE_LABELS[state] || state}
     </span>
+);
+
+const ExecutiveOutputSection = ({ title, items = [] }) => (
+    <section className="local-executive-section">
+        <div className="local-executive-section-header">
+            <strong>{title}</strong>
+            <span>{items.length}</span>
+        </div>
+        {items.length > 0 ? (
+            <div className="local-executive-list">
+                {items.map((item) => (
+                    <article key={item.id} className="local-executive-item">
+                        <strong>{item.title}</strong>
+                        {item.description ? <p>{item.description}</p> : null}
+                        <small>
+                            {[
+                                item.status,
+                                item.priority ? `priority: ${item.priority}` : '',
+                                item.owner_id ? `owner: ${item.owner_id}` : '',
+                                item.due_date ? `due: ${item.due_date}` : '',
+                                item.source_backed ? 'source-backed' : 'needs review'
+                            ]
+                                .filter(Boolean)
+                                .join(' | ')}
+                        </small>
+                    </article>
+                ))}
+            </div>
+        ) : (
+            <div className="local-table-empty">No items projected.</div>
+        )}
+    </section>
 );
 
 const mergeGeneratedTaskPreviewRows = (rows, generatedPreview) => {
@@ -327,6 +474,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
         nodes: state.nodes,
         edges: state.edges,
         setNodes: state.setNodes,
+        setEdges: state.setEdges,
         activeView: state.activeView,
         activeCanvasView: state.activeCanvasView,
         setActiveView: state.setActiveView,
@@ -337,12 +485,14 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
         clearGeneratedHelperPreview: state.clearGeneratedHelperPreview,
         activeGraphFilters: state.activeGraphFilters,
         setActiveGraphFilters: state.setActiveGraphFilters,
-        nudgePreferences: state.nudgePreferences
+        nudgePreferences: state.nudgePreferences,
+        sourceLibrary: state.sourceLibrary
     });
     const {
         nodes,
         edges,
         setNodes,
+        setEdges,
         activeView,
         activeCanvasView,
         setActiveView,
@@ -353,7 +503,8 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
         clearGeneratedHelperPreview,
         activeGraphFilters,
         setActiveGraphFilters,
-        nudgePreferences
+        nudgePreferences,
+        sourceLibrary
     } = useStore(useShallow(selector));
     const [acceptedPreviewIds, setAcceptedPreviewIds] = useState(new Set());
     const [filtersOpen, setFiltersOpen] = useState(false);
@@ -364,6 +515,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const flowId = flowStore((s) => s.flow_id);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
     const pushNode = modalStore((s) => s.pushNode);
+    const selectedSourceId = modalStore((s) => s.sourceId);
 
     const projection = useMemo(
         () =>
@@ -382,6 +534,10 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const connectionRows = useMemo(() => getConnectionRows(projection), [projection]);
     const crossLinkRows = useMemo(() => getCrossLinkConnectionRows(projection), [projection]);
     const graphConfidence = useMemo(() => getGraphConfidenceSummary(projection), [projection]);
+    const executiveOutput = useMemo(
+        () => getExecutiveOutputProjection(projection, { title: 'Executive Output' }),
+        [projection]
+    );
     const generatedTaskPreview = generatedHelperPreviews.projectPlannerTasks;
     const generatedChecklistPreview = generatedHelperPreviews.projectPlannerChecklist;
     const generatedSourceRepairPreview = generatedHelperPreviews.sourceLibrarianSources;
@@ -422,12 +578,70 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
         projection.nodes.find((node) => node.id === selectedBranchId)?.title ||
         '';
     const selectedRoot = projection.nodes.find((node) => node.id === selectedBranchId);
+    const selectedCanvasNode = useMemo(
+        () => nodes.find((node) => node.selected && node.type === 'response'),
+        [nodes]
+    );
+    const selectedCanvasNodeTitle =
+        selectedCanvasNode?.data?.title ||
+        selectedCanvasNode?.data?.label ||
+        selectedCanvasNode?.data?.content ||
+        selectedCanvasNode?.id ||
+        '';
+    const selectedSource = useMemo(
+        () =>
+            (sourceLibrary || []).find(
+                (source) =>
+                    source.id === selectedSourceId ||
+                    source.source_document_id === selectedSourceId ||
+                    source.document_id === selectedSourceId
+            ),
+        [selectedSourceId, sourceLibrary]
+    );
+    const activeSourceIds = useMemo(() => {
+        if (selectedSource?.id) {
+            return [selectedSource.id];
+        }
+        return (sourceLibrary || [])
+            .map((source) => source.id || source.source_document_id || source.document_id)
+            .filter(Boolean);
+    }, [selectedSource, sourceLibrary]);
+    const followUpContext = useMemo(() => {
+        if (selectedCanvasNode?.id) {
+            return {
+                scope: 'node',
+                nodeId: selectedCanvasNode.id,
+                label: selectedCanvasNodeTitle || selectedCanvasNode.id,
+                summary: `Selected node: ${selectedCanvasNodeTitle || selectedCanvasNode.id}`
+            };
+        }
+        if (selectedBranchId) {
+            return {
+                scope: 'branch',
+                nodeId: selectedBranchId,
+                label: selectedBranchTitle || selectedBranchId,
+                summary: `Selected branch: ${selectedBranchTitle || selectedBranchId}`
+            };
+        }
+        return {
+            scope: 'workspace',
+            nodeId: undefined,
+            label: 'Whole workspace',
+            summary: 'Whole workspace'
+        };
+    }, [
+        selectedBranchId,
+        selectedBranchTitle,
+        selectedCanvasNode?.id,
+        selectedCanvasNodeTitle
+    ]);
     const activePreviewIds =
         acceptedPreviewIds.size > 0 ? acceptedPreviewIds : allPreviewIds;
     const outputModeValue = WORKSPACE_OUTPUT_OPTIONS.some((view) => view.id === activeView)
         ? activeView
         : '';
     const activeOutputOption = WORKSPACE_OUTPUT_OPTIONS.find((view) => view.id === outputModeValue);
+    const activeNextActionDetail = NEXT_ACTION_DETAILS[outputModeValue];
     const isCanvasView = CANVAS_VIEW_IDS.has(activeView);
     const activeCanvasOption = CORE_VIEWS.find((view) => view.id === activeCanvasView);
     const showCanvasNudges = isNudgeCategoryEnabled(nudgePreferences, 'canvas');
@@ -536,31 +750,70 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
         if (!flowId) {
             return;
         }
+        const normalizedPreset = {
+            role: preset.role || preset.roleId,
+            action: preset.action || preset.actionId,
+            scope: preset.scope,
+            initialPrompt: preset.initialPrompt || preset.prompt,
+            initialVisual: preset.initialVisual || preset.visual
+        };
         const preferredScope =
-            preset.scope === 'branch' && selectedBranchId ? 'branch' : 'workspace';
+            normalizedPreset.scope === 'branch' && selectedBranchId ? 'branch' : 'workspace';
         pushNode(PromptModal, {
             scope: preferredScope,
             nodeId: preferredScope === 'branch' ? selectedBranchId : undefined,
-            initialRoleId: preset.role,
-            initialActionId: preset.action,
-            initialPrompt: preset.initialPrompt,
-            initialVisual: preset.initialVisual || 'auto'
+            initialRoleId: normalizedPreset.role,
+            initialActionId: normalizedPreset.action,
+            initialPrompt: normalizedPreset.initialPrompt,
+            initialVisual: normalizedPreset.initialVisual || 'auto'
         });
         recordActivity({
             type: 'ai_action_picker_opened',
             title: 'Workspace Ask AI opened',
-            summary: preset.action
-                ? `Opened preview-first AI action: ${preset.action}.`
+            summary: normalizedPreset.action
+                ? `Opened preview-first AI action: ${normalizedPreset.action}.`
                 : 'Opened preview-first AI actions from the workspace.',
             metadata: {
                 scope: preferredScope,
-                action: preset.action || ''
+                action: normalizedPreset.action || ''
             }
         });
     };
 
     const openAiPreset = (presetKey) => {
         openWorkspaceAskAi(AI_ACTION_PRESETS[presetKey]);
+    };
+
+    const openFollowUpAction = (action) => {
+        if (!flowId) {
+            return;
+        }
+        if (action.requiresSource && activeSourceIds.length === 0) {
+            openSourcePicker();
+            return;
+        }
+
+        pushNode(PromptModal, {
+            scope: followUpContext.scope,
+            nodeId: followUpContext.nodeId,
+            initialRoleId: action.role,
+            initialActionId: action.action,
+            initialPrompt: `${action.prompt}\n\nCurrent context: ${followUpContext.summary}.`,
+            initialVisual: action.initialVisual || 'auto',
+            initialContextSourceIds: action.requiresSource ? activeSourceIds : []
+        });
+        recordActivity({
+            type: 'ai_follow_up_action_opened',
+            title: `${action.label} opened`,
+            summary: `${action.intent} ${followUpContext.label}.`,
+            node_ids: followUpContext.nodeId ? [followUpContext.nodeId] : [],
+            source_ids: action.requiresSource ? activeSourceIds : [],
+            metadata: {
+                scope: followUpContext.scope,
+                action: action.action,
+                follow_up_action: action.id
+            }
+        });
     };
 
     const acceptTaskPreview = () => {
@@ -756,6 +1009,22 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             </button>
                         ) : null}
                     </div>
+                    {activeNextActionDetail ? (
+                        <div className="local-next-action-preview">
+                            <div>
+                                <strong>{activeNextActionDetail.title}</strong>
+                                <span>{activeNextActionDetail.description}</span>
+                            </div>
+                            <div className="local-next-action-expected" aria-label="Expected result">
+                                {activeNextActionDetail.expected.map((item) => (
+                                    <span key={item}>{item}</span>
+                                ))}
+                            </div>
+                            {activeNextActionDetail.emptyHint && crossLinkRows.length === 0 ? (
+                                <small>{activeNextActionDetail.emptyHint}</small>
+                            ) : null}
+                        </div>
+                    ) : null}
                 </div>
             </div>
             {filtersOpen ? (
@@ -848,8 +1117,77 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                 </div>
             ) : null}
 
+            {nodes.length > 0 ? (
+                <section className="local-follow-up-panel" aria-label="Follow-up actions">
+                    <div className="local-follow-up-context">
+                        <span>{followUpContext.summary}</span>
+                        <span>
+                            {activeSourceIds.length > 0
+                                ? `${activeSourceIds.length} active source${activeSourceIds.length === 1 ? '' : 's'}`
+                                : 'No sources loaded'}
+                        </span>
+                        {typeof graphConfidence.score === 'number' ? (
+                            <span>{graphConfidence.score}% confidence</span>
+                        ) : null}
+                    </div>
+                    <div className="local-follow-up-actions">
+                        {FOLLOW_UP_ACTIONS.map((action) => {
+                            const needsSource = action.requiresSource && activeSourceIds.length === 0;
+                            return (
+                                <button
+                                    key={action.id}
+                                    type="button"
+                                    className={needsSource ? 'needs-source' : ''}
+                                    onClick={() => openFollowUpAction(action)}
+                                >
+                                    <span>{action.intent}</span>
+                                    <strong>{action.label}</strong>
+                                    <small>
+                                        {needsSource
+                                            ? 'Add a source first, then compare or supplement this scope.'
+                                            : action.description}
+                                    </small>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </section>
+            ) : null}
+
             {!isCanvasView ? (
                 <div className="local-view-content-surface">
+            {nodes.length > 0 ? (
+                <div className="local-workspace-health">
+                    <div>
+                        <span>Workspace health</span>
+                        <strong>{graphConfidence.score}% {graphConfidence.label}</strong>
+                    </div>
+                    <div className="local-workspace-health-stats">
+                        <span>{graphConfidence.sourced_nodes}/{graphConfidence.node_count} sourced</span>
+                        <span>{graphConfidence.nodes_needing_review} needs review</span>
+                        <span>{graphConfidence.cross_link_edges} cross-links</span>
+                    </div>
+                    <div className="local-workspace-health-actions">
+                        {graphConfidence.supplement_actions.slice(0, 3).map((action) => (
+                            <button
+                                key={action}
+                                type="button"
+                                onClick={() => {
+                                    if (/connection/i.test(action)) {
+                                        openAiPreset('connections');
+                                    } else if (/source/i.test(action)) {
+                                        setActiveView('sources');
+                                    } else {
+                                        setActiveView('gaps');
+                                    }
+                                }}
+                            >
+                                {action}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            ) : null}
             {nodes.length === 0 ? (
                 <EmptyState
                     activeView={activeView}
@@ -868,10 +1206,10 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         <div className="local-lens-summary-copy">
                             <OutputStatePill state="Locally projected" />
                             <div>
-                                <strong>Knowledge Graph readiness</strong>
+                                <strong>Connections readiness</strong>
                                 <span>
-                                    Mind maps organize hierarchy. This lens becomes more useful after
-                                    accepted cross-branch relationship edges are added.
+                                    The map shows hierarchy. The Connections lens becomes useful after
+                                    accepted cross-branch relationship edges exist.
                                 </span>
                             </div>
                         </div>
@@ -898,7 +1236,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             <span>TraceSpace Map</span>
                             <span>Find cross-branch connections</span>
                             <span>Review candidates</span>
-                            <span>Knowledge Graph</span>
+                            <span>Connections lens</span>
                         </div>
                         <div className="local-lens-actions">
                             <button type="button" onClick={() => openAiPreset('connections')} disabled={!flowId}>
@@ -959,26 +1297,29 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         <div className="local-lens-summary-copy">
                             <OutputStatePill state="Locally projected" />
                             <div>
-                                <strong>Current connections</strong>
+                                <strong>Accepted connections</strong>
                                 <span>
-                                    This list shows accepted hierarchy edges and accepted relationship
-                                    edges. AI candidates open as a preview before they can supplement
-                                    the graph.
+                                    This list shows relationship edges already accepted into the
+                                    workspace. Find connections proposes candidates first; you review
+                                    confidence and rationale before accepting anything.
                                 </span>
                             </div>
                         </div>
                         <div className="local-lens-ai-callout">
                             <div>
-                                <strong>Build on this structure</strong>
+                                <strong>Find connections</strong>
                                 <span>
-                                    Ask AI to propose cross-branch links from the current mind map, or
-                                    use accepted connections to reorganize the workspace into a new
-                                    mind map.
+                                    AI looks for cross-branch links such as dependencies,
+                                    potential software overlap, conflicts, blockers, and
+                                    supporting relationships. It does not rewrite the map hierarchy.
                                 </span>
                             </div>
                             <div className="local-lens-callout-actions">
                                 <button type="button" onClick={() => openAiPreset('connections')} disabled={!flowId}>
-                                    Find cross-branch connections
+                                    Find connections
+                                </button>
+                                <button type="button" onClick={() => openAiPreset('softwareOverlap')} disabled={!flowId}>
+                                    Find software overlap
                                 </button>
                                 <button
                                     type="button"
@@ -990,9 +1331,9 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             </div>
                         </div>
                         <div className="local-connection-stats">
-                            <span>{connectionRows.length} accepted connection rows</span>
-                            <span>{crossLinkRows.length} cross-link candidates accepted</span>
-                            <span>{graphConfidence.score}% graph confidence</span>
+                            <span>{connectionRows.length} accepted link{connectionRows.length === 1 ? '' : 's'}</span>
+                            <span>{crossLinkRows.length} cross-branch link{crossLinkRows.length === 1 ? '' : 's'}</span>
+                            <span>{graphConfidence.score}% confidence</span>
                         </div>
                     </div>
                     <table className="local-projection-table">
@@ -1031,11 +1372,11 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         <div className="local-table-empty local-empty-actions">
                             <strong>No relationship edges in this scope.</strong>
                             <span>
-                                This is not broken: the current filter has nodes but no accepted
-                                connections to show.
+                                This is not broken. Find connections will propose cross-branch
+                                relationship candidates with confidence and rationale for review.
                             </span>
                             <button type="button" onClick={() => openAiPreset('connections')} disabled={!flowId}>
-                                Ask AI for connection candidates
+                                Find connections
                             </button>
                         </div>
                     ) : null}
@@ -1044,14 +1385,14 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
 
             {(activeView === 'flowchart' || activeView === 'chartData') && nodes.length > 0 ? (
                 <div className="local-view-empty">
-                    <span className="local-view-empty-kicker">AI output target</span>
+                    <span className="local-view-empty-kicker">Needs AI preview</span>
                     <strong>
                         {activeView === 'flowchart'
                             ? 'Create flow chart'
                             : 'Create structured table'}
                     </strong>
                     <span>
-                        This output needs AI enrichment. Generate a preview first, then review
+                        This view needs AI help. Generate a preview first, then review
                         the proposed structure before accepting anything into the graph.
                     </span>
                     <div className="local-view-empty-actions">
@@ -1068,7 +1409,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             Review missing fields
                         </button>
                         <button type="button" onClick={() => setActiveView('knowledgeGraph')}>
-                            Project now
+                            View connections
                         </button>
                     </div>
                 </div>
@@ -1088,6 +1429,31 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         />
                     ))}
                 </ol>
+            ) : null}
+
+            {activeView === 'executive' && nodes.length > 0 ? (
+                <div className="local-executive-output">
+                    <section className="local-executive-summary">
+                        <div>
+                            <strong>Executive output</strong>
+                            <span>Reusable preview and export contract v{executiveOutput.contract_version}</span>
+                        </div>
+                        <p>{executiveOutput.summary}</p>
+                        <div className="local-executive-metrics">
+                            <span>{executiveOutput.metadata.source_backed_node_count} sourced</span>
+                            <span>{executiveOutput.metadata.task_count} actions</span>
+                            <span>{executiveOutput.metadata.needs_review_count} review</span>
+                        </div>
+                    </section>
+                    <ExecutiveOutputSection title="Key findings" items={executiveOutput.key_findings} />
+                    <ExecutiveOutputSection title="Recommended actions" items={executiveOutput.recommended_actions} />
+                    <ExecutiveOutputSection title="Risks" items={executiveOutput.risks} />
+                    <ExecutiveOutputSection title="Required decisions" items={executiveOutput.required_decisions} />
+                    <ExecutiveOutputSection
+                        title="Source-backed appendix"
+                        items={executiveOutput.source_backed_appendix}
+                    />
+                </div>
             ) : null}
 
             {activeView === 'tasks' && nodes.length > 0 ? (
@@ -1271,7 +1637,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         <div className="local-table-empty local-empty-actions">
                             <strong>No task preview candidates in this scope.</strong>
                             <span>
-                                Project now found no task-like rows. Ask AI to infer task
+                                This scope has no task-like rows yet. Ask AI to infer task
                                 candidates, or add a non-reference node first.
                             </span>
                             <button type="button" onClick={() => openAiPreset('tasks')} disabled={!flowId}>
@@ -1327,17 +1693,20 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                 />
             ) : null}
 
-            {activeView === 'sources' && nodes.length > 0 ? (
+            {activeView === 'sources' && (nodes.length > 0 || projection.sources?.length > 0) ? (
                 <SourceRepairPreview
                     nodes={nodes}
+                    edges={edges}
                     projection={projection}
                     generatedPreview={generatedSourceRepairPreview}
                     onRejectGeneratedPreview={() =>
                         clearGeneratedHelperPreview('sourceLibrarianSources')
                     }
+                    selectedBranchId={selectedBranchId}
                     setNodes={setNodes}
+                    setEdges={setEdges}
                     setActiveView={setActiveView}
-                    onAskAi={() => openAiPreset('sources')}
+                    onAskAi={(preset) => openWorkspaceAskAi(preset || AI_ACTION_PRESETS.sources)}
                 />
             ) : null}
 

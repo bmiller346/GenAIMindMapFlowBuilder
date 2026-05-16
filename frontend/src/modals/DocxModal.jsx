@@ -31,6 +31,7 @@ import {
     uploadHasGraphDraft,
     upsertSource
 } from '../utils/sourceReconciliationPreview';
+import { handleGeneratedSourceGraph } from '../utils/generatedSourceGraph';
 
 const DOCX_INTAKE_PROFILES = [
     {
@@ -293,26 +294,6 @@ const DocxModal = ({
         setupFlow(data)
     }
 
-    const commitGeneratedSourceFlow = (flow, data) => {
-        const viewport = flow.viewport || {};
-        const sourceRecord = sourceRecordFromUpload(
-            data,
-            file,
-            data.flow_id || flowStore.getState().flow_id || flowId
-        );
-
-        setFlowId(data.flow_id || flowStore.getState().flow_id || flowId);
-        setFlowName(data.flow_name || flowName || 'Untitled workspace');
-        setFlowType(data.flow_type || flowType || 'automatic');
-        setNodes(flow.nodes || []);
-        setEdges(flow.edges || []);
-        setViewPort(viewport.x || 0, viewport.y || 0, viewport.zoom || 1.25);
-        setSourceLibrary(upsertSource(flow.source_library || sourceLibrary, sourceRecord));
-        setSaveStatus('dirty');
-        popNode();
-        window.setTimeout(() => fitView({ maxZoom: 1 }), 50);
-    };
-
     const setupFlow = (data) => {
         const parsedFlow = parseMindmapJson(data.mindmap_json);
         if (Object.keys(parsedFlow || {}).length > 0) {
@@ -324,30 +305,20 @@ const DocxModal = ({
                 return;
             }
             if (flow) {
-                const currentGraph = useStore.getState();
-                const isBlankCanvas =
-                    (currentGraph.nodes || []).length === 0 &&
-                    (currentGraph.edges || []).length === 0;
-                if (isBlankCanvas) {
-                    commitGeneratedSourceFlow(flow, data);
-                    return;
-                }
-                setPendingSourceDraft({
-                    id: `source_draft_${data.component_id || data.flow_id || nanoid()}`,
-                    flowId: data.flow_id,
-                    flowName: data.flow_name,
-                    flowType: data.flow_type || flowType || 'manual',
-                    componentId: data.component_id,
-                    sourceType: data.type || 'docx',
-                    sourceName: file?.name || data.type || 'DOCX source',
-                    intakeRole: intakeProfileId,
-                    intakeRoleLabel: sourcePromptLabel() || 'No intake role',
-                    intakeModel,
-                    intakePrompt: intakeBrief.trim(),
-                    graph: flow,
-                    createdAt: new Date().toISOString()
+                handleGeneratedSourceGraph({
+                    uploadData: { ...data, mindmap_json: flow },
+                    sourceInput: file,
+                    fallbackType: 'docx',
+                    fallbackTypeLabel: 'DOCX',
+                    popNode,
+                    fitView,
+                    draftMeta: {
+                        intakeRole: intakeProfileId,
+                        intakeRoleLabel: sourcePromptLabel() || 'No intake role',
+                        intakeModel,
+                        intakePrompt: intakeBrief.trim()
+                    }
                 });
-                popNode();
             } else {
                 console.log('Flow error');
             }

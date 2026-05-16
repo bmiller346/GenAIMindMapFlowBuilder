@@ -33,6 +33,26 @@ const HELP_ARTICLES = [
         ]
     },
     {
+        id: 'source-reconcile',
+        title: 'Source Reconciliation',
+        summary: 'Compare a selected source against the accepted graph before changing anything.',
+        sections: [
+            'Open Sources / Media, select one or more sources, then choose Reconcile with workspace.',
+            'TraceSpace prepares citation repairs for matching graph nodes and separately flags source-only sections that may need placement.',
+            'Use the Source repair preview to accept useful repairs, supplement the graph, replace a branch, or keep both versions for comparison.'
+        ]
+    },
+    {
+        id: 'specialize-branch',
+        title: 'Specialize Branch',
+        summary: 'Turn a generic branch into domain-specific structure while preserving evidence.',
+        sections: [
+            'Open a node menu or slash command and choose Specialize branch when a branch is useful but too generic.',
+            'Describe the domain, audience, product line, standard, or implementation context you want the branch adapted for.',
+            'Source-backed content should remain intact. New or inferred items stay reviewable until accepted.'
+        ]
+    },
+    {
         id: 'draft-review',
         title: 'Draft Review',
         summary: 'Preview before accept keeps messy AI output out of the real graph.',
@@ -40,6 +60,16 @@ const HELP_ARTICLES = [
             'Review generated items in the draft panel before accepting.',
             'Items without sources stay marked for review.',
             'Discard closes the draft without changing the workspace.'
+        ]
+    },
+    {
+        id: 'handoff',
+        title: 'Handoff Packages',
+        summary: 'Prepare accepted structure for implementation without losing provenance.',
+        sections: [
+            'Use handoff outputs when the graph is ready for monday, Miro, stakeholder review, or implementation planning.',
+            'Handoff packages should include scope, ready items, blocked items, assumptions, open SME questions, and source references.',
+            'External tools are projections. TraceSpace remains the canonical graph and review record.'
         ]
     },
     {

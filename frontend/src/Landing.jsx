@@ -14,55 +14,65 @@ import {
 import './Landing.css';
 
 const flowSteps = [
-    'Add source',
-    'Generate structure',
-    'Review confidence and citations',
-    'Find relationships',
-    'Convert to tasks, checklists, tables, or handoff packages'
+    'Add sources',
+    'Build workspace',
+    'Review evidence',
+    'Preview changes',
+    'Handoff work'
 ];
 
 const howItWorks = [
     {
         title: 'Ingest',
-        text: 'Bring in documents, spreadsheets, notes, source files, and other messy inputs.',
+        text: 'Bring in documents, spreadsheets, notes, standards, folders, and other messy inputs.',
         icon: FiUploadCloud
     },
     {
-        title: 'Structure',
-        text: 'Turn source material into a mind map, outline, table, tasks, or reviewable checklist.',
-        icon: FiLayers
-    },
-    {
         title: 'Connect',
-        text: 'See graph relationships, dependencies, duplicate ideas, and missing links.',
+        text: 'Build a source-cited workspace that links ideas, requirements, gaps, decisions, and tasks.',
         icon: FiGitBranch
     },
     {
+        title: 'Structure',
+        text: 'View the same material as a map, outline, table, task list, checklist, flowchart, or knowledge graph.',
+        icon: FiLayers
+    },
+    {
         title: 'Review',
-        text: 'Check confidence, citations, gaps, and needs-review states before work changes hands.',
+        text: 'Check citations, assumptions, confidence, missing information, and needs-review items.',
         icon: FiShield
     },
     {
+        title: 'Refine',
+        text: 'Use AI drafts to reshape selected branches without changing the accepted workspace until you approve.',
+        icon: FiSearch
+    },
+    {
         title: 'Handoff',
-        text: 'Export useful packages for implementation, project tracking, or stakeholder review.',
+        text: 'Package reviewed work for implementation, stakeholder review, Miro, monday.com, or export.',
         icon: FiCheckSquare
     }
 ];
 
 const differentiators = [
-    'Source-backed outputs',
-    'Preview before mutation',
-    'Confidence and review states',
-    'One canonical graph, many views',
-    'Built for serious project and document transformation'
+    'Source-grounded, not just summarized',
+    'Preview changes before they apply',
+    'One accepted workspace, many views',
+    'Maps, tables, tasks, checklists, flowcharts, and knowledge graphs',
+    'Confidence, citation, and review states',
+    'Built for reviewable handoff'
 ];
 
 const useCases = [
+    'Review a standards folder for missing pieces',
+    'Software inventory overlap and rationalization report',
+    'Turn a complex document into a team roadmap',
     'SOP to checklist',
-    'Excel tracker to task/status map',
     'Requirements doc to implementation plan',
-    'Meeting notes to action plan',
-    'Standards doc to source coverage map'
+    'Excel tracker to task/status map',
+    'Source coverage and gap report',
+    'Knowledge graph for related ideas and dependencies',
+    'Implementation handoff package'
 ];
 
 export const Landing = () => (
@@ -82,24 +92,22 @@ export const Landing = () => (
 
             <div className="landing-hero-grid">
                 <div className="landing-hero-copy">
-                    <p className="landing-kicker">Source-aware workspace</p>
-                    <h1 id="landing-title">TraceSpace</h1>
+                    <p className="landing-kicker">Source-grounded thinking workspace</p>
+                    <h1 id="landing-title">Turn messy source material into trusted workspaces.</h1>
                     <p className="landing-value">
-                        TraceSpace turns documents, spreadsheets, notes, and messy source
-                        material into structured workspaces you can trust.
+                        TraceSpace turns documents, folders, notes, and trackers into
+                        source-cited maps, graphs, tables, checklists, roadmaps, and
+                        handoff packages.
                     </p>
                     <p className="landing-support">
-                        Turn messy source material into trusted, reviewable maps, connections,
-                        tasks, and handoffs.
+                        Use AI to find structure, gaps, relationships, and next actions
+                        without changing accepted work until you preview and approve it.
                     </p>
                     <div className="landing-actions">
                         <Link to="/" className="landing-primary-cta">
                             Open workspace
                             <FiArrowRight />
                         </Link>
-                        <button type="button" className="landing-secondary-cta" disabled>
-                            Demo not implemented
-                        </button>
                     </div>
                 </div>
 
@@ -114,9 +122,9 @@ export const Landing = () => (
                         <span className="graph-line graph-line-b" />
                         <span className="graph-line graph-line-c" />
                         <span className="graph-node node-source">Source</span>
-                        <span className="graph-node node-map">Map</span>
+                        <span className="graph-node node-map">Reconcile</span>
                         <span className="graph-node node-review">Review</span>
-                        <span className="graph-node node-task">Tasks</span>
+                        <span className="graph-node node-task">Handoff</span>
                         <span className="confidence-chip"><FiSearch /> cited 0.86</span>
                     </div>
                 </div>
@@ -135,7 +143,7 @@ export const Landing = () => (
         <section className="landing-section" id="how-it-works">
             <div className="landing-section-heading">
                 <p>How it works</p>
-                <h2>From source material to reviewable structure</h2>
+                <h2>From evidence to accountable structure</h2>
             </div>
             <div className="landing-work-grid">
                 {howItWorks.map(({ title, text, icon: Icon }) => (
@@ -151,7 +159,7 @@ export const Landing = () => (
         <section className="landing-section landing-split">
             <div className="landing-section-heading">
                 <p>What makes it different</p>
-                <h2>Not just a mind map app</h2>
+                <h2>Not a generic AI task app</h2>
             </div>
             <div className="landing-difference-panel">
                 {differentiators.map((item) => (
@@ -166,7 +174,7 @@ export const Landing = () => (
         <section className="landing-section">
             <div className="landing-section-heading">
                 <p>Example use cases</p>
-                <h2>Useful wherever messy inputs become accountable work</h2>
+                <h2>Useful wherever evidence has to become accountable work</h2>
             </div>
             <div className="landing-use-cases">
                 {useCases.map((useCase) => (
