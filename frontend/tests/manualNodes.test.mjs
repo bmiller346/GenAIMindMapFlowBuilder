@@ -41,6 +41,35 @@ test('createWorkspaceNode emits the durable manual node shape', () => {
     });
 });
 
+test('createWorkspaceNode preserves artifact payloads for structured data children', () => {
+    const artifact = {
+        id: 'artifact-1',
+        artifact_type: 'data_table',
+        data: { rows: [{ Tool: 'Bluebeam' }], columns: ['Tool'] }
+    };
+    const node = createWorkspaceNode({
+        id: 'structured-child-1',
+        title: 'Review evidence',
+        nodeType: 'task',
+        query: 'SELECT Tool FROM software_inventory',
+        sourceRefs: [{ source_type: 'sql_query', query_id: 'query-1' }],
+        artifactType: 'tasks',
+        artifactIds: ['artifact-1'],
+        reviewState: 'source_backed',
+        generatedArtifacts: [artifact],
+        metadata: { domain: 'structured_data', query_id: 'query-1' }
+    });
+
+    assert.equal(node.data.artifact_type, 'tasks');
+    assert.deepEqual(node.data.artifact_ids, ['artifact-1']);
+    assert.equal(node.data.review_state, 'source_backed');
+    assert.deepEqual(node.data.generated_artifacts, [artifact]);
+    assert.equal(node.data.data.query, 'SELECT Tool FROM software_inventory');
+    assert.equal(node.data.data.artifact_type, 'tasks');
+    assert.deepEqual(node.data.data.generated_artifacts, [artifact]);
+    assert.deepEqual(node.data.metadata, { domain: 'structured_data', query_id: 'query-1' });
+});
+
 test('updateWorkspaceNode keeps legacy summary compatibility in sync', () => {
     const node = createWorkspaceNode({ id: 'node-1', title: 'Old title' });
     const updated = updateWorkspaceNode(node, {

@@ -317,9 +317,16 @@ export const createWorkspaceNode = ({
     nodeType = 'concept',
     position = { x: 0, y: 0 },
     df = [],
+    graph = DEFAULT_GRAPH_DATA,
+    query = '',
     status = 'needs_review',
     body = '',
     sourceRefs = [],
+    artifactType = '',
+    artifactIds = [],
+    reviewState = '',
+    generatedArtifacts = [],
+    metadata = {},
     display = {},
     id = nanoid()
 } = {}) => ({
@@ -333,12 +340,29 @@ export const createWorkspaceNode = ({
         body,
         manual: true,
         source_refs: Array.isArray(sourceRefs) ? sourceRefs : [],
+        artifact_type: artifactType,
+        artifact_ids: cloneArray(artifactIds),
+        review_state: reviewState,
+        generated_artifacts: cloneArray(generatedArtifacts),
+        metadata: cloneValue(metadata, {}),
         external_refs: [],
         display: {
             collapsed: Boolean(display.collapsed),
             layoutMode: normalizeLayoutMode(display.layoutMode)
         },
-        data: createLegacyResponseData({ title, body, df, sourceRefs })
+        data: createLegacyResponseData({
+            title,
+            body,
+            df,
+            graph,
+            query,
+            sourceRefs,
+            artifactType,
+            artifactIds,
+            reviewState,
+            generatedArtifacts,
+            metadata
+        })
     },
     deletable: true,
     targetPosition: 'left',

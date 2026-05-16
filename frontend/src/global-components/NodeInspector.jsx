@@ -12,6 +12,17 @@ import {
     previewDraftNodes,
     previewNonNodeOutputs
 } from '../utils/aiActionRuns';
+import {
+    createWorkspaceEdge,
+    createWorkspaceNode,
+    getChildPosition,
+    updateWorkspaceNode
+} from '../utils/manualNodes';
+import {
+    getStructuredDataArtifactContext,
+    structuredDataAcceptance,
+    structuredDataChildData
+} from '../utils/structuredDataArtifacts';
 
 const NODE_TYPES = [
     'category',
@@ -19,6 +30,7 @@ const NODE_TYPES = [
     'standard',
     'workflow',
     'procedure',
+    'finding',
     'decision',
     'risk',
     'requirement',
@@ -212,6 +224,10 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
     const selectedNode = useMemo(
         () => nodes.find((node) => node.id === selectedNodeId),
         [nodes, selectedNodeId]
+    );
+    const structuredDataContext = useMemo(
+        () => getStructuredDataArtifactContext(selectedNode?.data || {}),
+        [selectedNode]
     );
     const [draft, setDraft] = useState({});
     const [applyMessage, setApplyMessage] = useState('');
@@ -429,6 +445,94 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
             flowId
                 ? 'Applied locally. Save or autosave will persist this workspace.'
                 : 'Applied locally. Create or open a workspace to persist it.'
+        );
+    };
+
+    const acceptStructuredEvidence = () => {
+        if (!selectedNode) {
+            return;
+        }
+        const acceptedData = structuredDataAcceptance(selectedNode.data || {}, structuredDataContext);
+        setNodes(
+            nodes.map((node) =>
+                node.id === selectedNode.id
+                    ? updateWorkspaceNode({ ...node, data: acceptedData }, { data: acceptedData })
+                    : node
+            )
+        );
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        recordActivity({
+            type: 'structured_data_preview_accepted',
+            title: 'Accepted structured evidence',
+            summary: `Accepted ${structuredDataContext.tableName || draft.title || selectedNode.id} as source-backed structured evidence.`,
+            node_ids: [selectedNode.id],
+            source_ids: structuredDataContext.sourceRefs
+                .map((ref) => ref.document_id || ref.source_id || ref.query_id)
+                .filter(Boolean),
+            metadata: {
+                query_id: structuredDataContext.queryId,
+                table_name: structuredDataContext.tableName,
+                artifact_types: structuredDataContext.artifactTypes
+            },
+            status: 'completed'
+        });
+        setApplyMessage('Structured evidence accepted.');
+    };
+
+    const createStructuredDataChild = (kind) => {
+        if (!selectedNode) {
+            return;
+        }
+        const childData = structuredDataChildData({
+            kind,
+            parentTitle: draft.title || selectedNode.id,
+            context: structuredDataContext,
+            summary:
+                kind === 'finding'
+                    ? firstValue(selectedNode.data || {}, ['body', 'summary', 'summ'])
+                    : ''
+        });
+        const childNode = createWorkspaceNode({
+            ...childData,
+            position: getChildPosition(nodes, edges, selectedNode.id)
+        });
+        const acceptedData = structuredDataContext.accepted
+            ? selectedNode.data
+            : structuredDataAcceptance(selectedNode.data || {}, structuredDataContext);
+
+        setNodes([
+            ...nodes.map((node) =>
+                node.id === selectedNode.id
+                    ? updateWorkspaceNode({ ...node, data: acceptedData }, { data: acceptedData })
+                    : node
+            ),
+            childNode
+        ]);
+        setEdges([...edges, createWorkspaceEdge(selectedNode.id, childNode.id)]);
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        recordActivity({
+            type: kind === 'task' ? 'structured_data_task_created' : 'structured_data_finding_created',
+            title: kind === 'task' ? 'Created data-backed task' : 'Created data-backed finding',
+            summary: `${childData.title} was created from structured evidence.`,
+            node_ids: [selectedNode.id, childNode.id],
+            source_ids: structuredDataContext.sourceRefs
+                .map((ref) => ref.document_id || ref.source_id || ref.query_id)
+                .filter(Boolean),
+            metadata: {
+                query_id: structuredDataContext.queryId,
+                table_name: structuredDataContext.tableName,
+                artifact_type: childData.artifactType
+            },
+            status: 'completed'
+        });
+        setApplyMessage(
+            kind === 'task'
+                ? 'Created a data-backed task below this node.'
+                : 'Created a data-backed finding below this node.'
         );
     };
 
@@ -992,6 +1096,79 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
                         />
                     </label>
                 </div>
+
+                {structuredDataContext.hasStructuredData ? (
+                    <div className="node-inspector-section structured-artifact-inspector">
+                        <p>Structured evidence</p>
+                        <div className="structured-artifact-facts">
+                            <span>Table</span>
+                            <strong>{structuredDataContext.tableName || 'Data table'}</strong>
+                            <span>Rows</span>
+                            <strong>{structuredDataContext.rowCount || 0}</strong>
+                            <span>Query</span>
+                            <strong>{structuredDataContext.queryId || 'Untracked query'}</strong>
+                            <span>Result</span>
+                            <strong>
+                                {structuredDataContext.resultHash
+                                    ? structuredDataContext.resultHash.slice(0, 16)
+                                    : 'No result hash'}
+                            </strong>
+                        </div>
+                        {structuredDataContext.artifactTypes.length ? (
+                            <div className="structured-artifact-chips">
+                                {structuredDataContext.artifactTypes.map((artifactType) => (
+                                    <span key={artifactType}>{humanizeId(artifactType)}</span>
+                                ))}
+                            </div>
+                        ) : null}
+                        {structuredDataContext.query ? (
+                            <pre className="structured-artifact-query">
+                                <code>{structuredDataContext.query}</code>
+                            </pre>
+                        ) : null}
+                        {structuredDataContext.sourceRefs.length ? (
+                            <div className="node-citation-list">
+                                {structuredDataContext.sourceRefs.map((sourceRef, index) => (
+                                    <article
+                                        key={`${sourceRef.query_id || sourceRef.source_id || sourceRef.table_name || 'data-ref'}-${index}`}
+                                        className="node-citation-list-item"
+                                    >
+                                        <span>{humanizeId(sourceRef.source_type || 'data evidence')}</span>
+                                        <strong>
+                                            {[
+                                                sourceRef.table_name,
+                                                sourceRef.query_id,
+                                                sourceRef.result_hash
+                                                    ? sourceRef.result_hash.slice(0, 12)
+                                                    : ''
+                                            ]
+                                                .filter(Boolean)
+                                                .join(' | ') || 'Structured evidence ref'}
+                                        </strong>
+                                        {sourceRef.confidence ? (
+                                            <p>Confidence {sourceRef.confidence}</p>
+                                        ) : null}
+                                    </article>
+                                ))}
+                            </div>
+                        ) : null}
+                        <div className="ai-action-preview-actions structured-artifact-actions">
+                            <button
+                                type="button"
+                                onClick={acceptStructuredEvidence}
+                                disabled={structuredDataContext.accepted}
+                            >
+                                {structuredDataContext.accepted ? 'Accepted' : 'Mark reviewed'}
+                            </button>
+                            <button type="button" onClick={() => createStructuredDataChild('finding')}>
+                                Create finding
+                            </button>
+                            <button type="button" onClick={() => createStructuredDataChild('task')}>
+                                Create task
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
 
                 {renderAIActionPreview()}
 

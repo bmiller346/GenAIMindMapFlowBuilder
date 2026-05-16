@@ -1615,6 +1615,21 @@ input:focus {
 
 .ai-action-modal {
   gap: 1rem;
+  width: min(45rem, calc(100vw - 2rem));
+  max-height: min(52rem, calc(100vh - 2rem));
+  overflow: auto;
+  padding: 1.25rem;
+  scrollbar-gutter: stable;
+}
+
+.ai-action-modal > .title {
+  position: sticky;
+  top: -1.25rem;
+  z-index: 2;
+  margin: -1.25rem -1.25rem 0;
+  border-bottom: 1px solid var(--question-border);
+  background-color: color-mix(in srgb, var(--modal-container-color) 96%, transparent);
+  padding: 1rem 1.25rem;
 }
 
 .ai-action-scope {
@@ -1939,7 +1954,7 @@ input:focus {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 0.45rem;
-  max-height: 14rem;
+  max-height: clamp(9rem, 28vh, 13rem);
   overflow: auto;
   padding-right: 0.1rem;
 }
@@ -2114,9 +2129,16 @@ input:focus {
 }
 
 .ai-action-footer {
+  position: sticky;
+  bottom: -1.25rem;
+  z-index: 2;
   display: flex;
   justify-content: flex-end;
   gap: 0.65rem;
+  margin: 0 -1.25rem -1.25rem;
+  border-top: 1px solid var(--question-border);
+  background-color: color-mix(in srgb, var(--modal-container-color) 96%, transparent);
+  padding: 0.85rem 1.25rem;
 }
 
 .help-modal {
@@ -4070,6 +4092,94 @@ input:focus {
   gap: 0.25rem;
 }
 
+.structured-evidence-card {
+  display: grid;
+  gap: 0.7rem;
+  background: var(--response-node-block-color);
+  border: 1px solid color-mix(in srgb, var(--question-border) 78%, transparent);
+  border-radius: 0.75rem;
+  color: var(--font-color);
+  padding: 0.85rem;
+}
+
+.structured-evidence-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.structured-evidence-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.45rem;
+  background: rgba(52, 211, 153, 0.14);
+  color: #34d399;
+  flex: 0 0 auto;
+}
+
+.structured-evidence-header h3 {
+  font-size: 0.95rem;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.structured-evidence-header p {
+  color: var(--node-response-summary-color);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  margin: 0.2rem 0 0;
+}
+
+.structured-evidence-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.3rem 0.65rem;
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.structured-evidence-meta dt {
+  color: var(--node-response-summary-color);
+  font-weight: 700;
+}
+
+.structured-evidence-meta dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.structured-evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.structured-evidence-actions button {
+  border: 1px solid var(--question-border);
+  border-radius: 0.45rem;
+  background: var(--node-response-background);
+  color: var(--font-color);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  line-height: 1.1;
+  padding: 0.45rem 0.6rem;
+}
+
+.structured-evidence-actions button:hover:not(:disabled) {
+  border-color: rgba(52, 211, 153, 0.48);
+}
+
+.structured-evidence-actions button:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
 .manual-table-editor {
   display: flex;
   flex-direction: column;
@@ -5812,6 +5922,74 @@ img:hover {
   font-size: 0.78rem;
   line-height: 1.15rem;
   opacity: 0.75;
+}
+
+.structured-artifact-inspector {
+  border-top-color: rgba(52, 211, 153, 0.38);
+}
+
+.structured-artifact-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.35rem 0.7rem;
+  border: 1px solid var(--question-border);
+  border-left: 4px solid #34d399;
+  border-radius: 0.5rem;
+  background-color: var(--input-bar-color);
+  padding: 0.65rem;
+}
+
+.structured-artifact-facts span {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.62;
+}
+
+.structured-artifact-facts strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.structured-artifact-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.structured-artifact-chips span {
+  border: 1px solid rgba(52, 211, 153, 0.34);
+  border-radius: 999px;
+  background: rgba(52, 211, 153, 0.12);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1rem;
+  padding: 0.18rem 0.5rem;
+}
+
+.structured-artifact-query {
+  max-height: 8rem;
+  overflow: auto;
+  border: 1px solid var(--question-border);
+  border-radius: 0.5rem;
+  background-color: var(--input-bar-color);
+  margin: 0;
+  padding: 0.65rem;
+  white-space: pre-wrap;
+}
+
+.structured-artifact-query code {
+  background: transparent;
+  font-size: 0.76rem !important;
+  line-height: 1.15rem !important;
+}
+
+.structured-artifact-actions {
+  justify-content: flex-start;
 }
 
 .node-inspector-help {

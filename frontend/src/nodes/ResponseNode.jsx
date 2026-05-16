@@ -3,6 +3,7 @@ import axios from 'axios';
 import { lazy, Suspense, useMemo, useState } from 'react';
 import {
     FiCalendar,
+    FiBarChart2,
     FiCheckSquare,
     FiChevronRight,
     FiCopy,
@@ -47,6 +48,11 @@ import {
     updateWorkspaceNode,
     layoutDirectChildren
 } from '../utils/manualNodes';
+import {
+    getStructuredDataArtifactContext,
+    structuredDataAcceptance,
+    structuredDataChildData
+} from '../utils/structuredDataArtifacts';
 
 const Graph = lazy(() => import('../global-components/Graph'));
 const TableComponent = lazy(() => import('../global-components/TableComponent'));
@@ -334,6 +340,10 @@ const ResponseNode = ({ id, data }) => {
             ),
         [df]
     );
+    const structuredDataContext = useMemo(
+        () => getStructuredDataArtifactContext(data),
+        [data]
+    );
     const getNodeLabel = (node) => getWorkspaceNodeData(node).title || node?.id || '';
 
     const updateNodeData = (updater) => {
@@ -446,6 +456,69 @@ const ResponseNode = ({ id, data }) => {
         setIsSlashOpen(false);
         setSlashQuery('');
         setActiveSlashIndex(0);
+    };
+
+    const acceptStructuredEvidence = () => {
+        const acceptedData = structuredDataAcceptance(data, structuredDataContext);
+        setNodes(
+            nodes.map((node) =>
+                node.id === id
+                    ? updateWorkspaceNode({ ...node, data: acceptedData }, { data: acceptedData })
+                    : node
+            )
+        );
+        recordActivity({
+            type: 'structured_data_preview_accepted',
+            title: 'Accepted structured evidence',
+            summary: `Accepted ${structuredDataContext.tableName || displayTitle || id} as source-backed structured evidence.`,
+            node_ids: [id],
+            metadata: {
+                query_id: structuredDataContext.queryId,
+                table_name: structuredDataContext.tableName,
+                artifact_types: structuredDataContext.artifactTypes
+            }
+        });
+        setSaveStatus('dirty');
+        setActiveView('table');
+    };
+
+    const createStructuredDataChild = (kind) => {
+        const childData = structuredDataChildData({
+            kind,
+            parentTitle: displayTitle || summary || id,
+            context: structuredDataContext,
+            summary: kind === 'finding' ? summary : ''
+        });
+        const childNode = createWorkspaceNode({
+            ...childData,
+            position: getChildPosition(nodes, edges, id)
+        });
+        const acceptedData = structuredDataContext.accepted
+            ? data
+            : structuredDataAcceptance(data, structuredDataContext);
+
+        setNodes([
+            ...nodes.map((node) =>
+                node.id === id
+                    ? updateWorkspaceNode({ ...node, data: acceptedData }, { data: acceptedData })
+                    : node
+            ),
+            childNode
+        ]);
+        setEdges([...edges, createWorkspaceEdge(id, childNode.id)]);
+        recordActivity({
+            type: kind === 'task' ? 'structured_data_task_created' : 'structured_data_finding_created',
+            title: kind === 'task' ? 'Created data-backed task' : 'Created data-backed finding',
+            summary: `${childData.title} was created from structured evidence.`,
+            node_ids: [id, childNode.id],
+            metadata: {
+                query_id: structuredDataContext.queryId,
+                table_name: structuredDataContext.tableName,
+                artifact_type: childData.artifactType
+            }
+        });
+        setSaveStatus('dirty');
+        setActiveView(kind === 'task' ? 'tasks' : 'knowledgeGraph');
     };
 
     const addSibling = (direction = 'below') => {
@@ -1749,6 +1822,66 @@ const ResponseNode = ({ id, data }) => {
                         Show details
                     </button>
                 )
+            ) : null}
+            {structuredDataContext.hasStructuredData ? (
+                <section className="structured-evidence-card nodrag">
+                    <div className="structured-evidence-header">
+                        <span className="structured-evidence-icon">
+                            <FiBarChart2 />
+                        </span>
+                        <div>
+                            <h3>Structured evidence</h3>
+                            <p>
+                                {[
+                                    structuredDataContext.tableName || 'Data table',
+                                    structuredDataContext.rowCount
+                                        ? `${structuredDataContext.rowCount} rows`
+                                        : '',
+                                    structuredDataContext.artifactTypes.length
+                                        ? `${structuredDataContext.artifactTypes.length} artifacts`
+                                        : ''
+                                ]
+                                    .filter(Boolean)
+                                    .join(' | ')}
+                            </p>
+                        </div>
+                    </div>
+                    <dl className="structured-evidence-meta">
+                        {structuredDataContext.queryId ? (
+                            <>
+                                <dt>Query</dt>
+                                <dd>{structuredDataContext.queryId}</dd>
+                            </>
+                        ) : null}
+                        {structuredDataContext.resultHash ? (
+                            <>
+                                <dt>Result</dt>
+                                <dd>{structuredDataContext.resultHash.slice(0, 12)}</dd>
+                            </>
+                        ) : null}
+                        {structuredDataContext.columns.length ? (
+                            <>
+                                <dt>Columns</dt>
+                                <dd>{structuredDataContext.columns.slice(0, 4).join(', ')}</dd>
+                            </>
+                        ) : null}
+                    </dl>
+                    <div className="structured-evidence-actions">
+                        <button
+                            type="button"
+                            onClick={acceptStructuredEvidence}
+                            disabled={structuredDataContext.accepted}
+                        >
+                            {structuredDataContext.accepted ? 'Evidence accepted' : 'Accept evidence'}
+                        </button>
+                        <button type="button" onClick={() => createStructuredDataChild('finding')}>
+                            Create finding
+                        </button>
+                        <button type="button" onClick={() => createStructuredDataChild('task')}>
+                            Create task
+                        </button>
+                    </div>
+                </section>
             ) : null}
             {query.length > 0 && (
                 <div className="query-block">
