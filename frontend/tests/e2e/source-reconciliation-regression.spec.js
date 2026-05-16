@@ -103,10 +103,24 @@ const openWholeWorkspaceTasksView = async (page) => {
     const compactWholeButton = panel.getByRole('button', { name: 'Whole', exact: true });
     if ((await compactWholeButton.count()) > 0) {
         await compactWholeButton.click();
+        await panel.locator('.local-canvas-view-button').click();
+        await panel.getByRole('button', { name: 'Tasks', exact: true }).click();
+        return;
     } else {
         await panel.getByRole('button', { name: 'Whole workspace', exact: true }).click();
     }
     await panel.getByRole('button', { name: 'Tasks', exact: true }).click();
+};
+
+const openTraceSpaceMapView = async (page) => {
+    const panel = page.locator('.local-views-panel');
+    const compactViewMenu = panel.locator('.local-canvas-view-button');
+    if ((await compactViewMenu.count()) > 0) {
+        await compactViewMenu.click();
+        await panel.getByRole('button', { name: 'TraceSpace Map', exact: true }).click();
+        return;
+    }
+    await page.getByRole('button', { name: /TraceSpace Map/ }).click();
 };
 
 const setupMockBackend = async (page) => {
@@ -660,7 +674,7 @@ test('uploaded business plan reconciles with generated graph and opens scoped AE
     await expect(page.locator('.workspace-ai-usage')).toContainText('Draft session opened for review.');
     await page.getByRole('button', { name: 'Close workspace AI preview' }).click();
 
-    await page.getByRole('button', { name: /TraceSpace Map/ }).click();
+    await openTraceSpaceMapView(page);
     const targetNode = page.locator('.node-response').filter({ hasText: 'Target market and positioning' });
     await targetNode.locator('.node-menu-trigger').first().dispatchEvent('click');
     await expect(page.locator('.node-action-menu')).toBeVisible();

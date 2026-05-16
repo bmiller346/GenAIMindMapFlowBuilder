@@ -1,6 +1,4 @@
 import DRAWERSvg from '../assets/drawer.svg';
-import LIGHT from '../assets/lightMode.svg';
-import DARK from '../assets/darkMode.svg';
 import LoadingModal from '../modals/LoadingModal';
 import flowStore from '../stores/flowStore';
 import modalStore from '../stores/modalStore';
@@ -20,7 +18,7 @@ import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FiGitBranch } from 'react-icons/fi';
+import { FiGitBranch, FiMoreHorizontal } from 'react-icons/fi';
 import {
     createFlowSnapshot,
     parseFlowSnapshot,
@@ -52,6 +50,7 @@ const Header = ({
     setLightMode
 }) => {
     const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
+    const [isUtilityMenuOpen, setIsUtilityMenuOpen] = useState(false);
     const recordActivity = useActivityStore((s) => s.recordActivity);
     const setActivityEvents = useActivityStore((s) => s.setActivityEvents);
     const setActivityWorkspace = useActivityStore((s) => s.setActivityWorkspace);
@@ -60,6 +59,7 @@ const Header = ({
     const setAutomations = useAutomationStore((s) => s.setAutomations);
     const autosaveTimerRef = useRef();
     const exportInFlightRef = useRef(false);
+    const utilityMenuRef = useRef(null);
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const flow_id = flowStore((s) => s.flow_id);
@@ -168,6 +168,22 @@ const Header = ({
     useEffect(() => {
         setActivityWorkspace(flow_id || '');
     }, [flow_id, setActivityWorkspace]);
+
+    useEffect(() => {
+        if (!isUtilityMenuOpen) {
+            return undefined;
+        }
+
+        const handlePointerDown = (event) => {
+            if (utilityMenuRef.current?.contains(event.target)) {
+                return;
+            }
+            setIsUtilityMenuOpen(false);
+        };
+
+        document.addEventListener('pointerdown', handlePointerDown);
+        return () => document.removeEventListener('pointerdown', handlePointerDown);
+    }, [isUtilityMenuOpen]);
 
     const currentSnapshot = useMemo(
         () => buildCurrentSnapshot(),
@@ -1154,6 +1170,7 @@ const Header = ({
     };
 
     const manageTheme = () => {
+        setIsUtilityMenuOpen(false);
         setTheme(!lightMode);
         setLightMode(!lightMode);
         setTrigger(!trigger);
@@ -1161,21 +1178,25 @@ const Header = ({
 
     const openSettings = () => {
         setIsExportMenuOpen(false);
+        setIsUtilityMenuOpen(false);
         pushNode(SettingsModal);
     };
 
     const openHelp = () => {
         setIsExportMenuOpen(false);
+        setIsUtilityMenuOpen(false);
         pushNode(HelpModal);
     };
 
     const openDebug = () => {
         setIsExportMenuOpen(false);
+        setIsUtilityMenuOpen(false);
         pushNode(DevDebugModal);
     };
 
     const openWorkspaceAskAi = () => {
         setIsExportMenuOpen(false);
+        setIsUtilityMenuOpen(false);
         setSelectedBranchId(undefined);
         setInspectorNodeId(undefined);
         pushNode(PromptModal, { scope: 'workspace' });
@@ -1190,23 +1211,19 @@ const Header = ({
     };
 
     const toggleExportMenu = () => {
+        setIsUtilityMenuOpen(false);
         setIsExportMenuOpen((prev) => !prev);
+    };
+
+    const toggleUtilityMenu = () => {
+        setIsExportMenuOpen(false);
+        setIsUtilityMenuOpen((prev) => !prev);
     };
 
     const hasWorkspace = Boolean(flow_id);
     const canSave = hasWorkspace;
     const canRevert =
         hasWorkspace && Boolean(lastSavedSnapshot) && saveStatus !== 'saving';
-    const saveLabel =
-        saveStatus === 'saving'
-            ? 'Saving...'
-            : saveStatus === 'saved'
-                ? 'Saved'
-                : saveStatus === 'dirty'
-                    ? 'Unsaved'
-                    : saveStatus === 'error'
-                    ? 'Retry save'
-                    : 'Save now';
     const saveStatusMessage =
         saveStatus === 'saving'
             ? 'Autosaving...'
@@ -1254,10 +1271,19 @@ const Header = ({
                 />
             </div>
             <div className="button header-actions">
+                {canSave ? (
+                    <button
+                        type="button"
+                        className="header-action header-action-primary workspace-ask-ai"
+                        onClick={openWorkspaceAskAi}
+                    >
+                        Ask AI
+                    </button>
+                ) : null}
                 <div className="export-actions">
                     <button
                         type="button"
-                        className="header-action header-action-primary"
+                        className="header-action header-action-secondary"
                         onClick={toggleExportMenu}
                     >
                         Export
@@ -1292,69 +1318,58 @@ const Header = ({
                     <>
                         <button
                             type="button"
-                            className="header-action header-action-secondary workspace-ask-ai"
-                            onClick={openWorkspaceAskAi}
-                        >
-                            Ask AI
-                        </button>
-                        {developerMode ? (
-                            <button
-                                type="button"
-                                className="header-action header-action-secondary dev-debug-trigger"
-                                onClick={openDebug}
-                                title="Open temporary developer debug panel"
-                            >
-                                Debug
-                            </button>
-                        ) : null}
-                        <button
-                            type="button"
-                            className={`header-action save-now ${saveStatus}`}
+                            className={`save-status save-status-${saveStatus}`}
                             onClick={() => saveFlow()}
                             disabled={saveStatus === 'saving'}
-                        >
-                            {saveLabel}
-                        </button>
-                        <button
-                            type="button"
-                            className="header-action header-action-secondary revert-flow"
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={revertFlow}
-                            disabled={!canRevert}
-                        >
-                            Revert
-                        </button>
-                        <span
-                            className={`save-status save-status-${saveStatus}`}
+                            title="Click to save now"
                             aria-live="polite"
                         >
                             {saveStatusMessage}
-                        </span>
+                        </button>
                     </>
                 ) : (
                     <span className="save-status" aria-live="polite">
                         {saveStatusMessage}
                     </span>
                 )}
-                <button
-                    type="button"
-                    className="header-action header-action-secondary"
-                    onClick={openHelp}
-                >
-                    Help
-                </button>
-                <button
-                    type="button"
-                    className="theme-toggle-button"
-                    onClick={manageTheme}
-                    aria-label={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
-                >
-                    <img
-                        className="theme-toggle"
-                        src={lightMode ? LIGHT : DARK}
-                        alt=""
-                    />
-                </button>
+                <div className="header-utility" ref={utilityMenuRef}>
+                    <button
+                        type="button"
+                        className="header-action header-action-secondary header-overflow"
+                        onClick={toggleUtilityMenu}
+                        aria-label="More workspace actions"
+                        aria-expanded={isUtilityMenuOpen}
+                    >
+                        <FiMoreHorizontal aria-hidden="true" />
+                    </button>
+                    {isUtilityMenuOpen ? (
+                        <div className="header-overflow-menu">
+                            <button
+                                type="button"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={revertFlow}
+                                disabled={!canRevert}
+                            >
+                                Revert
+                            </button>
+                            <button type="button" onClick={openHelp}>
+                                Help
+                            </button>
+                            <button type="button" onClick={manageTheme}>
+                                {lightMode ? 'Dark mode' : 'Light mode'}
+                            </button>
+                            {developerMode ? (
+                                <button
+                                    type="button"
+                                    onClick={openDebug}
+                                    title="Open temporary developer debug panel"
+                                >
+                                    Debug
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null}
+                </div>
                 <button
                     type="button"
                     className="header-action iconless-settings"

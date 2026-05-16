@@ -33,7 +33,7 @@ import flowStore from '../stores/flowStore';
 import { createWorkspaceNode, getRootPosition } from '../utils/manualNodes';
 
 const CORE_VIEWS = [
-    { id: 'mindmap', label: 'TraceSpace Map', detail: 'Map the workspace structure', group: 'Explore' },
+    { id: 'mindmap', label: 'Map', ariaLabel: 'TraceSpace Map', detail: 'Map the workspace structure', group: 'Explore' },
     { id: 'knowledgeGraph', label: 'Connections', detail: 'Find relationships and overlaps', group: 'Explore' },
     { id: 'outline', label: 'Outline', detail: 'Review hierarchy as an outline', group: 'Review' },
     { id: 'executive', label: 'Executive', detail: 'Package summary and evidence', group: 'Review' },
@@ -509,6 +509,8 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const [acceptedPreviewIds, setAcceptedPreviewIds] = useState(new Set());
     const [filtersOpen, setFiltersOpen] = useState(false);
     const [outputMenuOpen, setOutputMenuOpen] = useState(false);
+    const [viewMenuOpen, setViewMenuOpen] = useState(false);
+    const [followUpActionsOpen, setFollowUpActionsOpen] = useState(false);
     const panelRef = useRef(null);
     const addActivity = useActivityStore((s) => s.addActivity);
     const recordActivity = useActivityStore((s) => s.recordActivity);
@@ -655,7 +657,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const showCanvasNudges = isNudgeCategoryEnabled(nudgePreferences, 'canvas');
     const showTaskNudges = isNudgeCategoryEnabled(nudgePreferences, 'tasks');
     useEffect(() => {
-        if (!filtersOpen && !outputMenuOpen) {
+        if (!filtersOpen && !outputMenuOpen && !viewMenuOpen) {
             return undefined;
         }
 
@@ -665,11 +667,12 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
             }
             setFiltersOpen(false);
             setOutputMenuOpen(false);
+            setViewMenuOpen(false);
         };
 
         document.addEventListener('pointerdown', handlePointerDown);
         return () => document.removeEventListener('pointerdown', handlePointerDown);
-    }, [filtersOpen, outputMenuOpen]);
+    }, [filtersOpen, outputMenuOpen, viewMenuOpen]);
 
     const toggleGraphFilter = (filterId) => {
         const nextFilters = activeFilterSet.has(filterId)
@@ -919,6 +922,216 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
         return null;
     }
 
+    if (isCanvasView) {
+        return (
+            <section
+                ref={panelRef}
+                className="local-views-panel local-views-panel-compact local-canvas-command-bar"
+            >
+                <div className="local-canvas-command-main">
+                    <button
+                        type="button"
+                        className={`local-canvas-view-button ${viewMenuOpen ? 'active' : ''}`}
+                        onClick={() => {
+                            setViewMenuOpen((open) => !open);
+                            setOutputMenuOpen(false);
+                            setFiltersOpen(false);
+                        }}
+                        aria-expanded={viewMenuOpen}
+                        aria-label={activeCanvasOption?.ariaLabel || activeCanvasOption?.label || 'TraceSpace Map'}
+                    >
+                        <span>View</span>
+                        <strong>{activeCanvasOption?.label || 'Map'}</strong>
+                        <span className="local-filter-menu-caret" aria-hidden="true">
+                            {viewMenuOpen ? '^' : 'v'}
+                        </span>
+                    </button>
+                    <div className="local-canvas-command-controls">
+                        <div className="local-filter-chips local-canvas-scope">
+                            <button
+                                type="button"
+                                className={!selectedBranchId ? 'active' : ''}
+                                onClick={() => setSelectedBranchId(undefined)}
+                            >
+                                Whole
+                            </button>
+                            <button
+                                type="button"
+                                className={selectedBranchId ? 'active' : ''}
+                                disabled={!branchLensCandidate}
+                                onClick={applySelectedBranchScope}
+                            >
+                                Branch
+                            </button>
+                        </div>
+                        <button
+                            type="button"
+                            className={`local-output-menu-button local-canvas-menu-button ${
+                                outputMenuOpen || outputModeValue ? 'active' : ''
+                            }`}
+                            onClick={() => {
+                                setOutputMenuOpen((open) => !open);
+                                setViewMenuOpen(false);
+                                setFiltersOpen(false);
+                            }}
+                            aria-expanded={outputMenuOpen}
+                        >
+                            <span>{activeOutputOption?.label || 'Outputs'}</span>
+                            <span className="local-filter-menu-caret" aria-hidden="true">
+                                {outputMenuOpen ? '^' : 'v'}
+                            </span>
+                        </button>
+                        <button
+                            type="button"
+                            className={`local-filter-menu-button local-canvas-menu-button ${filtersOpen ? 'active' : ''}`}
+                            onClick={() => {
+                                setFiltersOpen((open) => !open);
+                                setViewMenuOpen(false);
+                                setOutputMenuOpen(false);
+                            }}
+                            aria-expanded={filtersOpen}
+                        >
+                            <span>Filters</span>
+                            {activeGraphFilters.length > 0 ? <small>{activeGraphFilters.length}</small> : null}
+                            <span className="local-filter-menu-caret" aria-hidden="true">
+                                {filtersOpen ? '^' : 'v'}
+                            </span>
+                        </button>
+                    </div>
+                </div>
+
+                {viewMenuOpen ? (
+                    <div className="local-view-popover local-canvas-popover" aria-label="Canvas views">
+                        {CORE_VIEWS.map((view) => (
+                            <button
+                                key={view.id}
+                                type="button"
+                                className={activeCanvasView === view.id ? 'active' : ''}
+                                title={view.detail}
+                                aria-label={view.ariaLabel || view.label}
+                                onClick={() => {
+                                    setActiveCanvasView(view.id);
+                                    setViewMenuOpen(false);
+                                }}
+                            >
+                                <span>{view.group}</span>
+                                <strong>{view.label}</strong>
+                            </button>
+                        ))}
+                    </div>
+                ) : null}
+
+                {filtersOpen ? (
+                    <div className="local-filter-popover local-canvas-popover" aria-label="Persisted graph filters">
+                        <div className="local-filter-popover-header">
+                            <span>Node filters</span>
+                            <button type="button" onClick={() => setFiltersOpen(false)}>
+                                Done
+                            </button>
+                            {activeGraphFilters.length > 0 ? (
+                                <button type="button" onClick={() => setActiveGraphFilters([])}>
+                                    Reset
+                                </button>
+                            ) : null}
+                        </div>
+                        <div className="local-filter-popover-chips">
+                            {GRAPH_FILTERS.map((filter) => (
+                                <button
+                                    key={filter.id}
+                                    type="button"
+                                    className={activeFilterSet.has(filter.id) ? 'active' : ''}
+                                    onClick={() => toggleGraphFilter(filter.id)}
+                                >
+                                    {filter.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                ) : null}
+
+                {outputMenuOpen ? (
+                    <div className="local-output-popover local-canvas-popover" aria-label="Workspace actions">
+                        <div className="local-output-popover-header">
+                            <span>Choose what to do next</span>
+                            <button type="button" onClick={() => setOutputMenuOpen(false)}>
+                                Done
+                            </button>
+                        </div>
+                        <div className="local-output-groups">
+                            {WORKSPACE_OUTPUT_GROUPS.map((group) => (
+                                <div key={group.label} className="local-output-group">
+                                    <strong>{group.label}</strong>
+                                    <div>
+                                        {group.views.map((view) => (
+                                            <button
+                                                key={view.id}
+                                                type="button"
+                                                className={activeView === view.id ? 'active' : ''}
+                                                onClick={() => {
+                                                    setActiveView(view.id);
+                                                    setOutputMenuOpen(false);
+                                                }}
+                                            >
+                                                {view.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ) : null}
+
+                {nodes.length > 0 ? (
+                    <section className="local-follow-up-panel local-follow-up-panel-compact" aria-label="Follow-up actions">
+                        <div className="local-follow-up-context">
+                            <span>{followUpContext.summary}</span>
+                            <span>
+                                {activeSourceIds.length > 0
+                                    ? `${activeSourceIds.length} source${activeSourceIds.length === 1 ? '' : 's'}`
+                                    : 'No sources'}
+                            </span>
+                            {typeof graphConfidence.score === 'number' ? (
+                                <span>{graphConfidence.score}% confidence</span>
+                            ) : null}
+                            <button
+                                type="button"
+                                className="local-follow-up-toggle"
+                                onClick={() => setFollowUpActionsOpen((open) => !open)}
+                                aria-expanded={followUpActionsOpen}
+                            >
+                                Actions {followUpActionsOpen ? '^' : 'v'}
+                            </button>
+                        </div>
+                        {followUpActionsOpen ? (
+                            <div className="local-follow-up-actions">
+                                {FOLLOW_UP_ACTIONS.map((action) => {
+                                    const needsSource = action.requiresSource && activeSourceIds.length === 0;
+                                    return (
+                                        <button
+                                            key={action.id}
+                                            type="button"
+                                            className={needsSource ? 'needs-source' : ''}
+                                            onClick={() => openFollowUpAction(action)}
+                                        >
+                                            <span>{action.intent}</span>
+                                            <strong>{action.label}</strong>
+                                            <small>
+                                                {needsSource
+                                                    ? 'Add a source first, then compare or supplement this scope.'
+                                                    : action.description}
+                                            </small>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ) : null}
+                    </section>
+                ) : null}
+            </section>
+        );
+    }
+
     return (
         <section
             ref={panelRef}
@@ -942,6 +1155,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                                 key={view.id}
                                                 type="button"
                                                 title={view.detail}
+                                                aria-label={view.ariaLabel || view.label}
                                                 className={activeCanvasView === view.id ? 'active' : ''}
                                                 onClick={() => setActiveCanvasView(view.id)}
                                             >
@@ -1138,7 +1352,12 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
             ) : null}
 
             {nodes.length > 0 ? (
-                <section className="local-follow-up-panel" aria-label="Follow-up actions">
+                <section
+                    className={`local-follow-up-panel ${
+                        isCanvasView ? 'local-follow-up-panel-compact' : ''
+                    }`}
+                    aria-label="Follow-up actions"
+                >
                     <div className="local-follow-up-context">
                         <span>{followUpContext.summary}</span>
                         <span>
@@ -1149,7 +1368,16 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         {typeof graphConfidence.score === 'number' ? (
                             <span>{graphConfidence.score}% confidence</span>
                         ) : null}
+                        <button
+                            type="button"
+                            className="local-follow-up-toggle"
+                            onClick={() => setFollowUpActionsOpen((open) => !open)}
+                            aria-expanded={followUpActionsOpen}
+                        >
+                            Actions {followUpActionsOpen ? '^' : 'v'}
+                        </button>
                     </div>
+                    {followUpActionsOpen ? (
                     <div className="local-follow-up-actions">
                         {FOLLOW_UP_ACTIONS.map((action) => {
                             const needsSource = action.requiresSource && activeSourceIds.length === 0;
@@ -1171,6 +1399,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             );
                         })}
                     </div>
+                    ) : null}
                 </section>
             ) : null}
 

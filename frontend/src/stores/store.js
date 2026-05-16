@@ -221,6 +221,7 @@ const useStore = create((set, get) => ({
     activeView: 'mindmap',
     activeCanvasView: 'mindmap',
     activeGraphFilters: getLastUsedGraphFilters(),
+    canvasNodeDensity: 'compact',
     developerMode: isDeveloperModeEnabled(),
     nudgePreferences: getNudgePreferences(),
     selectedBranchId: undefined,
@@ -312,6 +313,9 @@ const useStore = create((set, get) => ({
     },
     setActiveGraphFilters: (filters = []) => {
         set({ activeGraphFilters: saveLastUsedGraphFilters(filters) });
+    },
+    setCanvasNodeDensity: (canvasNodeDensity) => {
+        set({ canvasNodeDensity: canvasNodeDensity || 'compact' });
     },
     setDeveloperMode: (enabled) => {
         set({ developerMode: saveDeveloperMode(enabled) });

@@ -42,6 +42,7 @@ import ManualNodeControls from './global-components/ManualNodeControls.jsx';
 import AiHelpersPanel from './global-components/AiHelpersPanel.jsx';
 import SourceDraftReviewPanel from './global-components/SourceDraftReviewPanel.jsx';
 import WorkspaceNudgeSurface from './global-components/WorkspaceNudgeSurface.jsx';
+import DataSourceSelect from './global-components/DataSourceSelect.jsx';
 import PromptModal from './modals/PromptModal.jsx';
 import { getLocalSetting, setLocalSetting, SETTINGS_KEYS } from './config/localSettings';
 import { parseFlowSnapshot, stringifyFlowSnapshot } from './utils/flowSnapshots';
@@ -51,6 +52,11 @@ import useAutomationStore from './stores/automationStore';
 
 const CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'outline', 'executive', 'tasks', 'table']);
 const STRUCTURED_CANVAS_VIEWS = new Set(['outline', 'executive', 'tasks', 'table']);
+const NODE_DENSITY_OPTIONS = [
+    { id: 'compact', label: 'Compact' },
+    { id: 'outline', label: 'Outline' },
+    { id: 'cards', label: 'Cards' }
+];
 const STRUCTURED_AI_PRESETS = {
     tasks: {
         role: 'task-planner',
@@ -354,6 +360,7 @@ const scopedClassName = (className = '', scopeClass, isActive) => {
             (value) =>
                 value &&
                 value !== CANVAS_OUT_OF_SCOPE_NODE_CLASS &&
+                !value.startsWith('canvas-node-density-') &&
                 value !== CANVAS_OUT_OF_SCOPE_EDGE_CLASS
         );
     if (isActive) {
@@ -392,7 +399,14 @@ const canvasEdgeClassName = ({
     return classes.join(' ') || undefined;
 };
 
-const projectCanvasGraph = ({ nodes, edges, activeCanvasView, activeGraphFilters, selectedBranchId }) => {
+const projectCanvasGraph = ({
+    nodes,
+    edges,
+    activeCanvasView,
+    activeGraphFilters,
+    selectedBranchId,
+    canvasNodeDensity
+}) => {
     const hasBranchScope = Boolean(selectedBranchId);
     const branchIds = collectVisibleBranchIds(nodes, edges, selectedBranchId);
     const filters = Array.isArray(activeGraphFilters) ? activeGraphFilters : [];
@@ -407,14 +421,18 @@ const projectCanvasGraph = ({ nodes, edges, activeCanvasView, activeGraphFilters
         nodes: nodes.map((node) => {
             const isProjected = projectedIds.has(node.id);
             const isOutOfScope = hasBranchScope && !branchIds.has(node.id);
+            const densityClass = canvasNodeDensity
+                ? `canvas-node-density-${canvasNodeDensity}`
+                : 'canvas-node-density-compact';
+            const nextClassName = scopedClassName(
+                node.className,
+                CANVAS_OUT_OF_SCOPE_NODE_CLASS,
+                isProjected && isOutOfScope
+            );
             return {
                 ...node,
                 hidden: !isProjected,
-                className: scopedClassName(
-                    node.className,
-                    CANVAS_OUT_OF_SCOPE_NODE_CLASS,
-                    isProjected && isOutOfScope
-                )
+                className: [nextClassName, densityClass].filter(Boolean).join(' ')
             };
         }),
         edges: edges.map((edge) => {
@@ -469,6 +487,8 @@ const App = () => {
         activeView: state.activeView,
         activeCanvasView: state.activeCanvasView,
         activeGraphFilters: state.activeGraphFilters,
+        canvasNodeDensity: state.canvasNodeDensity,
+        setCanvasNodeDensity: state.setCanvasNodeDensity,
         selectedBranchId: state.selectedBranchId,
         setSelectedBranchId: state.setSelectedBranchId,
         inspectorNodeId: state.inspectorNodeId,
@@ -492,6 +512,8 @@ const App = () => {
         activeView,
         activeCanvasView,
         activeGraphFilters,
+        canvasNodeDensity,
+        setCanvasNodeDensity,
         selectedBranchId,
         setSelectedBranchId,
         inspectorNodeId,
@@ -595,9 +617,10 @@ const App = () => {
                 edges,
                 activeCanvasView,
                 activeGraphFilters,
-                selectedBranchId
+                selectedBranchId,
+                canvasNodeDensity
             }),
-        [activeCanvasView, activeGraphFilters, edges, nodes, selectedBranchId]
+        [activeCanvasView, activeGraphFilters, canvasNodeDensity, edges, nodes, selectedBranchId]
     );
     const isStructuredCanvasView = STRUCTURED_CANVAS_VIEWS.has(activeCanvasView);
     const renderedCanvasGraph = useMemo(() => {
@@ -841,6 +864,29 @@ const App = () => {
         [flow_id, pushNode, recordActivity, selectedBranchId]
     );
 
+    const openEmptyCanvasSources = useCallback(() => {
+        setWorkspaceDockTab('sources');
+        pushNode(DataSourceSelect);
+    }, [pushNode]);
+
+    const openEmptyCanvasAskAi = useCallback(() => {
+        setSelectedBranchId(undefined);
+        setInspectorNodeId(undefined);
+        pushNode(PromptModal, { scope: 'workspace' });
+        recordActivity({
+            type: 'ai_action_picker_opened',
+            title: 'Workspace Ask AI opened',
+            summary: 'Opened preview-first AI actions from the empty canvas.',
+            metadata: {
+                scope: 'workspace'
+            }
+        });
+    }, [pushNode, recordActivity, setInspectorNodeId, setSelectedBranchId]);
+
+    const openManualStart = useCallback(() => {
+        setWorkspaceDockTab('build');
+    }, []);
+
     const fitSelectedNodes = useCallback(() => {
         const selectedIds = new Set(selectedVisibleNodes.map((node) => node.id));
         if (selectedIds.size === 0) {
@@ -856,6 +902,19 @@ const App = () => {
         setIsAiHelpersOpen(true);
         setNextStepsOpenToken((token) => token + 1);
     }, []);
+
+    const reflowCanvasGraph = useCallback(() => {
+        const graphNodes = reactFlow.getNodes();
+        const graphEdges = reactFlow.getEdges();
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
+            graphNodes,
+            graphEdges
+        );
+        setNodes(layoutedNodes);
+        setEdges(layoutedEdges);
+        setSaveStatus('dirty');
+        window.setTimeout(() => fitView({ nodes: layoutedNodes, maxZoom: 1 }), 50);
+    }, [fitView, reactFlow, setEdges, setNodes, setSaveStatus]);
 
     const onChange = useCallback(
         ({ nodes }) => {
@@ -1107,24 +1166,79 @@ const App = () => {
                             fitViewOptions={{ maxZoom: 1 }}
                             showInteractive={false}
                         />
-                        <MiniMap
-                            position="bottom-right"
-                            pannable
-                            zoomable
-                            nodeStrokeWidth={3}
-                            maskColor={
-                                lightMode
-                                    ? 'rgba(247, 247, 247, 0.68)'
-                                    : 'rgba(10, 10, 10, 0.68)'
-                            }
-                            nodeColor={(node) =>
-                                node.selected
-                                    ? '#eece47'
-                                    : node.data?.manual
-                                      ? '#b77bff'
-                                      : '#6ea8fe'
-                            }
-                        />
+                        {renderedCanvasGraph.nodes.length >= 5 ? (
+                            <MiniMap
+                                position="bottom-right"
+                                pannable
+                                zoomable
+                                nodeStrokeWidth={3}
+                                maskColor={
+                                    lightMode
+                                        ? 'rgba(247, 247, 247, 0.68)'
+                                        : 'rgba(10, 10, 10, 0.68)'
+                                }
+                                nodeColor={(node) =>
+                                    node.selected
+                                        ? '#eece47'
+                                        : node.data?.manual
+                                          ? '#b77bff'
+                                          : '#6ea8fe'
+                                }
+                            />
+                        ) : null}
+                        {renderedCanvasGraph.nodes.length > 0 ? (
+                            <Panel
+                                position="bottom-right"
+                                className="canvas-node-view-panel"
+                                style={{ display: 'block' }}
+                            >
+                                <section className="canvas-node-view-controls" aria-label="Node view">
+                                    <span>Node view</span>
+                                    <div>
+                                        {NODE_DENSITY_OPTIONS.map((option) => (
+                                            <button
+                                                key={option.id}
+                                                type="button"
+                                                className={canvasNodeDensity === option.id ? 'active' : ''}
+                                                onClick={() => setCanvasNodeDensity(option.id)}
+                                            >
+                                                {option.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="canvas-node-reflow"
+                                        onClick={reflowCanvasGraph}
+                                    >
+                                        Reflow
+                                    </button>
+                                </section>
+                            </Panel>
+                        ) : null}
+                        {nodes.length === 0 ? (
+                            <Panel
+                                position="top-center"
+                                className="canvas-empty-state-panel"
+                                style={{ display: 'block' }}
+                            >
+                                <section className="canvas-empty-state" aria-label="Empty workspace">
+                                    <span>Start your think space</span>
+                                    <p>Add sources, ask AI, or create the first node manually.</p>
+                                    <div>
+                                        <button type="button" onClick={openEmptyCanvasSources}>
+                                            Add sources
+                                        </button>
+                                        <button type="button" onClick={openEmptyCanvasAskAi}>
+                                            Ask AI
+                                        </button>
+                                        <button type="button" onClick={openManualStart}>
+                                            Start with node
+                                        </button>
+                                    </div>
+                                </section>
+                            </Panel>
+                        ) : null}
                     </>
                 ) : null}
                 {isStructuredCanvasView ? (
