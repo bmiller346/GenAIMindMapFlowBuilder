@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { FiGitBranch, FiMap } from 'react-icons/fi';
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
@@ -240,28 +241,48 @@ const FlowchartView = ({ flowchart, onOpenNode, onAskAi }) => {
                     const outgoing = flowchart.connectors.filter((connector) => connector.source === step.id);
                     return (
                         <div key={step.id} className="canvas-flowchart-step-wrap">
-                            <article className={`canvas-flowchart-step canvas-flowchart-step-${step.flow_kind}`}>
-                                <div>
-                                    <span>{step.flow_kind}</span>
-                                    <small>{step.source_backed ? 'source-backed' : 'needs source review'}</small>
+                            <article
+                                className={[
+                                    'canvas-flowchart-step',
+                                    `canvas-flowchart-step-${step.flow_kind}`,
+                                    `canvas-flowchart-shape-${step.shape || 'process'}`
+                                ].join(' ')}
+                            >
+                                <div className="canvas-flowchart-symbol-shell">
+                                    <div className="canvas-flowchart-symbol">
+                                        <span>{step.flow_kind === 'decision' ? 'Decision' : step.shape}</span>
+                                        <button type="button" onClick={() => onOpenNode?.(step.id)}>
+                                            {step.title}
+                                        </button>
+                                    </div>
                                 </div>
-                                <button type="button" onClick={() => onOpenNode?.(step.id)}>
-                                    {step.title}
-                                </button>
-                                {summaryText(step) ? <p>{summaryText(step)}</p> : null}
+                                <div className="canvas-flowchart-step-meta">
+                                    <small>{step.source_backed ? 'source-backed' : 'needs source review'}</small>
+                                    {summaryText(step) ? <p>{summaryText(step)}</p> : null}
+                                </div>
                             </article>
                             {index < flowchart.steps.length - 1 ? (
-                                <div className="canvas-flowchart-connectors">
+                                <div
+                                    className={[
+                                        'canvas-flowchart-connectors',
+                                        step.flow_kind === 'decision' ? 'canvas-flowchart-branches' : ''
+                                    ].join(' ')}
+                                >
                                     {outgoing.length ? (
                                         outgoing.map((connector) => (
-                                            <span key={connector.id}>
-                                                {connector.label}
-                                                {' -> '}
-                                                {connector.target_title}
-                                            </span>
+                                            <button
+                                                type="button"
+                                                key={connector.id}
+                                                className={`canvas-flowchart-connector canvas-flowchart-connector-${connector.branch_kind || 'default'}`}
+                                                onClick={() => onOpenNode?.(connector.target)}
+                                            >
+                                                <strong>{connector.label}</strong>
+                                                <span>{connector.target_title}</span>
+                                                {connector.condition ? <small>{connector.condition}</small> : null}
+                                            </button>
                                         ))
                                     ) : (
-                                        <span>Next</span>
+                                        <span className="canvas-flowchart-connector">Next</span>
                                     )}
                                 </div>
                             ) : null}
@@ -300,6 +321,7 @@ const CanvasStructuredView = ({
     onOpenNode,
     onOpenSources,
     onAskAi,
+    onBackToMap,
     onStartManual,
     onGenerateTaskCandidates,
     onCreateStructuredTable
@@ -442,7 +464,7 @@ const CanvasStructuredView = ({
 
     if (nodes.length === 0) {
         return (
-            <section className="canvas-structured-view" aria-label={label}>
+            <section className={`canvas-structured-view canvas-structured-view-${view}`} aria-label={label}>
                 <EmptyStructuredView
                     view={view}
                     label={label}
@@ -455,9 +477,9 @@ const CanvasStructuredView = ({
     }
 
     return (
-        <section className="canvas-structured-view" aria-label={label}>
+        <section className={`canvas-structured-view canvas-structured-view-${view}`} aria-label={label}>
             <header className="canvas-structured-header">
-                <div>
+                <div className="canvas-structured-header-main">
                     <span>
                         {view === 'table' ? 'View workspace as table' : 'Workspace view'}
                     </span>
@@ -468,15 +490,42 @@ const CanvasStructuredView = ({
                     {activeGraphFilters.length ? `, ${activeGraphFilters.length} filters` : ''}
                 </p>
                 <ActiveFilterChips filters={activeGraphFilters} />
-                {view === 'table' ? (
-                    <button
-                        type="button"
-                        className="canvas-structured-header-action"
-                        onClick={onCreateStructuredTable}
-                    >
-                        Create structured table
-                    </button>
-                ) : null}
+                <div className="canvas-structured-header-actions">
+                    {view === 'flowchart' ? (
+                        <button
+                            type="button"
+                            className="canvas-structured-header-action"
+                            onClick={() =>
+                                onAskAi?.({
+                                    initialVisual: 'flow_chart',
+                                    initialPrompt: 'Improve this flowchart with clearer step order, decision paths, dependencies, handoffs, and source-backed review notes.'
+                                })
+                            }
+                        >
+                            <FiGitBranch aria-hidden="true" />
+                            Improve flow
+                        </button>
+                    ) : null}
+                    {view === 'table' ? (
+                        <button
+                            type="button"
+                            className="canvas-structured-header-action"
+                            onClick={onCreateStructuredTable}
+                        >
+                            Create structured table
+                        </button>
+                    ) : null}
+                    {onBackToMap ? (
+                        <button
+                            type="button"
+                            className="canvas-structured-header-secondary"
+                            onClick={onBackToMap}
+                        >
+                            <FiMap aria-hidden="true" />
+                            Map
+                        </button>
+                    ) : null}
+                </div>
             </header>
 
             {view === 'flowchart' ? (

@@ -262,6 +262,37 @@ test('normalizeWorkspaceNode keeps generated title and body readable from draft-
     );
 });
 
+test('normalizeWorkspaceNode renders semantic question nodes as content nodes', () => {
+    const normalized = normalizeWorkspaceNode({
+        id: 'decision-1',
+        type: 'question',
+        position: { x: 20, y: 40 },
+        data: {
+            title: 'Decision: Is intake complete?',
+            summary: 'Route missing intake back to the project team.',
+            node_type: 'question',
+            status: 'needs_review'
+        }
+    });
+
+    assert.equal(normalized.type, 'response');
+    assert.equal(normalized.data.node_type, 'question');
+    assert.equal(normalized.data.title, 'Decision: Is intake complete?');
+    assert.equal(normalized.data.body, 'Route missing intake back to the project team.');
+
+    const legacyAskNode = normalizeWorkspaceNode({
+        id: 'ask-1',
+        type: 'question',
+        data: {
+            question: '',
+            component_type: 'pdf',
+            component_id: 'source-1'
+        }
+    });
+
+    assert.equal(legacyAskNode.type, 'question');
+});
+
 test('getWorkspaceNodeData exposes the canonical data contract', () => {
     const node = createWorkspaceNode({
         id: 'contract-1',

@@ -361,7 +361,20 @@ test('flowchart projection orders process steps and decision connectors', () => 
         ],
         [
             { id: 'edge-1', source: 'intake', target: 'decision', relationship_type: 'next' },
-            { id: 'edge-2', source: 'decision', target: 'handoff', relationship_type: 'handoff' }
+            {
+                id: 'edge-2',
+                source: 'decision',
+                target: 'handoff',
+                relationship_type: 'decision_path',
+                metadata: { branch_label: 'Yes', condition: 'Scope is approved' }
+            },
+            {
+                id: 'edge-3',
+                source: 'decision',
+                target: 'intake',
+                relationship_type: 'exception',
+                metadata: { branch_label: 'No', condition: 'Scope needs revision', exception_path: true }
+            }
         ]
     );
 
@@ -369,7 +382,10 @@ test('flowchart projection orders process steps and decision connectors', () => 
 
     assert.deepEqual(flowchart.steps.map((step) => step.id), ['intake', 'decision', 'handoff']);
     assert.deepEqual(flowchart.steps.map((step) => step.flow_kind), ['step', 'decision', 'handoff']);
-    assert.deepEqual(flowchart.connectors.map((connector) => connector.label), ['Next', 'Handoff']);
+    assert.deepEqual(flowchart.steps.map((step) => step.shape), ['process', 'decision', 'terminator']);
+    assert.deepEqual(flowchart.connectors.map((connector) => connector.label), ['Next', 'Yes', 'No']);
+    assert.deepEqual(flowchart.connectors.map((connector) => connector.branch_kind), ['default', 'yes', 'no']);
+    assert.equal(flowchart.connectors.find((connector) => connector.id === 'edge-3').exception_path, true);
     assert.equal(flowchart.metadata.decision_count, 1);
 });
 

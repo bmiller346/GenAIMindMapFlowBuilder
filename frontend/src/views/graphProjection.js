@@ -50,9 +50,41 @@ const FLOW_RELATIONSHIP_TYPES = new Set([
     'starts_with',
     'ends-with',
     'ends_with',
+    'decision-path',
+    'decision_path',
+    'exception',
     'handoff',
     'informs',
     'supports'
+]);
+const FLOW_YES_SIGNALS = new Set([
+    'yes',
+    'true',
+    'approved',
+    'approve',
+    'accepted',
+    'accept',
+    'pass',
+    'passes',
+    'success',
+    'successful',
+    'complete',
+    'completed'
+]);
+const FLOW_NO_SIGNALS = new Set([
+    'no',
+    'false',
+    'rejected',
+    'reject',
+    'denied',
+    'deny',
+    'fail',
+    'fails',
+    'failed',
+    'blocked',
+    'exception',
+    'else',
+    'otherwise'
 ]);
 
 const ENTERPRISE_ACTION_TYPES = new Set([
@@ -163,6 +195,62 @@ const relationshipLabel = (value = '') =>
     String(value || '')
         .replaceAll('_', ' ')
         .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const edgeTextSignals = (edge = {}) =>
+    [
+        edge.label,
+        edge.condition,
+        edge.branch_label,
+        edge.relationship_type,
+        edge.data?.label,
+        edge.data?.condition,
+        edge.data?.branch_label,
+        edge.data?.source_signal,
+        edge.metadata?.label,
+        edge.metadata?.condition,
+        edge.metadata?.branch_label,
+        edge.metadata?.source_signal
+    ]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean);
+
+const flowBranchKind = (edge = {}) => {
+    const signals = edgeTextSignals(edge).map(normalizeSignal);
+    if (signals.some((signal) => FLOW_YES_SIGNALS.has(signal))) {
+        return 'yes';
+    }
+    if (signals.some((signal) => FLOW_NO_SIGNALS.has(signal))) {
+        return 'no';
+    }
+    return 'default';
+};
+
+const flowBranchLabel = (edge = {}, sourceStep) => {
+    const explicit = [
+        edge.branch_label,
+        edge.condition,
+        edge.label,
+        edge.data?.branch_label,
+        edge.data?.condition,
+        edge.data?.label,
+        edge.metadata?.branch_label,
+        edge.metadata?.condition,
+        edge.metadata?.label
+    ].find((value) => String(value || '').trim());
+
+    if (explicit) {
+        return relationshipLabel(explicit);
+    }
+
+    const branchKind = sourceStep?.flow_kind === 'decision' ? flowBranchKind(edge) : 'default';
+    if (branchKind === 'yes') {
+        return 'Yes';
+    }
+    if (branchKind === 'no') {
+        return 'No';
+    }
+    return relationshipLabel(relationshipTypeForEdge(edge) || 'next');
+};
 
 const HIERARCHY_RELATIONSHIP_TYPES = new Set([
     '',
@@ -1964,6 +2052,22 @@ const flowchartNodeKind = (node = {}) => {
     return 'step';
 };
 
+const flowchartNodeShape = (step = {}, incoming = [], outgoing = []) => {
+    if (step.flow_kind === 'decision') {
+        return 'decision';
+    }
+    if (!incoming.length) {
+        return 'terminator';
+    }
+    if (!outgoing.length || step.flow_kind === 'milestone' || step.flow_kind === 'checkpoint') {
+        return 'terminator';
+    }
+    if (step.flow_kind === 'dependency') {
+        return 'document';
+    }
+    return 'process';
+};
+
 const orderFlowchartNodes = (projection, candidateIds) => {
     const ordered = [];
     const seen = new Set();
@@ -1987,7 +2091,7 @@ const orderFlowchartNodes = (projection, candidateIds) => {
 export const getFlowchartProjection = (projection) => {
     const contentNodes = projection.nodes.filter((node) => node.react_flow_type !== 'dataSource');
     const flowEdges = projection.edges.filter((edge) =>
-        FLOW_RELATIONSHIP_TYPES.has(normalizeSignal(edge.relationship_type))
+        FLOW_RELATIONSHIP_TYPES.has(normalizeSignal(relationshipTypeForEdge(edge)))
     );
     const connectedFlowIds = new Set(
         flowEdges.flatMap((edge) => [edge.source, edge.target]).filter(Boolean)
@@ -2003,7 +2107,7 @@ export const getFlowchartProjection = (projection) => {
         contentNodes.slice(0, 12).forEach((node) => candidateIds.add(node.id));
     }
 
-    const steps = orderFlowchartNodes(projection, candidateIds).map((node, index) => ({
+    const baseSteps = orderFlowchartNodes(projection, candidateIds).map((node, index) => ({
         ...node,
         order: index + 1,
         flow_kind: flowchartNodeKind(node),
@@ -2013,18 +2117,47 @@ export const getFlowchartProjection = (projection) => {
             node.node_type === 'needs_review' ||
             !hasSourceSupport(node)
     }));
-    const stepIds = new Set(steps.map((step) => step.id));
-    const connectors = projection.edges
+    const baseStepLookup = new Map(baseSteps.map((step) => [step.id, step]));
+    const stepIds = new Set(baseSteps.map((step) => step.id));
+    const connectors = flowEdges
         .filter((edge) => stepIds.has(edge.source) && stepIds.has(edge.target))
-        .map((edge) => ({
-            id: edge.id || `${edge.source}-${edge.target}`,
-            source: edge.source,
-            target: edge.target,
-            source_title: projection.nodeLookup.get(edge.source)?.title || edge.source,
-            target_title: projection.nodeLookup.get(edge.target)?.title || edge.target,
-            relationship_type: edge.relationship_type || 'contains',
-            label: relationshipLabel(edge.relationship_type || 'contains')
-        }));
+        .map((edge) => {
+            const sourceStep = baseStepLookup.get(edge.source);
+            const branchKind = sourceStep?.flow_kind === 'decision' ? flowBranchKind(edge) : 'default';
+            const relationshipType = relationshipTypeForEdge(edge) || 'next';
+
+            return {
+                id: edge.id || `${edge.source}-${edge.target}`,
+                source: edge.source,
+                target: edge.target,
+                source_title: projection.nodeLookup.get(edge.source)?.title || edge.source,
+                target_title: projection.nodeLookup.get(edge.target)?.title || edge.target,
+                relationship_type: relationshipType,
+                label: flowBranchLabel(edge, sourceStep),
+                branch_kind: branchKind,
+                condition:
+                    edge.condition ||
+                    edge.data?.condition ||
+                    edge.metadata?.condition ||
+                    '',
+                exception_path:
+                    normalizeSignal(relationshipType) === 'exception' ||
+                    edge.exception_path === true ||
+                    edge.data?.exception_path === true ||
+                    edge.metadata?.exception_path === true
+            };
+        });
+    const steps = baseSteps.map((step) => {
+        const incoming = connectors.filter((connector) => connector.target === step.id);
+        const outgoing = connectors.filter((connector) => connector.source === step.id);
+
+        return {
+            ...step,
+            shape: flowchartNodeShape(step, incoming, outgoing),
+            incoming_count: incoming.length,
+            outgoing_count: outgoing.length
+        };
+    });
 
     return {
         steps,

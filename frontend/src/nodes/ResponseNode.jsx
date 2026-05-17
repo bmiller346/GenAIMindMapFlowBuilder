@@ -994,9 +994,13 @@ const ResponseNode = ({ id, data }) => {
         );
         const targetLabel = displayTitle || summary || id;
         const normalizedScope = { type: 'node', node_id: id };
-        const sourceRefs = shouldAttachInlineSourceRefs(localPrompt)
-            ? workspaceData.sourceRefs || []
-            : [];
+        const sourceRequested = shouldAttachInlineSourceRefs(localPrompt);
+        const sourceRefs = sourceRequested ? workspaceData.sourceRefs || [] : [];
+        const inlineSourceStatus = sourceRefs.length
+            ? 'source_backed'
+            : sourceRequested
+              ? 'missing_required_source'
+              : 'ai_assumption_uncited';
         const childEdges = edges.filter((edge) => edge.source === id);
         const changeIntent = inferAIDraftChangeIntent(
             localPrompt,
@@ -1039,7 +1043,11 @@ const ResponseNode = ({ id, data }) => {
                       inline_prompt: localPrompt,
                       inline_prompt_step: index + 1,
                       action_id: selectedAction.id,
-                      role_id: role.id
+                      role_id: role.id,
+                      source_status: inlineSourceStatus,
+                      source_required: sourceRequested,
+                      source_policy_requires_citation: sourceRequested,
+                      reviewable_unsourced: sourceRefs.length === 0
                   }
               }))
             : [];
@@ -1111,7 +1119,10 @@ const ResponseNode = ({ id, data }) => {
                 follow_up_memory: memoryContext,
                 model: 'auto',
                 model_tier: 'auto',
-                model_reason: 'Inline node prompt uses automatic model selection.'
+                model_reason: 'Inline node prompt uses automatic model selection.',
+                source_status: inlineSourceStatus,
+                source_required: sourceRequested,
+                source_policy_requires_citation: sourceRequested
             }
         };
 
@@ -1163,9 +1174,6 @@ const ResponseNode = ({ id, data }) => {
                       draftSessionEndpoint({ flowId }),
                       {
                           ...baseRequestPayload,
-                          draft_nodes: draftNodes,
-                          draft_edges: draftEdges,
-                          draft_annotations: draftAnnotations,
                           source_refs: sourceRefs,
                           assumptions: [`User instruction: ${localPrompt}`],
                           metadata: {
@@ -1174,7 +1182,10 @@ const ResponseNode = ({ id, data }) => {
                               action_label: selectedAction.label,
                               preview_mode: 'inline_node_prompt',
                               source_node_id: id,
-                              source_context_attached: sourceRefs.length > 0
+                              source_context_attached: sourceRefs.length > 0,
+                              source_status: inlineSourceStatus,
+                              source_required: sourceRequested,
+                              source_policy_requires_citation: sourceRequested
                           }
                       }
                   )

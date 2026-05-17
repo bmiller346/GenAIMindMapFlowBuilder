@@ -69,6 +69,57 @@ export const getAIDraftAcceptModeDetail = (mode = 'append') =>
 const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 const firstText = (...values) =>
     values.find((value) => typeof value === 'string' && value.trim()) || '';
+const INTERNAL_AI_DRAFT_PROMPT_MARKERS = [
+    'Use this follow-up AI memory while answering.',
+    'Follow-up memory context JSON:',
+    'Use this structured workspace brief while answering.'
+];
+
+export const isInternalAIDraftPrompt = (value = '') => {
+    const text = String(value || '');
+    return INTERNAL_AI_DRAFT_PROMPT_MARKERS.some((marker) => text.includes(marker));
+};
+
+const decodeJsonStringValue = (value = '') => {
+    try {
+        return JSON.parse(`"${value}"`);
+    } catch {
+        return String(value || '')
+            .replace(/\\"/g, '"')
+            .replace(/\\n/g, '\n')
+            .replace(/\\t/g, '\t');
+    }
+};
+
+export const visibleAIDraftPromptText = (value = '', fallback = '') => {
+    const text = String(value || '').trim();
+    const fallbackText = String(fallback || '').trim();
+    const safeFallback = fallbackText && !isInternalAIDraftPrompt(fallbackText) ? fallbackText : '';
+
+    if (!text) {
+        return safeFallback;
+    }
+    if (!isInternalAIDraftPrompt(text)) {
+        return text;
+    }
+
+    const currentPromptMatch = text.match(/"current_prompt"\s*:\s*"((?:\\.|[^"\\])*)"/);
+    const currentPrompt = currentPromptMatch
+        ? decodeJsonStringValue(currentPromptMatch[1]).trim()
+        : '';
+    if (currentPrompt && !isInternalAIDraftPrompt(currentPrompt)) {
+        return currentPrompt;
+    }
+
+    const userQuestionMatch = text.match(/User question:\s*([\s\S]*)$/i);
+    const userQuestion = userQuestionMatch ? userQuestionMatch[1].trim() : '';
+    if (userQuestion && !isInternalAIDraftPrompt(userQuestion)) {
+        return userQuestion;
+    }
+
+    return safeFallback;
+};
+
 const numericConfidence = (value) => {
     if (typeof value === 'number') {
         return value;
@@ -85,6 +136,60 @@ const numericConfidence = (value) => {
     }
     const parsed = Number.parseFloat(normalized);
     return Number.isFinite(parsed) ? parsed : null;
+};
+
+const sourcePolicyRequiresCitation = ({ metadata = {}, status = '', type = '' } = {}) =>
+    metadata.source_required === true ||
+    metadata.requires_source === true ||
+    metadata.requires_source_ref === true ||
+    metadata.citation_required === true ||
+    metadata.source_policy_requires_citation === true ||
+    metadata.source_context_attached === true ||
+    metadata.missing_source_ref === true ||
+    metadata.source_gap === true ||
+    metadata.source_status === 'missing_required_source' ||
+    status === 'missing_source_ref' ||
+    status === 'source_missing' ||
+    type === 'source_gap' ||
+    type === 'missing_source_ref' ||
+    type === 'needs_source_ref';
+
+export const getAIDraftSourceStatus = (item = {}) => {
+    const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+    const sourceRefs = asArray(item.source_refs);
+    const status = firstText(item.status, metadata.status, metadata.review_state).toLowerCase();
+    const type = firstText(item.item_type, item.node_type, metadata.node_type, metadata.type).toLowerCase();
+
+    if (sourceRefs.length > 0) {
+        return {
+            id: 'source_backed',
+            badgeId: 'source-backed',
+            label: 'Source-backed',
+            tone: 'good',
+            reviewable: false,
+            source_required: false
+        };
+    }
+
+    if (sourcePolicyRequiresCitation({ metadata, status, type })) {
+        return {
+            id: 'missing_required_source',
+            badgeId: 'missing-source',
+            label: 'Missing citation',
+            tone: 'warn',
+            reviewable: true,
+            source_required: true
+        };
+    }
+
+    return {
+        id: 'ai_assumption_uncited',
+        badgeId: 'ai-assumption',
+        label: 'AI assumption',
+        tone: 'neutral',
+        reviewable: true,
+        source_required: false
+    };
 };
 
 const AI_DRAFT_MEMORY_NODE_LIMIT = 24;
@@ -797,6 +902,29 @@ export const normalizeAIDraftEdge = (edge = {}) => ({
     metadata: edge.metadata && typeof edge.metadata === 'object' ? { ...edge.metadata } : {}
 });
 
+const HIERARCHY_RELATIONSHIP_TYPES = new Set([
+    'contains',
+    'child',
+    'children',
+    'has_child',
+    'includes',
+    'part_of',
+    'decomposes_to',
+    'step',
+    'subtopic',
+    'sub_topic'
+]);
+
+const isHierarchyDraftEdge = (edge = {}) => {
+    const relationshipType = firstText(edge.relationship_type, edge.metadata?.relationship_type, 'contains')
+        .toLowerCase()
+        .replaceAll(' ', '_');
+    return HIERARCHY_RELATIONSHIP_TYPES.has(relationshipType);
+};
+
+const normalizeHierarchyRelationshipType = (edge = {}) =>
+    isHierarchyDraftEdge(edge) ? 'contains' : firstText(edge.relationship_type, edge.metadata?.relationship_type, 'contains');
+
 export const createAIDraftRevision = ({
     sessionId = '',
     prompt = '',
@@ -1025,16 +1153,15 @@ export const formatAIDraftPreviewDiffSummary = (diff = {}) => ({
 
 export const getAIDraftItemBadges = (item = {}) => {
     const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
-    const sourceRefs = asArray(item.source_refs);
     const assumptions = asArray(item.assumptions);
     const confidence = numericConfidence(item.confidence ?? metadata.confidence);
     const status = firstText(item.status, metadata.status).toLowerCase();
     const type = firstText(item.item_type, metadata.node_type, metadata.type).toLowerCase();
+    const sourceStatus = getAIDraftSourceStatus(item);
     const badges = [];
 
-    if (sourceRefs.length > 0) {
-        badges.push({ id: 'source-backed', label: 'Source-backed', tone: 'good' });
-    } else {
+    badges.push({ id: sourceStatus.badgeId, label: sourceStatus.label, tone: sourceStatus.tone });
+    if (sourceStatus.reviewable) {
         badges.push({ id: 'needs-review', label: 'Needs review', tone: 'warn' });
     }
     if (status === 'needs_review' || type === 'needs_review' || metadata.needs_review === true) {
@@ -1043,10 +1170,11 @@ export const getAIDraftItemBadges = (item = {}) => {
         }
     }
     if (
-        assumptions.length > 0 ||
-        metadata.assumption === true ||
-        metadata.assumptions === true ||
-        type === 'assumption'
+        sourceStatus.id !== 'ai_assumption_uncited' &&
+        (assumptions.length > 0 ||
+            metadata.assumption === true ||
+            metadata.assumptions === true ||
+            type === 'assumption')
     ) {
         badges.push({ id: 'assumption', label: 'Assumption', tone: 'neutral' });
     }
@@ -1155,6 +1283,8 @@ const describeAIDraftPreviewDiff = ({
     removedNodes = 0,
     removedEdges = 0,
     needsReviewRepairs = 0,
+    assumptionRepairs = 0,
+    missingSourceRepairs = 0,
     updatedNodes = 0
 } = {}) => {
     const draftItemCount = nodes.length + relationshipItems.length;
@@ -1195,7 +1325,9 @@ const describeAIDraftPreviewDiff = ({
             draftItemCount
                 ? `${draftItemCount} source-backed draft item${draftItemCount === 1 ? '' : 's'} will be accepted.`
                 : 'No source-backed draft items are available to accept.',
-            needsReviewRepairs ? `${needsReviewRepairs} uncited item${needsReviewRepairs === 1 ? '' : 's'} stay draft-only.` : 'Uncited draft items stay out of the graph.'
+            needsReviewRepairs
+                ? `${needsReviewRepairs} uncited item${needsReviewRepairs === 1 ? '' : 's'} stay draft-only (${missingSourceRepairs} missing citation${missingSourceRepairs === 1 ? '' : 's'}, ${assumptionRepairs} AI assumption${assumptionRepairs === 1 ? '' : 's'}).`
+                : 'Uncited draft items stay out of the graph.'
         ];
     }
     return [
@@ -1203,6 +1335,20 @@ const describeAIDraftPreviewDiff = ({
         'Existing workspace content stays in place.'
     ];
 };
+
+const reviewSourceStatusCounts = (items = []) =>
+    asArray(items).reduce(
+        (counts, item) => {
+            const sourceStatus = getAIDraftSourceStatus(item);
+            if (sourceStatus.id === 'missing_required_source') {
+                counts.missing_required_source += 1;
+            } else if (sourceStatus.id === 'ai_assumption_uncited') {
+                counts.ai_assumption_uncited += 1;
+            }
+            return counts;
+        },
+        { ai_assumption_uncited: 0, missing_required_source: 0 }
+    );
 
 export const buildAIDraftPreviewDiff = (
     session = {},
@@ -1228,15 +1374,16 @@ export const buildAIDraftPreviewDiff = (
         edges: currentEdges,
         scope: session.scope
     });
-    const needsReviewRepairs =
+    const needsReviewNodes =
         mode === 'notes_only'
-            ? 0
+            ? []
             : mode === 'cited_only'
               ? asArray(revision.draft_nodes).filter(
                     (node) => node.node_type !== 'reference' && asArray(node.source_refs).length === 0
-                ).length
-              : nodes.filter((node) => node.node_type !== 'reference' && asArray(node.source_refs).length === 0)
-                    .length;
+                )
+              : nodes.filter((node) => node.node_type !== 'reference' && asArray(node.source_refs).length === 0);
+    const needsReviewRepairs = needsReviewNodes.length;
+    const sourceStatusCounts = reviewSourceStatusCounts(needsReviewNodes);
     const updatedNodes = mode === 'merge' ? nodes.length : 0;
     const addedEdges = mode === 'merge' ? 0 : edges.length + relationshipItems.length;
     const previewLines = describeAIDraftPreviewDiff({
@@ -1248,6 +1395,8 @@ export const buildAIDraftPreviewDiff = (
         removedNodes: removals.removed_nodes,
         removedEdges: removals.removed_edges,
         needsReviewRepairs,
+        assumptionRepairs: sourceStatusCounts.ai_assumption_uncited,
+        missingSourceRepairs: sourceStatusCounts.missing_required_source,
         updatedNodes
     });
     const diff = {
@@ -1259,6 +1408,8 @@ export const buildAIDraftPreviewDiff = (
         removed_edges: removals.removed_edges,
         review_outputs: asArray(revision.draft_annotations).length,
         needs_review_repairs: needsReviewRepairs,
+        ai_assumption_repairs: sourceStatusCounts.ai_assumption_uncited,
+        missing_source_repairs: sourceStatusCounts.missing_required_source,
         accepted_item_ids: asArray(selectedItemIds).length
             ? asArray(selectedItemIds)
             : [...nodes.map((node) => node.id), ...relationshipItems.map((item) => item.id)],
@@ -1270,6 +1421,7 @@ export const buildAIDraftPreviewDiff = (
             accept_mode_help: acceptModeDetail.help,
             user_choice: acceptModeDetail.user_choice,
             preview_lines: previewLines,
+            source_status_counts: sourceStatusCounts,
             removed_node_ids: removals.removed_node_ids,
             removed_edge_ids: removals.removed_edge_ids,
             follow_up_semantics: {
@@ -1291,7 +1443,9 @@ export const buildAIDraftPreviewDiff = (
         `+${diff.added_edges} edges`,
         diff.updated_nodes ? `~${diff.updated_nodes} nodes updated` : '',
         diff.removed_nodes ? `-${diff.removed_nodes} scoped nodes` : '',
-        diff.needs_review_repairs ? `!${diff.needs_review_repairs} marked needs_review` : ''
+        diff.needs_review_repairs
+            ? `!${diff.needs_review_repairs} reviewable (${diff.missing_source_repairs} missing citation, ${diff.ai_assumption_repairs} AI assumption)`
+            : ''
     ]
         .filter(Boolean)
         .join(', ');
@@ -1336,35 +1490,71 @@ export const acceptAIDraftSession = ({
             ? graphAfterReplacementRemoval({ nodes, edges, scope: session.scope })
             : { nodes: asArray(nodes), edges: asArray(edges), removed_node_ids: [], removed_edge_ids: [] };
     const existingIds = new Set(baseGraph.nodes.map((node) => node.id));
-    const generatedNodes =
-        mode === 'notes_only'
-            ? []
-            : acceptedDrafts
-                  .map((draft, index) =>
-                      createAcceptedNode({
-                          draft,
-                          session,
-                          revision,
-                          nodes: baseGraph.nodes,
-                          edges: baseGraph.edges,
-                          index
-                      })
-                  )
-                  .filter((node) => !existingIds.has(node.id));
+    const normalizedDraftEdges = asArray(revision.draft_edges).map(normalizeAIDraftEdge);
+    const hierarchyDraftEdges = normalizedDraftEdges.filter(isHierarchyDraftEdge);
+    const relationshipDraftEdges = normalizedDraftEdges.filter((edge) => !isHierarchyDraftEdge(edge));
+    const parentIdByDraftId = new Map(
+        hierarchyDraftEdges
+            .filter((edge) => edge.source_node_id && edge.target_node_id)
+            .map((edge) => [edge.target_node_id, edge.source_node_id])
+    );
+    const generatedNodes = [];
+    const workingHierarchyEdges = [...baseGraph.edges];
+    if (mode !== 'notes_only') {
+        acceptedDrafts.forEach((draft) => {
+            if (existingIds.has(draft.id)) {
+                return;
+            }
+            const node = createAcceptedNode({
+                draft,
+                session,
+                revision,
+                nodes: [...baseGraph.nodes, ...generatedNodes],
+                edges: workingHierarchyEdges,
+                parentId: parentIdByDraftId.get(draft.id)
+            });
+            generatedNodes.push(node);
+            existingIds.add(node.id);
+            const parentId = parentIdByDraftId.get(draft.id) || draft.parent_id || session.scope?.node_id || '';
+            if (parentId) {
+                workingHierarchyEdges.push({
+                    id: `draft_position_edge_${parentId}_${node.id}`,
+                    source: parentId,
+                    target: node.id
+                });
+            }
+        });
+    }
     const generatedIds = new Set(generatedNodes.map((node) => node.id));
+    const acceptedOrExistingIds = new Set([
+        ...baseGraph.nodes.map((node) => node.id),
+        ...generatedIds
+    ]);
     const existingEdgeKeys = new Set(baseGraph.edges.map((edge) => `${edge.source}->${edge.target}`));
     const generatedHierarchyEdges =
         mode === 'notes_only'
             ? []
-            : asArray(revision.draft_edges)
-                  .map(normalizeAIDraftEdge)
+            : hierarchyDraftEdges
                   .filter((edge) => generatedIds.has(edge.target_node_id))
-                  .map((edge) =>
-                      createWorkspaceEdge(edge.source_node_id, edge.target_node_id, {
+                  .map((edge) => {
+                      const relationshipType = normalizeHierarchyRelationshipType(edge);
+                      return {
+                          ...createWorkspaceEdge(edge.source_node_id, edge.target_node_id, {
                           id: edge.id,
                           animated: true
-                      })
-                  )
+                          }),
+                          relationship_type: relationshipType,
+                          metadata: {
+                              ...(edge.metadata || {}),
+                              relationship_type: relationshipType,
+                              source: firstText(edge.metadata?.source, 'ai_draft_hierarchy')
+                          },
+                          data: {
+                              relationship_type: relationshipType,
+                              source: firstText(edge.metadata?.source, 'ai_draft_hierarchy')
+                          }
+                      };
+                  })
                   .filter((edge) => {
                       const key = `${edge.source}->${edge.target}`;
                       if (existingEdgeKeys.has(key)) {
@@ -1376,14 +1566,34 @@ export const acceptAIDraftSession = ({
     const generatedRelationshipEdges =
         mode === 'notes_only'
             ? []
-            : acceptedRelationships
+            : [
+                  ...acceptedRelationships.map((item) => ({
+                      id: item.id,
+                      source_node_id: item.metadata?.source_node_id,
+                      target_node_id: item.metadata?.target_node_id,
+                      relationship_type: firstText(item.metadata?.relationship_type, item.relationship_type, 'related_to'),
+                      source_refs: asArray(item.source_refs),
+                      confidence: item.confidence,
+                      status: item.status,
+                      content: item.content,
+                      metadata: item.metadata || {}
+                  })),
+                  ...relationshipDraftEdges.map((edge) => ({
+                      id: edge.id,
+                      source_node_id: edge.source_node_id,
+                      target_node_id: edge.target_node_id,
+                      relationship_type: edge.relationship_type,
+                      source_refs: [],
+                      metadata: edge.metadata || {}
+                  }))
+              ]
                   .map((item) => {
                       const metadata = item.metadata || {};
                       const relationshipType = firstText(metadata.relationship_type, item.relationship_type, 'related_to');
                       return {
                           id: firstText(metadata.relationship_edge_id, metadata.edge_id, item.id),
-                          source: metadata.source_node_id,
-                          target: metadata.target_node_id,
+                          source: firstText(metadata.source_node_id, item.source_node_id),
+                          target: firstText(metadata.target_node_id, item.target_node_id),
                           type: 'smoothstep',
                           animated: false,
                           relationship_type: relationshipType,
@@ -1404,6 +1614,7 @@ export const acceptAIDraftSession = ({
                       };
                   })
                   .filter((edge) => edge.source && edge.target)
+                  .filter((edge) => acceptedOrExistingIds.has(edge.source) && acceptedOrExistingIds.has(edge.target))
                   .filter((edge) => {
                       const key = `${edge.source}->${edge.target}->${edge.relationship_type}`;
                       if (existingEdgeKeys.has(key)) {
@@ -1503,10 +1714,14 @@ export const validateAIDraftRevision = ({ draft_nodes = [], draft_edges = [] } =
     };
 };
 
-const createAcceptedNode = ({ draft, session, revision, nodes, edges, index }) => {
-    const parentId = draft.parent_id || session.scope?.node_id || '';
+const createAcceptedNode = ({ draft, session, revision, nodes, edges, parentId }) => {
+    const preferredParentId = parentId || draft.parent_id || session.scope?.node_id || '';
+    const resolvedParentId = nodes.some((node) => node.id === preferredParentId)
+        ? preferredParentId
+        : session.scope?.node_id || '';
     const sourceRefs = asArray(draft.source_refs);
-    const position = parentId ? getChildPosition(nodes, edges, parentId) : undefined;
+    const sourceStatus = getAIDraftSourceStatus(draft);
+    const position = resolvedParentId ? getChildPosition(nodes, edges, resolvedParentId) : undefined;
     const status =
         draft.node_type !== 'reference' && sourceRefs.length === 0
             ? 'needs_review'
@@ -1519,14 +1734,22 @@ const createAcceptedNode = ({ draft, session, revision, nodes, edges, index }) =
         nodeType: draft.node_type,
         status,
         sourceRefs,
-        position: position
-            ? { x: position.x, y: position.y + index * 96 }
-            : { x: index * 320, y: index * 120 },
+        position: position || { x: nodes.length * 320, y: nodes.length * 120 },
+        metadata: {
+            ...(draft.metadata || {}),
+            source_status: sourceStatus.id,
+            source_required: sourceStatus.source_required,
+            reviewable_unsourced: sourceStatus.reviewable && sourceRefs.length === 0
+        },
         display: draft.display || {}
     });
     const provenance = {
             ...(draft.metadata || {}),
             source: 'ai_draft_session',
+            source_status: sourceStatus.id,
+            source_status_label: sourceStatus.label,
+            source_required: sourceStatus.source_required,
+            reviewable_unsourced: sourceStatus.reviewable && sourceRefs.length === 0,
             ai_draft_session_id: session.session_id,
             ai_draft_revision_id: revision.revision_id,
             ai_draft_intent: session.intent,

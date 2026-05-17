@@ -14,10 +14,12 @@ import {
     getAIDraftAcceptModeDetail,
     getAIDraftItemBadges,
     getAIDraftModelMetadata,
+    getAIDraftSourceStatus,
     inferAIDraftChangeIntent,
     normalizeSoftwareOverlapReports,
     rejectAIDraftSession,
-    reviseAIDraftSession
+    reviseAIDraftSession,
+    visibleAIDraftPromptText
 } from '../src/utils/aiDraftSessions.js';
 import {
     getActionsForProfileAndScope,
@@ -25,7 +27,7 @@ import {
     sourceFirstActionPresets,
     starterTransformations
 } from '../src/prompts/promptsModel.js';
-import { createWorkspaceNode } from '../src/utils/manualNodes.js';
+import { createWorkspaceEdge, createWorkspaceNode } from '../src/utils/manualNodes.js';
 
 const draftNodes = () => [
     {
@@ -120,7 +122,7 @@ test('buildAIDraftPreviewDiff summarizes accept selected', () => {
     assert.equal(diff.added_nodes, 1);
     assert.equal(diff.added_edges, 1);
     assert.equal(diff.needs_review_repairs, 1);
-    assert.equal(diff.summary, '+1 nodes, +1 edges, !1 marked needs_review');
+    assert.equal(diff.summary, '+1 nodes, +1 edges, !1 reviewable (0 missing citation, 1 AI assumption)');
     assert.equal(
         formatAIDraftPreviewDiffSummary(diff).text,
         '+1 nodes  +1 edges  ~0 updates  -0 removals  !1 needs_review items'
@@ -264,8 +266,8 @@ test('getAIDraftItemBadges renders source and review risk badges', () => {
 
     assert.deepEqual(cited, ['source-backed']);
     assert.deepEqual(risky, [
+        'ai-assumption',
         'needs-review',
-        'assumption',
         'low-confidence',
         'duplicate',
         'conflict'
@@ -277,6 +279,66 @@ test('getAIDraftItemBadges renders source and review risk badges', () => {
         source_refs: [{ document_id: 'inventory' }]
     }).map((badge) => badge.id);
     assert.deepEqual(overlap, ['source-backed', 'potential-overlap']);
+});
+
+test('getAIDraftSourceStatus and badges separate AI assumptions from missing citations', () => {
+    const exploratory = {
+        id: 'exploratory',
+        status: 'needs_review',
+        source_refs: [],
+        assumptions: ['Generated from prompt only.']
+    };
+    const sourceRequired = {
+        id: 'source-required',
+        status: 'needs_review',
+        source_refs: [],
+        metadata: { source_policy_requires_citation: true }
+    };
+
+    assert.equal(getAIDraftSourceStatus(exploratory).id, 'ai_assumption_uncited');
+    assert.equal(getAIDraftSourceStatus(sourceRequired).id, 'missing_required_source');
+    assert.deepEqual(
+        getAIDraftItemBadges(exploratory).map((badge) => badge.id).slice(0, 2),
+        ['ai-assumption', 'needs-review']
+    );
+    assert.deepEqual(
+        getAIDraftItemBadges(sourceRequired).map((badge) => badge.id).slice(0, 2),
+        ['missing-source', 'needs-review']
+    );
+});
+
+test('buildAIDraftPreviewDiff exposes source-status counts for reviewable unsourced nodes', () => {
+    const session = createAIDraftSession({
+        scope: { type: 'branch', node_id: 'root' },
+        draftNodes: [
+            {
+                id: 'draft-assumption',
+                title: 'Prompt-only idea',
+                summary: 'Generated without source context.',
+                source_refs: [],
+                assumptions: ['Prompt-only inference.']
+            },
+            {
+                id: 'draft-missing-citation',
+                title: 'Source-required claim',
+                summary: 'Needs source support.',
+                source_refs: [],
+                metadata: { source_policy_requires_citation: true }
+            }
+        ],
+        sessionId: 'session-source-status',
+        revisionId: 'revision-source-status'
+    });
+
+    const diff = buildAIDraftPreviewDiff(session);
+
+    assert.equal(diff.needs_review_repairs, 2);
+    assert.equal(diff.ai_assumption_repairs, 1);
+    assert.equal(diff.missing_source_repairs, 1);
+    assert.deepEqual(diff.metadata.source_status_counts, {
+        ai_assumption_uncited: 1,
+        missing_required_source: 1
+    });
 });
 
 test('normalizeSoftwareOverlapReports exposes score confidence review state factors and evidence', () => {
@@ -388,6 +450,8 @@ test('acceptAIDraftSession creates canonical nodes only on explicit accept', () 
     assert.equal(result.nodes.length, 2);
     const accepted = result.nodes.find((node) => node.id === 'draft-general-mills');
     assert.equal(accepted.data.status, 'needs_review');
+    assert.equal(accepted.data.metadata.source_status, 'ai_assumption_uncited');
+    assert.equal(accepted.data.metadata.reviewable_unsourced, true);
     assert.equal(accepted.data.ai_draft_session_id, 'session-cereal');
     assert.equal(result.edges.length, 1);
     assert.equal(result.session.status, 'accepted');
@@ -426,6 +490,151 @@ test('acceptAIDraftSession supports accept all and reject preserves noncanonical
     assert.equal(rejected.status, 'discarded');
     assert.equal(rejected.metadata.canonical, false);
     assert.equal(rejected.metadata.rejection_reason, 'Try a narrower prompt.');
+});
+
+test('acceptAIDraftSession places branch supplements locally and preserves non-hierarchy edges as relationships', () => {
+    const root = createWorkspaceNode({ id: 'root', title: 'Business plan', position: { x: 120, y: 120 } });
+    const risk = createWorkspaceNode({ id: 'risk', title: 'Risk management', position: { x: 560, y: 120 } });
+    const session = createAIDraftSession({
+        workspaceId: 'workspace-risk',
+        scope: { type: 'branch', node_id: 'risk' },
+        prompt: 'expand risk management',
+        draftNodes: [
+            {
+                id: 'sales-risk',
+                title: 'Sales Shortfall Risk',
+                node_type: 'risk',
+                source_refs: []
+            },
+            {
+                id: 'sales-mitigation',
+                title: 'Sales Mitigation',
+                node_type: 'control',
+                source_refs: []
+            }
+        ],
+        draftEdges: [
+            {
+                id: 'edge-risk-sales',
+                source_node_id: 'risk',
+                target_node_id: 'sales-risk',
+                relationship_type: 'contains'
+            },
+            {
+                id: 'edge-mitigation-supports-sales',
+                source_node_id: 'sales-mitigation',
+                target_node_id: 'sales-risk',
+                relationship_type: 'supports'
+            }
+        ],
+        sessionId: 'session-risk',
+        revisionId: 'revision-risk-1'
+    });
+
+    const accepted = acceptAIDraftSession({
+        session,
+        nodes: [root, risk],
+        edges: [createWorkspaceEdge('root', 'risk', { id: 'edge-root-risk' })],
+        mode: 'append',
+        acceptedAt: '2026-05-14T12:05:00.000Z'
+    });
+
+    const salesRisk = accepted.nodes.find((node) => node.id === 'sales-risk');
+    const mitigation = accepted.nodes.find((node) => node.id === 'sales-mitigation');
+    assert.ok(salesRisk.position.x < 1200);
+    assert.ok(mitigation.position.x < 1200);
+    assert.notDeepEqual(salesRisk.position, mitigation.position);
+    assert.ok(accepted.edges.some((edge) => edge.source === 'risk' && edge.target === 'sales-risk'));
+    const supportEdge = accepted.edges.find((edge) => edge.id === 'edge-mitigation-supports-sales');
+    assert.equal(supportEdge?.data?.relationship_type, 'supports');
+});
+
+test('acceptAIDraftSession normalizes blank hierarchy edge semantics on accepted edges', () => {
+    const parent = createWorkspaceNode({ id: 'parent', title: 'Implementation', position: { x: 200, y: 240 } });
+    const session = createAIDraftSession({
+        workspaceId: 'workspace-blank-edge',
+        scope: { type: 'node', node_id: 'parent' },
+        prompt: 'add next step',
+        draftNodes: [
+            {
+                id: 'draft-child',
+                title: 'Prepare rollout checklist',
+                node_type: 'task',
+                source_refs: []
+            }
+        ],
+        draftEdges: [
+            {
+                id: 'edge-parent-draft-child',
+                source_node_id: 'parent',
+                target_node_id: 'draft-child',
+                relationship_type: '   ',
+                metadata: { relationship_type: '' }
+            }
+        ],
+        sessionId: 'session-blank-edge',
+        revisionId: 'revision-blank-edge-1'
+    });
+
+    const accepted = acceptAIDraftSession({
+        session,
+        nodes: [parent],
+        edges: [],
+        mode: 'append',
+        acceptedAt: '2026-05-14T12:08:00.000Z'
+    });
+
+    const acceptedEdge = accepted.edges.find((edge) => edge.id === 'edge-parent-draft-child');
+    assert.equal(acceptedEdge?.type, 'step');
+    assert.equal(acceptedEdge?.relationship_type, 'contains');
+    assert.equal(acceptedEdge?.data?.relationship_type, 'contains');
+    assert.equal(acceptedEdge?.metadata?.relationship_type, 'contains');
+});
+
+test('acceptAIDraftSession lays out five generated branch children in a local non-overlapping lane', () => {
+    const parent = createWorkspaceNode({ id: 'parent', title: 'Branch root', position: { x: 320, y: 360 } });
+    const existingA = createWorkspaceNode({ id: 'existing-a', title: 'Existing A', position: { x: 750, y: 312 } });
+    const existingB = createWorkspaceNode({ id: 'existing-b', title: 'Existing B', position: { x: 750, y: 408 } });
+    const draftNodes = Array.from({ length: 5 }, (_, index) => ({
+        id: `generated-${index + 1}`,
+        title: `Generated child ${index + 1}`,
+        node_type: 'task',
+        source_refs: []
+    }));
+    const session = createAIDraftSession({
+        workspaceId: 'workspace-five-children',
+        scope: { type: 'branch', node_id: 'parent' },
+        prompt: 'expand this branch with five child tasks',
+        draftNodes,
+        draftEdges: draftNodes.map((node, index) => ({
+            id: `edge-parent-${node.id}`,
+            source_node_id: 'parent',
+            target_node_id: node.id,
+            relationship_type: index % 2 === 0 ? '' : 'contains'
+        })),
+        sessionId: 'session-five-children',
+        revisionId: 'revision-five-children-1'
+    });
+
+    const accepted = acceptAIDraftSession({
+        session,
+        nodes: [parent, existingA, existingB],
+        edges: [
+            createWorkspaceEdge('parent', 'existing-a', { id: 'edge-existing-a' }),
+            createWorkspaceEdge('parent', 'existing-b', { id: 'edge-existing-b' })
+        ],
+        mode: 'append',
+        acceptedAt: '2026-05-14T12:09:00.000Z'
+    });
+
+    const generated = draftNodes.map((node) => accepted.nodes.find((acceptedNode) => acceptedNode.id === node.id));
+    const positionKeys = new Set(generated.map((node) => `${node.position.x}:${node.position.y}`));
+    assert.equal(positionKeys.size, 5);
+    assert.ok(generated.every((node) => Math.abs(node.position.x - parent.position.x) <= 500));
+    assert.ok(generated.every((node) => Math.abs(node.position.y - parent.position.y) <= 600));
+    assert.ok(generated.every((node) => ![existingA, existingB].some((existing) => (
+        existing.position.x === node.position.x && existing.position.y === node.position.y
+    ))));
 });
 
 test('acceptAIDraftSession replace removes scoped descendants before local fallback accept', () => {
@@ -674,6 +883,26 @@ test('follow-up memory captures scoped graph context and update intent', () => {
         ['doc-context', 'doc-aec', 'doc-cereal', 'doc-reconciled']
     );
     assert.equal(request.metadata.follow_up_memory.change_intent, 'update');
+});
+
+test('visibleAIDraftPromptText hides internal memory prompts and recovers user prompt', () => {
+    const memoryPrompt = [
+        'Use this follow-up AI memory while answering.',
+        'Follow-up memory context JSON:',
+        '{ "current_prompt": "Improve this flowchart with source-backed notes." }',
+        '',
+        'User question: Improve this flowchart with source-backed notes.'
+    ].join('\n');
+
+    assert.equal(
+        visibleAIDraftPromptText(memoryPrompt),
+        'Improve this flowchart with source-backed notes.'
+    );
+    assert.equal(
+        visibleAIDraftPromptText('Use this structured workspace brief while answering.\n\nUser question: Build a setup map'),
+        'Build a setup map'
+    );
+    assert.equal(visibleAIDraftPromptText('Make a BIM flowchart'), 'Make a BIM flowchart');
 });
 
 test('follow-up intent preserves supplement and compare prompts over update wording', () => {

@@ -6,6 +6,7 @@ import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
+import getLayoutedElements from '../utils/setLayout';
 import {
     AI_DRAFT_ACCEPT_MODES,
     acceptAIDraftSession,
@@ -17,11 +18,13 @@ import {
     getAIDraftAcceptModeDetail,
     getAIDraftItemBadges,
     getAIDraftModelMetadata,
+    getAIDraftSourceStatus,
     inferAIDraftChangeIntent,
     latestAIDraftRevision,
     normalizeSoftwareOverlapReports,
     rejectAIDraftSession,
-    reviseAIDraftSession
+    reviseAIDraftSession,
+    visibleAIDraftPromptText
 } from '../utils/aiDraftSessions';
 import { buildSourceLibraryProjection } from '../views/graphProjection';
 import { PreviewDiffSummary, previewDiffToChanges } from '../views/previewDiffSummary';
@@ -42,6 +45,29 @@ const CHANGE_INTENT_LABELS = {
 };
 
 const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
+
+const acceptResultFromResponse = (result = {}) =>
+    result.accept_result && typeof result.accept_result === 'object'
+        ? result.accept_result
+        : result;
+
+const graphHasRenderableContent = (graph = {}) =>
+    asArray(graph.nodes).length > 0 || asArray(graph.edges).length > 0;
+
+const acceptResultHasGraphMutation = (acceptResult = {}) =>
+    asArray(acceptResult.accepted_node_ids).length > 0 ||
+    asArray(acceptResult.accepted_edge_ids).length > 0 ||
+    asArray(acceptResult.patch_operations).some((operation) =>
+        ['add_node', 'add_edge', 'update_node', 'update_edge', 'remove_node', 'remove_edge'].includes(operation?.op)
+    );
+
+const revisionHasGraphDraft = (revision = {}) =>
+    asArray(revision.draft_nodes).length > 0 ||
+    asArray(revision.draft_edges).length > 0 ||
+    asArray(revision.draft_items).some((item) => {
+        const metadata = item?.metadata || {};
+        return metadata.source_node_id && metadata.target_node_id;
+    });
 
 const humanizeId = (value = '') =>
     String(value || '')
@@ -89,6 +115,9 @@ const scopeLabel = (scope = {}) => {
 
 const itemText = (item = {}) =>
     item.content || item.body || item.summary || item.text || item.title || item.label || '';
+
+const promptEntryText = (entry = {}) =>
+    entry.content || entry.prompt || entry.text || entry.summary || entry.title || entry.label || '';
 
 const nodeText = (node = {}) => node.summary || node.body || node.rationale || node.title || '';
 
@@ -229,13 +258,14 @@ const primaryActionLabel = (itemCount = 0) =>
 
 const GRAPH_FILTER_LABELS = {
     'source-backed': 'Source-backed',
+    'ai-assumption': 'AI assumption',
     'needs-review': 'Needs review',
     manual: 'Manual',
     'ai-generated': 'AI-generated',
     'tasks-only': 'Tasks only',
     unassigned: 'Unassigned',
     'missing-due-date': 'Missing due',
-    'missing-source': 'Missing source',
+    'missing-source': 'Missing citation',
     'low-confidence': 'Low confidence',
     'hidden-from-export': 'Hidden export'
 };
@@ -297,10 +327,22 @@ const canvasForDraft = (session = {}, revision = {}, fallback = 'mindmap') => {
     if (shape.includes('outline')) {
         return keepMapVisible ? mapFallbackCanvas(fallback) : 'outline';
     }
+    if (
+        shape.includes('flow_chart') ||
+        shape.includes('flowchart') ||
+        shape.includes('flow chart') ||
+        shape.includes('process_map') ||
+        shape.includes('process map') ||
+        shape.includes('decision_tree') ||
+        shape.includes('decision tree') ||
+        shape.includes('swimlane')
+    ) {
+        return 'flowchart';
+    }
     if (shape.includes('knowledge')) {
         return 'knowledgeGraph';
     }
-    if (shape.includes('mind') || shape.includes('flow') || shape.includes('graph')) {
+    if (shape.includes('mind') || shape.includes('graph') || shape.includes('workflow')) {
         return 'mindmap';
     }
     if (shape.includes('no_visual')) {
@@ -316,7 +358,18 @@ const reviewSummary = (coverage = { cited: 0, uncited: 0, total: 0 }, noteCount 
     const parts = [];
     if (coverage.total) {
         parts.push(`${coverage.total} ${coverage.total === 1 ? 'item' : 'items'}`);
-        parts.push(coverage.uncited ? `${coverage.uncited} needs review` : 'all cited');
+        if (coverage.missingRequired || coverage.assumptions) {
+            parts.push(
+                [
+                    coverage.missingRequired ? `${coverage.missingRequired} missing citation` : '',
+                    coverage.assumptions ? `${coverage.assumptions} AI assumption` : ''
+                ]
+                    .filter(Boolean)
+                    .join(', ')
+            );
+        } else {
+            parts.push(coverage.uncited ? `${coverage.uncited} needs review` : 'all cited');
+        }
     }
     if (noteCount) {
         parts.push(`${noteCount} ${noteCount === 1 ? 'note' : 'notes'}`);
@@ -326,18 +379,31 @@ const reviewSummary = (coverage = { cited: 0, uncited: 0, total: 0 }, noteCount 
 
 const compactPromptHistory = (history = []) =>
     asArray(history)
-        .filter((entry) => itemText(entry))
+        .map((entry) => ({
+            ...entry,
+            content: visibleAIDraftPromptText(promptEntryText(entry))
+        }))
+        .filter((entry) => entry.content)
         .filter((entry, index, list) => {
             const previous = list[index - 1];
-            return !previous || previous.role !== entry.role || itemText(previous) !== itemText(entry);
+            return !previous || previous.role !== entry.role || previous.content !== entry.content;
         })
         .slice(-3);
 
+const sessionPromptTitle = (session = {}, revision = {}) =>
+    visibleAIDraftPromptText(
+        promptEntryText(asArray(session.prompt_history).at(-1)),
+        visibleAIDraftPromptText(revision.prompt, session.role || 'Ask AI')
+    );
+
 const sourceCoverage = (items = []) => {
     const cited = items.filter((item) => asArray(item.source_refs).length > 0).length;
+    const statuses = items.map(getAIDraftSourceStatus);
     return {
         cited,
         uncited: Math.max(items.length - cited, 0),
+        assumptions: statuses.filter((status) => status.id === 'ai_assumption_uncited').length,
+        missingRequired: statuses.filter((status) => status.id === 'missing_required_source').length,
         total: items.length
     };
 };
@@ -404,7 +470,7 @@ const buildDraftOutlinePreview = (revision = {}, session = {}) => {
     });
 
     const roots = nodes.filter((node) => !draftChildIds.has(draftNodeId(node)));
-    const promptTitle = asArray(session.prompt_history).at(-1)?.content || revision.prompt || session.role;
+    const promptTitle = sessionPromptTitle(session, revision);
     return {
         title: promptTitle || 'AI draft',
         nodeCount: nodes.length,
@@ -484,7 +550,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
     const flowId = flowStore((state) => state.flow_id);
     const setSaveStatus = flowStore((state) => state.setSaveStatus);
     const recordActivity = useActivityStore((state) => state.recordActivity);
-    const { setViewport } = useReactFlow();
+    const { fitView, setViewport } = useReactFlow();
     const [prompt, setPrompt] = useState('');
     const [acceptMode, setAcceptMode] = useState(() =>
         acceptModeForChangeIntent(changeIntentFromAIDraftSession(session))
@@ -542,6 +608,10 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
     const promptHistory = useMemo(
         () => compactPromptHistory(session.prompt_history),
         [session.prompt_history]
+    );
+    const visiblePromptTitle = useMemo(
+        () => sessionPromptTitle(session, revision),
+        [revision, session]
     );
     const sourceProjection = useMemo(
         () => buildSourceLibraryProjection(nodes, edges, workspaceBrief, sourceLibrary),
@@ -702,6 +772,58 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         setIsAccepting(true);
         setMessage('');
         setProgressMessage('Applying accepted draft changes to the workspace.');
+        const shouldPreserveBranchLayout =
+            session.scope?.type === 'branch' &&
+            ['append', 'selected', 'merge'].includes(mode) &&
+            MAP_CANVAS_VIEWS.has(activeCanvasView || 'mindmap');
+        const applyAcceptedGraph = (graph = {}, { preservePositions = false } = {}) => {
+            const hasNodes = Array.isArray(graph.nodes);
+            const hasEdges = Array.isArray(graph.edges);
+            let nextNodes = hasNodes ? graph.nodes : null;
+            let nextEdges = hasEdges ? graph.edges : null;
+            if (hasNodes && !preservePositions) {
+                const layouted = getLayoutedElements(nextNodes, hasEdges ? nextEdges : edges);
+                nextNodes = layouted.nodes;
+                nextEdges = layouted.edges;
+            }
+            if (nextNodes) {
+                setNodes(nextNodes);
+            }
+            if (nextEdges) {
+                setEdges(nextEdges);
+            }
+            if (graph.viewport && typeof graph.viewport === 'object') {
+                setViewPort(graph.viewport);
+                setViewport(graph.viewport, { duration: 360 });
+            } else if (nextNodes?.length) {
+                window.setTimeout(() => {
+                    const acceptedIds = new Set(asArray(graph.accept_result?.accepted_node_ids));
+                    const focusNodes =
+                        preservePositions && acceptedIds.size
+                            ? nextNodes.filter((node) => acceptedIds.has(node.id) || node.id === session.scope?.node_id)
+                            : nextNodes;
+                    fitView({ nodes: focusNodes.length ? focusNodes : nextNodes, duration: 420, maxZoom: 0.95, padding: 0.18 });
+                }, 80);
+            }
+        };
+        const shouldUseLocalAcceptFallback = (graph = {}, result = {}) => {
+            const acceptResult = acceptResultFromResponse(result);
+            if (!Array.isArray(graph.nodes) && !Array.isArray(graph.edges)) {
+                return true;
+            }
+            if (graphHasRenderableContent(graph)) {
+                return false;
+            }
+            if (!revisionHasGraphDraft(revision) || mode === 'notes_only') {
+                return false;
+            }
+            return acceptResultHasGraphMutation(acceptResult) || nodes.length > 0;
+        };
+        const shouldPreserveCurrentGraph = (graph = {}, result = {}) =>
+            Array.isArray(graph.nodes) &&
+            !graphHasRenderableContent(graph) &&
+            nodes.length > 0 &&
+            !acceptResultHasGraphMutation(acceptResultFromResponse(result));
         try {
             const response =
                 flowId && session.session_id
@@ -714,26 +836,33 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                     : null;
             const result = response?.data || {};
             const graph = result.graph || result.workspace || result;
-            if (Array.isArray(graph.nodes)) {
-                setNodes(graph.nodes);
-            }
-            if (Array.isArray(graph.edges)) {
-                setEdges(graph.edges);
-            }
-            if (graph.viewport && typeof graph.viewport === 'object') {
-                setViewPort(graph.viewport);
-                setViewport(graph.viewport, { duration: 360 });
-            }
-            if (!Array.isArray(graph.nodes) && !Array.isArray(graph.edges)) {
-                const fallback = acceptAIDraftSession({
-                    session,
-                    nodes,
-                    edges,
-                    mode,
-                    selectedItemIds: effectiveSelectedIds
+            const localAcceptedGraph =
+                shouldPreserveBranchLayout && revisionHasGraphDraft(revision)
+                    ? acceptAIDraftSession({
+                          session,
+                          nodes,
+                          edges,
+                          mode,
+                          selectedItemIds: effectiveSelectedIds
+                      })
+                    : null;
+            if (shouldUseLocalAcceptFallback(graph, result)) {
+                const fallback =
+                    localAcceptedGraph ||
+                    acceptAIDraftSession({
+                        session,
+                        nodes,
+                        edges,
+                        mode,
+                        selectedItemIds: effectiveSelectedIds
+                    });
+                applyAcceptedGraph(fallback, { preservePositions: shouldPreserveBranchLayout });
+            } else if (shouldPreserveCurrentGraph(graph, result)) {
+                setMessage('Accepted draft did not include graph changes, so the current layout was preserved.');
+            } else {
+                applyAcceptedGraph(localAcceptedGraph || graph, {
+                    preservePositions: Boolean(localAcceptedGraph)
                 });
-                setNodes(fallback.nodes);
-                setEdges(fallback.edges);
             }
             updateActiveAIDraftSession(
                 result.session || result.draft_session || {
@@ -772,8 +901,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 mode,
                 selectedItemIds: effectiveSelectedIds
             });
-            setNodes(fallback.nodes);
-            setEdges(fallback.edges);
+            applyAcceptedGraph(fallback, { preservePositions: shouldPreserveBranchLayout });
             updateActiveAIDraftSession(fallback.session);
             if (flowId) {
                 setSaveStatus('dirty');
@@ -966,7 +1094,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             <div className="ai-draft-session-toolbar">
                 <div>
                     <p>Draft preview</p>
-                    <strong>{asArray(session.prompt_history).at(-1)?.content || session.role || 'Ask AI'}</strong>
+                    <strong>{visiblePromptTitle || session.role || 'Ask AI'}</strong>
                     <span>{scopeLabel(session.scope)} · {reviewSummary(coverage, reviewNotes.length)}</span>
                 </div>
                 <button type="button" onClick={discardDraft} aria-label="Close AI draft session">
@@ -975,14 +1103,16 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             </div>
 
             <div className="ai-draft-conversation" aria-label="Refine draft">
-                <div className="ai-draft-history">
-                    {promptHistory.map((entry, index) => (
-                        <p key={`${entry.revision_id || index}-${entry.created_at}`}>
-                            <span>{entry.role || 'user'}</span>
-                            {itemText(entry)}
-                        </p>
-                    ))}
-                </div>
+                {promptHistory.length > 1 ? (
+                    <div className="ai-draft-history">
+                        {promptHistory.map((entry, index) => (
+                            <p key={`${entry.revision_id || index}-${entry.created_at}`}>
+                                <span>{entry.role || 'user'}</span>
+                                {entry.content}
+                            </p>
+                        ))}
+                    </div>
+                ) : null}
                 <label>
                     Refine draft
                     <textarea
@@ -1044,7 +1174,11 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                     <div>
                         <span>Sources</span>
                         <strong>{coverage.total ? `${coverage.cited}/${coverage.total} cited` : 'No items'}</strong>
-                        <small>{coverage.uncited ? `${coverage.uncited} needs review` : 'Ready for review'}</small>
+                        <small>
+                            {coverage.uncited
+                                ? `${coverage.missingRequired} missing citation · ${coverage.assumptions} AI assumption`
+                                : 'Ready for review'}
+                        </small>
                     </div>
                 </div>
                 <div className="ai-draft-source-tools">

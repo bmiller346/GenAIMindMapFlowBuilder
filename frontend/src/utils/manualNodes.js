@@ -209,11 +209,37 @@ const createLegacyResponseData = ({
     metadata: cloneValue(metadata, {})
 });
 
+const isSemanticWorkspaceQuestionNode = (node = {}) => {
+    if (node.type !== 'question') {
+        return false;
+    }
+
+    const data = node.data || {};
+    const legacyData = data.data && typeof data.data === 'object' ? data.data : {};
+    return Boolean(
+        data.node_type === 'question' ||
+            legacyData.node_type === 'question' ||
+            data.title ||
+            legacyData.title ||
+            data.summary ||
+            legacyData.summary ||
+            data.body ||
+            legacyData.body ||
+            data.source_refs ||
+            legacyData.source_refs
+    );
+};
+
 export const normalizeWorkspaceNode = (node = {}) => {
     if (!node || typeof node !== 'object') {
         return node;
     }
-    if (node.type !== WORKSPACE_NODE_TYPE && node.type !== 'pdfResponse' && node.type !== 'custom') {
+    const shouldNormalize =
+        node.type === WORKSPACE_NODE_TYPE ||
+        node.type === 'pdfResponse' ||
+        node.type === 'custom' ||
+        isSemanticWorkspaceQuestionNode(node);
+    if (!shouldNormalize) {
         return node;
     }
 
