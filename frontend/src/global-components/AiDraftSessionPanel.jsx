@@ -1086,7 +1086,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         try {
             await navigator.clipboard.writeText(markdown);
             setCopiedArtifactId(artifact.id);
-            setMessage(`${artifact.label} copied as SharePoint-ready Markdown.`);
+            setMessage(`${artifact.label} copied as publish-ready Markdown.`);
             window.setTimeout(() => setCopiedArtifactId(''), 1600);
         } catch {
             setMessage('Copy is unavailable in this browser. Select the preview text and copy it manually.');
@@ -1343,6 +1343,7 @@ const PublishableArtifactPreviews = ({ artifacts, copiedArtifactId, onCopy }) =>
                 artifact.reviewState ||
                 artifact.provenance?.evidenceLabel ||
                 artifact.provenance?.citationLabel;
+            const provenanceTone = artifact.provenance?.tone || 'neutral';
             return (
                 <article key={`artifact-preview-${artifact.id}`} className="ai-draft-artifact-preview">
                     <div className="ai-draft-artifact-header">
@@ -1373,6 +1374,14 @@ const PublishableArtifactPreviews = ({ artifacts, copiedArtifactId, onCopy }) =>
                                 </span>
                             ) : null}
                         </div>
+                    ) : null}
+                    {artifact.provenance?.summary ? (
+                        <p
+                            className={`ai-draft-artifact-evidence ai-draft-artifact-evidence-${provenanceTone}`}
+                        >
+                            <strong>Evidence</strong>
+                            <span>{artifact.provenance.summary}</span>
+                        </p>
                     ) : null}
                     {artifact.keyPoints.length ? (
                         <ul className="ai-draft-artifact-key-points">

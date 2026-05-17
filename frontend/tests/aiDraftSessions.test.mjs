@@ -1221,6 +1221,7 @@ test('publishable draft artifacts normalize executive summary preview fields', (
     assert.equal(previews[0].provenance.citationLabel, 'Citations required');
     assert.equal(previews[0].provenance.sourceRefCount, 1);
     assert.equal(previews[0].provenance.assumptionCount, 1);
+    assert.equal(previews[0].provenance.tone, 'good');
     assert.equal(
         previews[0].provenance.summary,
         'Uploaded sources | Citations required | 1 cited ref | 1 assumption'
@@ -1256,6 +1257,7 @@ test('publishable draft artifacts normalize news article payloads and copy markd
     assert.equal(preview.label, 'News article');
     assert.equal(preview.title, 'TraceSpace pilots monthly source reviews');
     assert.deepEqual(preview.keyPoints, ['New review queue', 'SME questions stay visible']);
+    assert.equal(preview.provenance.tone, 'warn');
 
     const markdown = draftArtifactPreviewToMarkdown(preview);
     assert.match(markdown, /^# TraceSpace pilots monthly source reviews/);

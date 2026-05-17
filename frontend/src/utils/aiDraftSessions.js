@@ -1087,6 +1087,12 @@ const normalizePublishableArtifactProvenance = (payload = {}, revision = {}) => 
         sourceRefCount: sourceRefs.length,
         assumptionCount: assumptions.length,
         confidence,
+        tone:
+            citationPolicy === 'required' && !sourceRefs.length
+                ? 'warn'
+                : sourceRefs.length
+                  ? 'good'
+                  : 'neutral',
         summary: parts.join(' | ')
     };
 };
