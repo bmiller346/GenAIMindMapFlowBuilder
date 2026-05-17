@@ -666,6 +666,19 @@ test('canvas command bar exposes node density and reflow without covering the ma
     await expect(page.getByLabel('Node display')).toHaveCount(0);
 });
 
+test('export menu exposes publishable workspace outputs', async ({ page }) => {
+    const { savedRequests } = await setupMockBackend(page);
+    await createRoot(page, savedRequests, 'Publishable root');
+
+    await page.getByRole('button', { name: 'Export' }).click();
+    await expect(page.locator('.export-menu')).toBeVisible();
+    await expect(page.locator('.export-menu')).toContainText('Publishable outputs');
+    await expect(page.getByRole('button', { name: 'Executive Summary' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'News Article' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Team Roadmap' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Completeness Review' })).toBeVisible();
+});
+
 test('workspace dock can collapse back to a compact canvas rail', async ({ page }) => {
     const { savedRequests } = await setupMockBackend(page);
     await createRoot(page, savedRequests, 'Dock root');

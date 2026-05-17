@@ -128,6 +128,32 @@ const Header = ({
         { id: 'mmd-json', label: 'MMD JSON', extension: 'json' },
         { id: 'mermaid', label: 'Mermaid', extension: 'mmd' }
     ];
+    const publishableExportFormats = [
+        {
+            id: 'executive.md',
+            label: 'Executive Summary',
+            extension: 'md',
+            suffix: 'executive-summary'
+        },
+        {
+            id: 'news-article.md',
+            label: 'News Article',
+            extension: 'md',
+            suffix: 'news-article'
+        },
+        {
+            id: 'team-roadmap.md',
+            label: 'Team Roadmap',
+            extension: 'md',
+            suffix: 'team-roadmap'
+        },
+        {
+            id: 'completeness-review.md',
+            label: 'Completeness Review',
+            extension: 'md',
+            suffix: 'completeness-review'
+        }
+    ];
     const imageExportFormats = [
         { id: 'png', label: 'PNG', extension: 'png' },
         { id: 'svg', label: 'SVG', extension: 'svg' },
@@ -454,7 +480,8 @@ const Header = ({
                     responseType: 'blob'
                 }
             );
-            const fileName = `${sanitizeFileName(flow_name)}.${format.extension}`;
+            const suffix = format.suffix ? `-${format.suffix}` : '';
+            const fileName = `${sanitizeFileName(flow_name)}${suffix}.${format.extension}`;
             triggerFileDownload(response.data, fileName);
             recordActivity({
                 type: 'export_file_downloaded',
@@ -1303,6 +1330,17 @@ const Header = ({
                             <div className="export-menu-divider" />
                             <p className="export-menu-label">Neutral files</p>
                             {exportFormats.map((format) => (
+                                <button
+                                    key={format.id}
+                                    type="button"
+                                    onClick={() => exportWorkspace(format)}
+                                >
+                                    {format.label}
+                                </button>
+                            ))}
+                            <div className="export-menu-divider" />
+                            <p className="export-menu-label">Publishable outputs</p>
+                            {publishableExportFormats.map((format) => (
                                 <button
                                     key={format.id}
                                     type="button"
