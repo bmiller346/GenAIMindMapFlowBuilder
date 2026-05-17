@@ -10,6 +10,7 @@ from export.completeness_review import (
 )
 from export.markdown import (
     export_executive_output_markdown,
+    export_news_article_markdown,
     export_team_roadmap_markdown,
 )
 from export.source_library import build_source_library
@@ -177,6 +178,79 @@ def graph_to_executive_output(graph: dict) -> dict:
 
 def graph_to_executive_markdown(graph: dict) -> str:
     return export_executive_output_markdown(graph_to_executive_output(graph))
+
+
+def artifact_to_news_article_markdown(artifact: dict) -> str:
+    data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
+    return export_news_article_markdown(data)
+
+
+def select_latest_ai_draft_artifact(
+    sessions: list[dict],
+    artifact_types: set[str],
+) -> dict | None:
+    candidates: list[tuple[int, str, dict]] = []
+    for session in sessions:
+        if not isinstance(session, dict):
+            continue
+        for acceptance in session.get("accept_history", []):
+            if not isinstance(acceptance, dict):
+                continue
+            accepted_at = str(acceptance.get("accepted_at") or session.get("updated_at") or "")
+            for artifact in acceptance.get("accepted_artifacts", []):
+                if _artifact_type_matches(artifact, artifact_types):
+                    candidates.append((1, accepted_at, artifact))
+        for revision in session.get("revisions", []):
+            if not isinstance(revision, dict):
+                continue
+            created_at = str(revision.get("created_at") or session.get("updated_at") or "")
+            for artifact in revision.get("generated_artifacts", []):
+                if _artifact_type_matches(artifact, artifact_types):
+                    candidates.append((0, created_at, artifact))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return candidates[-1][2]
+
+
+def graph_to_news_article(graph: dict) -> dict:
+    nodes = [node for node in graph.get("nodes", []) if node.get("node_type") != "reference"]
+    sourced_nodes = [node for node in nodes if _has_source_ref(node)]
+    needs_review_nodes = [node for node in nodes if _needs_review(node)]
+    title = graph.get("workspace", {}).get("title") or "Workspace"
+    source_nodes = _top_nodes(sourced_nodes or nodes, limit=6)
+    sections = [_news_article_section(node) for node in source_nodes]
+    appendix = [_news_article_section(node) for node in sourced_nodes]
+    assumptions = []
+    if nodes and not sourced_nodes:
+        assumptions.append("No source-backed graph nodes are available; article draft requires review.")
+    if needs_review_nodes:
+        assumptions.append(f"{len(needs_review_nodes)} graph node(s) are marked needs_review.")
+
+    return {
+        "headline": f"{title} Update",
+        "dek": "Drafted from the accepted workspace graph.",
+        "lede": _news_article_lede(graph, nodes, sourced_nodes),
+        "body": "",
+        "sections": sections,
+        "quotes": [],
+        "fact_checks": [
+            {
+                "title": section["title"],
+                "description": "Confirm the section against cited source material before publication.",
+                "status": "source_backed" if section.get("source_refs") else "needs_review",
+                "source_refs": section.get("source_refs", []),
+            }
+            for section in sections
+        ],
+        "source_backed_appendix": appendix,
+        "source_refs": _merge_source_refs(*(node.get("source_refs", []) for node in sourced_nodes)),
+        "assumptions": assumptions,
+    }
+
+
+def graph_to_news_article_markdown(graph: dict) -> str:
+    return export_news_article_markdown(graph_to_news_article(graph))
 
 
 def graph_to_completeness_review(graph: dict) -> dict:
@@ -651,6 +725,39 @@ def _executive_rationale(node: dict, item_type: str, source_backed: bool, needs_
     if needs_review:
         parts.append("Requires review before external distribution.")
     return " ".join(parts)
+
+
+def _news_article_section(node: dict) -> dict:
+    source_refs = node.get("source_refs", []) if isinstance(node.get("source_refs"), list) else []
+    source_backed = any(ref.get("document_id") for ref in source_refs if isinstance(ref, dict))
+    return {
+        "id": f"section-{node.get('id', 'item')}",
+        "title": node.get("title") or "Untitled",
+        "description": node.get("summary") or "",
+        "status": "source_backed" if source_backed and not _needs_review(node) else "needs_review",
+        "source_refs": source_refs,
+        "assumptions": [] if source_backed else ["Graph item has no source reference."],
+        "metadata": {
+            "source": "workspace_graph_projection",
+            "scope": "workspace",
+            "artifact_type": "news_article",
+            "source_signal": "explicit_source_ref" if source_backed else "graph_projection",
+        },
+    }
+
+
+def _news_article_lede(graph: dict, nodes: list[dict], sourced_nodes: list[dict]) -> str:
+    workspace = graph.get("workspace", {})
+    base = workspace.get("summary") or workspace.get("brief", {}).get("goal") or ""
+    metrics = f"Projected from {len(nodes)} content node(s), including {len(sourced_nodes)} source-backed item(s)."
+    return f"{base} {metrics}".strip() if base else metrics
+
+
+def _artifact_type_matches(artifact: dict, artifact_types: set[str]) -> bool:
+    return (
+        isinstance(artifact, dict)
+        and str(artifact.get("artifact_type") or "") in artifact_types
+    )
 
 
 def _team_roadmap_context(

@@ -1288,8 +1288,8 @@ def _draft_items_from_revision_parts(
             {
                 "id": f"item_{artifact_id}",
                 "item_type": "artifact",
-                "title": str(artifact.get("title") or artifact_type),
-                "content": str(artifact.get("summary") or artifact.get("description") or ""),
+                "title": _artifact_preview_title(artifact),
+                "content": _artifact_preview_content(artifact),
                 "source_refs": deepcopy(artifact.get("source_refs", [])) if isinstance(artifact.get("source_refs"), list) else [],
                 "assumptions": deepcopy(artifact.get("assumptions", [])) if isinstance(artifact.get("assumptions"), list) else [],
                 "status": artifact.get("status") or "draft",
@@ -1298,6 +1298,49 @@ def _draft_items_from_revision_parts(
             }
         )
     return items
+
+
+def _artifact_preview_title(artifact: dict[str, Any]) -> str:
+    data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
+    return str(
+        artifact.get("title")
+        or data.get("headline")
+        or data.get("title")
+        or artifact.get("artifact_type")
+        or "Artifact"
+    )
+
+
+def _artifact_preview_content(artifact: dict[str, Any]) -> str:
+    data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
+    for value in (
+        artifact.get("summary"),
+        artifact.get("description"),
+        data.get("dek"),
+        data.get("summary"),
+        data.get("lede"),
+        data.get("body"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    for key in ("key_points", "sections", "recommended_actions", "risks", "fact_checks"):
+        values = data.get(key)
+        if not isinstance(values, list):
+            continue
+        lines = []
+        for value in values[:4]:
+            if not isinstance(value, dict):
+                continue
+            title = str(value.get("title") or value.get("label") or "").strip()
+            detail = str(value.get("description") or value.get("summary") or "").strip()
+            if title and detail:
+                lines.append(f"{title}: {detail}")
+            elif title or detail:
+                lines.append(title or detail)
+        if lines:
+            return "\n".join(lines)
+    return ""
 
 
 def _relationship_edge_accept_id(
@@ -1951,6 +1994,10 @@ def normalize_requested_artifact_types(values: Any) -> list[str]:
         "software_rationalization": "software_overlap_report",
         "application_rationalization": "software_overlap_report",
         "tool_rationalization": "software_overlap_report",
+        "executive_brief": "executive_summary",
+        "executive_summary": "executive_summary",
+        "news_story": "news_article",
+        "article": "news_article",
         "sme_question": "sme_questions",
         "task": "tasks",
     }
@@ -2037,6 +2084,10 @@ def validate_generated_artifacts(
             _validate_team_roadmap_artifact(item, path, errors)
         elif artifact_type == "implementation_handoff_package":
             _validate_handoff_artifact(item, path, errors)
+        elif artifact_type == "executive_summary":
+            _validate_executive_summary_artifact(item, path, errors)
+        elif artifact_type == "news_article":
+            _validate_news_article_artifact(item, path, errors)
 
         validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
         validation.setdefault("status", "needs_review" if item["status"] == "needs_review" else "valid")
@@ -2406,6 +2457,88 @@ def _validate_team_roadmap_artifact(item: dict[str, Any], path: str, errors: lis
     )
     if not has_action_path:
         errors.append(f"{path}.data: team_roadmap requires workstreams, milestones, or recommended_next_actions")
+
+
+def _validate_executive_summary_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
+    data = item.get("data", {})
+    if not isinstance(data.get("summary", ""), str):
+        errors.append(f"{path}.data.summary: must be a string when provided")
+    for key in ("key_points", "recommended_actions", "risks", "source_backed_appendix"):
+        if key in data and not isinstance(data.get(key), list):
+            errors.append(f"{path}.data.{key}: must be a list when provided")
+    if not str(data.get("summary") or "").strip() and not (
+        isinstance(data.get("key_points"), list) and data.get("key_points")
+    ):
+        errors.append(f"{path}.data: executive_summary requires summary or key_points")
+    _mark_unsourced_review_items(
+        item,
+        path,
+        ("key_points", "recommended_actions", "risks"),
+    )
+
+
+def _validate_news_article_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
+    data = item.get("data", {})
+    headline = str(data.get("headline") or data.get("title") or "").strip()
+    if not headline:
+        errors.append(f"{path}.data.headline: news_article requires a headline")
+    for key in ("sections", "quotes", "fact_checks"):
+        if key in data and not isinstance(data.get(key), list):
+            errors.append(f"{path}.data.{key}: must be a list when provided")
+    has_body = bool(str(data.get("lede") or data.get("body") or "").strip())
+    has_sections = isinstance(data.get("sections"), list) and bool(data.get("sections"))
+    if not has_body and not has_sections:
+        errors.append(f"{path}.data: news_article requires lede, body, or sections")
+    _mark_unsourced_review_items(
+        item,
+        path,
+        ("sections", "quotes", "fact_checks"),
+    )
+
+
+def _mark_unsourced_review_items(
+    item: dict[str, Any],
+    path: str,
+    section_keys: tuple[str, ...],
+) -> None:
+    data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
+    validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
+    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
+    item_needs_review = False
+    for key in section_keys:
+        values = data.get(key)
+        if not isinstance(values, list):
+            continue
+        for index, value in enumerate(values):
+            if not isinstance(value, dict):
+                continue
+            source_refs = value.get("source_refs", [])
+            assumptions = value.get("assumptions", [])
+            if not isinstance(source_refs, list):
+                source_refs = []
+                value["source_refs"] = source_refs
+            if not isinstance(assumptions, list):
+                assumptions = []
+                value["assumptions"] = assumptions
+            if source_refs:
+                continue
+            value["status"] = "needs_review"
+            item_needs_review = True
+            issues.append(
+                {
+                    "code": "artifact_item_needs_review",
+                    "severity": "warning",
+                    "message": "Generated artifact item is missing source evidence and was marked needs_review.",
+                    "path": f"{path}.data.{key}.{index}",
+                    "repaired": True,
+                }
+            )
+    if item_needs_review:
+        item["status"] = "needs_review"
+        validation["status"] = "needs_review"
+    if issues:
+        validation["issues"] = issues
+        item["validation"] = validation
 
 
 def validate_ai_action_drafts_for_accept(
@@ -4534,6 +4667,16 @@ def classify_ai_draft_intent(
         capability = "create_team_roadmap"
         risk = "medium"
         model_policy = "balanced"
+    elif any(term in text for term in ("executive summary", "executive brief", "exec summary", "leadership summary")):
+        output_shape = "executive_summary"
+        capability = "draft_executive_summary"
+        risk = "medium"
+        model_policy = "balanced"
+    elif any(term in text for term in ("news article", "article draft", "press article", "journalistic article")):
+        output_shape = "news_article"
+        capability = "draft_news_article"
+        risk = "medium"
+        model_policy = "balanced"
     elif any(term in text for term in ("30/60/90", "30 60 90", "30-60-90", "improvement plan")):
         output_shape = "tasks"
         capability = "draft_30_60_90_improvement_plan"
@@ -4723,6 +4866,67 @@ def _should_include_library_sources(
     )
 
 
+def _draft_preferences_from_metadata(metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    source = metadata if isinstance(metadata, dict) else {}
+    expansion_mode = str(source.get("expansion_mode") or "").strip().lower()
+    if expansion_mode not in {"strict", "exploratory"}:
+        expansion_mode = "exploratory"
+    expansion_target = str(source.get("expansion_target") or "").strip().lower()
+    target_contracts = {
+        "selected_node": (
+            "Selected node: attach useful new draft nodes under the selected scope node unless the user asks otherwise."
+        ),
+        "existing_children": (
+            "Existing children: preserve the selected node's direct children as anchors and add useful descendants under those existing children."
+        ),
+        "leaves": (
+            "Branch leaves: preserve the selected branch scaffold and add useful descendants under existing leaf nodes."
+        ),
+        "whole_branch": (
+            "Whole branch: preserve existing branch nodes as anchors throughout the subtree and supplement missing structure where it belongs."
+        ),
+    }
+    if expansion_target not in target_contracts:
+        expansion_target = "selected_node"
+    evidence_mode = str(source.get("evidence_mode") or "").strip().lower()
+    evidence_contracts = {
+        "workspace": (
+            "Workspace only: use the supplied graph and draft/session context. Do not imply external source support."
+        ),
+        "uploaded_sources": (
+            "Uploaded sources: prefer supplied source_chunks/source_refs and copy only allowed source_refs for cited claims."
+        ),
+        "general_knowledge": (
+            "General knowledge: model knowledge is allowed, but unsupported graph nodes must remain uncited assumptions marked needs_review."
+        ),
+        "web_sources": (
+            "Web/current sources: use only supplied web excerpts or URL-bearing refs if present. Do not fabricate URLs, quotes, or current facts."
+        ),
+        "sharepoint": (
+            "SharePoint/internal: use only supplied SharePoint/internal excerpts or refs if present. Do not fabricate SharePoint links or internal claims."
+        ),
+    }
+    if evidence_mode not in evidence_contracts:
+        evidence_mode = "workspace"
+    citation_policy = str(source.get("citation_policy") or "").strip().lower()
+    if citation_policy not in {"required", "preferred", "not_required"}:
+        citation_policy = "preferred"
+    return {
+        "expansion_mode": expansion_mode,
+        "expansion_target": expansion_target,
+        "evidence_mode": evidence_mode,
+        "citation_policy": citation_policy,
+        "source_policy_requires_citation": citation_policy == "required",
+        "expansion_contract": (
+            "Strict: stay close to the requested level/count and avoid extra nested descendants unless requested."
+            if expansion_mode == "strict"
+            else "Exploratory: include useful child and descendant structure when it makes the draft more complete."
+        ),
+        "expansion_target_contract": target_contracts[expansion_target],
+        "evidence_contract": evidence_contracts[evidence_mode],
+    }
+
+
 def generate_ai_draft_session_with_provider(
     graph: dict[str, Any],
     *,
@@ -4735,6 +4939,7 @@ def generate_ai_draft_session_with_provider(
     model: str | None = None,
     desired_outputs: list[str] | None = None,
     source_chunks: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
     provider: DocMapAIProvider | None = None,
 ) -> dict[str, Any]:
     normalized_scope = normalize_ai_draft_scope(scope)
@@ -4743,17 +4948,19 @@ def generate_ai_draft_session_with_provider(
     requested_outputs = desired_outputs if desired_outputs is not None else _desired_outputs_from_graph(graph)
     classification = classify_ai_draft_intent(prompt, scope=normalized_scope, desired_outputs=requested_outputs)
     policy = normalize_model_policy(model_policy or classification["model_policy"], requested_model=model)
+    draft_preferences = _draft_preferences_from_metadata(metadata)
     include_library_sources = _should_include_library_sources(
         classification=classification,
         prompt=prompt,
         source_chunks=source_chunks,
-    )
+    ) or draft_preferences["evidence_mode"] == "uploaded_sources"
     source_context = build_ai_draft_source_context(
         graph,
         scope=normalized_scope,
         source_chunks=source_chunks or [],
         include_source_library=include_library_sources,
     )
+    source_context["draft_preferences"] = draft_preferences
     source_refs = source_context["source_refs"]
     decision = choose_openai_model(
         requested_model=model,
@@ -4776,6 +4983,7 @@ def generate_ai_draft_session_with_provider(
         provider=provider,
     )
     metadata = _draft_generation_metadata(result, classification, decision, policy)
+    metadata.update(draft_preferences)
     metadata["source_context"] = _source_context_metadata(source_context)
     metadata.update(_source_context_budget_metadata(source_context))
     generated_artifacts = validate_generated_artifacts(
@@ -5022,9 +5230,7 @@ def parse_ai_draft_revision_response(
         )
         if isinstance(annotation, dict)
     ]
-    draft_items = parsed.get("draft_items")
-    if not isinstance(draft_items, list) or not draft_items:
-        draft_items = _items_from_model_output(parsed, draft_nodes, draft_annotations, shape)
+    raw_draft_items = parsed.get("draft_items")
     raw_generated_artifacts = parsed.get("generated_artifacts", [])
     if not isinstance(raw_generated_artifacts, list):
         raw_generated_artifacts = []
@@ -5060,6 +5266,14 @@ def parse_ai_draft_revision_response(
         prompt_profile="",
         input_source_refs=allowed_source_refs,
     )
+    if isinstance(raw_draft_items, list) and raw_draft_items:
+        draft_items = raw_draft_items
+    else:
+        draft_items = _items_from_model_output(parsed, draft_nodes, draft_annotations, shape)
+        if generated_artifacts:
+            draft_items.extend(
+                _draft_items_from_revision_parts([], [], [], generated_artifacts)
+            )
     response_source_refs = _filter_allowed_source_refs(parsed.get("source_refs", []), allowed_source_refs)
     if not response_source_refs:
         response_source_refs = _source_refs_from_draft_parts(draft_nodes, draft_annotations)
@@ -5175,18 +5389,23 @@ Source context, including selected scope, source-library gaps, uploaded chunks, 
 {prior}
 Output requirements:
 - Treat mind_map as only one registered artifact type. Prefer the requested artifact_type/output_shape over map-first generation.
+- Respect explicit user quantities. If the user asks for exactly N more nodes/items, return exactly N relevant draft_nodes/items for that request unless they explicitly ask for nested descendants too.
+- Respect source_context.draft_preferences.expansion_mode. Strict mode means avoid extra subtree depth/count beyond the user's requested level. Exploratory mode means useful child and descendant structure is welcome when it improves completeness.
+- Respect source_context.draft_preferences.expansion_target. Preserve existing canonical nodes as anchors; do not rewrite them unless the user explicitly asks for update/rewrite. For existing_children, leaves, and whole_branch targets, connect new draft_nodes to existing node IDs with draft_edges so accepted output expands the existing branch instead of replacing it.
+- Respect source_context.draft_preferences.evidence_mode and citation_policy. Required citations means claims based on supplied documents/web/internal sources must copy allowed source_refs; if evidence is not supplied or not in allowed source_refs, leave source_refs empty and mark the item as an assumption/needs_review. Never fabricate URLs, SharePoint links, source refs, quotes, or current facts.
 - For broad mind_map or graph_draft requests, create a useful 2-4 level hierarchy instead of only top-level labels.
 - For broad conceptual, business, operating model, GTM, strategy, or learning-map requests, choose enough nodes for the subject to be genuinely useful, usually 20-40 draft_nodes unless the user asks for a quick/simple sketch.
 - Silently self-review before returning JSON: if the draft only contains generic category labels, is missing obvious domain-standard subtopics, or has fewer than 3 useful child branches under major concepts, revise it internally before finalizing.
 - Use your model knowledge of the requested domain to choose depth and subtopics; do not rely on hardcoded examples or stop at framework headings.
 - Populate generated_artifacts for visual or review outputs such as knowledge_graph, flow_chart, chart, checklist, tasks, source_coverage, software_overlap_report, and implementation_handoff_package.
+- For executive_summary and news_article outputs, fill the top-level executive_summary or news_article projection; it will be converted into a generated review artifact. Prefer these review artifacts over draft_nodes unless the user explicitly asks to change the graph. Keep unsourced claims, quotes, and inferred findings source_refs: [], include assumptions, and mark them needs_review.
 - For flow_chart outputs, model real flowchart grammar: decision steps need labeled outgoing paths such as Yes/No, Approved/Rejected, or Exception. Put branch text in flow_chart.edges[].label and durable graph edge metadata.branch_label / metadata.condition when you also emit draft_edges.
 - Populate the projection matching output_shape and, when graph changes are useful, draft_nodes and draft_edges.
 - Use stable draft IDs prefixed with draft_.
 - Use source_refs only by copying from Allowed source_refs.
 - For unsourced generated nodes, set source_refs: [] and add an assumption.
 - Strict schema mode requires every declared field. Include generated_artifacts, source_coverage, tasks, checklist, outline, table, kanban, presentation_sections, and review_annotations as arrays even when empty.
-- For typed object projections that are not relevant to the request, return null for flow_chart, knowledge_graph, and chart. When they are relevant, fill their required arrays and use [] for empty nested lists.
+- For typed object projections that are not relevant to the request, return null for flow_chart, knowledge_graph, chart, software_overlap_report, executive_output, executive_summary, and news_article. When they are relevant, fill their required arrays and use [] for empty nested lists.
 
 {ARTIFACT_REGISTRY_CONTRACT.strip()}
 """.strip()
@@ -5293,7 +5512,7 @@ def _artifact_from_top_level_projection(
     parsed: dict[str, Any],
     shape: str,
 ) -> dict[str, Any] | None:
-    if shape not in {"software_overlap_report", "flow_chart"}:
+    if shape not in {"software_overlap_report", "flow_chart", "executive_summary", "news_article"}:
         return None
     data = parsed.get(shape)
     if not isinstance(data, dict) or not data:
@@ -5302,6 +5521,12 @@ def _artifact_from_top_level_projection(
         data = _normalize_flow_chart_data(data)
         title = "Flowchart"
         artifact_id = str(data.get("id") or "artifact-flow-chart")
+    elif shape == "executive_summary":
+        title = str(data.get("title") or "Executive Summary")
+        artifact_id = str(data.get("id") or "artifact-executive-summary")
+    elif shape == "news_article":
+        title = str(data.get("headline") or data.get("title") or "News Article")
+        artifact_id = str(data.get("id") or "artifact-news-article")
     else:
         title = str(data.get("title") or "Software Overlap Report")
         artifact_id = str(data.get("id") or "artifact-software-overlap-report")

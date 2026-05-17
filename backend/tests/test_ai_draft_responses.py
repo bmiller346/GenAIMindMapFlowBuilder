@@ -332,6 +332,8 @@ def test_intent_classification_maps_output_shapes_and_policy():
     package = classify_ai_draft_intent("create a stakeholder review package")
     standards = classify_ai_draft_intent("review this Revit standards folder for completeness")
     roadmap = classify_ai_draft_intent("make this complex issue into a roadmap for my team")
+    executive_summary = classify_ai_draft_intent("create an executive summary for leadership")
+    news_article = classify_ai_draft_intent("draft a news article from these sources")
 
     assert table["output_shape"] == "kanban"
     assert table["model_policy"] == "balanced"
@@ -346,6 +348,10 @@ def test_intent_classification_maps_output_shapes_and_policy():
     assert standards["model_policy"] == "deep_review"
     assert roadmap["capability"] == "create_team_roadmap"
     assert roadmap["output_shape"] == "team_roadmap"
+    assert executive_summary["capability"] == "draft_executive_summary"
+    assert executive_summary["output_shape"] == "executive_summary"
+    assert news_article["capability"] == "draft_news_article"
+    assert news_article["output_shape"] == "news_article"
 
 
 def test_intent_classification_maps_enterprise_readiness_findings():

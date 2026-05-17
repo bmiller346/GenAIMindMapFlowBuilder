@@ -9,6 +9,7 @@ from ai.providers import FixtureDocMapAIProvider
 from ai_helpers import (
     accept_ai_draft_revision,
     append_ai_draft_revision,
+    build_ai_draft_generation_request,
     build_ai_draft_source_context,
     build_ai_draft_revision,
     build_ai_draft_session,
@@ -51,6 +52,39 @@ def draft_node(node_id="draft-1", *, sourced=False):
         "external_refs": {},
         "metadata": {"source": "test"},
     }
+
+
+def test_draft_generation_prompt_respects_explicit_node_counts():
+    request = build_ai_draft_generation_request(
+        prompt='Give me 5 more nodes for this branch.',
+        graph=sample_graph(),
+        scope={"type": "node", "node_id": "root"},
+        role="Workflow Mapper",
+        classification={"intent": "generate_child_nodes", "output_shape": "mind_map"},
+        model="gpt-test",
+        source_refs=[],
+        source_chunks=[],
+        source_context={
+            "draft_preferences": {
+                "expansion_mode": "strict",
+                "expansion_target": "leaves",
+                "evidence_mode": "uploaded_sources",
+                "citation_policy": "required",
+            }
+        },
+    )
+
+    user_prompt = request.input[0]["content"]
+    assert "Respect explicit user quantities" in user_prompt
+    assert "exactly N more nodes/items" in user_prompt
+    assert "unless they explicitly ask for nested descendants too" in user_prompt
+    assert "source_context.draft_preferences.expansion_mode" in user_prompt
+    assert "source_context.draft_preferences.expansion_target" in user_prompt
+    assert "source_context.draft_preferences.evidence_mode" in user_prompt
+    assert '"expansion_mode": "strict"' in user_prompt
+    assert '"expansion_target": "leaves"' in user_prompt
+    assert '"evidence_mode": "uploaded_sources"' in user_prompt
+    assert '"citation_policy": "required"' in user_prompt
 
 
 def test_react_node_projection_uses_registered_response_node_shape():
@@ -589,6 +623,61 @@ def test_accept_endpoint_save_reload_preserves_source_refs_needs_review_and_audi
     assert accept_response["graph"]["viewport"] != {}
 
 
+def test_markdown_export_endpoints_use_accepted_article_artifacts(monkeypatch):
+    graph = sample_graph()
+    accepted_session = {
+        "session_id": "session-article",
+        "workspace_id": "workspace-1",
+        "updated_at": "2026-05-17T01:00:00Z",
+        "accept_history": [
+            {
+                "accepted_at": "2026-05-17T01:00:00Z",
+                "accepted_artifacts": [
+                    {
+                        "id": "artifact-exec",
+                        "artifact_type": "executive_summary",
+                        "data": {
+                            "title": "Leadership Brief",
+                            "summary": "The workspace is ready for leadership review.",
+                            "key_points": [],
+                            "recommended_actions": [],
+                            "risks": [],
+                            "source_backed_appendix": [],
+                            "assumptions": [],
+                        },
+                    },
+                    {
+                        "id": "artifact-news",
+                        "artifact_type": "news_article",
+                        "data": {
+                            "headline": "Coffee Cart Launch Update",
+                            "dek": "The launch plan is ready for review.",
+                            "lede": "The team has a review-ready launch plan.",
+                            "body": "",
+                            "sections": [],
+                            "quotes": [],
+                            "fact_checks": [],
+                            "source_refs": [],
+                            "assumptions": ["Publish date still needs confirmation."],
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+
+    monkeypatch.setattr(app, "get_workspace_graph_or_404", lambda flow_id: graph)
+    monkeypatch.setattr(app, "list_ai_draft_sessions_for_workspace", lambda flow_id: [accepted_session])
+
+    executive = app.export_workspace_executive_markdown("workspace-1").body.decode("utf-8")
+    article = app.export_workspace_news_article_markdown("workspace-1").body.decode("utf-8")
+
+    assert "# Leadership Brief" in executive
+    assert "ready for leadership review" in executive
+    assert "# Coffee Cart Launch Update" in article
+    assert "Publish date still needs confirmation." in article
+
+
 def test_workspace_custom_prompt_draft_session_prefers_model_generation(monkeypatch):
     graph = sample_graph()
     persisted = {}
@@ -671,6 +760,12 @@ def test_workspace_custom_prompt_draft_session_prefers_model_generation(monkeypa
             "prompt": "show a SAAS business model",
             "custom_prompt": "show a SAAS business model",
             "scope": {"type": "workspace"},
+            "metadata": {
+                "expansion_mode": "exploratory",
+                "expansion_target": "whole_branch",
+                "evidence_mode": "general_knowledge",
+                "citation_policy": "not_required",
+            },
         },
     )
 
@@ -680,6 +775,10 @@ def test_workspace_custom_prompt_draft_session_prefers_model_generation(monkeypa
     assert calls[0]["prompt"] == "show a SAAS business model"
     assert calls[0]["role"] == "workflow_mapper"
     assert calls[0]["model"] is None
+    assert calls[0]["metadata"]["expansion_mode"] == "exploratory"
+    assert calls[0]["metadata"]["expansion_target"] == "whole_branch"
+    assert calls[0]["metadata"]["evidence_mode"] == "general_knowledge"
+    assert calls[0]["metadata"]["citation_policy"] == "not_required"
     assert session["status"] == "drafting"
     assert session["selected_model"] == "gpt-5.4"
     assert session["metadata"]["preview_mode"] == "responses_structured_draft"

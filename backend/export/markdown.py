@@ -20,6 +20,54 @@ def export_executive_output_markdown(output: dict) -> str:
     return f"# {title}\n\n{body}\n"
 
 
+def export_executive_summary_markdown(summary: dict) -> str:
+    sections = [
+        ("Summary", summary.get("summary", "")),
+        ("Key Points", _roadmap_item_lines(summary.get("key_points", []))),
+        ("Recommended Actions", _roadmap_item_lines(summary.get("recommended_actions", []))),
+        ("Risks", _roadmap_item_lines(summary.get("risks", []))),
+        ("Source-backed Appendix", _appendix_lines(summary.get("source_backed_appendix", []))),
+        ("Assumptions", _plain_list(summary.get("assumptions", []))),
+    ]
+    title = summary.get("title") or "Executive Summary"
+    body = "\n\n".join(
+        f"## {heading}\n\n{content or '_No items projected._'}"
+        for heading, content in sections
+    )
+    return f"# {title}\n\n{body}\n"
+
+
+def export_news_article_markdown(article: dict) -> str:
+    title = article.get("headline") or article.get("title") or "News Article"
+    opening = [
+        str(article.get("dek") or "").strip(),
+        str(article.get("lede") or "").strip(),
+        str(article.get("body") or "").strip(),
+    ]
+    body_parts = [part for part in opening if part]
+    section_lines = _article_section_lines(article.get("sections", []))
+    if section_lines:
+        body_parts.append(section_lines)
+    fact_checks = _roadmap_item_lines(article.get("fact_checks", []))
+    if fact_checks:
+        body_parts.append(f"## Fact Check Notes\n\n{fact_checks}")
+    quote_lines = _roadmap_item_lines(article.get("quotes", []))
+    if quote_lines:
+        body_parts.append(f"## Source Notes\n\n{quote_lines}")
+    appendix = _appendix_lines(
+        list(article.get("sections", []) or [])
+        + list(article.get("quotes", []) or [])
+        + list(article.get("fact_checks", []) or [])
+        + [{"title": title, "source_refs": article.get("source_refs", [])}]
+    )
+    if appendix:
+        body_parts.append(f"## Source-backed Appendix\n\n{appendix}")
+    assumptions = _plain_list(article.get("assumptions", []))
+    if assumptions:
+        body_parts.append(f"## Assumptions\n\n{assumptions}")
+    return f"# {title}\n\n" + "\n\n".join(body_parts) + "\n"
+
+
 def export_team_roadmap_markdown(roadmap: dict) -> str:
     sections = [
         ("Context", roadmap.get("context", "")),
@@ -37,6 +85,37 @@ def export_team_roadmap_markdown(roadmap: dict) -> str:
         for heading, content in sections
     )
     return f"# {title}\n\n{body}\n"
+
+
+def _article_section_lines(items: list[dict]) -> str:
+    lines = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        heading = item.get("title") or item.get("label")
+        detail = item.get("description") or item.get("summary") or item.get("body") or ""
+        if heading:
+            lines.append(f"## {heading}")
+            lines.append("")
+        if detail:
+            lines.append(str(detail))
+            lines.append("")
+        if item.get("status") == "needs_review" or item.get("needs_review"):
+            lines.append("_Needs review._")
+            lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _plain_list(items: list) -> str:
+    lines = []
+    for item in items:
+        if isinstance(item, dict):
+            value = item.get("title") or item.get("description") or item.get("summary") or item.get("label")
+        else:
+            value = item
+        if str(value or "").strip():
+            lines.append(f"- {value}")
+    return "\n".join(lines)
 
 
 def _item_lines(items: list[dict]) -> str:

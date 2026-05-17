@@ -118,17 +118,25 @@ from code_intelligence import (
 )
 from integrations.github import GitHubClient, GitHubClientError
 from export.csv_tasks import export_task_rows
+from export.markdown import (
+    export_executive_output_markdown,
+    export_executive_summary_markdown,
+)
 from export.workspace_graph import (
+    artifact_to_news_article_markdown,
     build_workspace_graph,
     graph_to_completeness_markdown,
     graph_to_completeness_review,
+    graph_to_executive_markdown,
     graph_to_markdown,
     graph_to_mermaid,
     graph_to_mmd_json,
+    graph_to_news_article_markdown,
     graph_to_opml,
     graph_to_task_rows,
     graph_to_team_roadmap,
     graph_to_team_roadmap_markdown,
+    select_latest_ai_draft_artifact,
     select_branch,
 )
 from integrations.miro.client import MiroClient
@@ -2995,6 +3003,42 @@ def export_workspace_completeness_review_markdown(flow_id: str):
     )
 
 
+@app.get("/api/workspaces/{flow_id}/exports/executive.md")
+@app.get("/api/workspaces/{flow_id}/exports/executive-output.md")
+def export_workspace_executive_markdown(flow_id: str):
+    artifact = _latest_ai_draft_artifact(flow_id, {"executive_summary", "executive_output"})
+    if artifact and artifact.get("artifact_type") == "executive_summary":
+        content = export_executive_summary_markdown(artifact.get("data", {}))
+    elif artifact and artifact.get("artifact_type") == "executive_output":
+        content = export_executive_output_markdown(artifact.get("data", {}))
+    else:
+        graph = get_workspace_graph_or_404(flow_id)
+        content = graph_to_executive_markdown(graph)
+    return Response(content=content, media_type="text/markdown")
+
+
+@app.get("/api/workspaces/{flow_id}/exports/article.md")
+@app.get("/api/workspaces/{flow_id}/exports/news-article.md")
+def export_workspace_news_article_markdown(flow_id: str):
+    artifact = _latest_ai_draft_artifact(flow_id, {"news_article"})
+    if artifact:
+        content = artifact_to_news_article_markdown(artifact)
+    else:
+        graph = get_workspace_graph_or_404(flow_id)
+        content = graph_to_news_article_markdown(graph)
+    return Response(
+        content=content,
+        media_type="text/markdown",
+    )
+
+
+def _latest_ai_draft_artifact(flow_id: str, artifact_types: set[str]) -> dict[str, Any] | None:
+    return select_latest_ai_draft_artifact(
+        list_ai_draft_sessions_for_workspace(flow_id),
+        artifact_types,
+    )
+
+
 @app.get("/api/workspaces/{flow_id}/exports/team-roadmap.md")
 def export_workspace_team_roadmap_markdown(flow_id: str):
     graph = get_workspace_graph_or_404(flow_id)
@@ -3635,6 +3679,7 @@ def create_ai_draft_session(
                 model=_requested_model(request),
                 desired_outputs=_requested_desired_outputs(request),
                 source_chunks=_requested_source_chunks(request),
+                metadata=request.get("metadata") if isinstance(request.get("metadata"), dict) else {},
             )
             generated_session["ai_action_run"] = build_ai_action_run(
                 workspace_id=flow_id,

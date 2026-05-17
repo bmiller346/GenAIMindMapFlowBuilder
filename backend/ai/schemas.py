@@ -54,6 +54,8 @@ AI_DRAFT_OUTPUT_SHAPES = {
     "team_roadmap",
     "implementation_handoff_package",
     "executive_output",
+    "executive_summary",
+    "news_article",
 }
 
 KNOWLEDGE_GRAPH_SOURCE_SIGNALS = {
@@ -701,6 +703,58 @@ EXECUTIVE_OUTPUT_SCHEMA: dict[str, Any] = {
     ],
 }
 
+EXECUTIVE_SUMMARY_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "properties": {
+        "title": {"type": ["string", "null"]},
+        "summary": {"type": ["string", "null"]},
+        "key_points": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "recommended_actions": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "risks": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "source_backed_appendix": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "title",
+        "summary",
+        "key_points",
+        "recommended_actions",
+        "risks",
+        "source_backed_appendix",
+        "source_refs",
+        "assumptions",
+    ],
+}
+
+NEWS_ARTICLE_OUTPUT_SCHEMA: dict[str, Any] = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "properties": {
+        "headline": {"type": ["string", "null"]},
+        "dek": {"type": ["string", "null"]},
+        "lede": {"type": ["string", "null"]},
+        "body": {"type": ["string", "null"]},
+        "sections": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "quotes": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "fact_checks": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
+        "source_refs": {"type": "array", "items": SOURCE_REF_OUTPUT_SCHEMA},
+        "assumptions": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "headline",
+        "dek",
+        "lede",
+        "body",
+        "sections",
+        "quotes",
+        "fact_checks",
+        "source_refs",
+        "assumptions",
+    ],
+}
+
 
 ARTIFACT_REGISTRY: dict[str, dict[str, Any]] = {
     "mind_map": _artifact_definition(
@@ -1041,6 +1095,52 @@ ARTIFACT_REGISTRY: dict[str, dict[str, Any]] = {
             "unsourced_items_marked_needs_review",
         ],
     ),
+    "executive_summary": _artifact_definition(
+        "executive_summary",
+        requires=["source_context"],
+        optional=["nodes", "source_refs", "risks", "recommended_actions"],
+        generated_schema={
+            "summary": "concise executive-ready narrative",
+            "key_points": "source-backed or review-marked points",
+            "recommended_actions": "optional action candidates",
+            "risks": "optional risks or blockers",
+            "source_backed_appendix": "evidence rows tied to source refs",
+        },
+        projection_requirements=["summary or key points exist"],
+        supported_views=["executive_summary", "review", "markdown_export"],
+        preview_component="ExecutiveSummaryPreview",
+        accept_behavior="attach_review_artifact_after_preview_acceptance",
+        export_behavior="markdown_executive_summary",
+        validation_rules=[
+            "executive_summary_has_summary_or_key_points",
+            "source_backed_items_include_source_refs",
+            "unsupported_items_marked_needs_review",
+        ],
+    ),
+    "news_article": _artifact_definition(
+        "news_article",
+        requires=["source_context"],
+        optional=["nodes", "source_refs", "quotes", "fact_checks"],
+        generated_schema={
+            "headline": "article headline",
+            "dek": "short subhead",
+            "lede": "opening paragraph",
+            "body": "article body or narrative draft",
+            "sections": "optional section blocks",
+            "quotes": "optional source-backed quotations",
+            "fact_checks": "reviewable factual claims",
+        },
+        projection_requirements=["headline plus lede, body, or sections exist"],
+        supported_views=["article", "review", "markdown_export"],
+        preview_component="NewsArticlePreview",
+        accept_behavior="attach_review_artifact_after_preview_acceptance",
+        export_behavior="markdown_article",
+        validation_rules=[
+            "article_has_headline_and_body_content",
+            "quotes_include_source_refs_or_are_marked_needs_review",
+            "unsupported_claims_marked_needs_review",
+        ],
+    ),
 }
 
 REGISTERED_ARTIFACT_TYPES = set(ARTIFACT_REGISTRY)
@@ -1114,6 +1214,8 @@ AI_DRAFT_REVISION_OUTPUT_SCHEMA: dict[str, Any] = {
         "chart": CHART_OUTPUT_SCHEMA,
         "software_overlap_report": SOFTWARE_OVERLAP_REPORT_OUTPUT_SCHEMA,
         "executive_output": EXECUTIVE_OUTPUT_SCHEMA,
+        "executive_summary": EXECUTIVE_SUMMARY_OUTPUT_SCHEMA,
+        "news_article": NEWS_ARTICLE_OUTPUT_SCHEMA,
         "outline": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
         "table": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
         "kanban": {"type": "array", "items": GENERIC_OUTPUT_ITEM_SCHEMA},
@@ -1139,6 +1241,8 @@ AI_DRAFT_REVISION_OUTPUT_SCHEMA: dict[str, Any] = {
         "chart",
         "software_overlap_report",
         "executive_output",
+        "executive_summary",
+        "news_article",
         "outline",
         "table",
         "kanban",

@@ -1,9 +1,16 @@
 import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from export.csv_tasks import export_task_rows
 from export.internal_graph_json import export_internal_graph
+from export.markdown import export_executive_summary_markdown, export_news_article_markdown
 from export.workspace_graph import (
     build_workspace_graph,
+    graph_to_news_article,
+    graph_to_news_article_markdown,
     graph_to_executive_markdown,
     graph_to_executive_output,
     graph_to_markdown,
@@ -14,6 +21,7 @@ from export.workspace_graph import (
     graph_to_team_roadmap_markdown,
     graph_to_task_rows,
     select_branch,
+    select_latest_ai_draft_artifact,
 )
 from graph.schemas import WorkspaceGraph
 
@@ -253,6 +261,129 @@ def test_executive_output_projection_is_source_backed_and_exportable():
     }
     assert "## Source-backed Appendix" in graph_to_executive_markdown(graph)
     assert "Checklist needs SME review." in graph_to_executive_markdown(graph)
+
+
+def test_executive_summary_and_news_article_artifacts_export_to_markdown():
+    executive = export_executive_summary_markdown(
+        {
+            "title": "Deployment Summary",
+            "summary": "Deployment is ready after manager approval.",
+            "key_points": [
+                {
+                    "title": "Approval gate",
+                    "description": "Manager approval is required.",
+                    "source_backed": True,
+                    "source_refs": [{"document_id": "doc-1", "quote_snippet": "Manager approval is required."}],
+                }
+            ],
+            "recommended_actions": [],
+            "risks": [],
+            "source_backed_appendix": [
+                {
+                    "title": "Approval evidence",
+                    "source_refs": [{"document_id": "doc-1", "quote_snippet": "Manager approval is required."}],
+                }
+            ],
+            "assumptions": [],
+        }
+    )
+    article = export_news_article_markdown(
+        {
+            "headline": "Deployment Process Adds Approval Gate",
+            "dek": "Manager review is required before rollout.",
+            "lede": "Teams must confirm approval before deployment begins.",
+            "sections": [
+                {
+                    "title": "What changed",
+                    "description": "The rollout now includes a manager approval gate.",
+                    "source_refs": [{"document_id": "doc-1", "quote_snippet": "approval gate"}],
+                }
+            ],
+            "fact_checks": [],
+            "quotes": [],
+            "source_refs": [{"document_id": "doc-1", "quote_snippet": "approval gate"}],
+            "assumptions": ["Timing still needs confirmation."],
+        }
+    )
+
+    assert "# Deployment Summary" in executive
+    assert "## Key Points" in executive
+    assert "Manager approval is required." in executive
+    assert "# Deployment Process Adds Approval Gate" in article
+    assert "## What changed" in article
+    assert "## Source-backed Appendix" in article
+    assert "Timing still needs confirmation." in article
+
+
+def test_news_article_projection_uses_source_backed_graph_for_markdown_export():
+    graph = _validated_export_graph()
+    article = graph_to_news_article(graph)
+
+    assert article["headline"] == "Training Rollout Update"
+    assert article["lede"] == (
+        "Plan rollout work. Projected from 2 content node(s), "
+        "including 2 source-backed item(s)."
+    )
+    assert [section["title"] for section in article["sections"]] == [
+        "Training Rollout",
+        "Draft enablement checklist",
+    ]
+    assert article["sections"][1]["status"] == "needs_review"
+    assert article["source_refs"] == [
+        {
+            "document_id": "doc-1",
+            "page": 1,
+            "section": "Overview",
+            "quote_snippet": "Launch training in phases.",
+            "confidence": 0.92,
+        },
+        {
+            "document_id": "doc-1",
+            "page": 3,
+            "section": "Tasks",
+            "quote_snippet": "Checklist needs SME review.",
+            "confidence": 0.55,
+        },
+    ]
+
+    markdown = graph_to_news_article_markdown(graph)
+    assert "# Training Rollout Update" in markdown
+    assert "## Draft enablement checklist" in markdown
+    assert "Checklist needs SME review." in markdown
+    assert "## Fact Check Notes" in markdown
+
+
+def test_latest_ai_draft_artifact_prefers_accepted_then_latest_generated():
+    generated_old = {"id": "generated-old", "artifact_type": "news_article", "data": {"headline": "Old"}}
+    generated_new = {"id": "generated-new", "artifact_type": "news_article", "data": {"headline": "New"}}
+    accepted = {"id": "accepted", "artifact_type": "news_article", "data": {"headline": "Accepted"}}
+    sessions = [
+        {
+            "updated_at": "2026-05-01T00:00:00Z",
+            "revisions": [
+                {"created_at": "2026-05-01T00:00:00Z", "generated_artifacts": [generated_old]},
+                {"created_at": "2026-05-02T00:00:00Z", "generated_artifacts": [generated_new]},
+            ],
+            "accept_history": [],
+        }
+    ]
+
+    assert select_latest_ai_draft_artifact(sessions, {"news_article"}) == generated_new
+
+    sessions.append(
+        {
+            "updated_at": "2026-05-01T12:00:00Z",
+            "revisions": [],
+            "accept_history": [
+                {
+                    "accepted_at": "2026-05-01T12:00:00Z",
+                    "accepted_artifacts": [accepted],
+                }
+            ],
+        }
+    )
+
+    assert select_latest_ai_draft_artifact(sessions, {"news_article"}) == accepted
 
 
 def test_team_roadmap_projection_groups_source_backed_graph_for_export():

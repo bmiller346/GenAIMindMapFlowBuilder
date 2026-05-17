@@ -145,6 +145,54 @@ def _artifact_response(request):
             "risks": [],
             "recommended_next_actions": ["Confirm deployment owner"],
         },
+        "executive_summary": {
+            "title": "Deployment Approval Summary",
+            "summary": "Deployment depends on manager approval before rollout.",
+            "key_points": [
+                {
+                    "id": "point-approval",
+                    "title": "Approval is required",
+                    "description": "Manager approval is required before deployment.",
+                    "source_refs": [SOURCE_REF],
+                    "assumptions": [],
+                    "metadata": {},
+                }
+            ],
+            "recommended_actions": [],
+            "risks": [],
+            "source_backed_appendix": [
+                {
+                    "id": "appendix-approval",
+                    "title": "Approval evidence",
+                    "description": "Approval is required before deployment.",
+                    "source_refs": [SOURCE_REF],
+                    "assumptions": [],
+                    "metadata": {},
+                }
+            ],
+            "source_refs": [SOURCE_REF],
+            "assumptions": [],
+        },
+        "news_article": {
+            "headline": "Deployment Process Adds Approval Gate",
+            "dek": "Manager review is required before rollout.",
+            "lede": "The deployment procedure requires approval before rollout.",
+            "body": "Teams must confirm manager approval before deployment begins.",
+            "sections": [
+                {
+                    "id": "section-approval",
+                    "title": "Approval gate",
+                    "description": "Manager approval is required before deployment.",
+                    "source_refs": [SOURCE_REF],
+                    "assumptions": [],
+                    "metadata": {},
+                }
+            ],
+            "quotes": [],
+            "fact_checks": [],
+            "source_refs": [SOURCE_REF],
+            "assumptions": [],
+        },
         "software_overlap_report": {
             "summary": "Two approved tools appear to support the same approval workflow.",
             "inventory_items": [
@@ -277,6 +325,8 @@ def test_artifact_registry_contains_required_starter_types():
         "source_coverage",
         "source_repair",
         "implementation_handoff_package",
+        "executive_summary",
+        "news_article",
     }
 
     assert expected <= set(registered_artifact_types())
@@ -307,6 +357,8 @@ def test_artifact_registry_contains_required_starter_types():
         "software_overlap_report",
         "team_roadmap",
         "implementation_handoff_package",
+        "executive_summary",
+        "news_article",
     ],
 )
 def test_workspace_brief_desired_outputs_generate_non_mind_map_artifacts(artifact_type):
@@ -409,6 +461,156 @@ def test_flow_chart_artifact_preserves_branch_labels_and_flags_unlabeled_decisio
     assert edges[0]["label"] == "Yes"
     assert artifact["validation"]["status"] == "needs_review"
     assert "decision and exception paths should include label" in artifact["validation"]["issues"][0]
+
+
+def test_top_level_executive_summary_projection_becomes_review_artifact_without_nodes():
+    revision = parse_ai_draft_revision_response(
+        {
+            "intent": "draft_executive_summary",
+            "output_shape": "executive_summary",
+            "summary": "Executive-ready summary.",
+            "draft_nodes": [],
+            "draft_edges": [],
+            "draft_annotations": [],
+            "draft_items": [],
+            "generated_artifacts": [],
+            "executive_summary": {
+                "title": "Deployment approval summary",
+                "summary": "Deployment depends on manager approval.",
+                "key_points": [
+                    {
+                        "id": "point-1",
+                        "title": "Approval required",
+                        "description": "Approval is required before deployment.",
+                        "source_refs": [SOURCE_REF],
+                        "assumptions": [],
+                        "metadata": {},
+                    }
+                ],
+                "recommended_actions": [],
+                "risks": [],
+                "source_backed_appendix": [],
+                "source_refs": [SOURCE_REF],
+                "assumptions": [],
+            },
+            "source_coverage": [],
+            "tasks": [],
+            "checklist": [],
+            "flow_chart": {},
+            "knowledge_graph": {},
+            "chart": {},
+            "outline": [],
+            "table": [],
+            "kanban": [],
+            "presentation_sections": [],
+            "review_annotations": [],
+            "assumptions": [],
+            "source_refs": [SOURCE_REF],
+        },
+        prompt="Create an executive summary.",
+        scope={"type": "workspace"},
+        source_refs=[SOURCE_REF],
+        classification={"output_shape": "executive_summary", "intent": "draft_executive_summary"},
+    )
+
+    assert revision["draft_nodes"] == []
+    [artifact] = revision["generated_artifacts"]
+    assert artifact["artifact_type"] == "executive_summary"
+    assert artifact["data"]["summary"] == "Deployment depends on manager approval."
+    assert artifact["validation"]["status"] == "valid"
+    [draft_item] = revision["draft_items"]
+    assert draft_item["item_type"] == "artifact"
+    assert draft_item["title"] == "Deployment approval summary"
+    assert draft_item["content"] == "Deployment depends on manager approval."
+    assert draft_item["metadata"]["artifact_type"] == "executive_summary"
+
+
+def test_news_article_artifact_marks_unsourced_article_items_needs_review():
+    [artifact] = validate_generated_artifacts(
+        [
+            {
+                "id": "article-1",
+                "artifact_type": "news_article",
+                "data": {
+                    "headline": "Deployment Process Adds Approval Gate",
+                    "lede": "Deployment now includes an approval gate.",
+                    "sections": [
+                        {
+                            "id": "section-1",
+                            "title": "Approval gate",
+                            "description": "The team should confirm the approval owner.",
+                            "source_refs": [],
+                            "assumptions": ["Owner is inferred from workflow context."],
+                        }
+                    ],
+                    "quotes": [],
+                    "fact_checks": [],
+                },
+                "source_refs": [],
+                "assumptions": ["Article includes generated context needing review."],
+            }
+        ],
+        scope={"type": "workspace"},
+        model_provider="fixture",
+        model="gpt-test",
+        ai_role="Ask AI",
+        prompt_profile="news_article",
+        input_source_refs=[],
+    )
+
+    assert artifact["status"] == "needs_review"
+    assert artifact["data"]["sections"][0]["status"] == "needs_review"
+    assert artifact["validation"]["status"] == "needs_review"
+    assert artifact["validation"]["issues"][0]["code"] == "artifact_item_needs_review"
+
+
+def test_top_level_news_article_projection_becomes_reviewable_artifact_item():
+    revision = parse_ai_draft_revision_response(
+        {
+            "intent": "draft_news_article",
+            "output_shape": "news_article",
+            "summary": "Article draft.",
+            "draft_nodes": [],
+            "draft_edges": [],
+            "draft_annotations": [],
+            "draft_items": [],
+            "generated_artifacts": [],
+            "news_article": {
+                "headline": "Deployment Process Adds Approval Gate",
+                "dek": "Manager review is required before rollout.",
+                "lede": "The deployment procedure requires approval before rollout.",
+                "body": "Teams must confirm manager approval before deployment begins.",
+                "sections": [],
+                "quotes": [],
+                "fact_checks": [],
+                "source_refs": [SOURCE_REF],
+                "assumptions": [],
+            },
+            "source_coverage": [],
+            "tasks": [],
+            "checklist": [],
+            "flow_chart": {},
+            "knowledge_graph": {},
+            "chart": {},
+            "outline": [],
+            "table": [],
+            "kanban": [],
+            "presentation_sections": [],
+            "review_annotations": [],
+            "assumptions": [],
+            "source_refs": [SOURCE_REF],
+        },
+        prompt="Draft a news article.",
+        scope={"type": "workspace"},
+        source_refs=[SOURCE_REF],
+        classification={"output_shape": "news_article", "intent": "draft_news_article"},
+    )
+
+    [artifact] = revision["generated_artifacts"]
+    [draft_item] = revision["draft_items"]
+    assert artifact["artifact_type"] == "news_article"
+    assert draft_item["title"] == "Deployment Process Adds Approval Gate"
+    assert draft_item["content"] == "Manager review is required before rollout."
 
 
 def test_top_level_flow_chart_projection_becomes_tolerant_artifact():
@@ -520,6 +722,19 @@ def test_ai_draft_schema_has_first_class_software_overlap_report_output():
     entity_enum = report_schema["properties"]["inventory_items"]["items"]["properties"]["entity_type"]["enum"]
     assert "software_license" in entity_enum
     assert "software_use_case" in entity_enum
+
+
+def test_ai_draft_schema_has_first_class_executive_summary_and_news_article_outputs():
+    properties = AI_DRAFT_REVISION_OUTPUT_SCHEMA["properties"]
+
+    assert "executive_summary" in properties
+    assert {"summary", "key_points", "recommended_actions", "risks"} <= set(
+        properties["executive_summary"]["properties"]
+    )
+    assert "news_article" in properties
+    assert {"headline", "lede", "body", "sections", "fact_checks"} <= set(
+        properties["news_article"]["properties"]
+    )
 
 
 def test_software_overlap_report_validation_marks_inferred_candidates_needs_review():
