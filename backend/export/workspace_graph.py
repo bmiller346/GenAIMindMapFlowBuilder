@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 from collections import defaultdict
 from html import escape as html_escape
 from xml.sax.saxutils import escape as xml_escape
@@ -180,9 +181,21 @@ def graph_to_executive_markdown(graph: dict) -> str:
     return export_executive_output_markdown(graph_to_executive_output(graph))
 
 
+def artifact_export_data(artifact: dict) -> dict:
+    data = deepcopy(artifact.get("data")) if isinstance(artifact.get("data"), dict) else {}
+    for key in ("metadata", "provenance"):
+        value = artifact.get(key)
+        if value is not None and key not in data:
+            data[key] = deepcopy(value)
+    for key in ("source_refs", "assumptions"):
+        value = artifact.get(key)
+        if value is not None and not data.get(key):
+            data[key] = deepcopy(value)
+    return data
+
+
 def artifact_to_news_article_markdown(artifact: dict) -> str:
-    data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
-    return export_news_article_markdown(data)
+    return export_news_article_markdown(artifact_export_data(artifact))
 
 
 def select_latest_ai_draft_artifact(

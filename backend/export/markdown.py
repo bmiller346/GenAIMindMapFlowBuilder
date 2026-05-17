@@ -17,7 +17,9 @@ def export_executive_output_markdown(output: dict) -> str:
         f"## {heading}\n\n{content or '_No items projected._'}"
         for heading, content in sections
     )
-    return f"# {title}\n\n{body}\n"
+    evidence = _evidence_line(output)
+    evidence_block = f"{evidence}\n\n" if evidence else ""
+    return f"# {title}\n\n{evidence_block}{body}\n"
 
 
 def export_executive_summary_markdown(summary: dict) -> str:
@@ -34,7 +36,9 @@ def export_executive_summary_markdown(summary: dict) -> str:
         f"## {heading}\n\n{content or '_No items projected._'}"
         for heading, content in sections
     )
-    return f"# {title}\n\n{body}\n"
+    evidence = _evidence_line(summary)
+    evidence_block = f"{evidence}\n\n" if evidence else ""
+    return f"# {title}\n\n{evidence_block}{body}\n"
 
 
 def export_news_article_markdown(article: dict) -> str:
@@ -65,6 +69,9 @@ def export_news_article_markdown(article: dict) -> str:
     assumptions = _plain_list(article.get("assumptions", []))
     if assumptions:
         body_parts.append(f"## Assumptions\n\n{assumptions}")
+    evidence = _evidence_line(article)
+    if evidence:
+        body_parts.insert(0, evidence)
     return f"# {title}\n\n" + "\n\n".join(body_parts) + "\n"
 
 
@@ -116,6 +123,56 @@ def _plain_list(items: list) -> str:
         if str(value or "").strip():
             lines.append(f"- {value}")
     return "\n".join(lines)
+
+
+def _evidence_line(payload: dict) -> str:
+    provenance = payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    evidence_mode = (
+        metadata.get("evidence_mode")
+        or metadata.get("evidenceMode")
+        or provenance.get("evidence_mode")
+        or provenance.get("evidenceMode")
+    )
+    citation_policy = (
+        metadata.get("citation_policy")
+        or metadata.get("citationPolicy")
+        or provenance.get("citation_policy")
+        or provenance.get("citationPolicy")
+    )
+    source_refs = payload.get("source_refs") if isinstance(payload.get("source_refs"), list) else []
+    input_source_refs = (
+        provenance.get("input_source_refs")
+        if isinstance(provenance.get("input_source_refs"), list)
+        else []
+    )
+    if not any([evidence_mode, citation_policy, source_refs, input_source_refs]):
+        return ""
+    evidence_labels = {
+        "workspace": "Workspace inference",
+        "uploaded_sources": "Uploaded sources",
+        "general_knowledge": "General knowledge",
+        "web_sources": "Web/current sources",
+        "sharepoint": "SharePoint/internal",
+    }
+    citation_labels = {
+        "required": "Citations required",
+        "preferred": "Citations preferred",
+        "not_required": "Citations not required",
+    }
+    evidence_label = evidence_labels.get(str(evidence_mode or "workspace"), "Workspace inference")
+    citation_label = citation_labels.get(str(citation_policy or "preferred"), "Citations preferred")
+    cited_count = len(source_refs or input_source_refs)
+    assumptions = payload.get("assumptions") if isinstance(payload.get("assumptions"), list) else []
+    assumption_count = len(assumptions)
+    parts = [
+        evidence_label,
+        citation_label,
+        f"{cited_count} cited {'ref' if cited_count == 1 else 'refs'}",
+    ]
+    if assumption_count:
+        parts.append(f"{assumption_count} {'assumption' if assumption_count == 1 else 'assumptions'}")
+    return f"Evidence: {' | '.join(parts)}"
 
 
 def _item_lines(items: list[dict]) -> str:

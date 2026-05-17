@@ -1051,7 +1051,7 @@ def accept_ai_draft_revision(
         "accepted_node_ids": [node.get("id", "") for node in accepted_nodes],
         "accepted_edge_ids": [edge.get("id", "") for edge in accepted_edges],
         "review_outputs": review_outputs,
-        "accepted_artifacts": deepcopy(revision.get("generated_artifacts", [])),
+        "accepted_artifacts": _accepted_artifacts_with_revision_context(revision),
         "preview_diff": preview_diff,
         "patch_operations": patch_operations,
         "validation_report": repaired_graph.get("validation_report", {}),
@@ -1074,6 +1074,31 @@ def accept_ai_draft_revision(
         updated_session["ai_action_run"]["status"] = "accepted"
         updated_session["ai_action_run"]["generated_node_ids"] = result["accepted_node_ids"]
     return repaired_graph, validate_ai_draft_session(updated_session), result
+
+
+def _accepted_artifacts_with_revision_context(revision: dict[str, Any]) -> list[dict[str, Any]]:
+    metadata = revision.get("metadata") if isinstance(revision.get("metadata"), dict) else {}
+    evidence_mode = str(metadata.get("evidence_mode") or "").strip()
+    citation_policy = str(metadata.get("citation_policy") or "").strip()
+    artifacts = deepcopy(revision.get("generated_artifacts", []))
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        artifact_metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
+        if evidence_mode and not artifact_metadata.get("evidence_mode"):
+            artifact_metadata["evidence_mode"] = evidence_mode
+        if citation_policy and not artifact_metadata.get("citation_policy"):
+            artifact_metadata["citation_policy"] = citation_policy
+        if artifact_metadata:
+            artifact["metadata"] = artifact_metadata
+        provenance = artifact.get("provenance") if isinstance(artifact.get("provenance"), dict) else {}
+        if evidence_mode and not provenance.get("evidence_mode"):
+            provenance["evidence_mode"] = evidence_mode
+        if citation_policy and not provenance.get("citation_policy"):
+            provenance["citation_policy"] = citation_policy
+        if provenance:
+            artifact["provenance"] = provenance
+    return artifacts
 
 
 def accept_ai_draft_session(

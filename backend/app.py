@@ -123,6 +123,7 @@ from export.markdown import (
     export_executive_summary_markdown,
 )
 from export.workspace_graph import (
+    artifact_export_data,
     artifact_to_news_article_markdown,
     build_workspace_graph,
     graph_to_completeness_markdown,
@@ -3008,9 +3009,9 @@ def export_workspace_completeness_review_markdown(flow_id: str):
 def export_workspace_executive_markdown(flow_id: str):
     artifact = _latest_ai_draft_artifact(flow_id, {"executive_summary", "executive_output"})
     if artifact and artifact.get("artifact_type") == "executive_summary":
-        content = export_executive_summary_markdown(artifact.get("data", {}))
+        content = export_executive_summary_markdown(artifact_export_data(artifact))
     elif artifact and artifact.get("artifact_type") == "executive_output":
-        content = export_executive_output_markdown(artifact.get("data", {}))
+        content = export_executive_output_markdown(artifact_export_data(artifact))
     else:
         graph = get_workspace_graph_or_404(flow_id)
         content = graph_to_executive_markdown(graph)

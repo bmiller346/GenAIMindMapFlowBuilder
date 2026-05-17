@@ -650,6 +650,11 @@ def test_markdown_export_endpoints_use_accepted_article_artifacts(monkeypatch):
                             "source_backed_appendix": [],
                             "assumptions": [],
                         },
+                        "provenance": {
+                            "evidence_mode": "uploaded_sources",
+                            "citation_policy": "required",
+                            "input_source_refs": [{"document_id": "doc-1"}],
+                        },
                     },
                     {
                         "id": "artifact-news",
@@ -665,6 +670,10 @@ def test_markdown_export_endpoints_use_accepted_article_artifacts(monkeypatch):
                             "source_refs": [],
                             "assumptions": ["Publish date still needs confirmation."],
                         },
+                        "metadata": {
+                            "evidence_mode": "sharepoint",
+                            "citation_policy": "required",
+                        },
                     },
                 ],
             }
@@ -679,8 +688,48 @@ def test_markdown_export_endpoints_use_accepted_article_artifacts(monkeypatch):
 
     assert "# Leadership Brief" in executive
     assert "ready for leadership review" in executive
+    assert "Evidence: Uploaded sources | Citations required | 1 cited ref" in executive
     assert "# Coffee Cart Launch Update" in article
+    assert "Evidence: SharePoint/internal | Citations required | 0 cited refs" in article
     assert "Publish date still needs confirmation." in article
+
+
+def test_accepting_publishable_artifact_preserves_evidence_context():
+    session = build_ai_draft_session(
+        workspace_id="workspace-1",
+        prompt="Create executive summary.",
+        scope={"type": "workspace"},
+        role="enterprise-readiness-planner",
+        intent="create_stakeholder_review_package",
+        draft_items=[],
+        generated_artifacts=[
+            {
+                "id": "artifact-exec",
+                "artifact_type": "executive_summary",
+                "data": {
+                    "title": "Leadership Brief",
+                    "summary": "Approve the controlled pilot.",
+                    "key_points": [],
+                    "recommended_actions": [],
+                    "risks": [],
+                    "source_backed_appendix": [],
+                    "assumptions": ["Pilot cost needs final validation."],
+                },
+                "source_refs": [{"document_id": "doc-1"}],
+            }
+        ],
+    )
+    session["revisions"][0]["metadata"].update(
+        {"evidence_mode": "uploaded_sources", "citation_policy": "required"}
+    )
+
+    _graph, _session, result = accept_ai_draft_revision(sample_graph(), session)
+    [artifact] = result["accepted_artifacts"]
+
+    assert artifact["metadata"]["evidence_mode"] == "uploaded_sources"
+    assert artifact["metadata"]["citation_policy"] == "required"
+    assert artifact["provenance"]["evidence_mode"] == "uploaded_sources"
+    assert artifact["provenance"]["citation_policy"] == "required"
 
 
 def test_workspace_custom_prompt_draft_session_prefers_model_generation(monkeypatch):
