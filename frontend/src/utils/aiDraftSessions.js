@@ -48,12 +48,32 @@ export const normalizeAIDraftEvidenceMode = (value = '') =>
         ? String(value || '').trim().toLowerCase()
         : 'workspace';
 
+export const AI_DRAFT_EVIDENCE_MODE_LABELS = {
+    workspace: 'Workspace inference',
+    uploaded_sources: 'Uploaded sources',
+    general_knowledge: 'General knowledge',
+    web_sources: 'Web/current sources',
+    sharepoint: 'SharePoint/internal'
+};
+
+export const aiDraftEvidenceModeLabel = (mode = '') =>
+    AI_DRAFT_EVIDENCE_MODE_LABELS[normalizeAIDraftEvidenceMode(mode)] || 'Workspace inference';
+
 export const AI_DRAFT_CITATION_POLICIES = ['required', 'preferred', 'not_required'];
 
 export const normalizeAIDraftCitationPolicy = (value = '') =>
     AI_DRAFT_CITATION_POLICIES.includes(String(value || '').trim().toLowerCase())
         ? String(value || '').trim().toLowerCase()
         : 'preferred';
+
+export const AI_DRAFT_CITATION_POLICY_LABELS = {
+    required: 'Citations required',
+    preferred: 'Citations preferred',
+    not_required: 'Citations not required'
+};
+
+export const aiDraftCitationPolicyLabel = (policy = '') =>
+    AI_DRAFT_CITATION_POLICY_LABELS[normalizeAIDraftCitationPolicy(policy)] || 'Citations preferred';
 
 export const inferAIDraftEvidencePreferences = ({
     prompt = '',
@@ -996,6 +1016,81 @@ const publishableArtifactType = (artifact = {}) => {
     return '';
 };
 
+const artifactSourceRefs = (payload = {}) =>
+    mergeSourceRefs(
+        mergeSourceRefs(asArray(payload.source_refs), asArray(payload.sourceRefs)),
+        mergeSourceRefs(
+            asArray(payload.data?.source_refs),
+            asArray(payload.provenance?.input_source_refs)
+        )
+    );
+
+const artifactAssumptions = (payload = {}) =>
+    collectTextList(
+        payload.assumptions,
+        payload.data?.assumptions,
+        payload.provenance?.assumptions,
+        payload.metadata?.assumptions
+    );
+
+const normalizePublishableArtifactProvenance = (payload = {}, revision = {}) => {
+    const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+    const revisionMetadata =
+        revision.metadata && typeof revision.metadata === 'object' ? revision.metadata : {};
+    const provenance =
+        payload.provenance && typeof payload.provenance === 'object' ? payload.provenance : {};
+    const evidenceMode = normalizeAIDraftEvidenceMode(
+        firstText(
+            metadata.evidence_mode,
+            metadata.evidenceMode,
+            provenance.evidence_mode,
+            provenance.evidenceMode,
+            revisionMetadata.evidence_mode,
+            revisionMetadata.evidenceMode
+        )
+    );
+    const citationPolicy = normalizeAIDraftCitationPolicy(
+        firstText(
+            metadata.citation_policy,
+            metadata.citationPolicy,
+            provenance.citation_policy,
+            provenance.citationPolicy,
+            revisionMetadata.citation_policy,
+            revisionMetadata.citationPolicy
+        )
+    );
+    const sourceRefs = artifactSourceRefs(payload);
+    const assumptions = artifactAssumptions(payload);
+    const confidence = firstText(
+        provenance.confidence_summary,
+        metadata.confidence_summary,
+        payload.review_state,
+        payload.review_status,
+        payload.status
+    );
+    const parts = [
+        aiDraftEvidenceModeLabel(evidenceMode),
+        aiDraftCitationPolicyLabel(citationPolicy),
+        sourceRefs.length
+            ? `${sourceRefs.length} cited ${sourceRefs.length === 1 ? 'ref' : 'refs'}`
+            : 'No cited refs',
+        assumptions.length
+            ? `${assumptions.length} ${assumptions.length === 1 ? 'assumption' : 'assumptions'}`
+            : ''
+    ].filter(Boolean);
+
+    return {
+        evidenceMode,
+        evidenceLabel: aiDraftEvidenceModeLabel(evidenceMode),
+        citationPolicy,
+        citationLabel: aiDraftCitationPolicyLabel(citationPolicy),
+        sourceRefCount: sourceRefs.length,
+        assumptionCount: assumptions.length,
+        confidence,
+        summary: parts.join(' | ')
+    };
+};
+
 export const normalizePublishableDraftArtifacts = (revision = {}) => {
     const artifacts = [
         ...asArray(revision.generated_artifacts),
@@ -1010,6 +1105,7 @@ export const normalizePublishableDraftArtifacts = (revision = {}) => {
             if (!type) {
                 return null;
             }
+            const provenance = normalizePublishableArtifactProvenance(payload, revision);
             const sections = [
                 ...asArray(payload.sections),
                 ...asArray(payload.body_sections),
@@ -1049,7 +1145,8 @@ export const normalizePublishableDraftArtifacts = (revision = {}) => {
                     payload.status,
                     payload.metadata?.review_state,
                     'needs_review'
-                )
+                ),
+                provenance
             };
         })
         .filter(Boolean);
@@ -1070,6 +1167,9 @@ export const draftArtifactPreviewToMarkdown = (artifact = {}) => {
                 .filter(Boolean)
                 .join(' | ')
         );
+    }
+    if (artifact.provenance?.summary) {
+        lines.push('', `Evidence: ${artifact.provenance.summary}`);
     }
     if (artifact.keyPoints?.length) {
         lines.push('', '## Key points', ...artifact.keyPoints.map((point) => `- ${point}`));

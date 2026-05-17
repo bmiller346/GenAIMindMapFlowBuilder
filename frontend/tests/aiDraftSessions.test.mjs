@@ -1199,8 +1199,12 @@ test('publishable draft artifacts normalize executive summary preview fields', (
                 ],
                 metadata: {
                     audience: 'Leadership team',
-                    publish_target: 'SharePoint news'
-                }
+                    publish_target: 'SharePoint news',
+                    evidence_mode: 'uploaded_sources',
+                    citation_policy: 'required'
+                },
+                source_refs: [{ document_id: 'doc-1', quote_snippet: 'review cadence' }],
+                assumptions: ['Quarterly cadence needs owner confirmation.']
             }
         ]
     });
@@ -1213,10 +1217,22 @@ test('publishable draft artifacts normalize executive summary preview fields', (
     assert.equal(previews[0].sections[0].title, 'Decision needed');
     assert.equal(previews[0].audience, 'Leadership team');
     assert.equal(previews[0].publishTarget, 'SharePoint news');
+    assert.equal(previews[0].provenance.evidenceLabel, 'Uploaded sources');
+    assert.equal(previews[0].provenance.citationLabel, 'Citations required');
+    assert.equal(previews[0].provenance.sourceRefCount, 1);
+    assert.equal(previews[0].provenance.assumptionCount, 1);
+    assert.equal(
+        previews[0].provenance.summary,
+        'Uploaded sources | Citations required | 1 cited ref | 1 assumption'
+    );
 });
 
 test('publishable draft artifacts normalize news article payloads and copy markdown', () => {
     const [preview] = normalizePublishableDraftArtifacts({
+        metadata: {
+            evidence_mode: 'sharepoint',
+            citation_policy: 'required'
+        },
         artifacts: [
             {
                 artifact_type: 'news_article',
@@ -1245,6 +1261,7 @@ test('publishable draft artifacts normalize news article payloads and copy markd
     assert.match(markdown, /^# TraceSpace pilots monthly source reviews/);
     assert.match(markdown, /_Teams get a faster way to keep workspace knowledge current\._/);
     assert.match(markdown, /Channel: Intranet/);
+    assert.match(markdown, /Evidence: SharePoint\/internal \| Citations required \| No cited refs/);
     assert.match(markdown, /## Key points\n- New review queue\n- SME questions stay visible/);
     assert.match(markdown, /## What changed/);
 });

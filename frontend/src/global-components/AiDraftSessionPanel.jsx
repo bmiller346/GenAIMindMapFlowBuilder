@@ -1336,52 +1336,72 @@ export default AiDraftSessionPanel;
 
 const PublishableArtifactPreviews = ({ artifacts, copiedArtifactId, onCopy }) => (
     <section className="ai-draft-artifact-previews" aria-label="Draft artifact previews">
-        {artifacts.map((artifact) => (
-            <article key={`artifact-preview-${artifact.id}`} className="ai-draft-artifact-preview">
-                <div className="ai-draft-artifact-header">
-                    <div>
-                        <span>{artifact.label}</span>
-                        <strong>{artifact.title}</strong>
-                        {artifact.dek ? <p>{artifact.dek}</p> : null}
+        {artifacts.map((artifact) => {
+            const hasMeta =
+                artifact.audience ||
+                artifact.publishTarget ||
+                artifact.reviewState ||
+                artifact.provenance?.evidenceLabel ||
+                artifact.provenance?.citationLabel;
+            return (
+                <article key={`artifact-preview-${artifact.id}`} className="ai-draft-artifact-preview">
+                    <div className="ai-draft-artifact-header">
+                        <div>
+                            <span>{artifact.label}</span>
+                            <strong>{artifact.title}</strong>
+                            {artifact.dek ? <p>{artifact.dek}</p> : null}
+                        </div>
+                        <button type="button" className="secondary" onClick={() => onCopy(artifact)}>
+                            {copiedArtifactId === artifact.id ? 'Copied' : 'Copy Markdown'}
+                        </button>
                     </div>
-                    <button type="button" className="secondary" onClick={() => onCopy(artifact)}>
-                        {copiedArtifactId === artifact.id ? 'Copied' : 'Copy Markdown'}
-                    </button>
-                </div>
-                {(artifact.audience || artifact.publishTarget || artifact.reviewState) ? (
-                    <div className="ai-draft-artifact-meta">
-                        {artifact.audience ? <span>{artifact.audience}</span> : null}
-                        {artifact.publishTarget ? <span>{artifact.publishTarget}</span> : null}
-                        {artifact.reviewState ? <span>{humanizeId(artifact.reviewState)}</span> : null}
-                    </div>
-                ) : null}
-                {artifact.keyPoints.length ? (
-                    <ul className="ai-draft-artifact-key-points">
-                        {artifact.keyPoints.slice(0, 5).map((point) => (
-                            <li key={point}>{point}</li>
-                        ))}
-                    </ul>
-                ) : null}
-                {artifact.body ? <p className="ai-draft-artifact-body">{artifact.body}</p> : null}
-                {artifact.sections.length ? (
-                    <div className="ai-draft-artifact-sections">
-                        {artifact.sections.slice(0, 4).map((section) => (
-                            <section key={section.id}>
-                                <strong>{section.title}</strong>
-                                {section.body ? <p>{section.body}</p> : null}
-                                {section.bullets.length ? (
-                                    <ul>
-                                        {section.bullets.slice(0, 4).map((point) => (
-                                            <li key={point}>{point}</li>
-                                        ))}
-                                    </ul>
-                                ) : null}
-                            </section>
-                        ))}
-                    </div>
-                ) : null}
-            </article>
-        ))}
+                    {hasMeta ? (
+                        <div className="ai-draft-artifact-meta">
+                            {artifact.audience ? <span>{artifact.audience}</span> : null}
+                            {artifact.publishTarget ? <span>{artifact.publishTarget}</span> : null}
+                            {artifact.reviewState ? <span>{humanizeId(artifact.reviewState)}</span> : null}
+                            {artifact.provenance?.evidenceLabel ? (
+                                <span>{artifact.provenance.evidenceLabel}</span>
+                            ) : null}
+                            {artifact.provenance?.citationLabel ? (
+                                <span>{artifact.provenance.citationLabel}</span>
+                            ) : null}
+                            {artifact.provenance?.sourceRefCount ? (
+                                <span>
+                                    {artifact.provenance.sourceRefCount} cited{' '}
+                                    {artifact.provenance.sourceRefCount === 1 ? 'ref' : 'refs'}
+                                </span>
+                            ) : null}
+                        </div>
+                    ) : null}
+                    {artifact.keyPoints.length ? (
+                        <ul className="ai-draft-artifact-key-points">
+                            {artifact.keyPoints.slice(0, 5).map((point) => (
+                                <li key={point}>{point}</li>
+                            ))}
+                        </ul>
+                    ) : null}
+                    {artifact.body ? <p className="ai-draft-artifact-body">{artifact.body}</p> : null}
+                    {artifact.sections.length ? (
+                        <div className="ai-draft-artifact-sections">
+                            {artifact.sections.slice(0, 4).map((section) => (
+                                <section key={section.id}>
+                                    <strong>{section.title}</strong>
+                                    {section.body ? <p>{section.body}</p> : null}
+                                    {section.bullets.length ? (
+                                        <ul>
+                                            {section.bullets.slice(0, 4).map((point) => (
+                                                <li key={point}>{point}</li>
+                                            ))}
+                                        </ul>
+                                    ) : null}
+                                </section>
+                            ))}
+                        </div>
+                    ) : null}
+                </article>
+            );
+        })}
     </section>
 );
 
