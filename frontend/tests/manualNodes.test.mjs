@@ -14,6 +14,7 @@ import {
     layoutDirectChildren,
     normalizeWorkspaceEdges,
     normalizeWorkspaceNode,
+    reflowSiblingSubtrees,
     updateWorkspaceNode
 } from '../src/utils/manualNodes.js';
 
@@ -137,6 +138,17 @@ test('child positions are deterministic and avoid occupied slots', () => {
     assert.deepEqual(getChildPosition(nodes, edges, 'parent'), { x: 530, y: 244 });
 });
 
+test('child positions avoid nearby node boxes, not only exact coordinates', () => {
+    const parent = createWorkspaceNode({ id: 'parent', position: { x: 100, y: 100 } });
+    const nearbyBranch = createWorkspaceNode({
+        id: 'nearby-branch',
+        position: { x: 594, y: 116 }
+    });
+    const nodes = [parent, nearbyBranch];
+
+    assert.deepEqual(getChildPosition(nodes, [], 'parent'), { x: 530, y: 292 });
+});
+
 test('balanced branch mode alternates children left and right', () => {
     const parent = createWorkspaceNode({
         id: 'parent',
@@ -201,6 +213,58 @@ test('layoutDirectChildren repositions only the requested direct children', () =
         laidOut.find((node) => node.id === 'a').position,
         { x: 430, y: 48 }
     );
+});
+
+test('reflowSiblingSubtrees expands later siblings when a branch grows', () => {
+    const root = createWorkspaceNode({ id: 'root', position: { x: 0, y: 300 } });
+    const supplier = createWorkspaceNode({ id: 'supplier', position: { x: 430, y: 500 } });
+    const supplierChild = createWorkspaceNode({ id: 'supplier-child', position: { x: 860, y: 760 } });
+    const budget = createWorkspaceNode({ id: 'budget', position: { x: 430, y: 625 } });
+    const budgetChild = createWorkspaceNode({ id: 'budget-child', position: { x: 860, y: 625 } });
+    const nodes = [root, supplier, supplierChild, budget, budgetChild];
+    const edges = [
+        createWorkspaceEdge('root', 'supplier', { id: 'edge-supplier' }),
+        createWorkspaceEdge('root', 'budget', { id: 'edge-budget' }),
+        createWorkspaceEdge('supplier', 'supplier-child', { id: 'edge-supplier-child' }),
+        createWorkspaceEdge('budget', 'budget-child', { id: 'edge-budget-child' })
+    ];
+
+    const reflowed = reflowSiblingSubtrees({
+        nodes,
+        edges,
+        parentId: 'root',
+        anchorNodeId: 'supplier'
+    });
+
+    assert.equal(reflowed.find((node) => node.id === 'supplier').position.y, 500);
+    assert.equal(reflowed.find((node) => node.id === 'budget').position.y, 912);
+    assert.equal(reflowed.find((node) => node.id === 'budget-child').position.y, 912);
+});
+
+test('reflowSiblingSubtrees compacts later siblings after a branch is removed', () => {
+    const root = createWorkspaceNode({ id: 'root', position: { x: 0, y: 300 } });
+    const first = createWorkspaceNode({ id: 'first', position: { x: 430, y: 375 } });
+    const budget = createWorkspaceNode({ id: 'budget', position: { x: 430, y: 625 } });
+    const budgetChild = createWorkspaceNode({ id: 'budget-child', position: { x: 860, y: 625 } });
+    const marketing = createWorkspaceNode({ id: 'marketing', position: { x: 430, y: 900 } });
+    const nodes = [root, first, budget, budgetChild, marketing];
+    const edges = [
+        createWorkspaceEdge('root', 'first', { id: 'edge-first' }),
+        createWorkspaceEdge('root', 'budget', { id: 'edge-budget' }),
+        createWorkspaceEdge('budget', 'budget-child', { id: 'edge-budget-child' }),
+        createWorkspaceEdge('root', 'marketing', { id: 'edge-marketing' })
+    ];
+
+    const reflowed = reflowSiblingSubtrees({
+        nodes,
+        edges,
+        parentId: 'root',
+        compact: true
+    });
+
+    assert.equal(reflowed.find((node) => node.id === 'budget').position.y, 527);
+    assert.equal(reflowed.find((node) => node.id === 'budget-child').position.y, 527);
+    assert.equal(reflowed.find((node) => node.id === 'marketing').position.y, 679);
 });
 
 test('normalizeWorkspaceNode adds canonical fields while preserving legacy response data', () => {

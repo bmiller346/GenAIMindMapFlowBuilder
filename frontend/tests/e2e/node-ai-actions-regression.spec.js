@@ -934,14 +934,39 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
 });
 
 test('inline node Ask stages a canvas-native draft without opening branch scope', async ({ page }) => {
-    const { draftSessionRequests, savedRequests } = await setupMockBackend(page);
+    const { draftSessionRequests, savedRequests } = await setupMockBackend(page, {
+        draftSessionDelayMs: 1500
+    });
     await createRoot(page, savedRequests, 'Inline root');
     const beforePreview = latestSnapshot(savedRequests);
     const rootId = beforePreview.nodes[0].id;
     const rootNode = page.locator('.node-response').filter({ hasText: 'Inline root' });
+    const longPrompt =
+        'Add implementation tasks for vendor onboarding, inventory validation, warehouse handoff, exception handling, and weekly reporting so the branch has enough context to review before accepting.';
+    const inlineRequest = rootNode.getByLabel('Ask AI from this node');
 
-    await rootNode.getByLabel('Ask AI from this node').fill('add implementation tasks');
+    await inlineRequest.fill(longPrompt);
+    const promptBox = await inlineRequest.evaluate((element) => ({
+        tagName: element.tagName,
+        value: element.value,
+        rows: element.rows,
+        whiteSpace: window.getComputedStyle(element).whiteSpace
+    }));
+    expect(promptBox).toMatchObject({
+        tagName: 'TEXTAREA',
+        value: longPrompt,
+        whiteSpace: 'pre-wrap'
+    });
+    expect(promptBox.rows).toBeGreaterThan(2);
     await rootNode.locator('.node-inline-ai-send').evaluate((button) => button.click());
+
+    const inlineProgress = rootNode.getByLabel('Inline AI progress');
+    await expect(inlineProgress).toBeVisible();
+    await expect(inlineProgress).toContainText('Queued');
+    await expect(inlineProgress).toContainText('Context');
+    await expect(inlineProgress).toContainText('Draft');
+    await expect(page.getByLabel('AI generation progress')).toBeVisible();
+    await expect(page.getByLabel('AI generation progress')).toContainText(/Calling AI model|Building preview/);
 
     await expect(page.locator('.node-inspector')).toBeVisible();
     await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
@@ -958,7 +983,7 @@ test('inline node Ask stages a canvas-native draft without opening branch scope'
         type: 'node',
         node_id: rootId
     });
-    expect(draftSessionRequests[0].requestBody.prompt).toBe('add implementation tasks');
+    expect(draftSessionRequests[0].requestBody.prompt).toBe(longPrompt);
     expect(draftSessionRequests[0].requestBody).not.toHaveProperty('draft_nodes');
     expect(draftSessionRequests[0].requestBody).not.toHaveProperty('draft_edges');
     expect(draftSessionRequests[0].requestBody).not.toHaveProperty('draft_annotations');

@@ -20,6 +20,8 @@ export const LAYOUT_SPACING = {
 const ROOT_SPACING = { x: 360, y: 180 };
 const ROOT_SAFE_OFFSET = { x: 260, y: 160 };
 const POSITION_EPSILON = 16;
+const NODE_COLLISION_SPACING = { x: 340, y: 88 };
+const NODE_LAYOUT_BOUNDS = { width: 340, height: 88, gapY: 64 };
 const DEFAULT_GRAPH_DATA = {};
 
 export const getNodeTitle = (node) =>
@@ -58,8 +60,16 @@ const samePosition = (a = {}, b = {}) =>
     Math.abs((a.x || 0) - (b.x || 0)) < POSITION_EPSILON &&
     Math.abs((a.y || 0) - (b.y || 0)) < POSITION_EPSILON;
 
+const overlapsNodeBox = (a = {}, b = {}) =>
+    Math.abs((a.x || 0) - (b.x || 0)) < NODE_COLLISION_SPACING.x &&
+    Math.abs((a.y || 0) - (b.y || 0)) < NODE_COLLISION_SPACING.y;
+
 const isPositionOccupied = (nodes, position, excludeIds = new Set()) =>
-    nodes.some((node) => !excludeIds.has(node.id) && samePosition(node.position, position));
+    nodes.some(
+        (node) =>
+            !excludeIds.has(node.id) &&
+            (samePosition(node.position, position) || overlapsNodeBox(node.position, position))
+    );
 
 const firstOpenPosition = ({
     nodes = [],
@@ -84,6 +94,125 @@ export const getDirectChildIds = (edges = [], parentId) =>
 
 export const getParentId = (edges = [], nodeId) =>
     edges.find((edge) => edge.target === nodeId)?.source || '';
+
+export const collectBranchNodeIds = (edges = [], rootId = '') => {
+    const root = String(rootId || '').trim();
+    if (!root) {
+        return new Set();
+    }
+    const childrenByParent = new Map();
+    edges.forEach((edge) => {
+        if (!edge?.source || !edge?.target) {
+            return;
+        }
+        childrenByParent.set(edge.source, [...(childrenByParent.get(edge.source) || []), edge.target]);
+    });
+
+    const ids = new Set([root]);
+    const queue = [root];
+    while (queue.length) {
+        const parentId = queue.shift();
+        (childrenByParent.get(parentId) || []).forEach((childId) => {
+            if (ids.has(childId)) {
+                return;
+            }
+            ids.add(childId);
+            queue.push(childId);
+        });
+    }
+    return ids;
+};
+
+const nodeBounds = (node = {}) => {
+    const position = normalizePosition(node.position);
+    return {
+        left: position.x,
+        right: position.x + NODE_LAYOUT_BOUNDS.width,
+        top: position.y,
+        bottom: position.y + NODE_LAYOUT_BOUNDS.height
+    };
+};
+
+const mergeBounds = (bounds = []) => {
+    const validBounds = bounds.filter(Boolean);
+    if (!validBounds.length) {
+        return null;
+    }
+    return validBounds.reduce(
+        (merged, item) => ({
+            left: Math.min(merged.left, item.left),
+            right: Math.max(merged.right, item.right),
+            top: Math.min(merged.top, item.top),
+            bottom: Math.max(merged.bottom, item.bottom)
+        }),
+        validBounds[0]
+    );
+};
+
+export const getNodeIdsBounds = (nodes = [], nodeIds = new Set()) =>
+    mergeBounds(nodes.filter((node) => nodeIds.has(node.id)).map(nodeBounds));
+
+const shiftNodeIdsY = (nodes = [], nodeIds = new Set(), deltaY = 0) =>
+    deltaY
+        ? nodes.map((node) =>
+              nodeIds.has(node.id)
+                  ? {
+                        ...node,
+                        position: {
+                            ...normalizePosition(node.position),
+                            y: normalizePosition(node.position).y + deltaY
+                        }
+                    }
+                  : node
+          )
+        : nodes;
+
+export const reflowSiblingSubtrees = ({
+    nodes = [],
+    edges = [],
+    parentId = '',
+    anchorNodeId = '',
+    compact = false
+} = {}) => {
+    const childIds = getDirectChildIds(edges, parentId).filter((childId) =>
+        nodes.some((node) => node.id === childId)
+    );
+    if (childIds.length < 2) {
+        return nodes;
+    }
+
+    const anchorIndex = anchorNodeId ? childIds.indexOf(anchorNodeId) : 0;
+    const startIndex = anchorIndex >= 0 ? anchorIndex : 0;
+    let nextNodes = nodes;
+    let previousBounds = null;
+
+    childIds.forEach((childId, index) => {
+        const subtreeIds = collectBranchNodeIds(edges, childId);
+        let subtreeBounds = getNodeIdsBounds(nextNodes, subtreeIds);
+        if (!subtreeBounds) {
+            return;
+        }
+
+        if (!previousBounds || index < startIndex) {
+            previousBounds = subtreeBounds;
+            return;
+        }
+
+        const desiredTop = previousBounds.bottom + NODE_LAYOUT_BOUNDS.gapY;
+        const deltaY = desiredTop - subtreeBounds.top;
+        if (deltaY > 0 || (compact && deltaY < 0)) {
+            nextNodes = shiftNodeIdsY(nextNodes, subtreeIds, deltaY);
+            subtreeBounds = {
+                ...subtreeBounds,
+                top: subtreeBounds.top + deltaY,
+                bottom: subtreeBounds.bottom + deltaY
+            };
+        }
+        previousBounds = subtreeBounds;
+    });
+
+    return nextNodes;
+};
 
 export const getRootPosition = (nodes = []) =>
     firstOpenPosition({

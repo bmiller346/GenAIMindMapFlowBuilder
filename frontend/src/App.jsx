@@ -50,6 +50,7 @@ import { parseFlowSnapshot, stringifyFlowSnapshot } from './utils/flowSnapshots'
 import { rememberWorkspace, selectStartupWorkspace } from './utils/workspaceSession';
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from './utils/askAiGenerationProgress';
 import { buildWorkspaceNextSteps } from './utils/workspaceNudges';
+import { reflowSiblingSubtrees } from './utils/manualNodes';
 import useActivityStore from './stores/activityStore';
 import useAutomationStore from './stores/automationStore';
 
@@ -930,12 +931,29 @@ const App = () => {
             return;
         }
 
-        setNodes(currentNodes.filter((node) => !deletedIds.has(node.id)));
-        setEdges(
-            currentEdges.filter(
-                (edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target)
+        const reflowParentIds = [
+            ...new Set(
+                currentEdges
+                    .filter((edge) => deletedIds.has(edge.target) && !deletedIds.has(edge.source))
+                    .map((edge) => edge.source)
             )
+        ];
+        const nextEdges = currentEdges.filter(
+            (edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target)
         );
+        const nextNodes = reflowParentIds.reduce(
+            (reflowedNodes, parentId) =>
+                reflowSiblingSubtrees({
+                    nodes: reflowedNodes,
+                    edges: nextEdges,
+                    parentId,
+                    compact: true
+                }),
+            currentNodes.filter((node) => !deletedIds.has(node.id))
+        );
+
+        setNodes(nextNodes);
+        setEdges(nextEdges);
         if (deletedIds.has(selectedBranchId)) {
             setSelectedBranchId(undefined);
         }

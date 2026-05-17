@@ -46,13 +46,15 @@ import {
     getSiblingPosition,
     getWorkspaceNodeData,
     updateWorkspaceNode,
-    layoutDirectChildren
+    layoutDirectChildren,
+    reflowSiblingSubtrees
 } from '../utils/manualNodes';
 import {
     getStructuredDataArtifactContext,
     structuredDataAcceptance,
     structuredDataChildData
 } from '../utils/structuredDataArtifacts';
+import { ASK_AI_GENERATION_PROGRESS_EVENT } from '../utils/askAiGenerationProgress';
 
 const Graph = lazy(() => import('../global-components/Graph'));
 const TableComponent = lazy(() => import('../global-components/TableComponent'));
@@ -68,6 +70,25 @@ const INLINE_AI_DRAFT_NODE_ACTIONS = new Set([
     'generate_checklist',
     'custom_prompt'
 ]);
+
+const INLINE_AI_PROGRESS_STAGES = [
+    { id: 'preparing_request', stage: 'Preparing request', label: 'Queued' },
+    { id: 'gathering_context', stage: 'Selecting source context', label: 'Context' },
+    { id: 'choosing_model', stage: 'Choosing model', label: 'Model' },
+    { id: 'calling_model', stage: 'Calling AI model', label: 'Draft' },
+    { id: 'opening_preview', stage: 'Building preview', label: 'Review' }
+];
+
+const INLINE_AI_STAGE_ID = INLINE_AI_PROGRESS_STAGES.reduce(
+    (lookup, stage) => ({
+        ...lookup,
+        [stage.stage]: stage.id
+    }),
+    {}
+);
+
+const INLINE_AI_COMPLETE_STATUSES = new Set(['success', 'fallback', 'completed']);
+const INLINE_AI_FAILED_STATUSES = new Set(['error', 'failed', 'blocked']);
 
 const draftSessionEndpoint = ({ flowId }) =>
     `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions`;
@@ -280,6 +301,7 @@ const ResponseNode = ({ id, data }) => {
     const [activeSlashIndex, setActiveSlashIndex] = useState(0);
     const [inlineAiPrompt, setInlineAiPrompt] = useState('');
     const [inlineAiStatus, setInlineAiStatus] = useState('');
+    const [inlineAiProgress, setInlineAiProgress] = useState(null);
     const [isInlineAiGenerating, setIsInlineAiGenerating] = useState(false);
     const [isTableExpanded, setIsTableExpanded] = useState(false);
     const [areDetailsExpanded, setAreDetailsExpanded] = useState(false);
@@ -328,7 +350,40 @@ const ResponseNode = ({ id, data }) => {
         !['accepted', 'discarded', 'rejected'].includes(activeAIDraftSession?.status);
     const displayedInlineAiStatus = hasActiveInlineDraft
         ? 'Draft ready. Review and accept it in the node panel.'
-        : inlineAiStatus;
+        : inlineAiProgress?.detail || inlineAiStatus;
+    const inlineAiProgressSnapshot = hasActiveInlineDraft
+        ? {
+              ...inlineAiProgress,
+              status: inlineAiProgress?.status || 'success',
+              stage: 'Building preview',
+              detail: displayedInlineAiStatus
+          }
+        : inlineAiProgress;
+    const inlineAiProgressStageId =
+        INLINE_AI_STAGE_ID[inlineAiProgressSnapshot?.stage] || 'preparing_request';
+    const inlineAiProgressStageIndex = Math.max(
+        0,
+        INLINE_AI_PROGRESS_STAGES.findIndex(
+            (stage) => stage.id === inlineAiProgressStageId
+        )
+    );
+    const inlineAiProgressStatus = inlineAiProgressSnapshot?.status || '';
+    const isInlineAiProgressComplete =
+        hasActiveInlineDraft || INLINE_AI_COMPLETE_STATUSES.has(inlineAiProgressStatus);
+    const isInlineAiProgressFailed = INLINE_AI_FAILED_STATUSES.has(inlineAiProgressStatus);
+    const inlineAiPromptRows = Math.min(
+        6,
+        Math.max(
+            2,
+            inlineAiPrompt
+                .split('\n')
+                .reduce(
+                    (lineCount, line) =>
+                        lineCount + Math.max(1, Math.ceil(line.length / 44)),
+                    0
+                )
+        )
+    );
     const isBranchCollapsed = Boolean(data.display?.collapsed);
     const tableColumns = useMemo(
         () =>
@@ -439,8 +494,18 @@ const ResponseNode = ({ id, data }) => {
             position: getChildPosition(baseNodes, edges, id),
             df: childRows
         });
-        setNodes([...baseNodes, childNode]);
-        setEdges([...edges, createWorkspaceEdge(id, childNode.id)]);
+        const nextEdges = [...edges, createWorkspaceEdge(id, childNode.id)];
+        const parentEdge = edges.find((edge) => edge.target === id);
+        const nextNodes = parentEdge
+            ? reflowSiblingSubtrees({
+                  nodes: [...baseNodes, childNode],
+                  edges: nextEdges,
+                  parentId: parentEdge.source,
+                  anchorNodeId: id
+              })
+            : [...baseNodes, childNode];
+        setNodes(nextNodes);
+        setEdges(nextEdges);
         recordActivity({
             type: childRows.length ? 'manual_table_created' : 'manual_node_created',
             title: childRows.length ? 'Manual table added' : 'Manual child added',
@@ -498,15 +563,27 @@ const ResponseNode = ({ id, data }) => {
             ? data
             : structuredDataAcceptance(data, structuredDataContext);
 
-        setNodes([
+        const nextEdges = [...edges, createWorkspaceEdge(id, childNode.id)];
+        const parentEdge = edges.find((edge) => edge.target === id);
+        const nextNodes = [
             ...nodes.map((node) =>
                 node.id === id
                     ? updateWorkspaceNode({ ...node, data: acceptedData }, { data: acceptedData })
                     : node
             ),
             childNode
-        ]);
-        setEdges([...edges, createWorkspaceEdge(id, childNode.id)]);
+        ];
+        setNodes(
+            parentEdge
+                ? reflowSiblingSubtrees({
+                      nodes: nextNodes,
+                      edges: nextEdges,
+                      parentId: parentEdge.source,
+                      anchorNodeId: id
+                  })
+                : nextNodes
+        );
+        setEdges(nextEdges);
         recordActivity({
             type: kind === 'task' ? 'structured_data_task_created' : 'structured_data_finding_created',
             title: kind === 'task' ? 'Created data-backed task' : 'Created data-backed finding',
@@ -984,6 +1061,7 @@ const ResponseNode = ({ id, data }) => {
         if (!localPrompt || isInlineAiGenerating) {
             if (!localPrompt) {
                 setInlineAiStatus('Type a request, or open advanced.');
+                setInlineAiProgress(null);
             }
             return;
         }
@@ -1002,6 +1080,81 @@ const ResponseNode = ({ id, data }) => {
               ? 'missing_required_source'
               : 'ai_assumption_uncited';
         const childEdges = edges.filter((edge) => edge.source === id);
+        const requestStartedAt = new Date().toISOString();
+        const requestId = `inline-ai-${id}-${Date.now()}`;
+        let inlineProgressEvents = [];
+        const publishInlineAiProgress = (stage, detail, updates = {}) => {
+            inlineProgressEvents = [
+                {
+                    id: `${inlineProgressEvents.length + 1}-${stage}`,
+                    stage,
+                    detail,
+                    time: new Date().toISOString()
+                },
+                ...inlineProgressEvents
+            ].slice(0, 5);
+            const snapshot = {
+                requestId,
+                status: 'running',
+                startedAt: requestStartedAt,
+                source: 'ResponseNode',
+                scope: normalizedScope,
+                prompt: localPrompt,
+                role: {
+                    id: role.id,
+                    label: role.label
+                },
+                action: {
+                    id: selectedAction.id,
+                    label: selectedAction.label
+                },
+                target: {
+                    label: targetLabel,
+                    nodeId: id
+                },
+                previewMode: 'inline_node_prompt',
+                selectedModel: 'auto',
+                stage,
+                detail,
+                message: detail,
+                context: [
+                    { label: 'Scope', value: 'Selected node' },
+                    {
+                        label: 'Context',
+                        value: childEdges.length
+                            ? `${childEdges.length} child node${childEdges.length === 1 ? '' : 's'}`
+                            : targetLabel
+                    },
+                    {
+                        label: 'Sources',
+                        value: sourceRefs.length
+                            ? `${sourceRefs.length} source ref${sourceRefs.length === 1 ? '' : 's'}`
+                            : sourceRequested
+                              ? 'No cited refs'
+                              : 'Node context'
+                    }
+                ],
+                events: inlineProgressEvents,
+                ...updates,
+                updatedAt: new Date().toISOString()
+            };
+            setInlineAiProgress(snapshot);
+            setInlineAiStatus(detail);
+            if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                window.dispatchEvent(
+                    new CustomEvent(ASK_AI_GENERATION_PROGRESS_EVENT, {
+                        detail: snapshot
+                    })
+                );
+            }
+            return snapshot;
+        };
+        setIsInlineAiGenerating(true);
+        publishInlineAiProgress(
+            'Preparing request',
+            'Request acknowledged. Preparing node context.',
+            { status: 'accepted' }
+        );
         const changeIntent = inferAIDraftChangeIntent(
             localPrompt,
             activeAIDraftSession?.session_id ? 'update' : 'supplement'
@@ -1016,6 +1169,10 @@ const ResponseNode = ({ id, data }) => {
             changeIntent,
             outputMode: 'inline_node_prompt'
         });
+        publishInlineAiProgress(
+            'Selecting source context',
+            'Reading this node, child context, and attached source references.'
+        );
         const suggestions = getFollowUpSuggestions(
             role,
             selectedAction,
@@ -1146,15 +1303,15 @@ const ResponseNode = ({ id, data }) => {
                 }
             });
             setInlineAiPrompt('');
-            setInlineAiStatus('');
             setIsMenuOpen(false);
             setIsSlashOpen(false);
         };
 
-        setIsInlineAiGenerating(true);
-        setInlineAiStatus('Drafting from this node...');
-
         try {
+            publishInlineAiProgress(
+                'Choosing model',
+                'Choosing the draft path and model policy for this request.'
+            );
             const baseRequestPayload = buildAIDraftSessionRequestPayload({
                 role,
                 action: selectedAction,
@@ -1163,12 +1320,20 @@ const ResponseNode = ({ id, data }) => {
                 selectedModel: 'auto',
                 memoryContext,
                 changeIntent,
+                expansionMode: 'exploratory',
+                expansionTarget: 'selected_node',
                 metadata: {
                     preview_mode: 'inline_node_prompt',
+                    expansion_mode: 'exploratory',
+                    expansion_target: 'selected_node',
                     change_intent: changeIntent,
                     follow_up_memory: memoryContext
                 }
             });
+            publishInlineAiProgress(
+                'Calling AI model',
+                'AI is drafting a reviewable response for this node.'
+            );
             const response = flowId
                 ? await axios.post(
                       draftSessionEndpoint({ flowId }),
@@ -1190,6 +1355,11 @@ const ResponseNode = ({ id, data }) => {
                       }
                   )
                 : null;
+            publishInlineAiProgress(
+                'Building preview',
+                'Draft ready. Review and accept it in the node panel.',
+                { status: 'success' }
+            );
             activateSession(response?.data || fallbackSession);
         } catch (error) {
             const detail =
@@ -1197,6 +1367,11 @@ const ResponseNode = ({ id, data }) => {
                 error.response?.data?.detail ||
                 error.message ||
                 'Unable to generate inline draft.';
+            publishInlineAiProgress(
+                'Building preview',
+                'Backend draft session was unavailable; staged a local inline draft for review.',
+                { status: 'fallback' }
+            );
             activateSession({
                 ...fallbackSession,
                 warnings: [String(detail)],
@@ -1231,11 +1406,21 @@ const ResponseNode = ({ id, data }) => {
         }
 
         const deletedIds = new Set([id, ...descendantIds]);
+        const parentId = edges.find((edge) => edge.target === id)?.source || '';
+        const nextEdges = edges.filter(
+            (edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target)
+        );
+        const nextNodes = nodes.filter((node) => !deletedIds.has(node.id));
         useStore.setState({
-            nodes: nodes.filter((node) => !deletedIds.has(node.id)),
-            edges: edges.filter(
-                (edge) => !deletedIds.has(edge.source) && !deletedIds.has(edge.target)
-            )
+            nodes: parentId
+                ? reflowSiblingSubtrees({
+                      nodes: nextNodes,
+                      edges: nextEdges,
+                      parentId,
+                      compact: true
+                  })
+                : nextNodes,
+            edges: nextEdges
         });
         recordActivity({
             type: 'manual_node_deleted',
@@ -1603,8 +1788,8 @@ const ResponseNode = ({ id, data }) => {
                     onSubmit={stageInlineAiDraft}
                 >
                     <FiMessageSquare aria-hidden="true" />
-                    <input
-                        type="text"
+                    <textarea
+                        className="node-inline-ai-textarea"
                         value={inlineAiPrompt}
                         aria-label="Ask AI from this node"
                         placeholder={
@@ -1612,11 +1797,21 @@ const ResponseNode = ({ id, data }) => {
                                 ? 'Drafting...'
                                 : 'Ask AI from this node'
                         }
+                        rows={inlineAiPromptRows}
                         disabled={isInlineAiGenerating}
                         onChange={(event) => {
                             setInlineAiPrompt(event.target.value);
                             if (inlineAiStatus) {
                                 setInlineAiStatus('');
+                            }
+                            if (inlineAiProgress) {
+                                setInlineAiProgress(null);
+                            }
+                        }}
+                        onKeyDown={(event) => {
+                            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+                                event.preventDefault();
+                                event.currentTarget.form?.requestSubmit();
                             }
                         }}
                         onFocus={() => setIsMenuOpen(false)}
@@ -1638,7 +1833,42 @@ const ResponseNode = ({ id, data }) => {
                         <FiMaximize2 />
                     </button>
                     {displayedInlineAiStatus ? (
-                        <span className="node-inline-ai-status">{displayedInlineAiStatus}</span>
+                        <span className="node-inline-ai-status" aria-live="polite">
+                            {displayedInlineAiStatus}
+                        </span>
+                    ) : null}
+                    {inlineAiProgressSnapshot ? (
+                        <ol
+                            className={`node-inline-ai-progress${
+                                isInlineAiProgressComplete ? ' complete' : ''
+                            }${isInlineAiProgressFailed ? ' failed' : ''}`}
+                            aria-label="Inline AI progress"
+                        >
+                            {INLINE_AI_PROGRESS_STAGES.map((stage, index) => {
+                                const stageClass = [
+                                    isInlineAiProgressComplete || index < inlineAiProgressStageIndex
+                                        ? 'is-complete'
+                                        : '',
+                                    !isInlineAiProgressComplete &&
+                                    !isInlineAiProgressFailed &&
+                                    index === inlineAiProgressStageIndex
+                                        ? 'is-active'
+                                        : '',
+                                    isInlineAiProgressFailed && index === inlineAiProgressStageIndex
+                                        ? 'is-failed'
+                                        : ''
+                                ]
+                                    .filter(Boolean)
+                                    .join(' ');
+
+                                return (
+                                    <li key={stage.id} className={stageClass}>
+                                        <span>{index + 1}</span>
+                                        <strong>{stage.label}</strong>
+                                    </li>
+                                );
+                            })}
+                        </ol>
                     ) : null}
                 </form>
                 {isSlashOpen ? (

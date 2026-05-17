@@ -16,6 +16,7 @@ import {
     createWorkspaceEdge,
     createWorkspaceNode,
     getChildPosition,
+    reflowSiblingSubtrees,
     updateWorkspaceNode
 } from '../utils/manualNodes';
 import {
@@ -503,15 +504,27 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
             ? selectedNode.data
             : structuredDataAcceptance(selectedNode.data || {}, structuredDataContext);
 
-        setNodes([
+        const nextEdges = [...edges, createWorkspaceEdge(selectedNode.id, childNode.id)];
+        const parentEdge = edges.find((edge) => edge.target === selectedNode.id);
+        const nextNodes = [
             ...nodes.map((node) =>
                 node.id === selectedNode.id
                     ? updateWorkspaceNode({ ...node, data: acceptedData }, { data: acceptedData })
                     : node
             ),
             childNode
-        ]);
-        setEdges([...edges, createWorkspaceEdge(selectedNode.id, childNode.id)]);
+        ];
+        setNodes(
+            parentEdge
+                ? reflowSiblingSubtrees({
+                      nodes: nextNodes,
+                      edges: nextEdges,
+                      parentId: parentEdge.source,
+                      anchorNodeId: selectedNode.id
+                  })
+                : nextNodes
+        );
+        setEdges(nextEdges);
         if (flowId) {
             setSaveStatus('dirty');
         }
