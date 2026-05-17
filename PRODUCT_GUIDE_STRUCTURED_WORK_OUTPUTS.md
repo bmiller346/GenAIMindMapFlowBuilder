@@ -1,7 +1,8 @@
 # Structured Work Outputs Product Guide
 
 This guide defines TraceSpace outputs that turn accepted structure into
-roadmaps, SOPs, checklists, training guides, tasks, and implementation packages.
+roadmaps, SOPs, checklists, training guides, tasks, executive summaries,
+news/article drafts, and implementation packages.
 
 ## Purpose
 
@@ -32,6 +33,8 @@ TraceSpace should support:
 - Training outline.
 - Knowledge graph.
 - Table or matrix.
+- Executive summary or leadership decision memo.
+- Internal news/article draft.
 - Implementation handoff package.
 - SME question list.
 
@@ -49,6 +52,12 @@ TraceSpace should support:
   and exceptions when available.
 - Training guides should include audience, goals, modules, practice activities,
   examples, and checks for understanding.
+- Executive summaries should read like leadership decision memos: decision
+  requested, why now, scope, expected value, governance/risk controls,
+  planning-level assumptions, success metrics, and decision gate.
+- Internal news/article drafts should separate source-backed facts from
+  assumptions and keep publication/date/stakeholder claims marked for review
+  unless supported by supplied evidence.
 - Implementation packages should include ready items, blocked items, owners,
   dependencies, risks, assumptions, source refs, and handoff candidates.
 
@@ -94,6 +103,16 @@ Implementation handoff:
 - Miro candidates.
 - Risks and assumptions.
 
+Executive summary or news/article draft:
+
+- Recommendation or publication angle.
+- Source/evidence mode.
+- Citation policy.
+- Key points or sections.
+- Source-backed appendix when available.
+- Assumptions and review flags.
+- Copy/export-ready Markdown.
+
 ## Validation Intent
 
 Validate that structured outputs:
@@ -104,6 +123,8 @@ Validate that structured outputs:
 4. Export cleanly to Markdown/CSV/JSON where applicable.
 5. Can feed monday or Miro handoff when reviewed.
 6. Do not invent owners, approvals, or dates without marking assumptions.
+7. Preserve evidence mode, citation policy, cited refs, assumptions, and review
+   state in preview, copied Markdown, accepted artifacts, and exported Markdown.
 
 ## Future Roadmap
 
@@ -112,3 +133,7 @@ Validate that structured outputs:
 - Add checklist and SOP export snapshots.
 - Add templates for enterprise handoff packets.
 - Add browser tests for branch-to-output-to-handoff flows.
+- Treat SharePoint as a future integration. Current internal-news workflow is
+  copy/export-ready Markdown for manual SharePoint publishing; future work may
+  add SharePoint retrieval, page creation, or source citation import if/when
+  authentication, tenant policy, and review semantics are defined.
