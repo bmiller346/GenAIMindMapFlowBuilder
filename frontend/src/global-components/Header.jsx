@@ -43,6 +43,23 @@ const latestMeaningfulActivity = (events = []) =>
             !['autosave_persisted', 'save_manual', 'workspace_renamed'].includes(event.type)
     );
 
+const acceptedArtifactTypesFromActivity = (events = []) => {
+    const types = new Set();
+    (Array.isArray(events) ? events : []).forEach((event) => {
+        const artifacts = event?.metadata?.accepted_artifacts;
+        if (!Array.isArray(artifacts)) {
+            return;
+        }
+        artifacts.forEach((artifact) => {
+            const type = artifact?.artifact_type || artifact?.artifactType;
+            if (type) {
+                types.add(type);
+            }
+        });
+    });
+    return types;
+};
+
 const Header = ({
     setIsDrawer,
     setFlowList,
@@ -133,25 +150,29 @@ const Header = ({
             id: 'executive.md',
             label: 'Executive Summary',
             extension: 'md',
-            suffix: 'executive-summary'
+            suffix: 'executive-summary',
+            artifactTypes: ['executive_summary', 'executive_output']
         },
         {
             id: 'news-article.md',
             label: 'News Article',
             extension: 'md',
-            suffix: 'news-article'
+            suffix: 'news-article',
+            artifactTypes: ['news_article']
         },
         {
             id: 'team-roadmap.md',
             label: 'Team Roadmap',
             extension: 'md',
-            suffix: 'team-roadmap'
+            suffix: 'team-roadmap',
+            artifactTypes: ['team_roadmap']
         },
         {
             id: 'completeness-review.md',
             label: 'Completeness Review',
             extension: 'md',
-            suffix: 'completeness-review'
+            suffix: 'completeness-review',
+            artifactTypes: ['completeness_review']
         }
     ];
     const imageExportFormats = [
@@ -251,6 +272,10 @@ const Header = ({
         (currentFingerprint !== lastSavedFingerprint ||
             flow_name !== lastSavedFlowName ||
             flow_type !== lastSavedFlowType)
+    );
+    const acceptedArtifactTypes = useMemo(
+        () => acceptedArtifactTypesFromActivity(activityEvents),
+        [activityEvents]
     );
 
     useEffect(() => {
@@ -1340,15 +1365,21 @@ const Header = ({
                             ))}
                             <div className="export-menu-divider" />
                             <p className="export-menu-label">Publishable outputs</p>
-                            {publishableExportFormats.map((format) => (
-                                <button
-                                    key={format.id}
-                                    type="button"
-                                    onClick={() => exportWorkspace(format)}
-                                >
-                                    {format.label}
-                                </button>
-                            ))}
+                            {publishableExportFormats.map((format) => {
+                                const hasAcceptedArtifact = (format.artifactTypes || []).some(
+                                    (type) => acceptedArtifactTypes.has(type)
+                                );
+                                return (
+                                    <button
+                                        key={format.id}
+                                        type="button"
+                                        onClick={() => exportWorkspace(format)}
+                                    >
+                                        {format.label}
+                                        {hasAcceptedArtifact ? ' - Ready' : ''}
+                                    </button>
+                                );
+                            })}
                         </div>
                     ) : null}
                 </div>

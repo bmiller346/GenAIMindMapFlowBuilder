@@ -779,6 +779,15 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         const mode = modeOverride || acceptMode;
         const activeAcceptModeDetail = getAIDraftAcceptModeDetail(mode);
         const effectiveSelectedIds = mode === 'selected' ? selectedItemIds : [];
+        const acceptedArtifacts = normalizePublishableDraftArtifacts(revision).map(
+            (artifact) => ({
+                id: artifact.id,
+                artifact_type: artifact.artifactType,
+                title: artifact.title,
+                label: artifact.label,
+                review_state: artifact.reviewState
+            })
+        );
         if (mode === 'selected' && effectiveSelectedIds.length === 0) {
             setMessage('Select at least one draft item before accepting selected changes.');
             return;
@@ -898,7 +907,8 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                     revision_id: revision.revision_id,
                     mode,
                     apply_intent: activeAcceptModeDetail.user_choice,
-                    change_intent: sessionChangeIntent
+                    change_intent: sessionChangeIntent,
+                    accepted_artifacts: acceptedArtifacts
                 },
                 status: 'completed'
             });
@@ -927,7 +937,10 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 type: 'ai_draft_accepted_local',
                 title: 'Accepted AI draft locally',
                 summary: error.message || 'Backend accept was unavailable.',
-                metadata: fallback.accept_result,
+                metadata: {
+                    ...fallback.accept_result,
+                    accepted_artifacts: acceptedArtifacts
+                },
                 status: 'completed'
             });
             clearActiveAIDraftSession();

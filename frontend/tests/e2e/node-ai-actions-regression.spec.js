@@ -55,6 +55,35 @@ const scopedLensFlowJson = JSON.stringify({
     automations: []
 });
 
+const publishableArtifactFlowJson = JSON.stringify({
+    ...JSON.parse(scopedLensFlowJson),
+    activity_events: [
+        {
+            id: 'evt-publishable-artifacts',
+            type: 'ai_draft_accepted',
+            category: 'ai',
+            title: 'Accepted AI draft session',
+            summary: 'Accepted publishable artifacts.',
+            metadata: {
+                accepted_artifacts: [
+                    {
+                        id: 'artifact-executive',
+                        artifact_type: 'executive_summary',
+                        title: 'Leadership Brief',
+                        review_state: 'needs_review'
+                    },
+                    {
+                        id: 'artifact-news',
+                        artifact_type: 'news_article',
+                        title: 'Monthly Update',
+                        review_state: 'needs_review'
+                    }
+                ]
+            }
+        }
+    ]
+});
+
 const setupMockBackend = async (
     page,
     { initialFlowJson = emptyFlowJson, draftSessionDelayMs = 0 } = {}
@@ -667,14 +696,14 @@ test('canvas command bar exposes node density and reflow without covering the ma
 });
 
 test('export menu exposes publishable workspace outputs', async ({ page }) => {
-    const { savedRequests } = await setupMockBackend(page);
-    await createRoot(page, savedRequests, 'Publishable root');
+    await setupMockBackend(page, { initialFlowJson: publishableArtifactFlowJson });
+    await openExistingFlow(page);
 
     await page.getByRole('button', { name: 'Export' }).click();
     await expect(page.locator('.export-menu')).toBeVisible();
     await expect(page.locator('.export-menu')).toContainText('Publishable outputs');
-    await expect(page.getByRole('button', { name: 'Executive Summary' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'News Article' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Executive Summary - Ready' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'News Article - Ready' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Team Roadmap' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Completeness Review' })).toBeVisible();
 });
