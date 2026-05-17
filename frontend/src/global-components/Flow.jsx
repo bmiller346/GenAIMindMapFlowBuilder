@@ -162,7 +162,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
 
         try {
             await axios.put(
-                'http://localhost:8000/flow-update',
+                'http://localhost:8000/flow-update/',
                 {
                     flow_id: data.flow_id,
                     flow_name: data.flow_name,

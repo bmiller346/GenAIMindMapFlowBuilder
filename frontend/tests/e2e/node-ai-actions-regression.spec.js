@@ -55,7 +55,10 @@ const scopedLensFlowJson = JSON.stringify({
     automations: []
 });
 
-const setupMockBackend = async (page, { initialFlowJson = emptyFlowJson } = {}) => {
+const setupMockBackend = async (
+    page,
+    { initialFlowJson = emptyFlowJson, draftSessionDelayMs = 0 } = {}
+) => {
     await page.addInitScript(() => {
         window.localStorage.clear();
     });
@@ -85,7 +88,7 @@ const setupMockBackend = async (page, { initialFlowJson = emptyFlowJson } = {}) 
         });
     });
 
-    await page.route('http://localhost:8000/flow-update', async (route) => {
+    await page.route(/http:\/\/localhost:8000\/flow-update\/?$/, async (route) => {
         const requestBody = route.request().postDataJSON();
         state.savedFlowName = requestBody.flow_name;
         state.savedFlowJson = requestBody.flow_json;
@@ -355,6 +358,11 @@ const setupMockBackend = async (page, { initialFlowJson = emptyFlowJson } = {}) 
             };
             draftSessions.set(sessionId, session);
             draftSessionRequests.push({ scope: scopeType, nodeId: sourceNodeId, requestBody, session });
+            if (draftSessionDelayMs > 0) {
+                await new Promise((resolve) => {
+                    setTimeout(resolve, draftSessionDelayMs);
+                });
+            }
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
@@ -746,6 +754,56 @@ test('multi-select delete removes checked nodes without treating one selection a
     await expect(page.getByRole('region', { name: 'Selected node actions' })).toHaveCount(0);
 });
 
+test('Ask AI requires a prompt before leaving the form', async ({ page }) => {
+    const { draftSessionRequests, savedRequests } = await setupMockBackend(page);
+    await createRoot(page, savedRequests, 'Prompt required root');
+
+    await openAskAi(page);
+    await expect(promptTextarea(page)).toHaveValue('');
+    await page
+        .locator('.ai-action-footer')
+        .getByRole('button', { name: 'Preview changes' })
+        .evaluate((button) => button.click());
+
+    await expect(page.locator('.ai-action-modal')).toBeVisible();
+    await expect(page.locator('.ai-action-stage-message')).toContainText(
+        'Ask a question or describe what you want AI to make.'
+    );
+    await expect(page.getByLabel('AI generation progress')).toHaveCount(0);
+    expect(draftSessionRequests).toHaveLength(0);
+});
+
+test('Ask AI valid submit shows preview-first generation progress before draft review', async ({
+    page
+}) => {
+    const { draftSessionRequests, savedRequests } = await setupMockBackend(page, {
+        draftSessionDelayMs: 1500
+    });
+    await createRoot(page, savedRequests, 'Progress root');
+    const beforePreview = latestSnapshot(savedRequests);
+
+    await openAskAi(page);
+    await promptTextarea(page).fill('Generate a reviewable implementation branch.');
+    await page
+        .locator('.ai-action-footer')
+        .getByRole('button', { name: 'Preview changes' })
+        .evaluate((button) => button.click());
+
+    const progress = page.getByLabel('AI generation progress');
+    await expect(progress).toBeVisible();
+    await expect(progress).toContainText('Calling AI model');
+    await expect(progress).toContainText('Preview mode');
+    await expect(progress).toContainText('Draft preview');
+    expect(draftSessionRequests).toHaveLength(1);
+
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
+    await expect(page.locator('.ai-draft-impact')).toContainText('Before accept');
+    await expect(page.locator('.ai-action-modal')).toHaveCount(0);
+    expect(structuralNodes(latestSnapshot(savedRequests))).toEqual(
+        structuralNodes(beforePreview)
+    );
+});
+
 test('node Ask AI draft stays non-canonical until selected accept, then persists on reopen', async ({
     page
 }) => {
@@ -760,7 +818,7 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
     await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
     await expect(page.locator('.ai-draft-session-panel')).toContainText('General Mills');
     await expect(page.locator('.ai-draft-session-panel')).toContainText('Uncited cereal branch');
-    await expect(page.locator('.ai-draft-session-panel')).toContainText('3 items · 1 needs review');
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('3 items · 1 AI assumption');
     await expect(page.locator('.ai-draft-impact')).toContainText('Before accept');
     await expect(page.locator('.ai-draft-impact')).toContainText('Supplement');
     await expect(page.locator('.ai-draft-impact')).toContainText('2 new nodes before accept');
@@ -775,7 +833,7 @@ test('node Ask AI draft stays non-canonical until selected accept, then persists
         .filter({ hasText: 'General Mills supports Uncited cereal branch' });
     await expect(citedDraftItem).toContainText('Source-backed');
     await expect(reviewDraftItem).toContainText('Needs review');
-    await expect(reviewDraftItem).toContainText('Assumption');
+    await expect(reviewDraftItem).toContainText('AI assumption');
     await expect(reviewDraftItem).toContainText('Low confidence');
     await expect(reviewDraftItem).toContainText('Duplicate');
     await expect(reviewDraftItem).toContainText('Conflict');
@@ -901,6 +959,9 @@ test('inline node Ask stages a canvas-native draft without opening branch scope'
         node_id: rootId
     });
     expect(draftSessionRequests[0].requestBody.prompt).toBe('add implementation tasks');
+    expect(draftSessionRequests[0].requestBody).not.toHaveProperty('draft_nodes');
+    expect(draftSessionRequests[0].requestBody).not.toHaveProperty('draft_edges');
+    expect(draftSessionRequests[0].requestBody).not.toHaveProperty('draft_annotations');
     expect(draftSessionRequests[0].requestBody.metadata).toMatchObject({
         preview_mode: 'inline_node_prompt',
         source_node_id: rootId

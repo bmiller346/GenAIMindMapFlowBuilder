@@ -83,7 +83,13 @@ const sourceTitleFromNode = (node = {}) =>
     node.id ||
     'Selected source';
 
-const AiHelpersPanel = ({ hidden, selectedNodes = [], autoOpenToken = 0, summaryLabel = 'AI Helpers' }) => {
+const AiHelpersPanel = ({
+    hidden,
+    selectedNodes = [],
+    autoOpenToken = 0,
+    summaryLabel = 'AI Helpers',
+    onClose
+}) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -193,8 +199,6 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [], autoOpenToken = 0, summary
             }),
         [activeGraphFilters, edges, nodes, selectedBranchId, sourceLibrary]
     );
-    const recommendedNextSteps = nextStepProjection.steps;
-
     const selectedRoot = projection.nodes.find((node) => node.id === selectedBranchId);
     const hasFilteredScope = (activeGraphFilters || []).length > 0 || Boolean(selectedBranchId);
     const effectiveScopeType =
@@ -593,6 +597,21 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [], autoOpenToken = 0, summary
         );
     };
 
+    const canRouteNextStep = (step) => {
+        if (helperActionForNextStep(step)) {
+            return true;
+        }
+        if (step.action?.type === 'reset_branch') {
+            return true;
+        }
+        return Boolean(viewForNextStep(step));
+    };
+
+    const recommendedNextSteps = useMemo(
+        () => nextStepProjection.steps.filter(canRouteNextStep).slice(0, 3),
+        [helperRoles, nextStepProjection.steps]
+    );
+
     const openRecommendedNextStep = async (step) => {
         const helperTarget = helperActionForNextStep(step);
         if (helperTarget) {
@@ -628,6 +647,22 @@ const AiHelpersPanel = ({ hidden, selectedNodes = [], autoOpenToken = 0, summary
             </button>
             {isOpen ? (
                 <div className="ai-helpers-body">
+                    <div className="ai-helpers-body-header">
+                        <div>
+                            <strong>{summaryLabel}</strong>
+                            <span>{scopeDetail()}</span>
+                        </div>
+                        <div>
+                            <button type="button" onClick={() => setIsOpen(false)}>
+                                Minimize
+                            </button>
+                            {typeof onClose === 'function' ? (
+                                <button type="button" onClick={onClose}>
+                                    Close
+                                </button>
+                            ) : null}
+                        </div>
+                    </div>
                     <div className="ai-helper-scope">
                         <label htmlFor="ai-helper-scope-select">Scope before generation</label>
                         <select

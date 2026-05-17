@@ -40,6 +40,7 @@ import IntegrationsPanel from './global-components/IntegrationsPanel.jsx';
 import AutomationsPanel from './global-components/AutomationsPanel.jsx';
 import ManualNodeControls from './global-components/ManualNodeControls.jsx';
 import AiHelpersPanel from './global-components/AiHelpersPanel.jsx';
+import AiGenerationProgress from './global-components/AiGenerationProgress.jsx';
 import SourceDraftReviewPanel from './global-components/SourceDraftReviewPanel.jsx';
 import WorkspaceNudgeSurface from './global-components/WorkspaceNudgeSurface.jsx';
 import DataSourceSelect from './global-components/DataSourceSelect.jsx';
@@ -47,11 +48,67 @@ import PromptModal from './modals/PromptModal.jsx';
 import { getLocalSetting, setLocalSetting, SETTINGS_KEYS } from './config/localSettings';
 import { parseFlowSnapshot, stringifyFlowSnapshot } from './utils/flowSnapshots';
 import { rememberWorkspace, selectStartupWorkspace } from './utils/workspaceSession';
+import { ASK_AI_GENERATION_PROGRESS_EVENT } from './utils/askAiGenerationProgress';
+import { buildWorkspaceNextSteps } from './utils/workspaceNudges';
 import useActivityStore from './stores/activityStore';
 import useAutomationStore from './stores/automationStore';
 
 const CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
 const STRUCTURED_CANVAS_VIEWS = new Set(['flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
+const ASK_AI_STAGE_ID = {
+    'Preparing request': 'preparing_request',
+    'Selecting source context': 'gathering_context',
+    'Choosing model': 'choosing_model',
+    'Calling AI model': 'calling_model',
+    'Validating draft': 'validating_draft',
+    'Building preview': 'opening_preview'
+};
+const ASK_AI_STAGE_PROGRESS = {
+    preparing_request: 12,
+    gathering_context: 28,
+    choosing_model: 42,
+    calling_model: 64,
+    validating_draft: 84,
+    opening_preview: 96
+};
+const normalizeAskAiProgressStatus = (status = '') => {
+    if (['success', 'fallback', 'completed'].includes(status)) {
+        return 'completed';
+    }
+    if (['error', 'blocked', 'failed'].includes(status)) {
+        return 'failed';
+    }
+    if (status === 'canceled') {
+        return 'canceled';
+    }
+    return 'running';
+};
+const progressEventsForDisplay = (events = []) =>
+    [...(Array.isArray(events) ? events : [])]
+        .reverse()
+        .map((event) => ({
+            id: event.id,
+            stage: event.stage,
+            message: event.detail || event.message || event.label || event.title,
+            time: event.time || event.updatedAt
+        }));
+const hasRoutableNextStep = (step = {}) => {
+    const action = step.action || {};
+    const outputType = action.output_type || action.view;
+    if (action.type === 'reset_branch') {
+        return true;
+    }
+    if (action.type === 'open_view') {
+        return ['sources', 'gaps', 'tasks'].includes(action.view);
+    }
+    if (action.type === 'ai_enrichment') {
+        return outputType === 'knowledge_graph';
+    }
+    if (action.type === 'generate_output') {
+        return ['tasks', 'checklist', 'flow_chart', 'chart', 'knowledge_graph'].includes(outputType);
+    }
+    return false;
+};
 const STRUCTURED_AI_PRESETS = {
     tasks: {
         role: 'task-planner',
@@ -494,12 +551,15 @@ const App = () => {
         activeGraphFilters: state.activeGraphFilters,
         canvasNodeDensity: state.canvasNodeDensity,
         selectedBranchId: state.selectedBranchId,
+        workspaceBrief: state.workspaceBrief,
+        sourceLibrary: state.sourceLibrary,
         setSelectedBranchId: state.setSelectedBranchId,
         inspectorNodeId: state.inspectorNodeId,
         setInspectorNodeId: state.setInspectorNodeId,
         inspectorEdgeId: state.inspectorEdgeId,
         setInspectorEdgeId: state.setInspectorEdgeId,
         setActiveAIDraftSession: state.setActiveAIDraftSession,
+        setActiveView: state.setActiveView,
         setViewPort: state.setViewPort,
         setWorkspaceBrief: state.setWorkspaceBrief,
         setSourceLibrary: state.setSourceLibrary,
@@ -518,12 +578,15 @@ const App = () => {
         activeGraphFilters,
         canvasNodeDensity,
         selectedBranchId,
+        workspaceBrief,
+        sourceLibrary,
         setSelectedBranchId,
         inspectorNodeId,
         setInspectorNodeId,
         inspectorEdgeId,
         setInspectorEdgeId,
         setActiveAIDraftSession,
+        setActiveView,
         setViewPort,
         setWorkspaceBrief,
         setSourceLibrary,
@@ -547,6 +610,7 @@ const App = () => {
     const [workspaceDockTab, setWorkspaceDockTab] = useState('sources');
     const [workspaceDockCollapsed, setWorkspaceDockCollapsed] = useState(false);
     const [workspaceDockOffset, setWorkspaceDockOffset] = useState({ x: 0, y: 0 });
+    const [workspaceDockWidth, setWorkspaceDockWidth] = useState(17.65);
     const [aiUsage, setAIUsage] = useState();
     const [aiUsageStatus, setAIUsageStatus] = useState('');
     const [aiUsageReviewStatus, setAIUsageReviewStatus] = useState('');
@@ -558,6 +622,7 @@ const App = () => {
     const [flowList, setFlowList] = useState([]);
     const [isSourcesOpen, setIsSourcesOpen] = useState(false);
     const [isAiHelpersOpen, setIsAiHelpersOpen] = useState(false);
+    const [aiGenerationProgress, setAiGenerationProgress] = useState(null);
     const [lightMode, setLightMode] = useState(
         () => getLocalSetting(SETTINGS_KEYS.theme) === 'light'
     );
@@ -584,6 +649,38 @@ const App = () => {
             refreshAIUsage();
         }
     }, [refreshAIUsage, workspaceDockTab]);
+
+    useEffect(() => {
+        const handleAskAiGenerationProgress = (event) => {
+            const snapshot = event?.detail;
+            if (!snapshot?.requestId) {
+                return;
+            }
+            setAiGenerationProgress(snapshot);
+        };
+        window.addEventListener(ASK_AI_GENERATION_PROGRESS_EVENT, handleAskAiGenerationProgress);
+        return () => {
+            window.removeEventListener(ASK_AI_GENERATION_PROGRESS_EVENT, handleAskAiGenerationProgress);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!aiGenerationProgress) {
+            return undefined;
+        }
+        const normalizedStatus = normalizeAskAiProgressStatus(aiGenerationProgress.status);
+        if (normalizedStatus !== 'completed') {
+            return undefined;
+        }
+        const timeout = window.setTimeout(() => {
+            setAiGenerationProgress((currentProgress) =>
+                currentProgress?.requestId === aiGenerationProgress.requestId
+                    ? null
+                    : currentProgress
+            );
+        }, 1800);
+        return () => window.clearTimeout(timeout);
+    }, [aiGenerationProgress]);
 
     const startWorkspaceDockDrag = useCallback((event) => {
         if (event.button !== 0) {
@@ -613,6 +710,29 @@ const App = () => {
         window.addEventListener('pointerup', stopDrag);
         window.addEventListener('pointercancel', stopDrag);
     }, [workspaceDockOffset]);
+
+    const startWorkspaceDockResize = useCallback((event) => {
+        if (event.button !== 0) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        const startX = event.clientX;
+        const startWidth = workspaceDockWidth;
+
+        const handlePointerMove = (moveEvent) => {
+            const widthDelta = (moveEvent.clientX - startX) / 16;
+            setWorkspaceDockWidth(Math.max(15.5, Math.min(startWidth + widthDelta, 27)));
+        };
+
+        const stopResize = () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', stopResize);
+        };
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', stopResize);
+    }, [workspaceDockWidth]);
 
     const openUsageDraftSession = useCallback(
         async (session) => {
@@ -941,6 +1061,11 @@ const App = () => {
         setNextStepsOpenToken((token) => token + 1);
     }, []);
 
+    const openNextStepsFromDock = useCallback(() => {
+        setIsAiHelpersOpen(true);
+        setNextStepsOpenToken((token) => token + 1);
+    }, []);
+
     const reflowCanvasGraph = useCallback(() => {
         const graphNodes = reactFlow.getNodes();
         const graphEdges = reactFlow.getEdges();
@@ -1150,6 +1275,54 @@ const App = () => {
         setWorkspaceBrief
     ]);
 
+    const aiProgressStageId =
+        ASK_AI_STAGE_ID[aiGenerationProgress?.stage] || 'preparing_request';
+    const aiProgressStatus = normalizeAskAiProgressStatus(aiGenerationProgress?.status);
+    const aiProgressContextItems = Array.isArray(aiGenerationProgress?.context)
+        ? aiGenerationProgress.context
+        : [];
+    const aiProgressEvents = progressEventsForDisplay(aiGenerationProgress?.events);
+    const aiProgressTitle = aiGenerationProgress?.role?.label
+        ? aiGenerationProgress?.previewMode === 'source_upload'
+          ? aiGenerationProgress.role.label
+          : `${aiGenerationProgress.role.label} is drafting`
+        : 'Ask AI is drafting';
+    const aiProgressScopeLabel =
+        aiGenerationProgress?.previewMode === 'source_upload'
+            ? 'Source intake'
+            : aiGenerationProgress?.previewMode === 'initial_graph_seed'
+            ? 'Initial graph draft'
+            : aiGenerationProgress?.scope?.type
+              ? `${aiGenerationProgress.scope.type} draft`
+              : 'Canvas draft';
+    const aiProgressDescription =
+        aiProgressStatus === 'failed'
+            ? aiGenerationProgress?.message || 'The draft did not complete. No canvas changes were applied.'
+            : aiGenerationProgress?.previewMode === 'source_upload'
+              ? 'The source is being parsed and converted into workspace context.'
+            : 'No canvas changes are applied until you review and accept the draft.';
+    const isAiGenerationActive = Boolean(aiGenerationProgress) && aiProgressStatus === 'running';
+    const shouldShowEmptyCanvasState = nodes.length === 0 && (!aiGenerationProgress || isAiGenerationActive);
+    const workspaceNextSteps = useMemo(
+        () =>
+            buildWorkspaceNextSteps({
+                nodes,
+                edges,
+                sourceLibrary,
+                workspaceBrief,
+                selectedBranchId,
+                filters: activeGraphFilters
+            }).steps.filter(hasRoutableNextStep),
+        [activeGraphFilters, edges, nodes, selectedBranchId, sourceLibrary, workspaceBrief]
+    );
+    const hasWorkspaceNextSteps = workspaceNextSteps.length > 0;
+
+    useEffect(() => {
+        if (workspaceDockTab === 'next') {
+            setWorkspaceDockTab('guidance');
+        }
+    }, [workspaceDockTab]);
+
     return (
         <div className={lightMode ? 'app light' : 'app dark'}>
             <Modal ChildProp={Prompts} />
@@ -1202,6 +1375,39 @@ const App = () => {
                     size={1}
                     color={lightMode ? '#d8d8d8' : '#2d2d2d'}
                 />
+                {aiGenerationProgress ? (
+                    <Panel
+                        position="bottom-center"
+                        className="ai-generation-progress-dock"
+                        style={{ display: 'block' }}
+                    >
+                        <AiGenerationProgress
+                            status={aiProgressStatus}
+                            stageId={aiProgressStageId}
+                            progress={
+                                aiProgressStatus === 'completed'
+                                    ? 100
+                                    : ASK_AI_STAGE_PROGRESS[aiProgressStageId]
+                            }
+                            title={aiProgressTitle}
+                            subtitle={aiGenerationProgress?.action?.label || 'Working in a draft layer'}
+                            latestStatus={aiGenerationProgress?.detail || aiGenerationProgress?.message}
+                            contextItems={aiProgressContextItems}
+                            events={aiProgressEvents}
+                            showEventFeed
+                            scopeLabel={aiProgressScopeLabel}
+                            draftStateLabel={
+                                aiProgressStatus === 'failed'
+                                    ? 'No changes applied'
+                                    : aiProgressStatus === 'completed'
+                                      ? 'Ready for review'
+                                      : 'Pending review'
+                            }
+                            scopeDescription={aiProgressDescription}
+                            onDismiss={() => setAiGenerationProgress(null)}
+                        />
+                    </Panel>
+                ) : null}
                 {!isStructuredCanvasView ? (
                     <>
                         {renderedCanvasGraph.nodes.length > 0 ? (
@@ -1231,26 +1437,38 @@ const App = () => {
                                 }
                             />
                         ) : null}
-                        {nodes.length === 0 ? (
+                        {shouldShowEmptyCanvasState ? (
                             <Panel
                                 position="top-center"
-                                className="canvas-empty-state-panel"
+                                className={`canvas-empty-state-panel ${isAiGenerationActive ? 'canvas-empty-state-panel--minimized' : ''}`}
                                 style={{ display: 'block' }}
                             >
-                                <section className="canvas-empty-state" aria-label="Empty workspace">
-                                    <span>Start your think space</span>
-                                    <p>Add sources, ask AI, or create the first node manually.</p>
-                                    <div>
-                                        <button type="button" onClick={openEmptyCanvasSources}>
-                                            Add sources
-                                        </button>
-                                        <button type="button" onClick={openEmptyCanvasAskAi}>
-                                            Ask AI
-                                        </button>
-                                        <button type="button" onClick={openManualStart}>
-                                            Start with node
-                                        </button>
-                                    </div>
+                                <section
+                                    className={`canvas-empty-state ${isAiGenerationActive ? 'canvas-empty-state--minimized' : ''}`}
+                                    aria-label="Empty workspace"
+                                >
+                                    {isAiGenerationActive ? (
+                                        <>
+                                            <span>Starting workspace</span>
+                                            <p>AI is drafting the first reviewable map.</p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span>Start your think space</span>
+                                            <p>Add sources, ask AI, or create the first node manually.</p>
+                                            <div>
+                                                <button type="button" onClick={openEmptyCanvasSources}>
+                                                    Add sources
+                                                </button>
+                                                <button type="button" onClick={openEmptyCanvasAskAi}>
+                                                    Ask AI
+                                                </button>
+                                                <button type="button" onClick={openManualStart}>
+                                                    Start with node
+                                                </button>
+                                            </div>
+                                        </>
+                                    )}
                                 </section>
                             </Panel>
                         ) : null}
@@ -1266,6 +1484,7 @@ const App = () => {
                         onOpenNode={focusNodeForReview}
                         onOpenSources={openEmptyCanvasSources}
                         onAskAi={openEmptyCanvasAskAi}
+                        onBackToMap={() => setActiveView('mindmap')}
                         onStartManual={openManualStart}
                         onGenerateTaskCandidates={() => openStructuredAiPreset('tasks')}
                         onCreateStructuredTable={() => openStructuredAiPreset('table')}
@@ -1281,6 +1500,7 @@ const App = () => {
                     <section
                         className={`workspace-dock ${workspaceDockCollapsed ? 'workspace-dock--collapsed' : ''}`}
                         aria-label="Workspace tools"
+                        style={{ '--workspace-dock-width': `${workspaceDockWidth}rem` }}
                     >
                         <nav className="workspace-dock-tabs" aria-label="Workspace panel">
                             <div className="workspace-dock-panel-actions">
@@ -1394,12 +1614,34 @@ const App = () => {
                                 </div>
                             ) : null}
                             {workspaceDockTab === 'guidance' ? (
-                                <WorkspaceNudgeSurface
-                                    validationIssues={validationReport?.issues || []}
-                                    onFocusNode={focusNodeForReview}
-                                    onOpenSources={() => setIsSourcesOpen(true)}
-                                    onOpenAiHelpers={() => setIsAiHelpersOpen(true)}
-                                />
+                                <div className="workspace-dock-section workspace-guide-panel">
+                                    {hasWorkspaceNextSteps ? (
+                                        <div className="workspace-next-steps-launcher">
+                                            <div className="workspace-dock-header">
+                                                <strong>Next steps</strong>
+                                                <span>{workspaceNextSteps.length}</span>
+                                            </div>
+                                            <p>
+                                                Reopen recommended AI actions for the current workspace.
+                                            </p>
+                                            <button type="button" onClick={openNextStepsFromDock}>
+                                                Open next steps
+                                            </button>
+                                        </div>
+                                    ) : null}
+                                    <WorkspaceNudgeSurface
+                                        validationIssues={validationReport?.issues || []}
+                                        onFocusNode={focusNodeForReview}
+                                        onOpenSources={() => setIsSourcesOpen(true)}
+                                        onOpenAiHelpers={() => setIsAiHelpersOpen(true)}
+                                    />
+                                    {!hasWorkspaceNextSteps ? (
+                                        <div className="workspace-guide-empty">
+                                            <strong>Guide</strong>
+                                            <p>No recommended AI actions right now.</p>
+                                        </div>
+                                    ) : null}
+                                </div>
                             ) : null}
                             {workspaceDockTab === 'build' ? (
                                 <div className="workspace-flow-controls">
@@ -1408,6 +1650,17 @@ const App = () => {
                                 </div>
                             ) : null}
                         </div>
+                        {!workspaceDockCollapsed ? (
+                            <button
+                                type="button"
+                                className="workspace-dock-resize-handle"
+                                title="Resize panel"
+                                aria-label="Resize workspace panel"
+                                onPointerDown={startWorkspaceDockResize}
+                            >
+                                <FiMaximize2 />
+                            </button>
+                        ) : null}
                     </section>
                 </Panel>
                 <Panel position="bottom">
@@ -1481,6 +1734,7 @@ const App = () => {
                         selectedNodes={selectedNodes || []}
                         autoOpenToken={nextStepsOpenToken}
                         summaryLabel={nextStepsOpenToken ? 'Next steps' : 'AI Helpers'}
+                        onClose={() => setIsAiHelpersOpen(false)}
                     />
                 </Panel>
                 <Panel

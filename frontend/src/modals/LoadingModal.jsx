@@ -15,6 +15,7 @@ const LoadingModal = ({
     context = '',
     aiContext = '',
     operationId,
+    onProgress,
     onCancel,
     cancelLabel = 'Cancel request'
 }) => {
@@ -68,6 +69,7 @@ const LoadingModal = ({
                 const nextProgress = await response.json();
                 if (!canceled) {
                     setBackendProgress(nextProgress);
+                    onProgress?.(nextProgress);
                 }
             } catch (error) {
                 console.warn('Unable to load operation progress', error);
@@ -82,7 +84,7 @@ const LoadingModal = ({
             window.clearTimeout(initialTimeout);
             window.clearInterval(interval);
         };
-    }, [operationId]);
+    }, [onProgress, operationId]);
 
     const stepIsActive = (index) => {
         if (backendProgress?.progress !== undefined) {

@@ -2,7 +2,7 @@ import PROMPTSvg from "../assets/prompt.svg";
 import CROSSSvg from "../assets/cross.svg";
 import Prompts from "../global-components/Prompts";
 import DataSourceSelect from "../global-components/DataSourceSelect";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import axios from "axios";
 import modalStore from "../stores/modalStore";
 import useStore from "../stores/store";
@@ -30,6 +30,7 @@ import {
 } from "../utils/aiDraftSessions";
 import { createAIActionRun } from "../utils/aiActionRuns";
 import { buildSourceLibraryProjection } from "../views/graphProjection";
+import { ASK_AI_GENERATION_PROGRESS_EVENT } from "../utils/askAiGenerationProgress";
 
 const viewForAction = (actionId) => {
     if (actionId.includes('question')) {
@@ -52,7 +53,7 @@ const viewForAction = (actionId) => {
 
 const VISUAL_OPTIONS = [
     { id: 'auto', label: 'Auto' },
-    { id: 'mind_map', label: 'TraceSpace Map' },
+    { id: 'mind_map', label: 'Mind Map' },
     { id: 'outline', label: 'Outline' },
     { id: 'tasks', label: 'Tasks' },
     { id: 'checklist', label: 'Checklist' },
@@ -64,8 +65,11 @@ const VISUAL_OPTIONS = [
     { id: 'sme_questions', label: 'SME Questions' },
     { id: 'software_overlap_report', label: 'Software Overlap' },
     { id: 'implementation_handoff_package', label: 'Handoff' },
-    { id: 'no_visual', label: 'No visual' }
+    { id: 'no_visual', label: 'Text only' }
 ];
+
+const visualLabel = (visualId) =>
+    VISUAL_OPTIONS.find((option) => option.id === visualId)?.label || visualId;
 
 const OUTPUT_SHAPE_VIEW = {
     mind_map: 'mindmap',
@@ -164,16 +168,24 @@ const viewForOutputShape = (shape, actionId) =>
     OUTPUT_SHAPE_VIEW[shape] || viewForAction(actionId || 'custom_prompt');
 
 const MAP_REVIEW_SCOPES = new Set(['workspace', 'source', 'nodes']);
+const MAP_CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph']);
+const STRUCTURED_REVIEW_VIEWS = new Set(['flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
 const CANVAS_REVIEW_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
+
+const mapFallbackCanvas = (fallback) =>
+    MAP_CANVAS_VIEWS.has(fallback) ? fallback : 'mindmap';
 
 const viewForDraftReview = ({ scopeType, requestedView, activeCanvasView }) => {
     if (!MAP_REVIEW_SCOPES.has(scopeType)) {
         return requestedView;
     }
+    if (STRUCTURED_REVIEW_VIEWS.has(requestedView)) {
+        return mapFallbackCanvas(activeCanvasView);
+    }
     if (CANVAS_REVIEW_VIEWS.has(requestedView)) {
         return requestedView;
     }
-    return CANVAS_REVIEW_VIEWS.has(activeCanvasView) ? activeCanvasView : 'mindmap';
+    return mapFallbackCanvas(activeCanvasView);
 };
 
 const shapeFromSession = (session, fallbackShape) => {
@@ -619,6 +631,13 @@ const AI_GENERATION_STAGE_HELP = {
     'Building preview': 'Preparing the non-canonical preview before anything changes.'
 };
 
+const AI_MODEL_WAIT_UPDATES = [
+    'Still waiting on the model response. The draft will stay staged until you review it.',
+    'Keeping the request open while the provider builds the structured draft.',
+    'No canvas changes have been applied. This is still a preview-first run.',
+    'The model call can take longer with source sections or larger workspace context.'
+];
+
 const sourceOrReviewActionIds = new Set([
     'ask_follow_up',
     'create_sme_questions',
@@ -675,7 +694,8 @@ const PromptModal = ({
     initialChangeIntent = '',
     initialPromptPlaceholder = '',
     initialContextSourceId = '',
-    initialContextSourceIds = []
+    initialContextSourceIds = [],
+    onGenerationProgress
 }) => {
     const selector = (state) => ({
         popNode: state.popNode,
@@ -740,9 +760,15 @@ const PromptModal = ({
     const [customPrompt, setCustomPrompt] = useState(initialPrompt || '');
     const [stageMessage, setStageMessage] = useState('');
     const [generationStage, setGenerationStage] = useState('');
+    const [generationStageDetail, setGenerationStageDetail] = useState('');
+    const [stageEvents, setStageEvents] = useState([]);
     const [stageContext, setStageContext] = useState([]);
     const [stageDebug, setStageDebug] = useState(null);
     const [isGeneratingPreview, setIsGeneratingPreview] = useState(false);
+    const stageEventCounter = useRef(0);
+    const isFormDismissedRef = useRef(false);
+    const modelWaitIntervalRef = useRef(null);
+    const progressSnapshotRef = useRef({ events: [] });
     const promptScope = scope === 'nodes' ? 'node' : scope || 'node';
 
     const isPreviewFlow = Boolean(scope);
@@ -900,6 +926,154 @@ const PromptModal = ({
         setSelectedActionId(getDefaultActionForProfile(nextRole, promptScope));
     };
 
+    const emitGenerationProgress = (snapshot) => {
+        if (!snapshot?.requestId) {
+            return;
+        }
+        if (typeof onGenerationProgress === 'function') {
+            try {
+                onGenerationProgress(snapshot);
+            } catch (error) {
+                console.warn('Ask AI progress callback failed', error);
+            }
+        }
+        if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+            window.dispatchEvent(
+                new CustomEvent(ASK_AI_GENERATION_PROGRESS_EVENT, {
+                    detail: snapshot
+                })
+            );
+        }
+    };
+
+    const publishGenerationProgress = (updates = {}) => {
+        const nextSnapshot = {
+            ...progressSnapshotRef.current,
+            ...updates,
+            updatedAt: new Date().toISOString()
+        };
+        progressSnapshotRef.current = nextSnapshot;
+        emitGenerationProgress(nextSnapshot);
+        return nextSnapshot;
+    };
+
+    const updateStageContext = (context) => {
+        if (!isFormDismissedRef.current) {
+            setStageContext(context);
+        }
+        publishGenerationProgress({ context });
+    };
+
+    const updateStageMessage = (message, status) => {
+        if (!isFormDismissedRef.current) {
+            setStageMessage(message);
+        }
+        publishGenerationProgress({ message, status: status || progressSnapshotRef.current.status });
+    };
+
+    const updateStageDebug = (debug) => {
+        if (!isFormDismissedRef.current) {
+            setStageDebug(debug);
+        }
+        publishGenerationProgress({ debug });
+    };
+
+    const updateGenerationProgress = (stage, detail, updates = {}) => {
+        stageEventCounter.current += 1;
+        const nextDetail = detail || AI_GENERATION_STAGE_HELP[stage] || 'Working on the AI draft workflow.';
+        const nextEvents = [
+            {
+                id: `${stageEventCounter.current}-${stage}`,
+                stage,
+                detail: nextDetail
+            },
+            ...(progressSnapshotRef.current.events || [])
+        ].slice(0, 5);
+        if (!isFormDismissedRef.current) {
+            setGenerationStage(stage);
+            setGenerationStageDetail(nextDetail);
+            setStageEvents(nextEvents);
+        }
+        publishGenerationProgress({
+            status: 'running',
+            ...updates,
+            stage,
+            detail: nextDetail,
+            events: nextEvents
+        });
+    };
+
+    const stopModelWaitProgressUpdates = () => {
+        if (modelWaitIntervalRef.current && typeof window !== 'undefined') {
+            window.clearInterval(modelWaitIntervalRef.current);
+        }
+        modelWaitIntervalRef.current = null;
+    };
+
+    const startModelWaitProgressUpdates = () => {
+        stopModelWaitProgressUpdates();
+        if (typeof window === 'undefined') {
+            return;
+        }
+        let updateIndex = 0;
+        modelWaitIntervalRef.current = window.setInterval(() => {
+            const detail = AI_MODEL_WAIT_UPDATES[updateIndex % AI_MODEL_WAIT_UPDATES.length];
+            updateGenerationProgress('Calling AI model', detail);
+            updateIndex += 1;
+        }, 4500);
+    };
+
+    const acceptGenerationRequest = ({
+        effectiveRole,
+        effectiveAction,
+        inferredShape,
+        normalizedScope,
+        promptText,
+        shouldSeedInitialGraph
+    }) => {
+        const startedAt = new Date().toISOString();
+        const requestedView = viewForOutputShape(inferredShape, effectiveAction.id);
+        const reviewView = viewForDraftReview({
+            scopeType: normalizedScope.type,
+            requestedView,
+            activeCanvasView
+        });
+        if (reviewView !== activeCanvasView) {
+            setActiveView(reviewView);
+        }
+        publishGenerationProgress({
+            requestId: `ask-ai-${startedAt}-${stageEventCounter.current}`,
+            status: 'accepted',
+            startedAt,
+            source: 'PromptModal',
+            scope: normalizedScope,
+            prompt: promptText,
+            role: {
+                id: effectiveRole.id,
+                label: effectiveRole.label
+            },
+            action: {
+                id: effectiveAction.id,
+                label: effectiveAction.label
+            },
+            target: {
+                label: targetLabel,
+                nodeId: targetNodeId || null,
+                sourceId: targetSourceId || null,
+                nodeIds: selectedNodeIds
+            },
+            outputShape: inferredShape,
+            requestedVisual: selectedVisual,
+            selectedModel,
+            previewMode: shouldSeedInitialGraph ? 'initial_graph_seed' : 'draft_preview',
+            message: STRUCTURED_REVIEW_VIEWS.has(requestedView)
+                ? 'Ask AI request accepted. Returning to the map while the draft is generated for review.'
+                : 'Ask AI request accepted. Generation is continuing in the background.'
+        });
+        isFormDismissedRef.current = true;
+        popNode();
+    };
+
     const openSourcePicker = () => {
         pushNode(DataSourceSelect, {
             mode: 'ask_ai_context',
@@ -917,7 +1091,8 @@ const PromptModal = ({
                 initialVisual: selectedVisual,
                 initialChangeIntent,
                 initialContextSourceIds: selectedContextSourceIds,
-                initialContextSourceId: selectedContextSourceIds[0] || ''
+                initialContextSourceId: selectedContextSourceIds[0] || '',
+                onGenerationProgress
             }
         });
     };
@@ -930,6 +1105,9 @@ const PromptModal = ({
         setStageMessage('');
         setStageDebug(null);
         setGenerationStage('');
+        setGenerationStageDetail('');
+        setStageEvents([]);
+        progressSnapshotRef.current = { events: [] };
     };
 
     const stagePreviewRequest = async () => {
@@ -940,6 +1118,8 @@ const PromptModal = ({
         if (selectedVisual === 'auto' && !localPrompt) {
             setStageMessage('Ask a question or describe what you want AI to make.');
             setGenerationStage('');
+            setGenerationStageDetail('');
+            setStageEvents([]);
             setStageDebug(null);
             return;
         }
@@ -953,17 +1133,23 @@ const PromptModal = ({
         if (effectiveAction.id === 'custom_prompt' && !localPrompt) {
             setStageMessage('Add a custom instruction before generating this preview.');
             setGenerationStage('');
+            setGenerationStageDetail('');
+            setStageEvents([]);
             setStageDebug(null);
             return;
         }
 
+        isFormDismissedRef.current = false;
+        progressSnapshotRef.current = { events: [] };
+        stopModelWaitProgressUpdates();
         setIsGeneratingPreview(true);
-        setGenerationStage('Preparing request');
         setStageMessage('');
-        setStageContext([
+        setStageEvents([]);
+        updateGenerationProgress('Preparing request', 'Starting the Ask AI draft request.');
+        updateStageContext([
             { label: 'Prompt', value: localPrompt || effectiveAction.label },
             { label: 'Role', value: effectiveRole.label },
-            { label: 'Output', value: selectedVisual === 'auto' ? 'Auto' : selectedVisual }
+            { label: 'Output', value: visualLabel(selectedVisual) }
         ]);
         setStageDebug(null);
         const childEdges = edges.filter((edge) => edge.source === targetNodeId);
@@ -1003,7 +1189,15 @@ const PromptModal = ({
             changeIntent,
             outputMode: shouldSeedInitialGraph ? 'initial_graph_seed' : 'draft_preview'
         });
-        setStageContext([
+        updateGenerationProgress(
+            'Selecting source context',
+            selectedSourcePayload?.metadata?.selected_source_count
+                ? `Using ${selectedSourcePayload.metadata.selected_source_count} selected source${selectedSourcePayload.metadata.selected_source_count === 1 ? '' : 's'} plus the scoped workspace graph.`
+                : selectedContextSources.length
+                  ? `Using ${selectedContextSources.length} chosen source${selectedContextSources.length === 1 ? '' : 's'} plus the scoped workspace graph.`
+                  : 'Using the scoped workspace graph and any source refs already attached to it.'
+        );
+        updateStageContext([
             { label: 'Scope', value: normalizedScope.type },
             {
                 label: 'Context',
@@ -1140,7 +1334,7 @@ const PromptModal = ({
             );
         };
 
-        const activateSession = (session) => {
+        const activateSession = (session, progressStatus = 'success') => {
             const nextSession = session?.session_id
                 ? session
                 : session?.draft_session?.session_id
@@ -1184,9 +1378,13 @@ const PromptModal = ({
                     model: selectedModel
                 }
             });
-            setGenerationStage('Building preview');
-            setStageMessage('Draft session generated. Refine it in the drafting table before accepting.');
-            window.setTimeout(() => popNode(), 150);
+            updateGenerationProgress('Building preview', 'Draft session is ready. Opening the review surface.', {
+                status: progressStatus
+            });
+            updateStageMessage('Draft session generated. Refine it in the drafting table before accepting.', progressStatus);
+            if (!isFormDismissedRef.current) {
+                window.setTimeout(() => popNode(), 150);
+            }
         };
 
         const seedInitialGraph = async (session) => {
@@ -1198,8 +1396,8 @@ const PromptModal = ({
                     ? session.session
                     : fallbackSession;
             if (isLocalFallbackDraftSession(candidateSession)) {
-                setStageMessage('AI generation did not complete, so no starter canvas was created. Check the backend/model configuration and try again.');
-                setStageDebug({
+                updateStageMessage('AI generation did not complete, so no starter canvas was created. Check the backend/model configuration and try again.', 'blocked');
+                updateStageDebug({
                     timestamp: new Date().toISOString(),
                     mode: 'blocked_local_fallback',
                     diagnosis: [
@@ -1220,8 +1418,8 @@ const PromptModal = ({
                 session: candidateSession,
                 inferredShape
             })) {
-                setStageMessage('AI generation was too generic for an initial TraceSpace map, so no starter canvas was created. Try again after the model path is available.');
-                setStageDebug({
+                updateStageMessage('AI generation was too generic for an initial TraceSpace map, so no starter canvas was created. Try again after the model path is available.', 'blocked');
+                updateStageDebug({
                     timestamp: new Date().toISOString(),
                     mode: 'blocked_generic_initial_seed',
                     diagnosis: [
@@ -1239,12 +1437,20 @@ const PromptModal = ({
                 return;
             }
             activateSession(candidateSession);
-            setStageMessage('Starter draft generated. Review and accept it before it changes the canvas.');
+            updateStageMessage('Starter draft generated. Review and accept it before it changes the canvas.', 'success');
         };
+
+        acceptGenerationRequest({
+            effectiveRole,
+            effectiveAction,
+            inferredShape,
+            normalizedScope,
+            promptText,
+            shouldSeedInitialGraph
+        });
 
         try {
             const endpoint = flowId ? draftSessionEndpoint({ flowId }) : '';
-            setGenerationStage('Selecting source context');
             const requestPayload = buildAIDraftSessionRequestPayload({
                 role: effectiveRole,
                 action: effectiveAction,
@@ -1265,21 +1471,37 @@ const PromptModal = ({
                     follow_up_memory: memoryContext
                 }
             });
-            setGenerationStage('Choosing model');
-            setStageContext([
+            publishGenerationProgress({
+                request: summarizeDraftRequestForDebug(requestPayload)
+            });
+            updateGenerationProgress(
+                'Choosing model',
+                selectedModel === 'auto'
+                    ? 'Using auto model policy so the backend can choose for this intent and context.'
+                    : `Using the explicitly requested ${selectedModel} model.`
+            );
+            updateStageContext([
                 { label: 'Model policy', value: selectedModel === 'auto' ? 'Auto by intent' : 'Explicit model' },
                 { label: 'Requested model', value: selectedModel === 'auto' ? 'Auto' : selectedModel },
                 { label: 'Preview mode', value: shouldSeedInitialGraph ? 'Initial graph' : 'Draft preview' }
             ]);
-            setGenerationStage('Calling AI model');
+            updateGenerationProgress(
+                'Calling AI model',
+                'Sent the structured draft request. Waiting for the provider response.'
+            );
+            startModelWaitProgressUpdates();
             const response = endpoint
                 ? await axios.post(endpoint, requestPayload)
                 : null;
-            setGenerationStage('Validating draft');
+            stopModelWaitProgressUpdates();
+            updateGenerationProgress(
+                'Validating draft',
+                'Model response received. Checking the draft contract before previewing.'
+            );
             if (shouldSeedInitialGraph) {
                 if (!response?.data) {
-                    setStageMessage('AI generation did not return a draft session, so no starter canvas was created.');
-                    setStageDebug({
+                    updateStageMessage('AI generation did not return a draft session, so no starter canvas was created.', 'error');
+                    updateStageDebug({
                         timestamp: new Date().toISOString(),
                         mode: 'empty_response',
                         endpoint,
@@ -1290,12 +1512,12 @@ const PromptModal = ({
                 }
                 await seedInitialGraph(response.data);
             } else {
-                activateSession(response?.data || fallbackSession);
+                activateSession(response?.data || fallbackSession, response?.data ? 'success' : 'fallback');
             }
         } catch (error) {
             const detail = messageFromGenerationError(error);
             const endpoint = flowId ? draftSessionEndpoint({ flowId }) : '';
-            setGenerationStage('Validating draft');
+            updateGenerationProgress('Validating draft', 'The request returned an error; preparing the debug details.');
             const requestPayload = buildAIDraftSessionRequestPayload({
                 role: effectiveRole,
                 action: effectiveAction,
@@ -1316,14 +1538,14 @@ const PromptModal = ({
                     follow_up_memory: memoryContext
                 }
             });
-            setStageDebug(buildGenerationDebugSnapshot({
+            updateStageDebug(buildGenerationDebugSnapshot({
                 endpoint,
                 requestPayload,
                 error,
                 mode: shouldSeedInitialGraph ? 'initial_seed_failed' : 'preview_failed'
             }));
             if (shouldSeedInitialGraph) {
-                setStageMessage(`AI generation failed; no starter canvas was created. ${detail}`);
+                updateStageMessage(`AI generation failed; no starter canvas was created. ${detail}`, 'error');
                 return;
             }
             const fallbackWithWarning = {
@@ -1342,9 +1564,12 @@ const PromptModal = ({
                     backend_warning: String(detail)
                 }
             };
-            activateSession(fallbackWithWarning);
+            activateSession(fallbackWithWarning, 'fallback');
         } finally {
-            setIsGeneratingPreview(false);
+            stopModelWaitProgressUpdates();
+            if (!isFormDismissedRef.current) {
+                setIsGeneratingPreview(false);
+            }
         }
     };
 
@@ -1595,7 +1820,8 @@ const PromptModal = ({
                     <div className="ai-action-stage-now">
                         <span>{generationStage || 'Preparing request'}</span>
                         <strong>
-                            {AI_GENERATION_STAGE_HELP[generationStage] ||
+                            {generationStageDetail ||
+                                AI_GENERATION_STAGE_HELP[generationStage] ||
                                 'Preparing the AI draft workflow.'}
                         </strong>
                     </div>
@@ -1622,6 +1848,16 @@ const PromptModal = ({
                                 <div key={`${item.label}-${item.value}`}>
                                     <span>{item.label}</span>
                                     <strong>{formatStageContextValue(item.value)}</strong>
+                                </div>
+                            ))}
+                        </div>
+                    ) : null}
+                    {stageEvents.length ? (
+                        <div className="ai-action-stage-events" aria-label="AI generation activity">
+                            {stageEvents.map((event) => (
+                                <div key={event.id}>
+                                    <span>{event.stage}</span>
+                                    <strong>{event.detail}</strong>
                                 </div>
                             ))}
                         </div>

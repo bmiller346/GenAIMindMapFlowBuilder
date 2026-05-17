@@ -32,6 +32,7 @@ import {
     upsertSource
 } from '../utils/sourceReconciliationPreview';
 import { handleGeneratedSourceGraph } from '../utils/generatedSourceGraph';
+import { ASK_AI_GENERATION_PROGRESS_EVENT } from '../utils/askAiGenerationProgress';
 
 const DOCX_INTAKE_PROFILES = [
     {
@@ -91,6 +92,8 @@ const DocxModal = ({
     const [intakeModel, setIntakeModel] = useState(DOCX_INTAKE_MODELS[0]);
     const [intakeBrief, setIntakeBrief] = useState('');
     const fileInputRef = useRef(null);
+    const sourceProgressRef = useRef(null);
+    const sourceProgressEventCounter = useRef(0);
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const addActivity = useActivityStore((s) => s.addActivity);
@@ -133,6 +136,70 @@ const DocxModal = ({
             return selectedIntakeProfile.label;
         }
         return `${selectedIntakeProfile?.label || 'Custom intake brief'}: ${brief}`;
+    };
+
+    const emitSourceProgress = (requestId, updates = {}) => {
+        if (!requestId || typeof window === 'undefined') {
+            return;
+        }
+        const previous =
+            sourceProgressRef.current?.requestId === requestId
+                ? sourceProgressRef.current
+                : {};
+        const nextSnapshot = {
+            ...previous,
+            ...updates,
+            requestId,
+            updatedAt: new Date().toISOString()
+        };
+        sourceProgressRef.current = nextSnapshot;
+        window.dispatchEvent(
+            new CustomEvent(ASK_AI_GENERATION_PROGRESS_EVENT, {
+                detail: nextSnapshot
+            })
+        );
+    };
+
+    const progressStageFromOperation = (progress = {}) => {
+        if (progress.status === 'failed') {
+            return 'Validating draft';
+        }
+        if (progress.status === 'completed' || progress.phase === 'complete') {
+            return 'Building preview';
+        }
+        if (['ai_reading', 'ai_deriving', 'uploading_to_ai'].includes(progress.phase)) {
+            return 'Calling AI model';
+        }
+        if (progress.phase === 'extracting') {
+            return 'Selecting source context';
+        }
+        if (progress.phase === 'checking_settings') {
+            return 'Choosing model';
+        }
+        return 'Preparing request';
+    };
+
+    const publishSourceProgressEvent = (requestId, stage, detail, updates = {}) => {
+        sourceProgressEventCounter.current += 1;
+        const previousEvents =
+            sourceProgressRef.current?.requestId === requestId
+                ? sourceProgressRef.current.events || []
+                : [];
+        const events = [
+            {
+                id: `${sourceProgressEventCounter.current}-${stage}`,
+                stage,
+                detail,
+                updatedAt: new Date().toISOString()
+            },
+            ...previousEvents
+        ].slice(0, 5);
+        emitSourceProgress(requestId, {
+            ...updates,
+            stage,
+            detail,
+            events
+        });
     };
 
     const ensureWorkspace = async () => {
@@ -195,6 +262,7 @@ const DocxModal = ({
         }
 
         const operationId = nanoid();
+        const progressRequestId = `docx-source-${operationId}`;
         const data = {
             file: file,
             operationId,
@@ -210,9 +278,51 @@ const DocxModal = ({
             detail: file?.name,
             context: 'Uploading, extracting text, and deriving workspace structure.'
         });
+        publishSourceProgressEvent(
+            progressRequestId,
+            'Preparing request',
+            'Preparing DOCX source upload.',
+            {
+                status: 'running',
+                role: { label: 'Source upload' },
+                action: {
+                    label: isAskAIContextMode
+                        ? 'Attach DOCX to Ask AI'
+                        : 'Create DOCX source map'
+                },
+                scope: { type: 'source' },
+                previewMode: 'source_upload',
+                message: 'DOCX source upload is running.',
+                context: [
+                    { label: 'Source', value: file?.name || 'DOCX' },
+                    {
+                        label: 'Mode',
+                        value: isAskAIContextMode ? 'Ask AI context' : 'Mind map draft'
+                    },
+                    { label: 'Model', value: intakeModel || 'auto' }
+                ]
+            }
+        );
         pushNode(LoadingModal, {
             ...sourceUploadLoading('DOCX', file?.name),
             operationId,
+            onProgress: (progress) => {
+                const stage = progressStageFromOperation(progress);
+                publishSourceProgressEvent(
+                    progressRequestId,
+                    stage,
+                    progress?.detail || progress?.message || 'Processing DOCX source.',
+                    {
+                        status:
+                            progress?.status === 'failed'
+                                ? 'failed'
+                                : progress?.status === 'completed'
+                                  ? 'completed'
+                                  : 'running',
+                        message: progress?.message || 'DOCX source upload is running.'
+                    }
+                );
+            },
             onCancel: () => {
                 controller.abort();
                 updateActivity(activityId, {
@@ -220,6 +330,15 @@ const DocxModal = ({
                     status: 'canceled',
                     context: 'Upload request was canceled.'
                 });
+                publishSourceProgressEvent(
+                    progressRequestId,
+                    'Validating draft',
+                    'DOCX source upload was canceled.',
+                    {
+                        status: 'canceled',
+                        message: 'DOCX source upload was canceled.'
+                    }
+                );
                 popNode();
             }
         });
@@ -232,6 +351,17 @@ const DocxModal = ({
                 signal: controller.signal
             })
             .then((res) => {
+                publishSourceProgressEvent(
+                    progressRequestId,
+                    'Building preview',
+                    isAskAIContextMode
+                        ? 'DOCX source is available to Ask AI.'
+                        : 'DOCX source draft is ready for review.',
+                    {
+                        status: 'completed',
+                        message: 'DOCX source upload completed.'
+                    }
+                );
                 updateActivity(activityId, {
                     type: 'source_upload_completed',
                     status: 'completed',
@@ -250,6 +380,15 @@ const DocxModal = ({
                 if (isCanceledRequest(err)) {
                     return;
                 }
+                publishSourceProgressEvent(
+                    progressRequestId,
+                    'Validating draft',
+                    requestErrorMessage(err),
+                    {
+                        status: 'failed',
+                        message: 'DOCX source upload failed.'
+                    }
+                );
                 updateActivity(activityId, {
                     type: 'source_upload_failed',
                     status: 'failed',

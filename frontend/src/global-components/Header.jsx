@@ -322,7 +322,7 @@ const Header = ({
             flow_type: flow_type || 'manual',
             summary: 'Please work'
         };
-        return axios.put(`http://localhost:8000/flow-update`, data, {
+        return axios.put(`http://localhost:8000/flow-update/`, data, {
             headers: {
                 'Content-Type': 'application/json'
             }
