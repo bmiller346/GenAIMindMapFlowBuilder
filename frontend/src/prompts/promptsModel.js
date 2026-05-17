@@ -287,6 +287,26 @@ export const starterTransformations = [
         scopes: ['branch', 'workspace']
     },
     {
+        id: 'executive_summary',
+        label: 'Executive summary',
+        description: 'Condense reviewed context into a leadership-ready brief.',
+        prompt: 'Create an executive summary from this context with key findings, business impact, risks, decisions needed, recommended actions, and source-backed caveats. Keep unsupported claims clearly marked for review.',
+        visual: 'executive_summary',
+        roleId: 'enterprise-readiness-planner',
+        actionId: 'create_stakeholder_review_package',
+        scopes: ['branch', 'workspace']
+    },
+    {
+        id: 'news_article',
+        label: 'News article',
+        description: 'Draft an article-style update with evidence and attribution.',
+        prompt: 'Draft a news article from this context with a headline, lede, concise body sections, attributed facts, source notes, and a clear separation between verified facts and assumptions.',
+        visual: 'news_article',
+        roleId: 'research-assistant',
+        actionId: 'custom_prompt',
+        scopes: ['branch', 'workspace', 'source']
+    },
+    {
         id: 'document_to_knowledge_graph',
         label: 'Document to graph',
         description: 'Extract entities, relationships, dependencies, and refs.',

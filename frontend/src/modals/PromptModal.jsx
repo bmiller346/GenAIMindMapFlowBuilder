@@ -26,7 +26,12 @@ import {
     buildSelectedSourceDraftPayload,
     buildSelectedSourcesDraftPayload,
     createAIDraftSession,
-    inferAIDraftChangeIntent
+    inferAIDraftChangeIntent,
+    inferAIDraftEvidencePreferences,
+    inferAIDraftExpansionPreferences,
+    normalizeAIDraftCitationPolicy,
+    normalizeAIDraftEvidenceMode,
+    normalizeAIDraftExpansionTarget
 } from "../utils/aiDraftSessions";
 import { createAIActionRun } from "../utils/aiActionRuns";
 import { buildSourceLibraryProjection } from "../views/graphProjection";
@@ -62,6 +67,8 @@ const VISUAL_OPTIONS = [
     { id: 'knowledge_graph', label: 'Knowledge Graph' },
     { id: 'chart', label: 'Chart' },
     { id: 'kanban', label: 'Kanban' },
+    { id: 'executive_summary', label: 'Executive Summary' },
+    { id: 'news_article', label: 'News Article' },
     { id: 'sme_questions', label: 'SME Questions' },
     { id: 'software_overlap_report', label: 'Software Overlap' },
     { id: 'implementation_handoff_package', label: 'Handoff' },
@@ -70,6 +77,62 @@ const VISUAL_OPTIONS = [
 
 const visualLabel = (visualId) =>
     VISUAL_OPTIONS.find((option) => option.id === visualId)?.label || visualId;
+
+const EXPANSION_TARGET_OPTIONS = [
+    {
+        id: 'selected_node',
+        label: 'Selected node',
+        scopes: ['node', 'branch', 'nodes', 'workspace', 'source']
+    },
+    {
+        id: 'existing_children',
+        label: 'Existing children',
+        scopes: ['node', 'branch']
+    },
+    {
+        id: 'leaves',
+        label: 'Branch leaves',
+        scopes: ['branch']
+    },
+    {
+        id: 'whole_branch',
+        label: 'Whole branch',
+        scopes: ['branch']
+    }
+];
+
+const defaultExpansionTargetForScope = (scope = '') =>
+    scope === 'branch' ? 'leaves' : 'selected_node';
+
+const expansionTargetLabel = (target = '') =>
+    EXPANSION_TARGET_OPTIONS.find((option) => option.id === target)?.label || 'Selected node';
+
+const expansionTargetSummary = (target = '') => ({
+    existing_children: 'Existing child anchors',
+    leaves: 'Branch leaf anchors',
+    whole_branch: 'Whole branch anchors',
+    selected_node: 'Selected node anchor'
+}[target] || 'Selected node anchor');
+
+const EVIDENCE_MODE_OPTIONS = [
+    { id: 'workspace', label: 'Workspace only' },
+    { id: 'uploaded_sources', label: 'Uploaded sources' },
+    { id: 'general_knowledge', label: 'General knowledge' },
+    { id: 'web_sources', label: 'Web/current sources' },
+    { id: 'sharepoint', label: 'SharePoint/internal' }
+];
+
+const CITATION_POLICY_OPTIONS = [
+    { id: 'required', label: 'Required' },
+    { id: 'preferred', label: 'Preferred' },
+    { id: 'not_required', label: 'Not required' }
+];
+
+const evidenceModeLabel = (mode = '') =>
+    EVIDENCE_MODE_OPTIONS.find((option) => option.id === mode)?.label || 'Workspace only';
+
+const citationPolicyLabel = (policy = '') =>
+    CITATION_POLICY_OPTIONS.find((option) => option.id === policy)?.label || 'Preferred';
 
 const OUTPUT_SHAPE_VIEW = {
     mind_map: 'mindmap',
@@ -82,6 +145,9 @@ const OUTPUT_SHAPE_VIEW = {
     flow_chart: 'flowchart',
     chart: 'chartData',
     kanban: 'kanban',
+    executive_summary: 'executive',
+    executive_output: 'executive',
+    news_article: 'outline',
     review_annotations: 'gaps',
     sme_questions: 'sme',
     source_coverage: 'sources',
@@ -99,6 +165,9 @@ const OUTPUT_SHAPE_ROUTE = {
     knowledge_graph: { roleId: 'standards-extractor', actionId: 'custom_prompt' },
     outline: { roleId: 'training-guide-builder', actionId: 'generate_training_outline' },
     kanban: { roleId: 'task-planner', actionId: 'generate_tasks' },
+    executive_summary: { roleId: 'enterprise-readiness-planner', actionId: 'create_stakeholder_review_package' },
+    executive_output: { roleId: 'enterprise-readiness-planner', actionId: 'create_stakeholder_review_package' },
+    news_article: { roleId: 'research-assistant', actionId: 'custom_prompt' },
     sme_questions: { roleId: 'sme-question-generator', actionId: 'create_sme_questions' },
     source_coverage: { roleId: 'source-ref-repair', actionId: 'find_missing_source_support' },
     software_overlap_report: { roleId: 'enterprise-tool-rationalization', actionId: 'find_duplicate_tools' },
@@ -117,6 +186,12 @@ const inferOutputShape = (prompt, actionId = '') => {
         /\b(overlap|duplicate|rationali[sz]ation|redundant)\b.*\b(software|tool|application|app|system)s?\b/.test(text)
     ) {
         return 'software_overlap_report';
+    }
+    if (/\b(executive summary|exec summary|leadership summary|board summary|briefing memo|decision brief)\b/.test(text)) {
+        return 'executive_summary';
+    }
+    if (/\b(news article|article draft|newsletter|monthly update|press release|current news|latest news)\b/.test(text)) {
+        return 'news_article';
     }
     if (/\b(kanban|board|columns)\b/.test(text)) {
         return 'kanban';
@@ -365,6 +440,12 @@ const nodeTypeForShape = (shape, actionId) => {
     }
     if (shape === 'implementation_handoff_package') {
         return 'task';
+    }
+    if (shape === 'executive_summary' || shape === 'executive_output') {
+        return 'reference';
+    }
+    if (shape === 'news_article') {
+        return 'reference';
     }
     if (shape === 'table') {
         return 'reference';
@@ -691,6 +772,10 @@ const PromptModal = ({
     initialActionId,
     initialPrompt = '',
     initialVisual = 'auto',
+    initialExpansionMode = 'exploratory',
+    initialExpansionTarget = '',
+    initialEvidenceMode = '',
+    initialCitationPolicy = '',
     initialChangeIntent = '',
     initialPromptPlaceholder = '',
     initialContextSourceId = '',
@@ -749,6 +834,22 @@ const PromptModal = ({
     const [selectedRoleId, setSelectedRoleId] = useState(initialRoleId || '');
     const [selectedActionId, setSelectedActionId] = useState(initialActionId || '');
     const [selectedVisual, setSelectedVisual] = useState(initialVisual || 'auto');
+    const [selectedExpansionMode, setSelectedExpansionMode] = useState(initialExpansionMode || 'exploratory');
+    const [selectedExpansionTarget, setSelectedExpansionTarget] = useState(
+        normalizeAIDraftExpansionTarget(
+            initialExpansionTarget || defaultExpansionTargetForScope(scope)
+        )
+    );
+    const [selectedEvidenceMode, setSelectedEvidenceMode] = useState(
+        normalizeAIDraftEvidenceMode(
+            initialEvidenceMode || (scope === 'source' ? 'uploaded_sources' : 'workspace')
+        )
+    );
+    const [selectedCitationPolicy, setSelectedCitationPolicy] = useState(
+        normalizeAIDraftCitationPolicy(
+            initialCitationPolicy || (scope === 'source' ? 'required' : 'preferred')
+        )
+    );
     const [selectedContextSourceIds, setSelectedContextSourceIds] = useState(() =>
         Array.from(
             new Set([
@@ -769,6 +870,10 @@ const PromptModal = ({
     const isFormDismissedRef = useRef(false);
     const modelWaitIntervalRef = useRef(null);
     const progressSnapshotRef = useRef({ events: [] });
+    const didManuallySetExpansionModeRef = useRef(false);
+    const didManuallySetExpansionTargetRef = useRef(Boolean(initialExpansionTarget));
+    const didManuallySetEvidenceModeRef = useRef(Boolean(initialEvidenceMode));
+    const didManuallySetCitationPolicyRef = useRef(Boolean(initialCitationPolicy));
     const promptScope = scope === 'nodes' ? 'node' : scope || 'node';
 
     const isPreviewFlow = Boolean(scope);
@@ -831,6 +936,14 @@ const PromptModal = ({
         [role, promptScope, selectedAction, targetLabel]
     );
     const compactSuggestions = useMemo(() => suggestions.slice(0, 3), [suggestions]);
+    const expansionTargetOptions = useMemo(() => {
+        const options = EXPANSION_TARGET_OPTIONS.filter((option) =>
+            option.scopes.includes(promptScope)
+        );
+        return options.length ? options : EXPANSION_TARGET_OPTIONS.slice(0, 1);
+    }, [promptScope]);
+    const expansionPlanLabel = `${selectedExpansionMode === 'strict' ? 'Strict' : 'Exploratory'} / ${expansionTargetLabel(selectedExpansionTarget)}`;
+    const evidencePlanLabel = `${evidenceModeLabel(selectedEvidenceMode)} / ${citationPolicyLabel(selectedCitationPolicy)}`;
     const scopedStarterTransformations = useMemo(
         () =>
             starterTransformations.filter((starter) =>
@@ -1089,6 +1202,10 @@ const PromptModal = ({
                 initialActionId: selectedAction?.id || selectedActionId,
                 initialPrompt: customPrompt,
                 initialVisual: selectedVisual,
+                initialExpansionMode: selectedExpansionMode,
+                initialExpansionTarget: selectedExpansionTarget,
+                initialEvidenceMode: selectedEvidenceMode,
+                initialCitationPolicy: selectedCitationPolicy,
                 initialChangeIntent,
                 initialContextSourceIds: selectedContextSourceIds,
                 initialContextSourceId: selectedContextSourceIds[0] || '',
@@ -1100,6 +1217,26 @@ const PromptModal = ({
     const applyStarterTransformation = (starter) => {
         setCustomPrompt(starter.prompt);
         setSelectedVisual(starter.visual || 'auto');
+        didManuallySetExpansionModeRef.current = false;
+        didManuallySetExpansionTargetRef.current = false;
+        didManuallySetEvidenceModeRef.current = false;
+        didManuallySetCitationPolicyRef.current = false;
+        setSelectedExpansionMode(starter.expansionMode || 'exploratory');
+        setSelectedExpansionTarget(
+            normalizeAIDraftExpansionTarget(
+                starter.expansionTarget || defaultExpansionTargetForScope(promptScope)
+            )
+        );
+        const inferredEvidence = inferAIDraftEvidencePreferences({
+            prompt: starter.prompt,
+            scope: { type: promptScope },
+            selectedSourceCount: selectedContextSources.length,
+            loadedSourceCount: loadedSources.length,
+            fallbackEvidenceMode: starter.evidenceMode,
+            fallbackCitationPolicy: starter.citationPolicy
+        });
+        setSelectedEvidenceMode(inferredEvidence.evidenceMode);
+        setSelectedCitationPolicy(inferredEvidence.citationPolicy);
         setSelectedRoleId(starter.roleId || selectedRoleId);
         setSelectedActionId(starter.actionId || selectedActionId);
         setStageMessage('');
@@ -1108,6 +1245,47 @@ const PromptModal = ({
         setGenerationStageDetail('');
         setStageEvents([]);
         progressSnapshotRef.current = { events: [] };
+    };
+
+    const applyPromptExpansionInference = (nextPrompt) => {
+        const inferredPreferences = inferAIDraftExpansionPreferences({
+            prompt: nextPrompt,
+            scope: { type: promptScope },
+            fallbackMode: selectedExpansionMode,
+            fallbackTarget: selectedExpansionTarget
+        });
+        if (!didManuallySetExpansionModeRef.current) {
+            setSelectedExpansionMode(inferredPreferences.expansionMode);
+        }
+        if (
+            !didManuallySetExpansionTargetRef.current &&
+            expansionTargetOptions.some((option) => option.id === inferredPreferences.expansionTarget)
+        ) {
+            setSelectedExpansionTarget(inferredPreferences.expansionTarget);
+        }
+    };
+
+    const applyPromptEvidenceInference = (nextPrompt) => {
+        const inferredPreferences = inferAIDraftEvidencePreferences({
+            prompt: nextPrompt,
+            scope: { type: promptScope },
+            selectedSourceCount: selectedContextSources.length,
+            loadedSourceCount: loadedSources.length,
+            fallbackEvidenceMode: selectedEvidenceMode,
+            fallbackCitationPolicy: selectedCitationPolicy
+        });
+        if (!didManuallySetEvidenceModeRef.current) {
+            setSelectedEvidenceMode(inferredPreferences.evidenceMode);
+        }
+        if (!didManuallySetCitationPolicyRef.current) {
+            setSelectedCitationPolicy(inferredPreferences.citationPolicy);
+        }
+    };
+
+    const updateCustomPrompt = (nextPrompt) => {
+        setCustomPrompt(nextPrompt);
+        applyPromptExpansionInference(nextPrompt);
+        applyPromptEvidenceInference(nextPrompt);
     };
 
     const stagePreviewRequest = async () => {
@@ -1259,6 +1437,11 @@ const PromptModal = ({
                 action_label: effectiveAction.label,
                 output_shape: inferredShape,
                 requested_visual: selectedVisual,
+                expansion_mode: selectedExpansionMode,
+                expansion_target: selectedExpansionTarget,
+                evidence_mode: selectedEvidenceMode,
+                citation_policy: selectedCitationPolicy,
+                source_policy_requires_citation: selectedCitationPolicy === 'required',
                 preview_mode: 'local_fallback',
                 change_intent: changeIntent,
                 follow_up_memory: memoryContext,
@@ -1306,6 +1489,11 @@ const PromptModal = ({
                 preview_mode: 'local_fallback',
                 output_shape: inferredShape,
                 requested_visual: selectedVisual,
+                expansion_mode: selectedExpansionMode,
+                expansion_target: selectedExpansionTarget,
+                evidence_mode: selectedEvidenceMode,
+                citation_policy: selectedCitationPolicy,
+                source_policy_requires_citation: selectedCitationPolicy === 'required',
                 change_intent: changeIntent,
                 follow_up_memory: memoryContext,
                 model: selectedModel === 'auto' ? 'auto' : selectedModel,
@@ -1375,6 +1563,12 @@ const PromptModal = ({
                     action: effectiveAction.id,
                     visual: selectedVisual,
                     output_shape: resolvedShape,
+                    expansion_mode: selectedExpansionMode,
+                    expansion_target: selectedExpansionTarget,
+                    expansion_plan: expansionPlanLabel,
+                    evidence_mode: selectedEvidenceMode,
+                    citation_policy: selectedCitationPolicy,
+                    evidence_plan: evidencePlanLabel,
                     model: selectedModel
                 }
             });
@@ -1462,9 +1656,18 @@ const PromptModal = ({
                 workspaceBrief,
                 memoryContext,
                 changeIntent,
+                expansionMode: selectedExpansionMode,
+                expansionTarget: selectedExpansionTarget,
+                evidenceMode: selectedEvidenceMode,
+                citationPolicy: selectedCitationPolicy,
                 metadata: {
                     requested_visual: selectedVisual,
                     output_shape: inferredShape,
+                    expansion_mode: selectedExpansionMode,
+                    expansion_target: selectedExpansionTarget,
+                    evidence_mode: selectedEvidenceMode,
+                    citation_policy: selectedCitationPolicy,
+                    source_policy_requires_citation: selectedCitationPolicy === 'required',
                     routed_role_id: effectiveRole.id,
                     routed_action_id: effectiveAction.id,
                     change_intent: changeIntent,
@@ -1482,7 +1685,7 @@ const PromptModal = ({
             );
             updateStageContext([
                 { label: 'Model policy', value: selectedModel === 'auto' ? 'Auto by intent' : 'Explicit model' },
-                { label: 'Requested model', value: selectedModel === 'auto' ? 'Auto' : selectedModel },
+                { label: 'Evidence', value: evidencePlanLabel },
                 { label: 'Preview mode', value: shouldSeedInitialGraph ? 'Initial graph' : 'Draft preview' }
             ]);
             updateGenerationProgress(
@@ -1529,9 +1732,18 @@ const PromptModal = ({
                 workspaceBrief,
                 memoryContext,
                 changeIntent,
+                expansionMode: selectedExpansionMode,
+                expansionTarget: selectedExpansionTarget,
+                evidenceMode: selectedEvidenceMode,
+                citationPolicy: selectedCitationPolicy,
                 metadata: {
                     requested_visual: selectedVisual,
                     output_shape: inferredShape,
+                    expansion_mode: selectedExpansionMode,
+                    expansion_target: selectedExpansionTarget,
+                    evidence_mode: selectedEvidenceMode,
+                    citation_policy: selectedCitationPolicy,
+                    source_policy_requires_citation: selectedCitationPolicy === 'required',
                     routed_role_id: effectiveRole.id,
                     routed_action_id: effectiveAction.id,
                     change_intent: changeIntent,
@@ -1698,6 +1910,22 @@ const PromptModal = ({
                         {plannedRoute.role?.label || 'Select a role'} / {plannedRoute.action?.label || 'Select an action'}
                     </strong>
                 </div>
+                <div>
+                    <span>Expansion plan</span>
+                    <strong>{expansionPlanLabel}</strong>
+                </div>
+                <div>
+                    <span>Attach under</span>
+                    <strong>{expansionTargetSummary(selectedExpansionTarget)}</strong>
+                </div>
+                <div>
+                    <span>Evidence mode</span>
+                    <strong>{evidenceModeLabel(selectedEvidenceMode)}</strong>
+                </div>
+                <div>
+                    <span>Citations</span>
+                    <strong>{citationPolicyLabel(selectedCitationPolicy)}</strong>
+                </div>
                 {plannedRoute.promptOverridesAction ? (
                     <small>
                         Your prompt looks generative, so this will run as Workflow Mapper / Custom prompt.
@@ -1728,7 +1956,7 @@ const PromptModal = ({
                     Ask anything
                     <textarea
                         value={customPrompt}
-                        onChange={(event) => setCustomPrompt(event.target.value)}
+                        onChange={(event) => updateCustomPrompt(event.target.value)}
                         placeholder={
                             initialPromptPlaceholder ||
                             'Example: turn this commissioning plan into a task-ready workflow.'
@@ -1742,6 +1970,77 @@ const PromptModal = ({
                         onChange={(event) => setSelectedVisual(event.target.value)}
                     >
                         {VISUAL_OPTIONS.map((option) => (
+                            <option key={option.id} value={option.id}>
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                <label>
+                    Expansion
+                    <select
+                        value={selectedExpansionMode}
+                        onChange={(event) => {
+                            didManuallySetExpansionModeRef.current = true;
+                            setSelectedExpansionMode(event.target.value);
+                        }}
+                    >
+                        <option value="exploratory">Exploratory</option>
+                        <option value="strict">Strict</option>
+                    </select>
+                </label>
+                <label>
+                    Expansion target
+                    <select
+                        value={selectedExpansionTarget}
+                        onChange={(event) => {
+                            didManuallySetExpansionTargetRef.current = true;
+                            setSelectedExpansionTarget(event.target.value);
+                        }}
+                    >
+                        {expansionTargetOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                <label>
+                    Evidence mode
+                    <select
+                        value={selectedEvidenceMode}
+                        onChange={(event) => {
+                            didManuallySetEvidenceModeRef.current = true;
+                            const nextMode = event.target.value;
+                            setSelectedEvidenceMode(nextMode);
+                            if (!didManuallySetCitationPolicyRef.current) {
+                                setSelectedCitationPolicy(
+                                    ['uploaded_sources', 'web_sources', 'sharepoint'].includes(nextMode)
+                                        ? 'required'
+                                        : nextMode === 'general_knowledge'
+                                          ? 'not_required'
+                                          : 'preferred'
+                                );
+                            }
+                        }}
+                    >
+                        {EVIDENCE_MODE_OPTIONS.map((option) => (
+                            <option key={option.id} value={option.id}>
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                <label>
+                    Citations
+                    <select
+                        value={selectedCitationPolicy}
+                        onChange={(event) => {
+                            didManuallySetCitationPolicyRef.current = true;
+                            setSelectedCitationPolicy(event.target.value);
+                        }}
+                    >
+                        {CITATION_POLICY_OPTIONS.map((option) => (
                             <option key={option.id} value={option.id}>
                                 {option.label}
                             </option>
@@ -1806,7 +2105,7 @@ const PromptModal = ({
                     <button
                         type="button"
                         key={suggestion}
-                        onClick={() => setCustomPrompt(suggestion)}
+                        onClick={() => updateCustomPrompt(suggestion)}
                     >
                         {suggestion}
                     </button>

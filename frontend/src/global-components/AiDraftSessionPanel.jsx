@@ -21,6 +21,8 @@ import {
     getAIDraftSourceStatus,
     inferAIDraftChangeIntent,
     latestAIDraftRevision,
+    draftArtifactPreviewToMarkdown,
+    normalizePublishableDraftArtifacts,
     normalizeSoftwareOverlapReports,
     rejectAIDraftSession,
     reviseAIDraftSession,
@@ -273,6 +275,7 @@ const GRAPH_FILTER_LABELS = {
 const CANVAS_LABELS = {
     mindmap: 'TraceSpace Map',
     knowledgeGraph: 'Knowledge Graph',
+    executive: 'Executive',
     outline: 'Outline',
     tasks: 'Tasks',
     table: 'Table'
@@ -323,6 +326,12 @@ const canvasForDraft = (session = {}, revision = {}, fallback = 'mindmap') => {
     }
     if (shape.includes('table') || shape.includes('chart')) {
         return keepMapVisible ? mapFallbackCanvas(fallback) : 'table';
+    }
+    if (shape.includes('executive')) {
+        return keepMapVisible ? mapFallbackCanvas(fallback) : 'executive';
+    }
+    if (shape.includes('news') || shape.includes('article')) {
+        return keepMapVisible ? mapFallbackCanvas(fallback) : 'outline';
     }
     if (shape.includes('outline')) {
         return keepMapVisible ? mapFallbackCanvas(fallback) : 'outline';
@@ -562,6 +571,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
     const [isAccepting, setIsAccepting] = useState(false);
     const [isAddingSource, setIsAddingSource] = useState(false);
     const [sourceToAddId, setSourceToAddId] = useState('');
+    const [copiedArtifactId, setCopiedArtifactId] = useState('');
     const promptRef = useRef(null);
     const revision = useMemo(() => latestAIDraftRevision(session), [session]);
     const sessionChangeIntent = useMemo(
@@ -570,6 +580,10 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
     );
     const items = useMemo(() => extractRevisionItems(revision), [revision]);
     const reviewNotes = useMemo(() => extractRevisionNotes(revision), [revision]);
+    const publishableArtifacts = useMemo(
+        () => normalizePublishableDraftArtifacts(revision),
+        [revision]
+    );
     const overlapReports = useMemo(() => normalizeSoftwareOverlapReports(revision), [revision]);
     const coverage = useMemo(() => sourceCoverage(items), [items]);
     const outlinePreview = useMemo(
@@ -772,8 +786,9 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         setIsAccepting(true);
         setMessage('');
         setProgressMessage('Applying accepted draft changes to the workspace.');
-        const shouldPreserveBranchLayout =
-            session.scope?.type === 'branch' &&
+        const shouldPreserveScopedLayout =
+            ['branch', 'node'].includes(session.scope?.type) &&
+            Boolean(session.scope?.node_id) &&
             ['append', 'selected', 'merge'].includes(mode) &&
             MAP_CANVAS_VIEWS.has(activeCanvasView || 'mindmap');
         const applyAcceptedGraph = (graph = {}, { preservePositions = false } = {}) => {
@@ -837,7 +852,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             const result = response?.data || {};
             const graph = result.graph || result.workspace || result;
             const localAcceptedGraph =
-                shouldPreserveBranchLayout && revisionHasGraphDraft(revision)
+                shouldPreserveScopedLayout && revisionHasGraphDraft(revision)
                     ? acceptAIDraftSession({
                           session,
                           nodes,
@@ -856,7 +871,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                         mode,
                         selectedItemIds: effectiveSelectedIds
                     });
-                applyAcceptedGraph(fallback, { preservePositions: shouldPreserveBranchLayout });
+                applyAcceptedGraph(fallback, { preservePositions: shouldPreserveScopedLayout });
             } else if (shouldPreserveCurrentGraph(graph, result)) {
                 setMessage('Accepted draft did not include graph changes, so the current layout was preserved.');
             } else {
@@ -901,7 +916,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 mode,
                 selectedItemIds: effectiveSelectedIds
             });
-            applyAcceptedGraph(fallback, { preservePositions: shouldPreserveBranchLayout });
+            applyAcceptedGraph(fallback, { preservePositions: shouldPreserveScopedLayout });
             updateActiveAIDraftSession(fallback.session);
             if (flowId) {
                 setSaveStatus('dirty');
@@ -1049,8 +1064,27 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         addSourceToDraft();
     };
 
+    const copyArtifactMarkdown = async (artifact) => {
+        const markdown = draftArtifactPreviewToMarkdown(artifact);
+        if (!markdown) {
+            setMessage('This draft artifact does not have copyable content yet.');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(markdown);
+            setCopiedArtifactId(artifact.id);
+            setMessage(`${artifact.label} copied as SharePoint-ready Markdown.`);
+            window.setTimeout(() => setCopiedArtifactId(''), 1600);
+        } catch {
+            setMessage('Copy is unavailable in this browser. Select the preview text and copy it manually.');
+        }
+    };
+
     const renderProjection = () => {
         if (items.length === 0) {
+            if (publishableArtifacts.length) {
+                return null;
+            }
             return (
                 <div className="ai-draft-empty" role="status">
                     <strong>No draft items yet</strong>
@@ -1133,6 +1167,14 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             </div>
 
             <DraftOutlinePreview preview={outlinePreview} />
+
+            {publishableArtifacts.length ? (
+                <PublishableArtifactPreviews
+                    artifacts={publishableArtifacts}
+                    copiedArtifactId={copiedArtifactId}
+                    onCopy={copyArtifactMarkdown}
+                />
+            ) : null}
 
             {renderProjection()}
 
@@ -1278,6 +1320,57 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
 };
 
 export default AiDraftSessionPanel;
+
+const PublishableArtifactPreviews = ({ artifacts, copiedArtifactId, onCopy }) => (
+    <section className="ai-draft-artifact-previews" aria-label="Draft artifact previews">
+        {artifacts.map((artifact) => (
+            <article key={`artifact-preview-${artifact.id}`} className="ai-draft-artifact-preview">
+                <div className="ai-draft-artifact-header">
+                    <div>
+                        <span>{artifact.label}</span>
+                        <strong>{artifact.title}</strong>
+                        {artifact.dek ? <p>{artifact.dek}</p> : null}
+                    </div>
+                    <button type="button" className="secondary" onClick={() => onCopy(artifact)}>
+                        {copiedArtifactId === artifact.id ? 'Copied' : 'Copy Markdown'}
+                    </button>
+                </div>
+                {(artifact.audience || artifact.publishTarget || artifact.reviewState) ? (
+                    <div className="ai-draft-artifact-meta">
+                        {artifact.audience ? <span>{artifact.audience}</span> : null}
+                        {artifact.publishTarget ? <span>{artifact.publishTarget}</span> : null}
+                        {artifact.reviewState ? <span>{humanizeId(artifact.reviewState)}</span> : null}
+                    </div>
+                ) : null}
+                {artifact.keyPoints.length ? (
+                    <ul className="ai-draft-artifact-key-points">
+                        {artifact.keyPoints.slice(0, 5).map((point) => (
+                            <li key={point}>{point}</li>
+                        ))}
+                    </ul>
+                ) : null}
+                {artifact.body ? <p className="ai-draft-artifact-body">{artifact.body}</p> : null}
+                {artifact.sections.length ? (
+                    <div className="ai-draft-artifact-sections">
+                        {artifact.sections.slice(0, 4).map((section) => (
+                            <section key={section.id}>
+                                <strong>{section.title}</strong>
+                                {section.body ? <p>{section.body}</p> : null}
+                                {section.bullets.length ? (
+                                    <ul>
+                                        {section.bullets.slice(0, 4).map((point) => (
+                                            <li key={point}>{point}</li>
+                                        ))}
+                                    </ul>
+                                ) : null}
+                            </section>
+                        ))}
+                    </div>
+                ) : null}
+            </article>
+        ))}
+    </section>
+);
 
 const DraftOutlinePreview = ({ preview }) => {
     if (!preview?.nodeCount) {

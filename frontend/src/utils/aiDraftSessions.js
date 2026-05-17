@@ -2,7 +2,8 @@ import { nanoid } from 'nanoid';
 import {
     createWorkspaceEdge,
     createWorkspaceNode,
-    getChildPosition
+    getChildPosition,
+    reflowSiblingSubtrees
 } from './manualNodes.js';
 
 export const AI_DRAFT_SESSION_CONTRACT_VERSION = '1';
@@ -14,6 +15,133 @@ export const AI_DRAFT_ACCEPT_MODES = [
     'cited_only',
     'notes_only'
 ];
+
+export const AI_DRAFT_EXPANSION_MODES = ['exploratory', 'strict'];
+
+export const normalizeAIDraftExpansionMode = (value = '') =>
+    AI_DRAFT_EXPANSION_MODES.includes(String(value || '').trim().toLowerCase())
+        ? String(value || '').trim().toLowerCase()
+        : 'exploratory';
+
+export const AI_DRAFT_EXPANSION_TARGETS = [
+    'selected_node',
+    'existing_children',
+    'leaves',
+    'whole_branch'
+];
+
+export const normalizeAIDraftExpansionTarget = (value = '') =>
+    AI_DRAFT_EXPANSION_TARGETS.includes(String(value || '').trim().toLowerCase())
+        ? String(value || '').trim().toLowerCase()
+        : 'selected_node';
+
+export const AI_DRAFT_EVIDENCE_MODES = [
+    'workspace',
+    'uploaded_sources',
+    'general_knowledge',
+    'web_sources',
+    'sharepoint'
+];
+
+export const normalizeAIDraftEvidenceMode = (value = '') =>
+    AI_DRAFT_EVIDENCE_MODES.includes(String(value || '').trim().toLowerCase())
+        ? String(value || '').trim().toLowerCase()
+        : 'workspace';
+
+export const AI_DRAFT_CITATION_POLICIES = ['required', 'preferred', 'not_required'];
+
+export const normalizeAIDraftCitationPolicy = (value = '') =>
+    AI_DRAFT_CITATION_POLICIES.includes(String(value || '').trim().toLowerCase())
+        ? String(value || '').trim().toLowerCase()
+        : 'preferred';
+
+export const inferAIDraftEvidencePreferences = ({
+    prompt = '',
+    scope = { type: 'node' },
+    selectedSourceCount = 0,
+    loadedSourceCount = 0,
+    fallbackEvidenceMode = '',
+    fallbackCitationPolicy = ''
+} = {}) => {
+    const text = String(prompt || '').toLowerCase();
+    const normalizedScope = normalizeAIDraftScope(scope);
+    let evidenceMode = normalizeAIDraftEvidenceMode(
+        fallbackEvidenceMode ||
+            (normalizedScope.type === 'source' || selectedSourceCount > 0
+                ? 'uploaded_sources'
+                : 'workspace')
+    );
+    if (/\b(web|online|internet|current news|latest news|news article|urls?|links?|public sources?)\b/.test(text)) {
+        evidenceMode = 'web_sources';
+    } else if (/\b(sharepoint|internal article|intranet|monthly update|monthly news)\b/.test(text)) {
+        evidenceMode = 'sharepoint';
+    } else if (/\b(general knowledge|brainstorm|from your knowledge|model knowledge|no sources|uncited|assume)\b/.test(text)) {
+        evidenceMode = 'general_knowledge';
+    } else if (/\b(uploaded|document|docx|pdf|source|citation|cite|evidence|grounded)\b/.test(text) || selectedSourceCount > 0) {
+        evidenceMode = loadedSourceCount > 0 || selectedSourceCount > 0 ? 'uploaded_sources' : evidenceMode;
+    }
+
+    let citationPolicy = normalizeAIDraftCitationPolicy(fallbackCitationPolicy || 'preferred');
+    if (/\b(require citations|citation required|must cite|cite every|source-backed|source backed|grounded)\b/.test(text)) {
+        citationPolicy = 'required';
+    } else if (/\b(no citations|citation not required|uncited|assumption only|no sources)\b/.test(text)) {
+        citationPolicy = 'not_required';
+    } else if (['uploaded_sources', 'web_sources', 'sharepoint'].includes(evidenceMode)) {
+        citationPolicy = 'required';
+    } else if (evidenceMode === 'general_knowledge') {
+        citationPolicy = 'not_required';
+    }
+
+    return {
+        evidenceMode,
+        citationPolicy
+    };
+};
+
+export const inferAIDraftExpansionPreferences = ({
+    prompt = '',
+    scope = { type: 'node' },
+    fallbackMode = 'exploratory',
+    fallbackTarget = ''
+} = {}) => {
+    const text = String(prompt || '').toLowerCase();
+    const scopeType = normalizeAIDraftScope(scope).type;
+    const defaultTarget = scopeType === 'branch' ? 'leaves' : 'selected_node';
+    const countPattern =
+        /\b(?:exactly|only|just|give me|add|create|generate|with)\s+\d+\s+(?:more\s+)?(?:nodes?|items?|children|subtopics?|branches?)\b/;
+    const strictPattern =
+        /\b(strict|exactly|only|just|direct children|children only|one level|single level|no grand(?:child|children)|without grand(?:child|children)|no nested|without nested|not nested)\b/;
+    const exploratoryPattern =
+        /\b(exploratory|explore|comprehensive|deep|deeper|fully|fuller|more complete|logical manner|propagate|for each|for every|each child|every child|whole branch|entire branch|throughout|leaves|leaf nodes?)\b/;
+
+    let expansionMode = normalizeAIDraftExpansionMode(fallbackMode);
+    if (strictPattern.test(text) || countPattern.test(text)) {
+        expansionMode = 'strict';
+    }
+    if (exploratoryPattern.test(text) && !strictPattern.test(text) && !countPattern.test(text)) {
+        expansionMode = 'exploratory';
+    }
+
+    let expansionTarget = normalizeAIDraftExpansionTarget(fallbackTarget || defaultTarget);
+    if (/\b(children only|direct children|one level|single level|no grand(?:child|children)|without grand(?:child|children)|no nested|without nested|not nested)\b/.test(text)) {
+        expansionTarget = 'selected_node';
+    } else if (scopeType === 'branch' && /\b(whole branch|entire branch|full branch|throughout|all descendants|all existing nodes|entire subtree|whole subtree)\b/.test(text)) {
+        expansionTarget = 'whole_branch';
+    } else if (scopeType === 'branch' && /\b(leaves|leaf nodes?|terminal nodes?|end nodes?)\b/.test(text)) {
+        expansionTarget = 'leaves';
+    } else if (['branch', 'node'].includes(scopeType) && /\b(each child|every child|for each child|for every child|existing children|propagate|across children)\b/.test(text)) {
+        expansionTarget = 'existing_children';
+    } else if (countPattern.test(text)) {
+        expansionTarget = 'selected_node';
+    } else if (!fallbackTarget) {
+        expansionTarget = defaultTarget;
+    }
+
+    return {
+        expansionMode,
+        expansionTarget
+    };
+};
 
 export const AI_DRAFT_ACCEPT_MODE_DETAILS = {
     append: {
@@ -654,7 +782,11 @@ export const buildAIDraftSessionRequestPayload = ({
     workspaceBrief = {},
     metadata = {},
     memoryContext = null,
-    changeIntent = ''
+    changeIntent = '',
+    expansionMode = '',
+    expansionTarget = '',
+    evidenceMode = '',
+    citationPolicy = ''
 } = {}) => {
     const normalizedMemory =
         memoryContext && typeof memoryContext === 'object' && Object.keys(memoryContext).length
@@ -663,6 +795,18 @@ export const buildAIDraftSessionRequestPayload = ({
     const normalizedChangeIntent = normalizeAIDraftChangeIntent(
         changeIntent || normalizedMemory?.change_intent || metadata.change_intent,
         inferAIDraftChangeIntent(prompt, 'supplement')
+    );
+    const normalizedExpansionMode = normalizeAIDraftExpansionMode(
+        expansionMode || metadata.expansion_mode || normalizedMemory?.expansion_mode
+    );
+    const normalizedExpansionTarget = normalizeAIDraftExpansionTarget(
+        expansionTarget || metadata.expansion_target || normalizedMemory?.expansion_target
+    );
+    const normalizedEvidenceMode = normalizeAIDraftEvidenceMode(
+        evidenceMode || metadata.evidence_mode || normalizedMemory?.evidence_mode
+    );
+    const normalizedCitationPolicy = normalizeAIDraftCitationPolicy(
+        citationPolicy || metadata.citation_policy || normalizedMemory?.citation_policy
     );
     return {
         role: role.id || role.role_id || role.label || 'ask-ai',
@@ -684,6 +828,11 @@ export const buildAIDraftSessionRequestPayload = ({
         metadata: {
             ...metadata,
             change_intent: normalizedChangeIntent,
+            expansion_mode: normalizedExpansionMode,
+            expansion_target: normalizedExpansionTarget,
+            evidence_mode: normalizedEvidenceMode,
+            citation_policy: normalizedCitationPolicy,
+            source_policy_requires_citation: normalizedCitationPolicy === 'required',
             follow_up_memory: normalizedMemory || metadata.follow_up_memory,
             workspace_brief: workspaceBrief && typeof workspaceBrief === 'object' ? workspaceBrief : {},
             source_context: selectedSourcePayload?.metadata
@@ -793,6 +942,151 @@ const isSoftwareOverlapArtifact = (item = {}) => {
         type.includes('tool_overlap') ||
         (type.includes('overlap') && /\b(software|tool|application|app|system)\b/.test(title))
     );
+};
+
+const publishableArtifactTypes = new Set([
+    'executive_summary',
+    'executive_output',
+    'news_article'
+]);
+
+const artifactPayload = (artifact = {}) =>
+    artifact.data && typeof artifact.data === 'object'
+        ? { ...artifact.data, ...artifact }
+        : artifact;
+
+const collectTextList = (...values) =>
+    values
+        .flatMap((value) => asArray(value))
+        .map((value) =>
+            typeof value === 'string'
+                ? value.trim()
+                : firstText(value?.text, value?.content, value?.summary, value?.title, value?.label)
+        )
+        .filter(Boolean);
+
+const normalizeArtifactSection = (section = {}, index = 0) => {
+    if (typeof section === 'string') {
+        return {
+            id: `section-${index + 1}`,
+            title: `Section ${index + 1}`,
+            body: section.trim(),
+            bullets: []
+        };
+    }
+    return {
+        id: firstText(section.id, section.section_id, section.title, `section-${index + 1}`),
+        title: firstText(section.title, section.heading, section.label, `Section ${index + 1}`),
+        body: firstText(section.body, section.content, section.text, section.summary),
+        bullets: collectTextList(section.bullets, section.points, section.key_points)
+    };
+};
+
+const publishableArtifactType = (artifact = {}) => {
+    const type = artifactType(artifact);
+    if (publishableArtifactTypes.has(type)) {
+        return type;
+    }
+    if (type.includes('executive')) {
+        return 'executive_summary';
+    }
+    if (type.includes('news') || type.includes('article')) {
+        return 'news_article';
+    }
+    return '';
+};
+
+export const normalizePublishableDraftArtifacts = (revision = {}) => {
+    const artifacts = [
+        ...asArray(revision.generated_artifacts),
+        ...asArray(revision.artifacts),
+        ...asArray(revision.draft_items)
+    ];
+
+    return artifacts
+        .map((artifact, index) => {
+            const payload = artifactPayload(artifact);
+            const type = publishableArtifactType(payload);
+            if (!type) {
+                return null;
+            }
+            const sections = [
+                ...asArray(payload.sections),
+                ...asArray(payload.body_sections),
+                ...asArray(payload.article_sections)
+            ].map(normalizeArtifactSection);
+            const keyPoints = collectTextList(
+                payload.key_points,
+                payload.key_takeaways,
+                payload.takeaways,
+                payload.highlights,
+                payload.recommendations
+            );
+            return {
+                id: firstText(payload.id, payload.artifact_id, `draft-artifact-${index + 1}`),
+                artifactType: type,
+                label: type === 'news_article' ? 'News article' : 'Executive summary',
+                title: firstText(
+                    payload.headline,
+                    payload.title,
+                    payload.label,
+                    type === 'news_article' ? 'Draft news article' : 'Draft executive summary'
+                ),
+                dek: firstText(payload.dek, payload.subhead, payload.subtitle, payload.summary),
+                body: firstText(payload.body, payload.content, payload.text, payload.narrative),
+                keyPoints,
+                sections,
+                audience: firstText(payload.audience, payload.metadata?.audience),
+                publishTarget: firstText(
+                    payload.publish_target,
+                    payload.channel,
+                    payload.metadata?.publish_target,
+                    payload.metadata?.channel
+                ),
+                reviewState: firstText(
+                    payload.review_state,
+                    payload.review_status,
+                    payload.status,
+                    payload.metadata?.review_state,
+                    'needs_review'
+                )
+            };
+        })
+        .filter(Boolean);
+};
+
+export const draftArtifactPreviewToMarkdown = (artifact = {}) => {
+    const lines = [];
+    if (artifact.title) {
+        lines.push(`# ${artifact.title}`);
+    }
+    if (artifact.dek) {
+        lines.push('', `_${artifact.dek}_`);
+    }
+    if (artifact.audience || artifact.publishTarget) {
+        lines.push(
+            '',
+            [artifact.audience ? `Audience: ${artifact.audience}` : '', artifact.publishTarget ? `Channel: ${artifact.publishTarget}` : '']
+                .filter(Boolean)
+                .join(' | ')
+        );
+    }
+    if (artifact.keyPoints?.length) {
+        lines.push('', '## Key points', ...artifact.keyPoints.map((point) => `- ${point}`));
+    }
+    if (artifact.body) {
+        lines.push('', artifact.body);
+    }
+    asArray(artifact.sections).forEach((section) => {
+        lines.push('', `## ${section.title}`);
+        if (section.body) {
+            lines.push('', section.body);
+        }
+        if (section.bullets?.length) {
+            lines.push('', ...section.bullets.map((point) => `- ${point}`));
+        }
+    });
+    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 };
 
 const normalizeSoftwareOverlapCandidate = (candidate = {}, index = 0) => {
@@ -1536,6 +1830,7 @@ export const acceptAIDraftSession = ({
             ? []
             : hierarchyDraftEdges
                   .filter((edge) => generatedIds.has(edge.target_node_id))
+                  .filter((edge) => acceptedOrExistingIds.has(edge.source_node_id))
                   .map((edge) => {
                       const relationshipType = normalizeHierarchyRelationshipType(edge);
                       return {
@@ -1624,8 +1919,41 @@ export const acceptAIDraftSession = ({
                       return true;
                   });
     const generatedEdges = [...generatedHierarchyEdges, ...generatedRelationshipEdges];
+    const nextEdges = [...baseGraph.edges, ...generatedEdges];
+    const normalizedScope = normalizeAIDraftScope(session.scope);
+    const existingNodeIds = new Set(baseGraph.nodes.map((node) => node.id));
+    const reflowedExistingSources = new Set();
+    const internallyReseatedNodes = generatedHierarchyEdges.reduce((nextNodes, edge) => {
+        const sourceId = edgeSourceId(edge);
+        if (!sourceId || !existingNodeIds.has(sourceId) || reflowedExistingSources.has(sourceId)) {
+            return nextNodes;
+        }
+        const parentId = edgeSourceId(nextEdges.find((candidate) => edgeTargetId(candidate) === sourceId));
+        if (!parentId) {
+            return nextNodes;
+        }
+        reflowedExistingSources.add(sourceId);
+        return reflowSiblingSubtrees({
+            nodes: nextNodes,
+            edges: nextEdges,
+            parentId,
+            anchorNodeId: sourceId
+        });
+    }, [...baseGraph.nodes, ...generatedNodes]);
+    const scopeParentId =
+        ['branch', 'node'].includes(normalizedScope.type) && normalizedScope.node_id
+            ? edgeSourceId(nextEdges.find((edge) => edgeTargetId(edge) === normalizedScope.node_id))
+            : '';
+    const reseatedNodes = scopeParentId
+        ? reflowSiblingSubtrees({
+              nodes: internallyReseatedNodes,
+              edges: nextEdges,
+              parentId: scopeParentId,
+              anchorNodeId: normalizedScope.node_id
+          })
+        : internallyReseatedNodes;
     const nextNodes = attachDraftNotes({
-        nodes: [...baseGraph.nodes, ...generatedNodes],
+        nodes: reseatedNodes,
         session,
         revision,
         mode,
@@ -1656,7 +1984,7 @@ export const acceptAIDraftSession = ({
 
     return {
         nodes: nextNodes,
-        edges: [...baseGraph.edges, ...generatedEdges],
+        edges: nextEdges,
         session: acceptedSession,
         accept_result: {
             session_id: session.session_id,
@@ -1722,6 +2050,11 @@ const createAcceptedNode = ({ draft, session, revision, nodes, edges, parentId }
     const sourceRefs = asArray(draft.source_refs);
     const sourceStatus = getAIDraftSourceStatus(draft);
     const position = resolvedParentId ? getChildPosition(nodes, edges, resolvedParentId) : undefined;
+    const assumption =
+        draft.assumption ?? draft.metadata?.assumption ?? draft.metadata?.assumptions ?? false;
+    const confidence = draft.confidence ?? draft.metadata?.confidence ?? '';
+    const duplicate = draft.duplicate ?? draft.metadata?.duplicate ?? draft.metadata?.duplicate_of ?? '';
+    const conflict = draft.conflict ?? draft.metadata?.conflict ?? draft.metadata?.conflicts ?? '';
     const status =
         draft.node_type !== 'reference' && sourceRefs.length === 0
             ? 'needs_review'
@@ -1759,11 +2092,19 @@ const createAcceptedNode = ({ draft, session, revision, nodes, edges, parentId }
         ...node,
         data: {
             ...node.data,
+            assumption,
+            confidence,
+            duplicate,
+            conflict,
             metadata: provenance,
             ai_draft_session_id: session.session_id,
             ai_draft_revision_id: revision.revision_id,
             data: {
                 ...node.data.data,
+                assumption,
+                confidence,
+                duplicate,
+                conflict,
                 metadata: provenance
             }
         }

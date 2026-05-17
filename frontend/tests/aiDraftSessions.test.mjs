@@ -16,6 +16,10 @@ import {
     getAIDraftModelMetadata,
     getAIDraftSourceStatus,
     inferAIDraftChangeIntent,
+    inferAIDraftEvidencePreferences,
+    inferAIDraftExpansionPreferences,
+    draftArtifactPreviewToMarkdown,
+    normalizePublishableDraftArtifacts,
     normalizeSoftwareOverlapReports,
     rejectAIDraftSession,
     reviseAIDraftSession,
@@ -631,10 +635,115 @@ test('acceptAIDraftSession lays out five generated branch children in a local no
     const positionKeys = new Set(generated.map((node) => `${node.position.x}:${node.position.y}`));
     assert.equal(positionKeys.size, 5);
     assert.ok(generated.every((node) => Math.abs(node.position.x - parent.position.x) <= 500));
-    assert.ok(generated.every((node) => Math.abs(node.position.y - parent.position.y) <= 600));
+    assert.ok(generated.every((node) => Math.abs(node.position.y - parent.position.y) <= 900));
     assert.ok(generated.every((node) => ![existingA, existingB].some((existing) => (
-        existing.position.x === node.position.x && existing.position.y === node.position.y
+        Math.abs(existing.position.x - node.position.x) < 340 &&
+        Math.abs(existing.position.y - node.position.y) < 88
     ))));
+});
+
+test('acceptAIDraftSession reseats later sibling subtrees after a large node expansion', () => {
+    const root = createWorkspaceNode({ id: 'root', title: 'Coffee cart', position: { x: 0, y: 300 } });
+    const suppliers = createWorkspaceNode({ id: 'suppliers', title: 'Suppliers', position: { x: 366, y: 500 } });
+    const budget = createWorkspaceNode({ id: 'budget', title: 'Budget', position: { x: 366, y: 625 } });
+    const budgetChild = createWorkspaceNode({ id: 'budget-child', title: 'Cart buildout', position: { x: 732, y: 520 } });
+    const draftNodes = [
+        { id: 'supplier-requirements', title: 'Requirements', node_type: 'process', source_refs: [] },
+        { id: 'supplier-core', title: 'Core supplies', node_type: 'dependency', source_refs: [] },
+        { id: 'supplier-vendors', title: 'Vendor management', node_type: 'process', source_refs: [] },
+        { id: 'supplier-controls', title: 'Inventory controls', node_type: 'process', source_refs: [] },
+        { id: 'supplier-risk', title: 'Supply risk', node_type: 'risk', source_refs: [] },
+        { id: 'supplier-reorder', title: 'Reorder routine', node_type: 'process', source_refs: [] }
+    ];
+    const session = createAIDraftSession({
+        workspaceId: 'workspace-sibling-reseat',
+        scope: { type: 'node', node_id: 'suppliers' },
+        prompt: 'expand this node in a logical manner',
+        draftNodes,
+        draftEdges: draftNodes.map((node) => ({
+            id: `edge-suppliers-${node.id}`,
+            source_node_id: 'suppliers',
+            target_node_id: node.id,
+            relationship_type: 'contains'
+        })),
+        sessionId: 'session-sibling-reseat',
+        revisionId: 'revision-sibling-reseat-1'
+    });
+
+    const accepted = acceptAIDraftSession({
+        session,
+        nodes: [root, suppliers, budget, budgetChild],
+        edges: [
+            createWorkspaceEdge('root', 'suppliers', { id: 'edge-root-suppliers' }),
+            createWorkspaceEdge('root', 'budget', { id: 'edge-root-budget' }),
+            createWorkspaceEdge('budget', 'budget-child', { id: 'edge-budget-child' })
+        ],
+        mode: 'append',
+        acceptedAt: '2026-05-14T12:10:00.000Z'
+    });
+
+    const supplierNodes = accepted.nodes.filter((node) => node.id === 'suppliers' || node.id.startsWith('supplier-'));
+    const budgetNodes = accepted.nodes.filter((node) => node.id === 'budget' || node.id === 'budget-child');
+    const supplierBottom = Math.max(...supplierNodes.map((node) => node.position.y + 88));
+    const budgetTop = Math.min(...budgetNodes.map((node) => node.position.y));
+
+    assert.ok(budgetTop >= supplierBottom + 64);
+    assert.ok(accepted.nodes.find((node) => node.id === 'budget').position.y > budget.position.y);
+    assert.ok(accepted.nodes.find((node) => node.id === 'budget-child').position.y > budgetChild.position.y);
+});
+
+test('acceptAIDraftSession reseats branch siblings when expansion targets existing child anchors', () => {
+    const root = createWorkspaceNode({ id: 'root', title: 'Coffee cart', position: { x: 0, y: 300 } });
+    const suppliers = createWorkspaceNode({ id: 'suppliers', title: 'Suppliers', position: { x: 366, y: 250 } });
+    const budget = createWorkspaceNode({ id: 'budget', title: 'Budget', position: { x: 366, y: 375 } });
+    const budgetChild = createWorkspaceNode({ id: 'budget-child', title: 'Cart buildout', position: { x: 732, y: 375 } });
+    const draftNodes = [
+        { id: 'supplier-beans', title: 'Coffee beans', node_type: 'dependency', source_refs: [] },
+        { id: 'supplier-milk', title: 'Milk options', node_type: 'dependency', source_refs: [] },
+        { id: 'supplier-packaging', title: 'Packaging', node_type: 'dependency', source_refs: [] },
+        { id: 'supplier-backups', title: 'Backup vendors', node_type: 'risk', source_refs: [] }
+    ];
+    const session = createAIDraftSession({
+        workspaceId: 'workspace-existing-anchor-reseat',
+        scope: { type: 'branch', node_id: 'root' },
+        prompt: 'expand supplier branch leaves',
+        draftNodes,
+        draftEdges: [
+            ...draftNodes.map((node) => ({
+                id: `edge-suppliers-${node.id}`,
+                source_node_id: 'suppliers',
+                target_node_id: node.id,
+                relationship_type: 'contains'
+            })),
+            {
+                id: 'edge-missing-source',
+                source_node_id: 'missing-source',
+                target_node_id: 'supplier-backups',
+                relationship_type: 'contains'
+            }
+        ],
+        sessionId: 'session-existing-anchor-reseat',
+        revisionId: 'revision-existing-anchor-reseat-1'
+    });
+
+    const accepted = acceptAIDraftSession({
+        session,
+        nodes: [root, suppliers, budget, budgetChild],
+        edges: [
+            createWorkspaceEdge('root', 'suppliers', { id: 'edge-root-suppliers' }),
+            createWorkspaceEdge('root', 'budget', { id: 'edge-root-budget' }),
+            createWorkspaceEdge('budget', 'budget-child', { id: 'edge-budget-child' })
+        ],
+        mode: 'append',
+        acceptedAt: '2026-05-14T12:20:00.000Z'
+    });
+
+    assert.deepEqual(accepted.nodes.find((node) => node.id === 'root').position, root.position);
+    assert.deepEqual(accepted.nodes.find((node) => node.id === 'suppliers').position, suppliers.position);
+    assert.ok(accepted.edges.some((edge) => edge.source === 'suppliers' && edge.target === 'supplier-beans'));
+    assert.ok(!accepted.edges.some((edge) => edge.source === 'missing-source'));
+    assert.ok(accepted.nodes.find((node) => node.id === 'budget').position.y > budget.position.y);
+    assert.ok(accepted.nodes.find((node) => node.id === 'budget-child').position.y > budgetChild.position.y);
 });
 
 test('acceptAIDraftSession replace removes scoped descendants before local fallback accept', () => {
@@ -784,6 +893,103 @@ test('draft request carries visual routing metadata and desired outputs', () => 
     assert.equal(request.action, 'generate_checklist');
 });
 
+test('draft request carries strict versus exploratory expansion preference', () => {
+    const strictPayload = buildAIDraftSessionRequestPayload({
+        role: { id: 'workflow-mapper' },
+        action: { id: 'generate_child_nodes' },
+        scope: { type: 'node', node_id: 'root' },
+        prompt: 'Give me 5 more child nodes.',
+        expansionMode: 'strict',
+        expansionTarget: 'leaves',
+        evidenceMode: 'uploaded_sources',
+        citationPolicy: 'required'
+    });
+    const defaultPayload = buildAIDraftSessionRequestPayload({
+        role: { id: 'workflow-mapper' },
+        action: { id: 'generate_child_nodes' },
+        scope: { type: 'node', node_id: 'root' },
+        prompt: 'Expand this node.'
+    });
+
+    assert.equal(strictPayload.metadata.expansion_mode, 'strict');
+    assert.equal(strictPayload.metadata.expansion_target, 'leaves');
+    assert.equal(strictPayload.metadata.evidence_mode, 'uploaded_sources');
+    assert.equal(strictPayload.metadata.citation_policy, 'required');
+    assert.equal(strictPayload.metadata.source_policy_requires_citation, true);
+    assert.equal(defaultPayload.metadata.expansion_mode, 'exploratory');
+    assert.equal(defaultPayload.metadata.expansion_target, 'selected_node');
+    assert.equal(defaultPayload.metadata.evidence_mode, 'workspace');
+    assert.equal(defaultPayload.metadata.citation_policy, 'preferred');
+});
+
+test('inferAIDraftEvidencePreferences maps source intent to evidence gates', () => {
+    assert.deepEqual(
+        inferAIDraftEvidencePreferences({
+            prompt: 'Create a monthly news article with current online sources.',
+            scope: { type: 'workspace' }
+        }),
+        {
+            evidenceMode: 'web_sources',
+            citationPolicy: 'required'
+        }
+    );
+    assert.deepEqual(
+        inferAIDraftEvidencePreferences({
+            prompt: 'Draft this from general knowledge with no citations.',
+            scope: { type: 'node', node_id: 'root' }
+        }),
+        {
+            evidenceMode: 'general_knowledge',
+            citationPolicy: 'not_required'
+        }
+    );
+    assert.deepEqual(
+        inferAIDraftEvidencePreferences({
+            prompt: 'Build an executive summary from uploaded source evidence.',
+            scope: { type: 'source', source_id: 'doc-1' },
+            selectedSourceCount: 1,
+            loadedSourceCount: 1
+        }),
+        {
+            evidenceMode: 'uploaded_sources',
+            citationPolicy: 'required'
+        }
+    );
+});
+
+test('inferAIDraftExpansionPreferences maps plain-language growth intent', () => {
+    assert.deepEqual(
+        inferAIDraftExpansionPreferences({
+            prompt: 'Give me 5 more nodes for this branch.',
+            scope: { type: 'branch', node_id: 'root' }
+        }),
+        {
+            expansionMode: 'strict',
+            expansionTarget: 'selected_node'
+        }
+    );
+    assert.deepEqual(
+        inferAIDraftExpansionPreferences({
+            prompt: 'Propagate each child in a logical manner.',
+            scope: { type: 'branch', node_id: 'root' }
+        }),
+        {
+            expansionMode: 'exploratory',
+            expansionTarget: 'existing_children'
+        }
+    );
+    assert.deepEqual(
+        inferAIDraftExpansionPreferences({
+            prompt: 'Fully expand the whole branch.',
+            scope: { type: 'branch', node_id: 'root' }
+        }),
+        {
+            expansionMode: 'exploratory',
+            expansionTarget: 'whole_branch'
+        }
+    );
+});
+
 test('follow-up memory captures scoped graph context and update intent', () => {
     const nodeSourceRef = { document_id: 'doc-aec', chunk_id: 'chunk-1' };
     const priorSourceRef = { document_id: 'doc-reconciled', chunk_id: 'chunk-9' };
@@ -919,7 +1125,7 @@ test('follow-up intent preserves supplement and compare prompts over update word
 test('starter transformation catalog includes operational prompt defaults', () => {
     const ids = new Set(starterTransformations.map((starter) => starter.id));
 
-    assert.equal(starterTransformations.length, 22);
+    assert.equal(starterTransformations.length, 24);
     assert.ok(ids.has('sop_to_checklist'));
     assert.ok(ids.has('pdf_to_training_outline'));
     assert.ok(ids.has('requirements_to_tasks'));
@@ -928,6 +1134,8 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.ok(ids.has('complex_issue_team_roadmap'));
     assert.ok(ids.has('sme_review_packet'));
     assert.ok(ids.has('implementation_handoff_package'));
+    assert.ok(ids.has('executive_summary'));
+    assert.ok(ids.has('news_article'));
     assert.ok(ids.has('reconcile_source_with_workspace'));
     assert.ok(ids.has('specialize_branch'));
     assert.ok(ids.has('find_process_bottlenecks'));
@@ -956,6 +1164,86 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.equal(toolOverlap.visual, 'software_overlap_report');
     assert.match(toolOverlap.description, /overlapping applications/i);
     assert.match(toolOverlap.prompt, /potential overlap/i);
+
+    const executiveSummary = starterTransformations.find(
+        (starter) => starter.id === 'executive_summary'
+    );
+    assert.equal(executiveSummary.visual, 'executive_summary');
+    assert.equal(executiveSummary.roleId, 'enterprise-readiness-planner');
+    assert.equal(executiveSummary.actionId, 'create_stakeholder_review_package');
+
+    const newsArticle = starterTransformations.find((starter) => starter.id === 'news_article');
+    assert.equal(newsArticle.visual, 'news_article');
+    assert.equal(newsArticle.roleId, 'research-assistant');
+    assert.equal(newsArticle.actionId, 'custom_prompt');
+});
+
+test('publishable draft artifacts normalize executive summary preview fields', () => {
+    const previews = normalizePublishableDraftArtifacts({
+        generated_artifacts: [
+            {
+                id: 'exec-1',
+                artifact_type: 'executive_summary',
+                headline: 'Modernize source review',
+                dek: 'A concise leadership brief for operational rollout.',
+                key_points: ['Reduce review drift', { text: 'Protect cited decisions' }],
+                sections: [
+                    {
+                        heading: 'Decision needed',
+                        body: 'Approve a source-backed review cadence.',
+                        bullets: ['Assign owners', 'Set quarterly review dates']
+                    }
+                ],
+                metadata: {
+                    audience: 'Leadership team',
+                    publish_target: 'SharePoint news'
+                }
+            }
+        ]
+    });
+
+    assert.equal(previews.length, 1);
+    assert.equal(previews[0].label, 'Executive summary');
+    assert.equal(previews[0].title, 'Modernize source review');
+    assert.equal(previews[0].dek, 'A concise leadership brief for operational rollout.');
+    assert.deepEqual(previews[0].keyPoints, ['Reduce review drift', 'Protect cited decisions']);
+    assert.equal(previews[0].sections[0].title, 'Decision needed');
+    assert.equal(previews[0].audience, 'Leadership team');
+    assert.equal(previews[0].publishTarget, 'SharePoint news');
+});
+
+test('publishable draft artifacts normalize news article payloads and copy markdown', () => {
+    const [preview] = normalizePublishableDraftArtifacts({
+        artifacts: [
+            {
+                artifact_type: 'news_article',
+                data: {
+                    title: 'TraceSpace pilots monthly source reviews',
+                    subhead: 'Teams get a faster way to keep workspace knowledge current.',
+                    highlights: ['New review queue', 'SME questions stay visible'],
+                    body: 'The pilot helps teams review loaded source material before publishing.',
+                    article_sections: [
+                        {
+                            title: 'What changed',
+                            content: 'Source reviews can now be packaged for internal updates.'
+                        }
+                    ],
+                    channel: 'Intranet'
+                }
+            }
+        ]
+    });
+
+    assert.equal(preview.label, 'News article');
+    assert.equal(preview.title, 'TraceSpace pilots monthly source reviews');
+    assert.deepEqual(preview.keyPoints, ['New review queue', 'SME questions stay visible']);
+
+    const markdown = draftArtifactPreviewToMarkdown(preview);
+    assert.match(markdown, /^# TraceSpace pilots monthly source reviews/);
+    assert.match(markdown, /_Teams get a faster way to keep workspace knowledge current\._/);
+    assert.match(markdown, /Channel: Intranet/);
+    assert.match(markdown, /## Key points\n- New review queue\n- SME questions stay visible/);
+    assert.match(markdown, /## What changed/);
 });
 
 test('intent prompt profiles include standards review and roadmap actions', () => {
