@@ -226,7 +226,7 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
             "generate_checklist",
             "custom_prompt",
         ],
-        "system_instructions": "Turn findings into executive-ready plans with phases, owners, decisions, dependencies, evidence gaps, and review checkpoints.",
+        "system_instructions": "Turn findings into executive-ready decision memos and plans. Lead with the recommendation or decision requested, then cover why now, scope, business value, governance/risk controls, investment assumptions, success metrics, owners, evidence gaps, and review checkpoints.",
         "default_output_shape": "tasks",
         "source_strictness": "prefer_source_refs",
         "default_review_status": "needs_review_when_unsourced",

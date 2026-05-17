@@ -525,6 +525,72 @@ def test_top_level_executive_summary_projection_becomes_review_artifact_without_
     assert draft_item["metadata"]["artifact_type"] == "executive_summary"
 
 
+def test_top_level_executive_output_projection_becomes_review_artifact_without_nodes():
+    item = {
+        "id": "finding-approval",
+        "title": "Approval gate",
+        "description": "Manager approval is required before deployment.",
+        "status": "needs_review",
+        "priority": "high",
+        "owner_id": None,
+        "due_date": None,
+        "source_refs": [SOURCE_REF],
+        "source_backed": True,
+        "needs_review": False,
+        "metadata": {},
+    }
+    revision = parse_ai_draft_revision_response(
+        {
+            "intent": "draft_executive_output",
+            "output_shape": "executive_output",
+            "summary": "Executive output ready for review.",
+            "draft_nodes": [],
+            "draft_edges": [],
+            "draft_annotations": [],
+            "generated_artifacts": [],
+            "executive_output": {
+                "contract_version": "1",
+                "title": "Deployment Executive Output",
+                "summary": "Approve a controlled deployment pilot after confirming the approval owner.",
+                "key_findings": [item],
+                "recommended_actions": [item],
+                "risks": [],
+                "required_decisions": [item],
+                "source_backed_appendix": [item],
+                "assumptions": [],
+                "metadata": {
+                    "node_count": 1,
+                    "source_backed_node_count": 1,
+                    "needs_review_count": 0,
+                    "task_count": 0,
+                },
+            },
+            "source_coverage": [],
+            "tasks": [],
+            "checklist": [],
+            "flow_chart": {},
+            "knowledge_graph": {},
+            "chart": {},
+            "outline": [],
+            "table": [],
+            "kanban": [],
+            "presentation_sections": [],
+            "review_annotations": [],
+            "source_refs": [SOURCE_REF],
+            "assumptions": [],
+        },
+        prompt="Create executive output.",
+        scope={"type": "workspace"},
+        source_refs=[SOURCE_REF],
+        classification={"output_shape": "executive_output", "intent": "draft_executive_output"},
+    )
+
+    [artifact] = revision["generated_artifacts"]
+    assert artifact["artifact_type"] == "executive_output"
+    assert artifact["data"]["summary"].startswith("Approve a controlled deployment pilot")
+    assert revision["draft_items"][0]["metadata"]["artifact_type"] == "executive_output"
+
+
 def test_news_article_artifact_marks_unsourced_article_items_needs_review():
     [artifact] = validate_generated_artifacts(
         [

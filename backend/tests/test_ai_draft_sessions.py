@@ -81,6 +81,11 @@ def test_draft_generation_prompt_respects_explicit_node_counts():
     assert "source_context.draft_preferences.expansion_mode" in user_prompt
     assert "source_context.draft_preferences.expansion_target" in user_prompt
     assert "source_context.draft_preferences.evidence_mode" in user_prompt
+    assert "leadership business case / decision memo" in user_prompt
+    assert "recommendation or decision requested" in user_prompt
+    assert "why now, proposed scope, business value, governance/risk controls" in user_prompt
+    assert "planning-level ranges" in user_prompt
+    assert "unsourced claims, quotes, costs, timelines, ROI estimates" in user_prompt
     assert '"expansion_mode": "strict"' in user_prompt
     assert '"expansion_target": "leaves"' in user_prompt
     assert '"evidence_mode": "uploaded_sources"' in user_prompt

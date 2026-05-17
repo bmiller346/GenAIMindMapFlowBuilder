@@ -1171,6 +1171,9 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.equal(executiveSummary.visual, 'executive_summary');
     assert.equal(executiveSummary.roleId, 'enterprise-readiness-planner');
     assert.equal(executiveSummary.actionId, 'create_stakeholder_review_package');
+    assert.match(executiveSummary.prompt, /recommendation or decision requested/i);
+    assert.match(executiveSummary.prompt, /go\/no-go decision gate/i);
+    assert.match(executiveSummary.prompt, /unsupported costs, ROI, dates, or claims/i);
 
     const newsArticle = starterTransformations.find((starter) => starter.id === 'news_article');
     assert.equal(newsArticle.visual, 'news_article');

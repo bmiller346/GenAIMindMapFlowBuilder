@@ -5398,7 +5398,9 @@ Output requirements:
 - Silently self-review before returning JSON: if the draft only contains generic category labels, is missing obvious domain-standard subtopics, or has fewer than 3 useful child branches under major concepts, revise it internally before finalizing.
 - Use your model knowledge of the requested domain to choose depth and subtopics; do not rely on hardcoded examples or stop at framework headings.
 - Populate generated_artifacts for visual or review outputs such as knowledge_graph, flow_chart, chart, checklist, tasks, source_coverage, software_overlap_report, and implementation_handoff_package.
-- For executive_summary and news_article outputs, fill the top-level executive_summary or news_article projection; it will be converted into a generated review artifact. Prefer these review artifacts over draft_nodes unless the user explicitly asks to change the graph. Keep unsourced claims, quotes, and inferred findings source_refs: [], include assumptions, and mark them needs_review.
+- For executive_summary outputs, write a leadership business case / decision memo, not a generic summary. Lead with the recommendation or decision requested, then explain why now, proposed scope, business value, governance/risk controls, investment/resource assumptions, success metrics, and the go/no-go decision gate. Distinguish existing capability from new investment. Use calm executive language such as controlled pilot, governed deployment, planning-level estimate, approval-gated, auditability, measured adoption, and operational leverage. Avoid hype and implementation minutiae.
+- Executive summaries should connect capabilities to measurable operational impact: time saved, rework reduced, standardization improved, support dependency lowered, scalability increased, risk reduced, or governance strengthened. When exact numbers are unavailable, use planning-level ranges only if the prompt/source supports them; otherwise identify the missing baseline metric as an assumption or review item.
+- For executive_summary and news_article outputs, fill the top-level executive_summary or news_article projection; it will be converted into a generated review artifact. Prefer these review artifacts over draft_nodes unless the user explicitly asks to change the graph. Keep unsourced claims, quotes, costs, timelines, ROI estimates, and inferred findings source_refs: [], include assumptions, and mark them needs_review.
 - For flow_chart outputs, model real flowchart grammar: decision steps need labeled outgoing paths such as Yes/No, Approved/Rejected, or Exception. Put branch text in flow_chart.edges[].label and durable graph edge metadata.branch_label / metadata.condition when you also emit draft_edges.
 - Populate the projection matching output_shape and, when graph changes are useful, draft_nodes and draft_edges.
 - Use stable draft IDs prefixed with draft_.
@@ -5512,7 +5514,7 @@ def _artifact_from_top_level_projection(
     parsed: dict[str, Any],
     shape: str,
 ) -> dict[str, Any] | None:
-    if shape not in {"software_overlap_report", "flow_chart", "executive_summary", "news_article"}:
+    if shape not in {"software_overlap_report", "flow_chart", "executive_output", "executive_summary", "news_article"}:
         return None
     data = parsed.get(shape)
     if not isinstance(data, dict) or not data:
@@ -5521,6 +5523,9 @@ def _artifact_from_top_level_projection(
         data = _normalize_flow_chart_data(data)
         title = "Flowchart"
         artifact_id = str(data.get("id") or "artifact-flow-chart")
+    elif shape == "executive_output":
+        title = str(data.get("title") or "Executive Output")
+        artifact_id = str(data.get("id") or "artifact-executive-output")
     elif shape == "executive_summary":
         title = str(data.get("title") or "Executive Summary")
         artifact_id = str(data.get("id") or "artifact-executive-summary")
