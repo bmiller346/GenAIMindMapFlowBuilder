@@ -13,6 +13,7 @@ from ai_helpers import (
     build_ai_draft_session,
     generate_ai_draft_session_with_provider,
     normalize_requested_artifact_types,
+    parse_ai_draft_revision_response,
     registered_artifact_types,
     validate_generated_artifacts,
 )
@@ -90,6 +91,16 @@ def _artifact_response(request):
         "flow_chart": {
             "steps": [{"id": "step-1", "node_id": "root", "kind": "process"}],
             "decisions": [{"id": "decision-1", "node_id": "approval", "kind": "decision"}],
+            "edges": [
+                {
+                    "id": "edge-approve",
+                    "source_step_id": "decision-1",
+                    "target_step_id": "step-1",
+                    "label": "Yes",
+                    "relationship_type": "decision_path",
+                    "metadata": {"condition": "Approval is granted"},
+                }
+            ],
             "dependencies": [{"source": "step-1", "target": "decision-1", "type": "approval"}],
         },
         "chart": {
@@ -353,6 +364,146 @@ def test_knowledge_graph_relationship_contract_marks_inferred_edges_needs_review
     assert edge["review_state"] == "needs_review"
     assert artifact["status"] == "needs_review"
     assert artifact["provenance"]["validation_status"] == "needs_review"
+
+
+def test_flow_chart_artifact_preserves_branch_labels_and_flags_unlabeled_decisions():
+    [artifact] = validate_generated_artifacts(
+        [
+            {
+                "id": "flow-1",
+                "artifact_type": "flow_chart",
+                "data": {
+                    "steps": [
+                        {"id": "intake", "title": "Intake"},
+                        {"id": "decision", "title": "Approved?"},
+                        {"id": "handoff", "title": "Handoff"},
+                    ],
+                    "decisions": [{"id": "decision", "title": "Approved?"}],
+                    "edges": [
+                        {
+                            "id": "edge-yes",
+                            "source_step_id": "decision",
+                            "target_step_id": "handoff",
+                            "relationship_type": "decision_path",
+                            "metadata": {"branch_label": "Yes", "condition": "Approved"},
+                        },
+                        {
+                            "id": "edge-no",
+                            "source_step_id": "decision",
+                            "target_step_id": "intake",
+                            "relationship_type": "exception",
+                        },
+                    ],
+                },
+            }
+        ],
+        scope={"type": "workspace"},
+        model_provider="fixture",
+        model="gpt-test",
+        ai_role="Ask AI",
+        prompt_profile="flow_chart",
+        input_source_refs=[],
+    )
+
+    edges = artifact["data"]["edges"]
+    assert edges[0]["label"] == "Yes"
+    assert artifact["validation"]["status"] == "needs_review"
+    assert "decision and exception paths should include label" in artifact["validation"]["issues"][0]
+
+
+def test_top_level_flow_chart_projection_becomes_tolerant_artifact():
+    revision = parse_ai_draft_revision_response(
+        {
+            "intent": "custom_prompt",
+            "output_shape": "flow_chart",
+            "summary": "Draft a process flow.",
+            "draft_nodes": [],
+            "draft_edges": [],
+            "draft_annotations": [],
+            "generated_artifacts": [],
+            "flow_chart": {
+                "nodes": [
+                    {"id": "start", "title": "Start", "kind": "process"},
+                    {"id": "approved", "title": "Approved?", "kind": "decision"},
+                ],
+                "decisions": [{"id": "approved", "title": "Approved?", "kind": "decision"}],
+                "edges": [
+                    {
+                        "id": "edge-yes",
+                        "source": "approved",
+                        "target": "start",
+                        "condition": "Yes",
+                        "type": "decision_path",
+                    }
+                ],
+            },
+        },
+        prompt="Draft a flowchart",
+        scope={"type": "workspace"},
+        source_refs=[],
+        classification={"output_shape": "flow_chart", "intent": "custom_prompt"},
+    )
+
+    [artifact] = revision["generated_artifacts"]
+    assert artifact["artifact_type"] == "flow_chart"
+    assert artifact["data"]["steps"][0]["step_type"] == "process"
+    assert artifact["data"]["edges"][0]["source_step_id"] == "approved"
+    assert artifact["data"]["edges"][0]["label"] == "Yes"
+
+
+def test_top_level_flow_chart_projection_repairs_schema_limited_artifact_shell():
+    revision = parse_ai_draft_revision_response(
+        {
+            "intent": "custom_prompt",
+            "output_shape": "flow_chart",
+            "summary": "Draft a process flow.",
+            "draft_nodes": [],
+            "draft_edges": [],
+            "draft_annotations": [],
+            "generated_artifacts": [
+                {
+                    "id": "artifact-flow-chart",
+                    "artifact_type": "flow_chart",
+                    "title": "Workflow map",
+                    "status": "draft",
+                    "data": {
+                        "summary": "Schema-limited generated artifact shell.",
+                        "items": [],
+                        "source_refs": [],
+                        "assumptions": ["Generated shell."],
+                    },
+                    "source_refs": [],
+                    "assumptions": ["Generated shell."],
+                }
+            ],
+            "flow_chart": {
+                "steps": [
+                    {"id": "start", "title": "Start", "step_type": "process"},
+                    {"id": "review", "title": "Review request", "step_type": "decision"},
+                ],
+                "decisions": [{"id": "review", "title": "Review request", "step_type": "decision"}],
+                "edges": [
+                    {
+                        "id": "edge-approved",
+                        "source_step_id": "review",
+                        "target_step_id": "start",
+                        "label": "Approved",
+                        "relationship_type": "decision_path",
+                        "metadata": {},
+                    }
+                ],
+            },
+        },
+        prompt="Draft a flowchart",
+        scope={"type": "workspace"},
+        source_refs=[],
+        classification={"output_shape": "flow_chart", "intent": "custom_prompt"},
+    )
+
+    [artifact] = revision["generated_artifacts"]
+    assert artifact["id"] == "artifact-flow-chart"
+    assert artifact["data"]["steps"][0]["id"] == "start"
+    assert artifact["data"]["edges"][0]["label"] == "Approved"
 
 
 def test_ai_draft_schema_has_first_class_software_overlap_report_output():

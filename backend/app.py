@@ -2624,10 +2624,64 @@ def get_flow(flow_id: str):
     return normalize_flow_record(flow)
 
 
+def _snapshot_debug_counts(flow_json: str) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "bytes": len((flow_json or "").encode("utf-8")),
+    }
+    try:
+        snapshot = json.loads(flow_json or "{}")
+    except (TypeError, json.JSONDecodeError) as exc:
+        summary["parse_error"] = exc.__class__.__name__
+        return summary
+    if not isinstance(snapshot, dict):
+        summary["parse_error"] = "not_object"
+        return summary
+
+    for key in ("nodes", "edges", "activity_events", "ai_action_runs", "automations"):
+        value = snapshot.get(key)
+        summary[key] = len(value) if isinstance(value, list) else 0
+
+    source_library = snapshot.get("source_library")
+    if isinstance(source_library, list):
+        summary["source_library_items"] = len(source_library)
+    elif isinstance(source_library, dict):
+        documents = source_library.get("documents")
+        summary["source_library_items"] = len(documents) if isinstance(documents, list) else 0
+    else:
+        summary["source_library_items"] = 0
+    return summary
+
+
+def _print_flow_update_debug(
+    *,
+    flow_id: str,
+    storage: str,
+    started_at: float,
+    input_summary: dict[str, Any],
+    persisted_summary: dict[str, Any],
+    result: Any = None,
+) -> None:
+    payload = {
+        "flow_id": flow_id,
+        "storage": storage,
+        "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 1),
+        "input": input_summary,
+        "persisted": persisted_summary,
+    }
+    if result is not None:
+        payload["mongo"] = {
+            "matched": getattr(result, "matched_count", None),
+            "modified": getattr(result, "modified_count", None),
+            "upserted_id": str(getattr(result, "upserted_id", "") or ""),
+        }
+    print(f"[flow-update] {json.dumps(payload, separators=(',', ':'))}")
+
+
 @app.put("/flow-update/")
 def update_flow(update_data: Flow):
+    started_at = time.perf_counter()
+    input_summary = _snapshot_debug_counts(update_data.flow_json)
     try:
-        print(update_data)
         repaired_flow_json = repair_flow_snapshot_for_persistence(
             update_data.flow_json,
             flow_id=update_data.flow_id,
@@ -2650,7 +2704,7 @@ def update_flow(update_data: Flow):
                 )
             except PyMongoError:
                 result = None
-        print(result)
+        persisted_summary = _snapshot_debug_counts(repaired_flow_json)
 
         if result is None or result.matched_count == 0:
             promoted_flow = promote_local_flow_to_mongo(update_data.flow_id)
@@ -2661,11 +2715,27 @@ def update_flow(update_data: Flow):
                 )
                 if result.matched_count:
                     local_update_flow(update_data.flow_id, updates)
+                    _print_flow_update_debug(
+                        flow_id=update_data.flow_id,
+                        storage="mongo_promoted",
+                        started_at=started_at,
+                        input_summary=input_summary,
+                        persisted_summary=persisted_summary,
+                        result=result,
+                    )
                     return {
                         "flow_id": str(update_data.flow_id),
                         "message": "Flow updated successfully",
                     }
             if local_update_flow(update_data.flow_id, updates):
+                _print_flow_update_debug(
+                    flow_id=update_data.flow_id,
+                    storage="local",
+                    started_at=started_at,
+                    input_summary=input_summary,
+                    persisted_summary=persisted_summary,
+                    result=result,
+                )
                 return {
                     "flow_id": str(update_data.flow_id),
                     "message": "Flow updated successfully",
@@ -2674,6 +2744,14 @@ def update_flow(update_data: Flow):
                 status_code=status.HTTP_404_NOT_FOUND, detail="Flow not found"
             )
 
+        _print_flow_update_debug(
+            flow_id=update_data.flow_id,
+            storage="mongo",
+            started_at=started_at,
+            input_summary=input_summary,
+            persisted_summary=persisted_summary,
+            result=result,
+        )
         return {
             "flow_id": str(update_data.flow_id),
             "message": "Flow updated successfully",
@@ -3159,7 +3237,7 @@ def _react_node_from_graph_node(node: dict, index: int) -> dict:
         metadata = {}
     return {
         "id": node.get("id", ""),
-        "type": "question" if node_type == "question" else "response",
+        "type": "response",
         "position": metadata.get("position") or {"x": 120 + (index % 4) * 260, "y": 160 + index * 120},
         "data": {
             "title": title,
@@ -3310,6 +3388,10 @@ def _append_accepted_graph_to_flow_snapshot(
             if not graph_node:
                 continue
             updated_node = _react_node_from_graph_node(graph_node, len(snapshot.get("nodes", [])) + 1)
+            if node_id not in existing_node_ids:
+                snapshot["nodes"].append(updated_node)
+                existing_node_ids.add(node_id)
+                continue
             snapshot["nodes"] = [
                 (
                     {
@@ -3434,6 +3516,10 @@ def _requested_prompt(request: dict[str, Any]) -> str:
     return query_with_follow_up_memory(prompt_with_brief, request)
 
 
+def _display_prompt(request: dict[str, Any]) -> str:
+    return str(request.get("prompt") or request.get("custom_prompt") or "")
+
+
 def _requested_model_policy(request: dict[str, Any]) -> str | None:
     policy = request.get("model_policy")
     if isinstance(policy, str):
@@ -3454,20 +3540,95 @@ def _requested_model(request: dict[str, Any]) -> str | None:
     return normalized
 
 
+def _ai_draft_request_debug_summary(request: dict[str, Any], scope: dict[str, Any] | None = None) -> dict[str, Any]:
+    prompt = _requested_prompt(request)
+    desired_outputs = _requested_desired_outputs(request)
+    source_chunks = _requested_source_chunks(request)
+    source_refs = request.get("source_refs") if isinstance(request.get("source_refs"), list) else []
+    normalized_scope = scope or (
+        request.get("scope") if isinstance(request.get("scope"), dict) else {"type": "workspace"}
+    )
+    return {
+        "role": request.get("role") or "Ask AI",
+        "action": request.get("action") or request.get("intent") or "custom_prompt",
+        "scope_type": normalized_scope.get("type", "workspace"),
+        "desired_outputs": desired_outputs,
+        "model": request.get("model") or "auto",
+        "model_policy": _requested_model_policy(request) or "balanced",
+        "prompt_chars": len(prompt or ""),
+        "source_chunks": len(source_chunks),
+        "source_refs": len(source_refs),
+        "client_supplied_draft": _has_client_supplied_draft(request),
+    }
+
+
+def _ai_draft_session_debug_summary(session: dict[str, Any]) -> dict[str, Any]:
+    revisions = session.get("revisions") if isinstance(session.get("revisions"), list) else []
+    latest_revision = revisions[-1] if revisions and isinstance(revisions[-1], dict) else {}
+    metadata = latest_revision.get("metadata") if isinstance(latest_revision.get("metadata"), dict) else {}
+    return {
+        "session_id": session.get("session_id", ""),
+        "revision_id": latest_revision.get("revision_id", ""),
+        "model": latest_revision.get("model") or session.get("selected_model") or metadata.get("actual_model") or "",
+        "draft_nodes": len(latest_revision.get("draft_nodes", [])) if isinstance(latest_revision.get("draft_nodes"), list) else 0,
+        "draft_edges": len(latest_revision.get("draft_edges", [])) if isinstance(latest_revision.get("draft_edges"), list) else 0,
+        "draft_items": len(latest_revision.get("draft_items", [])) if isinstance(latest_revision.get("draft_items"), list) else 0,
+        "generated_artifacts": len(latest_revision.get("generated_artifacts", [])) if isinstance(latest_revision.get("generated_artifacts"), list) else 0,
+        "source_refs": len(session.get("source_refs", [])) if isinstance(session.get("source_refs"), list) else 0,
+        "source_context_mode": metadata.get("source_context_mode", ""),
+        "source_chunks_included": metadata.get("source_chunks_included", 0),
+        "source_context_truncated": bool(metadata.get("source_context_truncated")),
+        "input_tokens": metadata.get("input_tokens", 0),
+        "output_tokens": metadata.get("output_tokens", 0),
+        "total_tokens": metadata.get("total_tokens", 0),
+    }
+
+
+def _print_ai_draft_debug(
+    *,
+    flow_id: str,
+    status_label: str,
+    started_at: float,
+    graph_elapsed_ms: float,
+    generation_elapsed_ms: float,
+    save_elapsed_ms: float,
+    request_summary: dict[str, Any],
+    session: dict[str, Any] | None = None,
+) -> None:
+    payload = {
+        "flow_id": flow_id,
+        "status": status_label,
+        "elapsed_ms": round((time.perf_counter() - started_at) * 1000, 1),
+        "graph_ms": round(graph_elapsed_ms, 1),
+        "generation_ms": round(generation_elapsed_ms, 1),
+        "save_ms": round(save_elapsed_ms, 1),
+        "request": request_summary,
+    }
+    if session is not None:
+        payload["session"] = _ai_draft_session_debug_summary(session)
+    print(f"[ai-draft-session] {json.dumps(payload, separators=(',', ':'))}")
+
+
 @app.post("/api/workspaces/{flow_id}/ai/draft-sessions")
 def create_ai_draft_session(
     flow_id: str,
     request: dict[str, Any] | None = None,
 ):
+    started_at = time.perf_counter()
     request = request or {}
+    graph_started_at = time.perf_counter()
     graph = get_workspace_graph_or_404(flow_id)
+    graph_elapsed_ms = (time.perf_counter() - graph_started_at) * 1000
     scope = normalize_ai_draft_scope(request.get("scope") if isinstance(request.get("scope"), dict) else {"type": "workspace"})
+    request_summary = _ai_draft_request_debug_summary(request, scope)
     if not _has_client_supplied_draft(request):
         try:
+            generation_started_at = time.perf_counter()
             generated_session = generate_ai_draft_session_with_provider(
                 graph,
                 workspace_id=flow_id,
                 prompt=_requested_prompt(request),
+                display_prompt=_display_prompt(request),
                 scope=scope,
                 role=request.get("role") or "Ask AI",
                 model_policy=_requested_model_policy(request),
@@ -3492,10 +3653,28 @@ def create_ai_draft_session(
             metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
             if metadata:
                 generated_session.setdefault("metadata", {}).update(metadata)
-            return save_ai_draft_session(validate_ai_draft_session(generated_session))
+            generation_elapsed_ms = (time.perf_counter() - generation_started_at) * 1000
+            save_started_at = time.perf_counter()
+            saved_session = save_ai_draft_session(validate_ai_draft_session(generated_session))
+            save_elapsed_ms = (time.perf_counter() - save_started_at) * 1000
+            _print_ai_draft_debug(
+                flow_id=flow_id,
+                status_label="generated",
+                started_at=started_at,
+                graph_elapsed_ms=graph_elapsed_ms,
+                generation_elapsed_ms=generation_elapsed_ms,
+                save_elapsed_ms=save_elapsed_ms,
+                request_summary=request_summary,
+                session=saved_session,
+            )
+            return saved_session
         except MissingConfigurationError as exc:
             raise configuration_http_error(exc) from exc
         except GraphSchemaError as exc:
+            print(
+                "AI draft generation schema validation failed:",
+                json.dumps(exc.errors, indent=2),
+            )
             raise HTTPException(
                 status_code=422,
                 detail={
@@ -3548,7 +3727,20 @@ def create_ai_draft_session(
         session["selected_model"] = revision["model"]
     if revision.get("metadata", {}).get("model_reason"):
         session["model_reason"] = revision["metadata"]["model_reason"]
-    return save_ai_draft_session(session)
+    save_started_at = time.perf_counter()
+    saved_session = save_ai_draft_session(session)
+    save_elapsed_ms = (time.perf_counter() - save_started_at) * 1000
+    _print_ai_draft_debug(
+        flow_id=flow_id,
+        status_label="client_supplied",
+        started_at=started_at,
+        graph_elapsed_ms=graph_elapsed_ms,
+        generation_elapsed_ms=0,
+        save_elapsed_ms=save_elapsed_ms,
+        request_summary=request_summary,
+        session=saved_session,
+    )
+    return saved_session
 
 
 @app.get("/api/workspaces/{flow_id}/ai/draft-sessions/{session_id}")
@@ -3579,6 +3771,7 @@ def create_ai_draft_revision(
                 session,
                 graph,
                 prompt=_requested_prompt(request),
+                display_prompt=_display_prompt(request),
                 model_policy=_requested_model_policy(request),
                 model=_requested_model(request),
                 desired_outputs=_requested_desired_outputs(request),
@@ -6230,7 +6423,15 @@ def create_docx_component(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail="DOCX is too large for OpenAI processing. Split it into smaller source files and try again.",
             )
-    except HTTPException:
+    except HTTPException as exc:
+        update_operation_progress(
+            operation_id,
+            phase="failed",
+            message="DOCX processing failed",
+            detail=str(exc.detail),
+            progress=100,
+            status_value="failed",
+        )
         raise
     except MissingConfigurationError as exc:
         update_operation_progress(

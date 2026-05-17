@@ -538,7 +538,7 @@ def test_build_openai_helper_preview_payload_includes_contract_and_metadata():
         "helper_id": "project_planner",
         "action": "task_projection",
         "scope_type": "branch",
-        "node_count": 2,
+        "node_count": "2",
         "model_tier": "explicit",
         "model_reason": "User or workflow selected the model explicitly.",
     }

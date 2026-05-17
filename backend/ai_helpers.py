@@ -376,6 +376,12 @@ def generate_integration_operator_preview(
             warnings.append(
                 "OpenAI API key is not configured; returned deterministic local preview."
             )
+        except RuntimeError as exc:
+            if not allow_deterministic_fallback:
+                raise
+            warnings.append(
+                f"OpenAI helper preview failed; returned deterministic local preview. {exc}"
+            )
 
     preview = _deterministic_integration_operator_preview(
         scoped_graph,
@@ -2102,10 +2108,155 @@ def _normalize_relationship_edges(relationship_edges: Any, *, path: str, errors:
     return normalized
 
 
+def _coerce_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _normalize_flow_chart_step(value: Any, index: int, *, default_type: str = "process") -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        if isinstance(value, str) and value.strip():
+            value = {"title": value}
+        else:
+            return None
+    metadata = value.get("metadata") if isinstance(value.get("metadata"), dict) else {}
+    node_id = str(value.get("node_id") or value.get("node") or "").strip()
+    if node_id:
+        metadata.setdefault("node_id", node_id)
+    step_type = str(
+        value.get("step_type")
+        or value.get("kind")
+        or value.get("type")
+        or value.get("node_type")
+        or default_type
+    )
+    title = str(value.get("title") or value.get("label") or value.get("name") or f"Step {index}")
+    return {
+        "id": str(value.get("id") or node_id or f"step_{index}"),
+        "title": title,
+        "summary": value.get("summary") if isinstance(value.get("summary"), str) else value.get("description"),
+        "step_type": step_type,
+        "source_refs": deepcopy(value.get("source_refs", [])) if isinstance(value.get("source_refs"), list) else [],
+        "assumptions": deepcopy(value.get("assumptions", [])) if isinstance(value.get("assumptions"), list) else [],
+        "metadata": metadata,
+    }
+
+
+def _normalize_flow_chart_edge(value: Any, index: int, *, default_relationship: str = "next") -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    metadata = value.get("metadata") if isinstance(value.get("metadata"), dict) else {}
+    label = str(
+        value.get("label")
+        or value.get("branch_label")
+        or value.get("condition")
+        or metadata.get("label")
+        or metadata.get("branch_label")
+        or metadata.get("condition")
+        or ""
+    ).strip()
+    condition = str(value.get("condition") or metadata.get("condition") or "").strip()
+    if condition:
+        metadata.setdefault("condition", condition)
+    if label:
+        metadata.setdefault("branch_label", label)
+    source = str(value.get("source_step_id") or value.get("source") or value.get("source_node_id") or "").strip()
+    target = str(value.get("target_step_id") or value.get("target") or value.get("target_node_id") or "").strip()
+    if not source or not target:
+        return None
+    relationship_type = str(value.get("relationship_type") or value.get("type") or default_relationship)
+    return {
+        "id": str(value.get("id") or f"flow_edge_{index}_{source}_{target}"),
+        "source_step_id": source,
+        "target_step_id": target,
+        "label": label or None,
+        "relationship_type": relationship_type,
+        "metadata": metadata,
+    }
+
+
+def _normalize_flow_chart_data(data: Any) -> dict[str, Any]:
+    data = data if isinstance(data, dict) else {}
+    steps = [
+        step
+        for index, value in enumerate(
+            [*_coerce_list(data.get("steps")), *_coerce_list(data.get("nodes"))],
+            start=1,
+        )
+        if (step := _normalize_flow_chart_step(value, index))
+    ]
+    decisions = [
+        step
+        for index, value in enumerate(_coerce_list(data.get("decisions")), start=1)
+        if (step := _normalize_flow_chart_step(value, index, default_type="decision"))
+    ]
+    edges = [
+        edge
+        for index, value in enumerate(_coerce_list(data.get("edges")), start=1)
+        if (edge := _normalize_flow_chart_edge(value, index))
+    ]
+    dependency_start = len(edges) + 1
+    for index, dependency in enumerate(_coerce_list(data.get("dependencies")), start=dependency_start):
+        edge = _normalize_flow_chart_edge(dependency, index, default_relationship="dependency")
+        if edge:
+            edges.append(edge)
+    return {
+        **data,
+        "steps": steps,
+        "decisions": decisions,
+        "edges": edges,
+    }
+
+
 def _validate_flow_chart_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
-    data = item.get("data", {})
+    data = _normalize_flow_chart_data(item.get("data", {}))
+    item["data"] = data
     if not (data.get("steps") or data.get("nodes") or data.get("decisions") or data.get("dependencies")):
         errors.append(f"{path}.data: flow_chart requires steps, nodes, decisions, or dependencies")
+
+    validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
+    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
+    decision_ids = {
+        str(decision.get("id") or decision.get("node_id") or "").strip()
+        for decision in data.get("decisions", [])
+        if isinstance(decision, dict) and str(decision.get("id") or decision.get("node_id") or "").strip()
+    }
+    labeled_decision_edges: set[str] = set()
+
+    edges = data.get("edges", [])
+    for index, edge in enumerate(edges):
+        if not isinstance(edge, dict):
+            errors.append(f"{path}.data.edges.{index}: must be an object")
+            continue
+        metadata = edge.get("metadata") if isinstance(edge.get("metadata"), dict) else {}
+        if not isinstance(edge.get("metadata"), dict):
+            edge["metadata"] = metadata
+        label = str(
+            edge.get("label")
+            or metadata.get("label")
+            or metadata.get("branch_label")
+            or metadata.get("condition")
+            or ""
+        ).strip()
+        if label:
+            edge["label"] = label
+
+        source_id = str(edge.get("source_step_id") or edge.get("source") or "").strip()
+        relationship_type = str(edge.get("relationship_type") or "").strip().lower().replace("_", "-")
+        if source_id in decision_ids:
+            if label:
+                labeled_decision_edges.add(source_id)
+            elif relationship_type in {"decision-path", "exception"}:
+                issues.append(
+                    f"{path}.data.edges.{index}: decision and exception paths should include label or metadata.branch_label"
+                )
+
+    for decision_id in sorted(decision_ids - labeled_decision_edges):
+        issues.append(f"{path}.data.decisions: decision '{decision_id}' has no labeled outgoing path")
+
+    if issues:
+        validation["issues"] = issues
+        validation["status"] = "needs_review"
+        item["validation"] = validation
 
 
 def _validate_chart_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
@@ -2650,7 +2801,7 @@ def build_openai_helper_preview_payload(
             "helper_id": helper_id,
             "action": action,
             "scope_type": normalized_scope.get("type", "workspace"),
-            "node_count": len(graph.get("nodes", [])) if isinstance(graph, dict) else 0,
+            "node_count": str(len(graph.get("nodes", [])) if isinstance(graph, dict) else 0),
             "model_tier": decision.tier,
             "model_reason": decision.reason,
         },
@@ -4577,6 +4728,7 @@ def generate_ai_draft_session_with_provider(
     *,
     workspace_id: str | None = None,
     prompt: str,
+    display_prompt: str | None = None,
     scope: dict[str, Any] | None = None,
     role: str = "Ask AI",
     model_policy: str | None = None,
@@ -4587,6 +4739,7 @@ def generate_ai_draft_session_with_provider(
 ) -> dict[str, Any]:
     normalized_scope = normalize_ai_draft_scope(scope)
     scoped_graph = _scope_graph_for_ai_draft(graph, normalized_scope)
+    stored_prompt = display_prompt if display_prompt is not None else prompt
     requested_outputs = desired_outputs if desired_outputs is not None else _desired_outputs_from_graph(graph)
     classification = classify_ai_draft_intent(prompt, scope=normalized_scope, desired_outputs=requested_outputs)
     policy = normalize_model_policy(model_policy or classification["model_policy"], requested_model=model)
@@ -4636,7 +4789,7 @@ def generate_ai_draft_session_with_provider(
     )
     session = build_ai_draft_session(
         workspace_id=workspace_id or _workspace_id(graph),
-        prompt=prompt,
+        prompt=stored_prompt,
         scope=normalized_scope,
         role=role,
         intent=classification["intent"],
@@ -4661,6 +4814,7 @@ def revise_ai_draft_session_with_provider(
     graph: dict[str, Any],
     *,
     prompt: str,
+    display_prompt: str | None = None,
     model_policy: str | None = None,
     model: str | None = None,
     desired_outputs: list[str] | None = None,
@@ -4669,6 +4823,7 @@ def revise_ai_draft_session_with_provider(
 ) -> dict[str, Any]:
     normalized_session = validate_ai_draft_session(session)
     normalized_scope = normalized_session["scope"]
+    stored_prompt = display_prompt if display_prompt is not None else prompt
     requested_outputs = desired_outputs if desired_outputs is not None else _desired_outputs_from_graph(graph)
     classification = classify_ai_draft_intent(
         f"{normalized_session.get('intent', '')} {prompt}",
@@ -4726,7 +4881,7 @@ def revise_ai_draft_session_with_provider(
     )
     revision = build_ai_draft_revision(
         session=normalized_session,
-        prompt=prompt,
+        prompt=stored_prompt,
         draft_nodes=result["draft_nodes"],
         draft_edges=result["draft_edges"],
         draft_items=result.get("draft_items"),
@@ -4735,7 +4890,7 @@ def revise_ai_draft_session_with_provider(
         model=metadata["actual_model"],
         metadata=metadata,
     )
-    revised = append_ai_draft_revision(normalized_session, revision, prompt=prompt)
+    revised = append_ai_draft_revision(normalized_session, revision, prompt=stored_prompt)
     revised["selected_model"] = metadata["actual_model"]
     revised["model_reason"] = decision.reason
     revised["model_policy"] = {"policy": policy}
@@ -4874,12 +5029,28 @@ def parse_ai_draft_revision_response(
     if not isinstance(raw_generated_artifacts, list):
         raw_generated_artifacts = []
     projection_artifact = _artifact_from_top_level_projection(parsed, shape)
-    if projection_artifact and not any(
-        isinstance(artifact, dict)
-        and artifact.get("artifact_type") == projection_artifact["artifact_type"]
-        for artifact in raw_generated_artifacts
-    ):
-        raw_generated_artifacts = [*raw_generated_artifacts, projection_artifact]
+    if projection_artifact:
+        projection_type = projection_artifact["artifact_type"]
+        projection_consumed = False
+        merged_artifacts: list[dict[str, Any]] = []
+        for artifact in raw_generated_artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            if artifact.get("artifact_type") == projection_type:
+                merged = deepcopy(artifact)
+                merged["artifact_type"] = projection_type
+                merged["data"] = deepcopy(projection_artifact["data"])
+                if not isinstance(merged.get("source_refs"), list):
+                    merged["source_refs"] = deepcopy(projection_artifact.get("source_refs", []))
+                if not isinstance(merged.get("assumptions"), list):
+                    merged["assumptions"] = deepcopy(projection_artifact.get("assumptions", []))
+                merged_artifacts.append(merged)
+                projection_consumed = True
+            else:
+                merged_artifacts.append(artifact)
+        if not projection_consumed:
+            merged_artifacts.append(projection_artifact)
+        raw_generated_artifacts = merged_artifacts
     generated_artifacts = validate_generated_artifacts(
         raw_generated_artifacts,
         scope=scope,
@@ -5009,6 +5180,7 @@ Output requirements:
 - Silently self-review before returning JSON: if the draft only contains generic category labels, is missing obvious domain-standard subtopics, or has fewer than 3 useful child branches under major concepts, revise it internally before finalizing.
 - Use your model knowledge of the requested domain to choose depth and subtopics; do not rely on hardcoded examples or stop at framework headings.
 - Populate generated_artifacts for visual or review outputs such as knowledge_graph, flow_chart, chart, checklist, tasks, source_coverage, software_overlap_report, and implementation_handoff_package.
+- For flow_chart outputs, model real flowchart grammar: decision steps need labeled outgoing paths such as Yes/No, Approved/Rejected, or Exception. Put branch text in flow_chart.edges[].label and durable graph edge metadata.branch_label / metadata.condition when you also emit draft_edges.
 - Populate the projection matching output_shape and, when graph changes are useful, draft_nodes and draft_edges.
 - Use stable draft IDs prefixed with draft_.
 - Use source_refs only by copying from Allowed source_refs.
@@ -5121,15 +5293,22 @@ def _artifact_from_top_level_projection(
     parsed: dict[str, Any],
     shape: str,
 ) -> dict[str, Any] | None:
-    if shape != "software_overlap_report":
+    if shape not in {"software_overlap_report", "flow_chart"}:
         return None
-    data = parsed.get("software_overlap_report")
+    data = parsed.get(shape)
     if not isinstance(data, dict) or not data:
         return None
+    if shape == "flow_chart":
+        data = _normalize_flow_chart_data(data)
+        title = "Flowchart"
+        artifact_id = str(data.get("id") or "artifact-flow-chart")
+    else:
+        title = str(data.get("title") or "Software Overlap Report")
+        artifact_id = str(data.get("id") or "artifact-software-overlap-report")
     return {
-        "id": str(data.get("id") or "artifact-software-overlap-report"),
-        "artifact_type": "software_overlap_report",
-        "title": str(data.get("title") or "Software Overlap Report"),
+        "id": artifact_id,
+        "artifact_type": shape,
+        "title": str(data.get("title") or title),
         "status": str(data.get("status") or "draft"),
         "data": deepcopy(data),
         "source_refs": deepcopy(data.get("source_refs", []))

@@ -137,6 +137,19 @@ def test_extract_output_text_accepts_nested_responses_output():
     assert json.loads(output)["nodes"][1]["id"] == "topic-1"
 
 
+def test_post_openai_json_reports_read_timeout(monkeypatch):
+    def fake_urlopen(*args, **kwargs):
+        raise TimeoutError("The read operation timed out")
+
+    monkeypatch.setattr(openai_sources.urllib.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(openai_sources.HTTPException) as exc_info:
+        openai_sources._post_openai_json({"input": []}, "test-key")
+
+    assert exc_info.value.status_code == 504
+    assert "timed out after 120 seconds" in str(exc_info.value.detail)
+
+
 def test_source_graph_generation_retries_schema_invalid_output(monkeypatch):
     requests = []
 

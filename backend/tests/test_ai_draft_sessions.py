@@ -75,6 +75,25 @@ def test_react_node_projection_uses_registered_response_node_shape():
     assert react_node["sourcePosition"] == "right"
 
 
+def test_react_node_projection_keeps_semantic_questions_as_content_nodes():
+    react_node = app._react_node_from_graph_node(
+        {
+            "id": "decision-1",
+            "title": "Decision: Is intake complete?",
+            "summary": "Choose the ready path or route missing information back.",
+            "node_type": "question",
+            "status": "needs_review",
+            "source_refs": [],
+            "metadata": {"position": {"x": 10, "y": 20}},
+        },
+        1,
+    )
+
+    assert react_node["type"] == "response"
+    assert react_node["data"]["node_type"] == "question"
+    assert react_node["data"]["title"] == "Decision: Is intake complete?"
+
+
 def test_source_context_can_skip_workspace_library_for_unsourced_generation():
     graph = {
         "workspace": {"id": "workspace-1"},
@@ -241,6 +260,69 @@ def test_requested_prompt_includes_follow_up_memory_context():
     assert '"node_id": "aec-root"' in prompt
     assert '"session_id": "session-aec"' in prompt
     assert "make this specific to AEC consulting" in prompt
+
+
+def test_generated_draft_session_stores_visible_prompt_not_follow_up_memory():
+    request = {
+        "prompt": "Improve this flowchart with source-backed review notes.",
+        "change_intent": "update",
+        "memory_context": {
+            "scope": {"type": "workspace"},
+            "graph_context": {
+                "nodes": [{"id": "root", "title": "Root"}],
+                "edges": [],
+            },
+        },
+    }
+    provider = FixtureDocMapAIProvider(draft_response_json())
+
+    session = generate_ai_draft_session_with_provider(
+        sample_graph(),
+        workspace_id="workspace-1",
+        prompt=app._requested_prompt(request),
+        display_prompt=app._display_prompt(request),
+        scope={"type": "workspace"},
+        provider=provider,
+    )
+
+    provider_prompt = request_prompt_text(provider)
+    assert "Use this follow-up AI memory while answering." in provider_prompt
+    assert "Improve this flowchart with source-backed review notes." in provider_prompt
+    assert session["prompt_history"][0]["content"] == "Improve this flowchart with source-backed review notes."
+    assert session["revisions"][0]["prompt"] == "Improve this flowchart with source-backed review notes."
+    assert "Follow-up memory context JSON" not in session["prompt_history"][0]["content"]
+
+
+def test_accept_snapshot_keeps_merge_update_nodes_when_saved_snapshot_is_stale():
+    snapshot = app._append_accepted_graph_to_flow_snapshot(
+        {
+            "flow_id": "workspace-1",
+            "flow_json": json.dumps({"nodes": [], "edges": [], "viewport": {}}),
+        },
+        {
+            "accepted_node_ids": [],
+            "accepted_edge_ids": [],
+            "patch_operations": [{"op": "update_node", "node_id": "existing-root"}],
+        },
+        {
+            "nodes": [
+                {
+                    "id": "existing-root",
+                    "title": "Existing root updated by draft",
+                    "summary": "The merge response retained the graph node even though it was not newly added.",
+                    "node_type": "workflow",
+                    "status": "needs_review",
+                    "source_refs": [],
+                    "metadata": {"position": {"x": 240, "y": 120}},
+                }
+            ],
+            "edges": [],
+        },
+    )
+
+    assert len(snapshot["nodes"]) == 1
+    assert snapshot["nodes"][0]["id"] == "existing-root"
+    assert snapshot["nodes"][0]["data"]["title"] == "Existing root updated by draft"
 
 
 def react_root_flow():

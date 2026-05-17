@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import shutil
+import socket
 import subprocess
 import tempfile
 import urllib.error
@@ -23,6 +24,7 @@ except ImportError:
     class status:
         HTTP_422_UNPROCESSABLE_ENTITY = 422
         HTTP_502_BAD_GATEWAY = 502
+        HTTP_504_GATEWAY_TIMEOUT = 504
         HTTP_503_SERVICE_UNAVAILABLE = 503
 
 from config import MissingConfigurationError, configuration_http_error, get_setting
@@ -730,6 +732,14 @@ def _post_openai_json(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
             return json.loads(response.read().decode("utf-8"))
+    except (TimeoutError, socket.timeout) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=(
+                "OpenAI request timed out after 120 seconds while processing the source. "
+                "Try again, use source-context mode, or split the DOCX into a smaller source."
+            ),
+        ) from exc
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise HTTPException(status_code=exc.code, detail=detail) from exc
