@@ -30,10 +30,16 @@ import {
     stageUploadedSourceReconciliationPreview
 } from '../utils/sourceReconciliationPreview';
 import { handleGeneratedSourceGraph } from '../utils/generatedSourceGraph';
+import SourceIntakeRoleControls, {
+    SOURCE_INTAKE_MODELS
+} from '../global-components/SourceIntakeRoleControls';
 
 const PPTXModal = () => {
    const flowId = flowStore((s) => s.flow_id);
     const [file, setFile] = useState();
+    const [intakeProfileId, setIntakeProfileId] = useState('');
+    const [intakeModel, setIntakeModel] = useState(SOURCE_INTAKE_MODELS[0]);
+    const [intakeBrief, setIntakeBrief] = useState('');
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     // const csvAccept = ".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
@@ -87,7 +93,10 @@ const PPTXModal = () => {
         });
         const data = {
             file: file,
-            operationId
+            operationId,
+            intakeRole: intakeProfileId,
+            intakeModel: intakeModel === 'auto' ? '' : intakeModel,
+            intakePrompt: intakeBrief.trim()
         };
         pushNode(LoadingModal, {
             ...sourceUploadLoading('PPTX', file?.name),
@@ -272,6 +281,17 @@ const PPTXModal = () => {
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>
+            <SourceIntakeRoleControls
+                sourceType="pptx"
+                fileName={file?.name || ''}
+                intakeProfileId={intakeProfileId}
+                setIntakeProfileId={setIntakeProfileId}
+                intakeModel={intakeModel}
+                setIntakeModel={setIntakeModel}
+                intakeBrief={intakeBrief}
+                setIntakeBrief={setIntakeBrief}
+                briefPlaceholder="Optional: tell AI whether this deck should become decisions, risks, slide sections, or source-backed themes."
+            />
             <div className="buttons">
                 <button
                     id="cancel"

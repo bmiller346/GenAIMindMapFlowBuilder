@@ -29,7 +29,10 @@ const setRequestData = (component_name, flow_id, data) => {
 				["flow_id", flow_id],
 				["processing_type", data.processing_type],
 				["source_intent", data.sourceIntent],
-				["operation_id", data.operationId]
+				["operation_id", data.operationId],
+				["intake_role", data.intakeRole],
+				["intake_model", data.intakeModel],
+				["intake_prompt", data.intakePrompt]
 			]), "multipart/form-data"];
 		case "web":
 			return ["component-create-crawl", createFormData([
@@ -41,13 +44,19 @@ const setRequestData = (component_name, flow_id, data) => {
 			return ["component-create-audio", createFormData([
 				["file", data.file],
 				["flow_id", flow_id],
-				["operation_id", data.operationId]
+				["operation_id", data.operationId],
+				["intake_role", data.intakeRole],
+				["intake_model", data.intakeModel],
+				["intake_prompt", data.intakePrompt]
 			]), "multipart/form-data"];
 		case "md":
 			return ["component-create-md", createFormData([
 				["file", data.file],
 				["flow_id", flow_id],
-				["operation_id", data.operationId]
+				["operation_id", data.operationId],
+				["intake_role", data.intakeRole],
+				["intake_model", data.intakeModel],
+				["intake_prompt", data.intakePrompt]
 			]), "multipart/form-data"];
 		case "youtube":
 			return ["component-create-youtube", createFormData([
@@ -59,7 +68,10 @@ const setRequestData = (component_name, flow_id, data) => {
 			return ["component-create-img", createFormData([
 				["file", data.file],
 				["flow_id", flow_id],
-				["operation_id", data.operationId]
+				["operation_id", data.operationId],
+				["intake_role", data.intakeRole],
+				["intake_model", data.intakeModel],
+				["intake_prompt", data.intakePrompt]
 			]), "multipart/form-data"];
 		case "docx":
 			return ["component-create-docx", createFormData([
@@ -81,19 +93,28 @@ const setRequestData = (component_name, flow_id, data) => {
 			return ["component-create-pptx", createFormData([
 				["file", data.file],
 				["flow_id", flow_id],
-				["operation_id", data.operationId]
+				["operation_id", data.operationId],
+				["intake_role", data.intakeRole],
+				["intake_model", data.intakeModel],
+				["intake_prompt", data.intakePrompt]
 			]), "multipart/form-data"];
 		case "html":
 			return ["component-create-html", createFormData([
 				["file", data.file],
 				["flow_id", flow_id],
-				["operation_id", data.operationId]
+				["operation_id", data.operationId],
+				["intake_role", data.intakeRole],
+				["intake_model", data.intakeModel],
+				["intake_prompt", data.intakePrompt]
 			]), "multipart/form-data"];
 		case "txt":
 			return ["component-create-txt", createFormData([
 				["file", data.file],
 				["flow_id", flow_id],
-				["operation_id", data.operationId]
+				["operation_id", data.operationId],
+				["intake_role", data.intakeRole],
+				["intake_model", data.intakeModel],
+				["intake_prompt", data.intakePrompt]
 			]), "multipart/form-data"];
 		case "video":
 			return ["component-create-video", createFormData([

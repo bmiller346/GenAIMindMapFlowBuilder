@@ -30,10 +30,16 @@ import {
     stageUploadedSourceReconciliationPreview
 } from '../utils/sourceReconciliationPreview';
 import { handleGeneratedSourceGraph } from '../utils/generatedSourceGraph';
+import SourceIntakeRoleControls, {
+    SOURCE_INTAKE_MODELS
+} from '../global-components/SourceIntakeRoleControls';
 
 const TextModal = () => {
 const flowId = flowStore((s) => s.flow_id);
     const [file, setFile] = useState();
+    const [intakeProfileId, setIntakeProfileId] = useState('');
+    const [intakeModel, setIntakeModel] = useState(SOURCE_INTAKE_MODELS[0]);
+    const [intakeBrief, setIntakeBrief] = useState('');
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const addActivity = useActivityStore((s) => s.addActivity);
@@ -76,7 +82,10 @@ const flowId = flowStore((s) => s.flow_id);
         const operationId = nanoid();
         const data = {
             file: file,
-            operationId
+            operationId,
+            intakeRole: intakeProfileId,
+            intakeModel: intakeModel === 'auto' ? '' : intakeModel,
+            intakePrompt: intakeBrief.trim()
         };
         const undoSnapshot = createOperationSnapshot({
             nodes,
@@ -280,6 +289,17 @@ const flowId = flowStore((s) => s.flow_id);
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>
+            <SourceIntakeRoleControls
+                sourceType="text"
+                fileName={file?.name || ''}
+                intakeProfileId={intakeProfileId}
+                setIntakeProfileId={setIntakeProfileId}
+                intakeModel={intakeModel}
+                setIntakeModel={setIntakeModel}
+                intakeBrief={intakeBrief}
+                setIntakeBrief={setIntakeBrief}
+                briefPlaceholder="Optional: tell AI whether to preserve structure, extract evidence, or summarize this text into action themes."
+            />
             <div className="buttons">
                 <button
                     id="cancel"

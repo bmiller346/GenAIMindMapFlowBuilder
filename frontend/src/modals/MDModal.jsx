@@ -30,10 +30,16 @@ import {
     stageUploadedSourceReconciliationPreview
 } from '../utils/sourceReconciliationPreview';
 import { handleGeneratedSourceGraph } from '../utils/generatedSourceGraph';
+import SourceIntakeRoleControls, {
+    SOURCE_INTAKE_MODELS
+} from '../global-components/SourceIntakeRoleControls';
 
 const MDModal = () => {
     const flowId = flowStore((s) => s.flow_id);
     const [file, setFile] = useState();
+    const [intakeProfileId, setIntakeProfileId] = useState('');
+    const [intakeModel, setIntakeModel] = useState(SOURCE_INTAKE_MODELS[0]);
+    const [intakeBrief, setIntakeBrief] = useState('');
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const addActivity = useActivityStore((s) => s.addActivity);
@@ -77,7 +83,10 @@ const MDModal = () => {
         const operationId = nanoid();
         const data = {
             file: file,
-            operationId
+            operationId,
+            intakeRole: intakeProfileId,
+            intakeModel: intakeModel === 'auto' ? '' : intakeModel,
+            intakePrompt: intakeBrief.trim()
         };
         const undoSnapshot = createOperationSnapshot({
             nodes,
@@ -281,6 +290,17 @@ const MDModal = () => {
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>
+            <SourceIntakeRoleControls
+                sourceType="markdown"
+                fileName={file?.name || ''}
+                intakeProfileId={intakeProfileId}
+                setIntakeProfileId={setIntakeProfileId}
+                intakeModel={intakeModel}
+                setIntakeModel={setIntakeModel}
+                intakeBrief={intakeBrief}
+                setIntakeBrief={setIntakeBrief}
+                briefPlaceholder="Optional: tell AI whether to preserve headings, extract source-backed facts, or turn notes into decisions."
+            />
             <div className="buttons">
                 <button
                     id="cancel"

@@ -5388,6 +5388,9 @@ def create_pdf_component(
     processing_type: str = Form(...),
     source_intent: str | None = Form(None),
     operation_id: str | None = Form(None),
+    intake_role: str | None = Form(None),
+    intake_prompt: str | None = Form(None),
+    intake_model: str | None = Form(None),
 ):
     update_operation_progress(
         operation_id,
@@ -5422,7 +5425,7 @@ def create_pdf_component(
         print(get_page_len(file))
         check_page_length = get_page_len(file)
         if processing_type == "gpt" and not check_page_length and processing_flow_type == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type='manual', operation_id=operation_id)
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type='manual', operation_id=operation_id, intake_role=intake_role, intake_prompt=intake_prompt, intake_model=intake_model)
         elif processing_type == "aws" and processing_flow_type == 'manual':
             update_operation_progress(
                 operation_id,
@@ -5460,7 +5463,7 @@ def create_pdf_component(
             )
             return result
         elif processing_type == "gpt" and not check_page_length and processing_flow_type == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type='automatic', operation_id=operation_id)
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type='automatic', operation_id=operation_id, intake_role=intake_role, intake_prompt=intake_prompt, intake_model=intake_model)
         elif processing_type == "aws" and processing_flow_type == 'automatic':
             update_operation_progress(
                 operation_id,
@@ -6195,6 +6198,9 @@ def create_txt_component(
     file: UploadFile,
     flow_id: str = Form(...),
     operation_id: str | None = Form(None),
+    intake_role: str | None = Form(None),
+    intake_prompt: str | None = Form(None),
+    intake_model: str | None = Form(None),
 ):
     update_operation_progress(
         operation_id,
@@ -6220,9 +6226,9 @@ def create_txt_component(
     if upload["extension"] == "txt":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id, intake_role=intake_role, intake_prompt=intake_prompt, intake_model=intake_model)
         elif check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id, intake_role=intake_role, intake_prompt=intake_prompt, intake_model=intake_model)
         else:
             traceback.print_exc()
             update_operation_progress(
@@ -6252,6 +6258,9 @@ def create_md_component(
     file: UploadFile,
     flow_id: str = Form(...),
     operation_id: str | None = Form(None),
+    intake_role: str | None = Form(None),
+    intake_prompt: str | None = Form(None),
+    intake_model: str | None = Form(None),
 ):
     update_operation_progress(
         operation_id,
@@ -6277,9 +6286,9 @@ def create_md_component(
     if upload["extension"] == "md":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id, intake_role=intake_role, intake_prompt=intake_prompt, intake_model=intake_model)
         elif check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id, intake_role=intake_role, intake_prompt=intake_prompt, intake_model=intake_model)
         else:
             traceback.print_exc()
             update_operation_progress(
@@ -6309,6 +6318,9 @@ def create_pptx_component(
     file: UploadFile,
     flow_id: str = Form(...),
     operation_id: str | None = Form(None),
+    intake_role: str | None = Form(None),
+    intake_prompt: str | None = Form(None),
+    intake_model: str | None = Form(None),
 ):
     update_operation_progress(
         operation_id,
@@ -6334,9 +6346,9 @@ def create_pptx_component(
     if upload["extension"] == "pptx":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id, intake_role=intake_role, intake_prompt=intake_prompt, intake_model=intake_model)
         elif check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id, intake_role=intake_role, intake_prompt=intake_prompt, intake_model=intake_model)
         else:
             traceback.print_exc()
             update_operation_progress(
@@ -6366,6 +6378,9 @@ def create_html_component(
     file: UploadFile,
     flow_id: str = Form(...),
     operation_id: str | None = Form(None),
+    intake_role: str | None = Form(None),
+    intake_prompt: str | None = Form(None),
+    intake_model: str | None = Form(None),
 ):
     update_operation_progress(
         operation_id,
@@ -6391,9 +6406,9 @@ def create_html_component(
     if upload["extension"] == "html":
         check_page_length = is_within_gpt4o_token_limit(file)
         if check_page_length and flow["flow_type"] == 'manual':
-            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+            return get_summary_from_openai(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id, intake_role=intake_role, intake_prompt=intake_prompt, intake_model=intake_model)
         elif check_page_length and flow["flow_type"] == 'automatic':
-            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id)
+            return openai_mindmap_generator(file, flow_id=flow_id, flow_type=flow["flow_type"], operation_id=operation_id, intake_role=intake_role, intake_prompt=intake_prompt, intake_model=intake_model)
         else:
             traceback.print_exc()
             update_operation_progress(

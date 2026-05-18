@@ -29,6 +29,9 @@ import {
     stageUploadedSourceReconciliationPreview
 } from '../utils/sourceReconciliationPreview';
 import { handleGeneratedSourceGraph } from '../utils/generatedSourceGraph';
+import SourceIntakeRoleControls, {
+    SOURCE_INTAKE_MODELS
+} from '../global-components/SourceIntakeRoleControls';
 
 const HTMLModal = () => {
     const selector = (state) => ({
@@ -61,6 +64,9 @@ const HTMLModal = () => {
     const flow_id = flowStore((s) => s.flow_id);
     const setFlowName = flowStore((s) => s.setFlowName);
     const [file, setFile] = useState();
+    const [intakeProfileId, setIntakeProfileId] = useState('');
+    const [intakeModel, setIntakeModel] = useState(SOURCE_INTAKE_MODELS[0]);
+    const [intakeBrief, setIntakeBrief] = useState('');
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const modalAccept = '.html,.htm,text/html';
@@ -84,7 +90,10 @@ const HTMLModal = () => {
         });
         const data = {
             file: file,
-            operationId
+            operationId,
+            intakeRole: intakeProfileId,
+            intakeModel: intakeModel === 'auto' ? '' : intakeModel,
+            intakePrompt: intakeBrief.trim()
         };
         pushNode(LoadingModal, {
             ...sourceUploadLoading('HTML', file?.name),
@@ -268,6 +277,17 @@ const HTMLModal = () => {
                     onChange={(e) => handleFileUpload(e)}
                 />
             </div>
+            <SourceIntakeRoleControls
+                sourceType="html"
+                fileName={file?.name || ''}
+                intakeProfileId={intakeProfileId}
+                setIntakeProfileId={setIntakeProfileId}
+                intakeModel={intakeModel}
+                setIntakeModel={setIntakeModel}
+                intakeBrief={intakeBrief}
+                setIntakeBrief={setIntakeBrief}
+                briefPlaceholder="Optional: tell AI whether to preserve page sections, extract cited facts, or summarize the page into decisions."
+            />
             <div className="buttons">
                 <button
                     id="cancel"

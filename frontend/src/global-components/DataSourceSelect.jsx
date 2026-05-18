@@ -26,24 +26,24 @@ const WORKSPACE_SOURCES = [
 ];
 
 const DOCUMENT_SOURCES = [
-	{ img: DRAWERSvg, content: "Review folder / file set", name: "source_set", mode: "Source-set review", detail: "Uploads multiple files with relative paths." },
-	{ img: PDFSvg, content: "Upload PDF", name: "pdf", mode: "Source-traceable", detail: "Extracts cited document sections." },
-	{ img: DOCXSvg, content: "Upload DOCX", name: "docx", mode: "Source-traceable", detail: "Extracts cited document sections." },
-	{ img: MDSvg, content: "Upload Markdown", name: "md", mode: "Source-traceable", detail: "Extracts cited document sections." },
-	{ img: TXTSvg, content: "Upload TXT", name: "txt", mode: "Source-traceable", detail: "Extracts cited document sections." },
-	{ img: PPTXSvg, content: "Upload PPTX", name: "pptx", mode: "AI intake", detail: "Reviewable draft; no section citations." },
-	{ img: HTMLSvg, content: "Upload HTML", name: "html", mode: "AI intake", detail: "Reviewable draft; no section citations." },
+	{ img: DRAWERSvg, content: "Review folder / file set", name: "source_set", mode: "Multi-source", detail: "Batch upload PDF, DOCX, Markdown, and TXT with paths preserved." },
+	{ img: PDFSvg, content: "Upload PDF", name: "pdf", mode: "Single source", detail: "One file at a time with cited document sections." },
+	{ img: DOCXSvg, content: "Upload DOCX", name: "docx", mode: "Single source", detail: "One file at a time with cited document sections." },
+	{ img: MDSvg, content: "Upload Markdown", name: "md", mode: "Single source", detail: "One file at a time with cited document sections." },
+	{ img: TXTSvg, content: "Upload TXT", name: "txt", mode: "Single source", detail: "One file at a time with cited document sections." },
+	{ img: PPTXSvg, content: "Upload PPTX", name: "pptx", mode: "AI draft", detail: "Single upload; creates a reviewable draft, not section citations." },
+	{ img: HTMLSvg, content: "Upload HTML", name: "html", mode: "AI draft", detail: "Single upload; creates a reviewable draft, not section citations." },
 ];
 
 const WEB_SOURCES = [
-	{ img: WEBSvg, content: "Enter URL", name: "web", mode: "AI intake", detail: "Web-derived draft; verify sources." },
-	{ img: YOUTUBESvg, content: "Connect YouTube", name: "youtube", mode: "AI intake", detail: "Reviewable draft; no section citations." },
+	{ img: WEBSvg, content: "Enter URL", name: "web", mode: "AI draft", detail: "Single URL; creates a reviewable draft." },
+	{ img: YOUTUBESvg, content: "Connect YouTube", name: "youtube", mode: "AI draft", detail: "Single URL; creates a reviewable draft." },
 ];
 
 const MEDIA_SOURCES = [
-	{ img: AudioSvg, content: "Select Audio File", name: "audio", mode: "AI intake", detail: "Transcribed draft; no section citations." },
-	{ img: IMGSvg, content: "Select Image File", name: "img", mode: "AI intake", detail: "Vision draft; no section citations." },
-	{ img: VIDEOSvg, content: "Select Video File", name: "video", mode: "AI intake", detail: "Frame/audio draft; no section citations." },
+	{ img: AudioSvg, content: "Select Audio File", name: "audio", mode: "AI draft", detail: "Single upload; transcribed into a reviewable draft." },
+	{ img: IMGSvg, content: "Select Image File", name: "img", mode: "AI draft", detail: "Single upload; interpreted into a reviewable draft." },
+	{ img: VIDEOSvg, content: "Select Video File", name: "video", mode: "AI draft", detail: "Single upload; frame/audio draft for review." },
 ];
 
 const DATA_SOURCES = [
@@ -213,8 +213,8 @@ const DataSourceSelect = ({
 				{group.title === "DOCUMENTS" ? (
 					<p className="data-source-group-note">
 						{isAskAIContext
-							? "Attach a PDF, DOCX, or source set to the current Ask AI prompt. The workspace will return to Ask AI after upload."
-							: "Use source-set review for folder-like packages. PDF, DOCX, Markdown, and TXT remain source-traceable single-file paths; other inputs create reviewable drafts."}
+							? "Need more than one document? Use source set for batch upload, or add single PDF/DOCX files one at a time. This picker stays open so you can verify the selected context before returning to Ask AI."
+							: "Use source set when you want multiple documents in one upload. Single-source uploads are intentionally one file at a time for clearer extraction, role choice, and review. AI draft inputs create reviewable drafts instead of section-cited source records."}
 					</p>
 				) : null}
 				<div className="data-source-select-container">

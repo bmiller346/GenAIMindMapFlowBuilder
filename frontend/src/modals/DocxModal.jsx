@@ -37,25 +37,69 @@ import { ASK_AI_GENERATION_PROGRESS_EVENT } from '../utils/askAiGenerationProgre
 const DOCX_INTAKE_PROFILES = [
     {
         id: '',
-        label: 'No intake role'
+        label: 'No intake role',
+        description: 'Import the source with the default parser. Best when you only need the document saved and summarized without a specialized lens.',
+        bestFor: 'Fast neutral intake',
+        changes: 'Keeps extraction general and avoids adding a role-specific interpretation layer.',
+        avoidWhen: 'You need citation repair, structural mapping, or decision-oriented synthesis.'
     },
     {
         id: 'document-structure-extractor',
-        label: 'Document Structure Extractor'
+        label: 'Document Structure Extractor',
+        description: 'Pull out headings, sections, tables, lists, and hierarchy so the source keeps its document structure.',
+        bestFor: 'Policies, SOPs, specs, manuals, and documents with important headings or tables',
+        changes: 'Preserves the document outline and favors section-by-section organization over broad synthesis.',
+        avoidWhen: 'The document is mostly notes or you care more about recommendations than structure.'
     },
     {
         id: 'source-librarian',
-        label: 'Source Librarian'
+        label: 'Source Librarian',
+        description: 'Prioritize citations, evidence snippets, source refs, and coverage signals for later reconciliation.',
+        bestFor: 'Evidence review, reconciliation, audit prep, and source-backed Ask AI context',
+        changes: 'Emphasizes source refs, quote snippets, coverage gaps, and traceability.',
+        avoidWhen: 'You mainly want a strategy memo or a loose brainstorm from the document.'
     },
     {
         id: 'strategic-advisor',
-        label: 'Strategic Advisor'
+        label: 'Strategic Advisor',
+        description: 'Synthesize the source into decisions, risks, recommendations, tradeoffs, and action-oriented themes.',
+        bestFor: 'Business cases, planning docs, discovery notes, strategy, and executive review',
+        changes: 'Highlights implications, risks, decisions, tradeoffs, owners, and next steps.',
+        avoidWhen: 'You need faithful section structure or strict citation coverage first.'
     },
     {
         id: 'custom',
-        label: 'Custom Intake Prompt'
+        label: 'Custom Intake Prompt',
+        description: 'Use your optional brief as the intake instructions when none of the preset roles quite fit.',
+        bestFor: 'Specialized source handling with your own instructions',
+        changes: 'Uses the optional brief as the primary lens for intake.',
+        avoidWhen: 'The preset roles already describe the job; presets are easier to validate later.'
     }
 ];
+
+const recommendDocxIntakeProfile = ({
+    isAskAIContextMode = false,
+    fileName = '',
+    brief = ''
+}) => {
+    const text = `${fileName} ${brief}`.toLowerCase();
+    if (brief.trim()) {
+        return 'custom';
+    }
+    if (
+        isAskAIContextMode ||
+        /\b(audit|citation|cite|evidence|reconcile|reference|source|traceability)\b/.test(text)
+    ) {
+        return 'source-librarian';
+    }
+    if (/\b(policy|procedure|manual|standard|spec|sop|requirement|table|matrix)\b/.test(text)) {
+        return 'document-structure-extractor';
+    }
+    if (/\b(strategy|business case|roadmap|risk|decision|recommendation|planning|executive)\b/.test(text)) {
+        return 'strategic-advisor';
+    }
+    return '';
+};
 
 const DOCX_INTAKE_MODELS = ['auto', 'gpt-5.5', 'gpt-5.4'];
 
@@ -126,6 +170,15 @@ const DocxModal = ({
     const selectedIntakeProfile =
         DOCX_INTAKE_PROFILES.find((profile) => profile.id === intakeProfileId) ||
         DOCX_INTAKE_PROFILES[0];
+    const recommendedIntakeProfileId = recommendDocxIntakeProfile({
+        isAskAIContextMode,
+        fileName: file?.name || '',
+        brief: intakeBrief
+    });
+    const recommendedIntakeProfile =
+        DOCX_INTAKE_PROFILES.find((profile) => profile.id === recommendedIntakeProfileId) ||
+        DOCX_INTAKE_PROFILES[0];
+    const isSelectedRoleRecommended = selectedIntakeProfile.id === recommendedIntakeProfile.id;
 
     const sourcePromptLabel = () => {
         const brief = intakeBrief.trim();
@@ -408,25 +461,32 @@ const DocxModal = ({
 
     const attachSourceToAskAI = (data, currentFlowId) => {
         const uploadedSource = sourceRecordFromUpload(data, file, currentFlowId);
+        const pickerReturnProps =
+            returnModal === DataSourceSelect && returnProps?.mode === 'ask_ai_context'
+                ? returnProps
+                : {
+                      mode: sourcePickerMode,
+                      returnModal,
+                      returnProps
+                  };
         const nextSelectedSourceIds = Array.from(
             new Set([
-                ...(Array.isArray(returnProps.selectedSourceIds)
-                    ? returnProps.selectedSourceIds
+                ...(Array.isArray(pickerReturnProps.selectedSourceIds)
+                    ? pickerReturnProps.selectedSourceIds
                     : []),
                 uploadedSource.id
             ].filter(Boolean))
         );
         setSourceLibrary(upsertSource(sourceLibrary, uploadedSource));
         setSaveStatus('dirty');
-        pushNode(returnModal || DataSourceSelect, returnModal
-            ? {
-                  ...returnProps,
-                  selectedSourceIds: nextSelectedSourceIds,
-                  uploadedSourceId: uploadedSource.id,
-                  initialContextSourceIds: nextSelectedSourceIds,
-                  initialContextSourceId: uploadedSource.id
-              }
-            : {});
+        pushNode(DataSourceSelect, {
+            ...pickerReturnProps,
+            mode: 'ask_ai_context',
+            selectedSourceIds: nextSelectedSourceIds,
+            uploadedSourceId: uploadedSource.id,
+            initialContextSourceIds: nextSelectedSourceIds,
+            initialContextSourceId: uploadedSource.id
+        });
     };
 
     const manageAutomaticNode = (data) => {
@@ -619,17 +679,62 @@ const DocxModal = ({
             </div>
             <div className="source-intake-config">
                 <label>
-                    Optional intake role
+                    <span className="source-intake-label-row">
+                        Optional intake role
+                        {isSelectedRoleRecommended ? (
+                            <small>Recommended</small>
+                        ) : null}
+                    </span>
                     <select
                         value={intakeProfileId}
                         onChange={(event) => setIntakeProfileId(event.target.value)}
+                        title={selectedIntakeProfile.description}
+                        aria-describedby="docx-intake-role-help"
                     >
                         {DOCX_INTAKE_PROFILES.map((profile) => (
-                            <option key={profile.id} value={profile.id}>
-                                {profile.label}
+                            <option
+                                key={profile.id}
+                                value={profile.id}
+                                title={profile.description}
+                            >
+                                {profile.id === recommendedIntakeProfile.id
+                                    ? `${profile.label} (recommended)`
+                                    : profile.label}
                             </option>
                         ))}
                     </select>
+                    {!isSelectedRoleRecommended ? (
+                        <button
+                            type="button"
+                            className="source-intake-recommendation"
+                            onClick={() => setIntakeProfileId(recommendedIntakeProfile.id)}
+                        >
+                            Use recommended: {recommendedIntakeProfile.label}
+                        </button>
+                    ) : null}
+                    <div
+                        id="docx-intake-role-help"
+                        className="source-intake-role-help-panel"
+                    >
+                        <div>
+                            <strong>{selectedIntakeProfile.label}</strong>
+                            <span>{selectedIntakeProfile.description}</span>
+                        </div>
+                        <dl>
+                            <div>
+                                <dt>Best for</dt>
+                                <dd>{selectedIntakeProfile.bestFor}</dd>
+                            </div>
+                            <div>
+                                <dt>What changes</dt>
+                                <dd>{selectedIntakeProfile.changes}</dd>
+                            </div>
+                            <div>
+                                <dt>Skip when</dt>
+                                <dd>{selectedIntakeProfile.avoidWhen}</dd>
+                            </div>
+                        </dl>
+                    </div>
                 </label>
                 <label>
                     DOCX intake model

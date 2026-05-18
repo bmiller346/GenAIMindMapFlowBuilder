@@ -175,23 +175,30 @@ const SourceSetModal = ({
         setSaveStatus('dirty');
 
         if (isAskAIContextMode) {
+            const pickerReturnProps =
+                returnModal === DataSourceSelect && returnProps?.mode === 'ask_ai_context'
+                    ? returnProps
+                    : {
+                          mode: sourcePickerMode,
+                          returnModal,
+                          returnProps
+                      };
             const nextSelectedSourceIds = Array.from(
                 new Set([
-                    ...(Array.isArray(returnProps.selectedSourceIds)
-                        ? returnProps.selectedSourceIds
+                    ...(Array.isArray(pickerReturnProps.selectedSourceIds)
+                        ? pickerReturnProps.selectedSourceIds
                         : []),
                     ...records.map((record) => record.id)
                 ].filter(Boolean))
             );
-            pushNode(returnModal || DataSourceSelect, returnModal
-                ? {
-                      ...returnProps,
-                      selectedSourceIds: nextSelectedSourceIds,
-                      uploadedSourceId: records[0]?.id || '',
-                      initialContextSourceIds: nextSelectedSourceIds,
-                      initialContextSourceId: records[0]?.id || ''
-                  }
-                : {});
+            pushNode(DataSourceSelect, {
+                ...pickerReturnProps,
+                mode: 'ask_ai_context',
+                selectedSourceIds: nextSelectedSourceIds,
+                uploadedSourceId: records[0]?.id || '',
+                initialContextSourceIds: nextSelectedSourceIds,
+                initialContextSourceId: records[0]?.id || ''
+            });
             return records;
         }
 
@@ -310,7 +317,7 @@ const SourceSetModal = ({
                         <img src={DRAWERSvg} alt="" />
                         <span className="data-source-set-copy">
                             <p>Select folder</p>
-                            <small>Preserve folder-relative paths for source-set review.</small>
+                            <small>Batch upload supported source files and keep folder paths.</small>
                         </span>
                     </div>
                     <img src={RIGHTArrow} alt="" />
@@ -324,7 +331,7 @@ const SourceSetModal = ({
                         <img src={DRAWERSvg} alt="" />
                         <span className="data-source-set-copy">
                             <p>Select files</p>
-                            <small>Use when the review set is a hand-picked group of files.</small>
+                            <small>Pick multiple PDF, DOCX, Markdown, or TXT files at once.</small>
                         </span>
                     </div>
                     <img src={RIGHTArrow} alt="" />
@@ -372,6 +379,23 @@ const SourceSetModal = ({
                         </span>
                     </div>
                 ) : null}
+                <div className="source-set-help-panel">
+                    <strong>
+                        {isAskAIContextMode
+                            ? 'Adds multiple source documents to Ask AI context'
+                            : 'Builds a source-traceable review set'}
+                    </strong>
+                    <span>
+                        This is the multi-source upload path. It supports PDF, DOCX, Markdown,
+                        and TXT; folder paths are preserved so related files stay recognizable
+                        after upload.
+                    </span>
+                    <small>
+                        {selectionProfile.unsupportedCount
+                            ? `${selectionProfile.unsupportedCount} unsupported file${selectionProfile.unsupportedCount === 1 ? '' : 's'} will be skipped.`
+                            : 'AI-draft formats such as PPTX, HTML, media, and web links stay single-source for clearer review.'}
+                    </small>
+                </div>
                 {samplePaths.length ? (
                     <div className="source-set-path-list" aria-label="Selected relative paths">
                         {samplePaths.map((entry) => (
