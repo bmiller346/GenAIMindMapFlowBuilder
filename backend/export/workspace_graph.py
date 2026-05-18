@@ -520,16 +520,43 @@ def _normalize_node(raw_node: dict, parent_id: str | None) -> dict:
 
 
 def _normalize_edge(edge: dict) -> dict:
-    return {
+    data = edge.get("data", {}) if isinstance(edge.get("data"), dict) else {}
+    metadata = edge.get("metadata", {}) if isinstance(edge.get("metadata"), dict) else {}
+    source_refs = edge.get("source_refs")
+    if not isinstance(source_refs, list):
+        source_refs = data.get("source_refs") if isinstance(data.get("source_refs"), list) else []
+
+    relationship_metadata = {
+        **metadata,
+        **(data.get("metadata", {}) if isinstance(data.get("metadata"), dict) else {}),
+        "animated": edge.get("animated", False),
+        "react_flow_type": edge.get("type", ""),
+    }
+    for key in (
+        "confidence",
+        "rationale",
+        "source_signal",
+        "review_state",
+        "assumptions",
+    ):
+        value = edge.get(key, data.get(key))
+        if value not in (None, ""):
+            relationship_metadata[key] = value
+
+    normalized = {
         "id": edge.get("id", ""),
         "source_node_id": edge.get("source", ""),
         "target_node_id": edge.get("target", ""),
-        "relationship_type": edge.get("relationship_type", "contains"),
-        "metadata": {
-            "animated": edge.get("animated", False),
-            "react_flow_type": edge.get("type", ""),
-        },
+        "relationship_type": edge.get("relationship_type") or data.get("relationship_type") or "contains",
+        "metadata": relationship_metadata,
     }
+    if relationship_metadata.get("confidence") not in (None, ""):
+        normalized["confidence"] = relationship_metadata.get("confidence")
+    if relationship_metadata.get("review_state") not in (None, ""):
+        normalized["review_state"] = relationship_metadata.get("review_state")
+    if source_refs:
+        normalized["source_refs"] = source_refs
+    return normalized
 
 
 def _semantic_node_type(raw_node: dict, data: dict, nested_data: dict) -> str:

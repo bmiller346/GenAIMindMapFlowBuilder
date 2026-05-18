@@ -150,6 +150,57 @@ def test_validated_graph_json_snapshot_includes_report_and_task_projection():
     WorkspaceGraph.model_validate(graph)
 
 
+def test_workspace_graph_preserves_relationship_evidence_metadata():
+    source_ref = {"document_id": "doc-relationship", "chunk_id": "approval"}
+    flow = {
+        "_id": "workspace-kg",
+        "flow_name": "Knowledge Graph",
+        "flow_type": "manual",
+        "flow_json": json.dumps(
+            {
+                "nodes": [
+                    {"id": "plan", "type": "response", "data": {"label": "Plan"}},
+                    {"id": "approval", "type": "response", "data": {"label": "Approval"}},
+                ],
+                "edges": [
+                    {
+                        "id": "edge-plan-approval",
+                        "source": "plan",
+                        "target": "approval",
+                        "type": "smoothstep",
+                        "relationship_type": "depends_on",
+                        "confidence": 0.82,
+                        "rationale": "Launch planning depends on approval.",
+                        "source_signal": "Manual review",
+                        "review_state": "needs_review",
+                        "source_refs": [source_ref],
+                        "data": {
+                            "relationship_type": "depends_on",
+                            "confidence": 0.82,
+                            "rationale": "Launch planning depends on approval.",
+                            "source_signal": "Manual review",
+                            "review_state": "needs_review",
+                            "source_refs": [source_ref],
+                        },
+                        "metadata": {"authored_from_view": "knowledgeGraph"},
+                    }
+                ],
+            }
+        ),
+    }
+
+    graph = build_workspace_graph(flow)
+
+    edge = graph["edges"][0]
+    assert edge["relationship_type"] == "depends_on"
+    assert edge["confidence"] == 0.82
+    assert edge["review_state"] == "needs_review"
+    assert edge["source_refs"] == [source_ref]
+    assert edge["metadata"]["authored_from_view"] == "knowledgeGraph"
+    assert edge["metadata"]["rationale"] == "Launch planning depends on approval."
+    assert edge["metadata"]["source_signal"] == "Manual review"
+
+
 def test_internal_graph_json_export_snapshot_preserves_validation_report():
     graph = _validated_export_graph()
 

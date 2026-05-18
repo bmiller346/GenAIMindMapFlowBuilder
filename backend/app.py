@@ -3563,6 +3563,11 @@ def _react_node_from_graph_node(node: dict, index: int) -> dict:
 def _react_edge_from_graph_edge(edge: dict) -> dict:
     metadata = edge.get("metadata", {}) if isinstance(edge.get("metadata"), dict) else {}
     relationship_type = edge.get("relationship_type", "contains")
+    source_refs = edge.get("source_refs")
+    if not isinstance(source_refs, list):
+        source_refs = metadata.get("source_refs") if isinstance(metadata.get("source_refs"), list) else []
+    source_signal = metadata.get("source_signal", edge.get("source_signal", ""))
+    rationale = metadata.get("rationale", edge.get("rationale", ""))
     return {
         "id": edge.get("id", ""),
         "source": edge.get("source_node_id", ""),
@@ -3572,15 +3577,16 @@ def _react_edge_from_graph_edge(edge: dict) -> dict:
         "relationship_type": relationship_type,
         "confidence": metadata.get("confidence", edge.get("confidence", "")),
         "review_state": metadata.get("review_state", edge.get("review_state", "")),
-        "source_refs": edge.get("source_refs", []) if isinstance(edge.get("source_refs"), list) else [],
+        "source_refs": source_refs,
         "data": {
             "relationship_type": relationship_type,
             "confidence": metadata.get("confidence", edge.get("confidence", "")),
             "review_state": metadata.get("review_state", edge.get("review_state", "")),
-            "source_signal": metadata.get("source_signal", ""),
-            "rationale": metadata.get("rationale", ""),
+            "source_signal": source_signal,
+            "rationale": rationale,
             "assumptions": metadata.get("assumptions", []),
             "artifact_id": metadata.get("artifact_id", ""),
+            "source_refs": source_refs,
         },
     }
 
