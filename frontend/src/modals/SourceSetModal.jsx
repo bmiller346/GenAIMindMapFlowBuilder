@@ -217,22 +217,46 @@ const SourceSetModal = ({
             return;
         }
 
-        let currentFlowId;
-        try {
-            currentFlowId = await ensureWorkspace();
-        } catch (err) {
-            showError(err.response?.status || err.status || 500, requestErrorMessage(err));
-            return;
-        }
-
         const operationId = nanoid();
         const controller = new AbortController();
+        let requestCanceled = false;
         const activityId = addActivity({
             type: 'source_set_upload_started',
             title: 'Adding source set',
             detail: `${selectedFiles.length} files`,
             context: 'Uploading files and preserving folder-relative paths for review.'
         });
+        pushNode(LoadingModal, {
+            ...sourceUploadLoading('source set', `${selectedFiles.length} files`),
+            operationId,
+            onCancel: () => {
+                requestCanceled = true;
+                controller.abort();
+                updateActivity(activityId, {
+                    type: 'source_set_upload_canceled',
+                    status: 'canceled',
+                    context: 'Source-set upload request was canceled.'
+                });
+                popNode();
+            }
+        });
+
+        let currentFlowId;
+        try {
+            currentFlowId = await ensureWorkspace();
+        } catch (err) {
+            updateActivity(activityId, {
+                type: 'source_set_upload_failed',
+                status: 'failed',
+                context: requestErrorMessage(err)
+            });
+            showError(err.response?.status || err.status || 500, requestErrorMessage(err));
+            return;
+        }
+        if (requestCanceled) {
+            return;
+        }
+
         const [url] = setRequestData('source_set', currentFlowId, {
             operationId,
             sourceIntent: isAskAIContextMode ? 'context' : 'source_set_review'
@@ -242,20 +266,6 @@ const SourceSetModal = ({
             flowId: currentFlowId,
             operationId,
             sourceIntent: isAskAIContextMode ? 'context' : 'source_set_review'
-        });
-
-        pushNode(LoadingModal, {
-            ...sourceUploadLoading('source set', `${selectedFiles.length} files`),
-            operationId,
-            onCancel: () => {
-                controller.abort();
-                updateActivity(activityId, {
-                    type: 'source_set_upload_canceled',
-                    status: 'canceled',
-                    context: 'Source-set upload request was canceled.'
-                });
-                popNode();
-            }
         });
 
         axios

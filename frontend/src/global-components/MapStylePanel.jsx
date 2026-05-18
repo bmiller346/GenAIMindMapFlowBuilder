@@ -55,6 +55,29 @@ const MapStylePanel = () => {
         });
     };
 
+    const makePrintable = () => {
+        const printableStyle = normalizeMapStyle({
+            theme: 'print',
+            hierarchy: 'depth',
+            showEmphasisBadges: true
+        });
+        const nextNodes = autoStyleWorkspaceNodes(nodes, edges);
+        setNodes(nextNodes);
+        setMapStyle(printableStyle);
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        recordActivity({
+            type: 'map_style_printable_applied',
+            title: 'Made map printable',
+            summary: 'Applied print theme, depth hierarchy, emphasis badges, and auto-styled nodes.',
+            metadata: {
+                ...printableStyle,
+                styled_nodes: nextNodes.length
+            }
+        });
+    };
+
     const resetStyling = () => {
         const nextNodes = resetWorkspaceNodeEmphasis(nodes);
         setNodes(nextNodes);
@@ -134,6 +157,9 @@ const MapStylePanel = () => {
                 <span>Show emphasis badges</span>
             </label>
             <div className="map-style-actions">
+                <button type="button" onClick={makePrintable} disabled={nodes.length === 0}>
+                    Make printable
+                </button>
                 <button type="button" onClick={autoStyleMap} disabled={nodes.length === 0}>
                     Auto-style map
                 </button>

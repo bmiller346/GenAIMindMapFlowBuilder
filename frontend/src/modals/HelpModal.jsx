@@ -40,7 +40,7 @@ const HELP_ARTICLES = [
         sections: [
             'Open Build / Map style to choose Clean, Print, or Sketchbook. Print uses a high-contrast light canvas; Sketchbook gives workshop-style cards and dashed connectors.',
             'Select a node, open Node metadata, and set Map emphasis to Key idea, Critical, Supporting, Evidence, or Action. Use Apply to branch when an entire section needs the same visual role.',
-            'Auto-style map applies sensible emphasis from node type, review state, priority, source refs, and depth. Reset styling clears emphasis and returns the map style to the default.',
+            'Make printable applies the print theme, depth hierarchy, emphasis badges, and auto-styles nodes in one step. Auto-style map only updates node emphasis. Reset styling clears emphasis and returns the map style to the default.',
             'Export PDF for handouts, PNG for slides, or SVG when the map needs editing in another graphics tool.'
         ]
     },

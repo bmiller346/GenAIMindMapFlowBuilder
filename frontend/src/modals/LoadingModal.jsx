@@ -17,10 +17,18 @@ const LoadingModal = ({
     operationId,
     onProgress,
     onCancel,
-    cancelLabel = 'Cancel request'
+    cancelLabel = 'Cancel request',
+    onRetry,
+    retryLabel = 'Retry',
+    onDismiss,
+    status,
+    statusMessage
 }) => {
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const [backendProgress, setBackendProgress] = useState();
+    const progressStatus = status || backendProgress?.status;
+    const isFailed = progressStatus === 'failed';
+    const isCompleted = progressStatus === 'completed';
     const currentStepIndex = useMemo(() => {
         if (backendProgress?.progress !== undefined) {
             return Math.min(
@@ -35,7 +43,7 @@ const LoadingModal = ({
         return index;
     }, [backendProgress, elapsedSeconds, steps]);
     const currentStep =
-        backendProgress?.message || steps[currentStepIndex] || DEFAULT_STEPS[0];
+        statusMessage || backendProgress?.message || steps[currentStepIndex] || DEFAULT_STEPS[0];
     const progressPercent =
         backendProgress?.progress !== undefined
             ? backendProgress.progress
@@ -50,7 +58,6 @@ const LoadingModal = ({
                   )
               );
     const detailText = backendProgress?.detail || detail;
-    const progressStatus = backendProgress?.status;
 
     useEffect(() => {
         if (!operationId) {
@@ -109,7 +116,12 @@ const LoadingModal = ({
     }, []);
 
     return (
-        <div className="loading-modal-card">
+        <div
+            className={[
+                'loading-modal-card',
+                progressStatus ? `loading-modal-card--${progressStatus}` : ''
+            ].filter(Boolean).join(' ')}
+        >
             <img src={LOGOSvg} alt="Loading" id="logo" />
             <div className="loading-modal-copy">
                 <h2>{title}</h2>
@@ -144,15 +156,35 @@ const LoadingModal = ({
                 {statusLabel ? `${statusLabel} · ` : ''}
                 {elapsedSeconds < 3 ? 'Starting now' : `${elapsedSeconds}s elapsed`}
             </p>
-            {onCancel ? (
-                <button
-                    className="loading-modal-cancel"
-                    type="button"
-                    onClick={onCancel}
-                >
-                    {cancelLabel}
-                </button>
-            ) : null}
+            <div className="loading-modal-actions">
+                {isFailed && onRetry ? (
+                    <button
+                        className="loading-modal-retry"
+                        type="button"
+                        onClick={onRetry}
+                    >
+                        {retryLabel}
+                    </button>
+                ) : null}
+                {(isFailed || isCompleted) && onDismiss ? (
+                    <button
+                        className="loading-modal-cancel"
+                        type="button"
+                        onClick={onDismiss}
+                    >
+                        Dismiss
+                    </button>
+                ) : null}
+                {!isFailed && !isCompleted && onCancel ? (
+                    <button
+                        className="loading-modal-cancel"
+                        type="button"
+                        onClick={onCancel}
+                    >
+                        {cancelLabel}
+                    </button>
+                ) : null}
+            </div>
         </div>
     );
 };

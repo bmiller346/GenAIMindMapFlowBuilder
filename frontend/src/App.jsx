@@ -211,6 +211,8 @@ const edgeRelationshipType = (edge = {}) =>
         .trim()
         .toLowerCase();
 
+const isHierarchyEdge = (edge = {}) => HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge));
+
 const formatEdgeConfidence = (confidence) => {
     if (confidence === undefined || confidence === null || confidence === '') {
         return '';

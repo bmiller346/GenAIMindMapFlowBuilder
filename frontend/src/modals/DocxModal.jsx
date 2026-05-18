@@ -32,7 +32,6 @@ import {
     upsertSource
 } from '../utils/sourceReconciliationPreview';
 import { handleGeneratedSourceGraph } from '../utils/generatedSourceGraph';
-import { ASK_AI_GENERATION_PROGRESS_EVENT } from '../utils/askAiGenerationProgress';
 
 const DOCX_INTAKE_PROFILES = [
     {
@@ -106,7 +105,11 @@ const DOCX_INTAKE_MODELS = ['auto', 'gpt-5.5', 'gpt-5.4'];
 const DocxModal = ({
     sourcePickerMode = 'workspace_intake',
     returnModal,
-    returnProps = {}
+    returnProps = {},
+    initialFile,
+    initialIntakeRole = '',
+    initialIntakeModel = DOCX_INTAKE_MODELS[0],
+    initialIntakePrompt = ''
 }) => {
     const selector = (state) => ({
         trigger: state.trigger,
@@ -131,13 +134,11 @@ const DocxModal = ({
     const setSavedSnapshot = flowStore((s) => s.setSavedSnapshot);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
     const { fitView } = useReactFlow();
-    const [file, setFile] = useState();
-    const [intakeProfileId, setIntakeProfileId] = useState('');
-    const [intakeModel, setIntakeModel] = useState(DOCX_INTAKE_MODELS[0]);
-    const [intakeBrief, setIntakeBrief] = useState('');
+    const [file, setFile] = useState(initialFile);
+    const [intakeProfileId, setIntakeProfileId] = useState(initialIntakeRole);
+    const [intakeModel, setIntakeModel] = useState(initialIntakeModel);
+    const [intakeBrief, setIntakeBrief] = useState(initialIntakePrompt);
     const fileInputRef = useRef(null);
-    const sourceProgressRef = useRef(null);
-    const sourceProgressEventCounter = useRef(0);
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
     const addActivity = useActivityStore((s) => s.addActivity);
@@ -191,70 +192,6 @@ const DocxModal = ({
         return `${selectedIntakeProfile?.label || 'Custom intake brief'}: ${brief}`;
     };
 
-    const emitSourceProgress = (requestId, updates = {}) => {
-        if (!requestId || typeof window === 'undefined') {
-            return;
-        }
-        const previous =
-            sourceProgressRef.current?.requestId === requestId
-                ? sourceProgressRef.current
-                : {};
-        const nextSnapshot = {
-            ...previous,
-            ...updates,
-            requestId,
-            updatedAt: new Date().toISOString()
-        };
-        sourceProgressRef.current = nextSnapshot;
-        window.dispatchEvent(
-            new CustomEvent(ASK_AI_GENERATION_PROGRESS_EVENT, {
-                detail: nextSnapshot
-            })
-        );
-    };
-
-    const progressStageFromOperation = (progress = {}) => {
-        if (progress.status === 'failed') {
-            return 'Validating draft';
-        }
-        if (progress.status === 'completed' || progress.phase === 'complete') {
-            return 'Building preview';
-        }
-        if (['ai_reading', 'ai_deriving', 'uploading_to_ai'].includes(progress.phase)) {
-            return 'Calling AI model';
-        }
-        if (progress.phase === 'extracting') {
-            return 'Selecting source context';
-        }
-        if (progress.phase === 'checking_settings') {
-            return 'Choosing model';
-        }
-        return 'Preparing request';
-    };
-
-    const publishSourceProgressEvent = (requestId, stage, detail, updates = {}) => {
-        sourceProgressEventCounter.current += 1;
-        const previousEvents =
-            sourceProgressRef.current?.requestId === requestId
-                ? sourceProgressRef.current.events || []
-                : [];
-        const events = [
-            {
-                id: `${sourceProgressEventCounter.current}-${stage}`,
-                stage,
-                detail,
-                updatedAt: new Date().toISOString()
-            },
-            ...previousEvents
-        ].slice(0, 5);
-        emitSourceProgress(requestId, {
-            ...updates,
-            stage,
-            detail,
-            events
-        });
-    };
-
     const ensureWorkspace = async () => {
         const currentFlow = flowStore.getState();
         if (currentFlow.flow_id && currentFlow.flow_id !== 'undefined') {
@@ -303,19 +240,66 @@ const DocxModal = ({
             return;
         }
 
+        const operationId = nanoid();
+        const controller = new AbortController();
+        let requestCanceled = false;
+        const retryProps = {
+            sourcePickerMode,
+            returnModal,
+            returnProps,
+            initialFile: file,
+            initialIntakeRole: intakeProfileId,
+            initialIntakeModel: intakeModel,
+            initialIntakePrompt: intakeBrief
+        };
+        const retryDocxIntake = () => {
+            requestCanceled = true;
+            controller.abort();
+            pushNode(DocxModal, retryProps);
+        };
+        const activityId = addActivity({
+            type: 'source_upload_started',
+            title: 'Adding DOCX source',
+            detail: file?.name,
+            context: 'Uploading, extracting text, and deriving workspace structure.'
+        });
+        pushNode(LoadingModal, {
+            ...sourceUploadLoading('DOCX', file?.name),
+            operationId,
+            onCancel: () => {
+                requestCanceled = true;
+                controller.abort();
+                updateActivity(activityId, {
+                    type: 'source_upload_canceled',
+                    status: 'canceled',
+                    context: 'Upload request was canceled.'
+                });
+                popNode();
+            },
+            onRetry: retryDocxIntake,
+            retryLabel: 'Retry DOCX intake',
+            onDismiss: popNode
+        });
+
         let currentFlowId;
         try {
             currentFlowId = await ensureWorkspace();
         } catch (err) {
+            updateActivity(activityId, {
+                type: 'source_upload_failed',
+                status: 'failed',
+                context: requestErrorMessage(err)
+            });
             showError(
                 err.response?.status || err.status || 500,
                 requestErrorMessage(err)
             );
             return;
         }
+        if (requestCanceled) {
+            return;
+        }
 
-        const operationId = nanoid();
-        const progressRequestId = `docx-source-${operationId}`;
         const data = {
             file: file,
             operationId,
@@ -324,77 +308,6 @@ const DocxModal = ({
             intakeModel: intakeModel === 'auto' ? '' : intakeModel,
             intakePrompt: intakeBrief.trim()
         };
-        const controller = new AbortController();
-        const activityId = addActivity({
-            type: 'source_upload_started',
-            title: 'Adding DOCX source',
-            detail: file?.name,
-            context: 'Uploading, extracting text, and deriving workspace structure.'
-        });
-        publishSourceProgressEvent(
-            progressRequestId,
-            'Preparing request',
-            'Preparing DOCX source upload.',
-            {
-                status: 'running',
-                role: { label: 'Source upload' },
-                action: {
-                    label: isAskAIContextMode
-                        ? 'Attach DOCX to Ask AI'
-                        : 'Create DOCX source map'
-                },
-                scope: { type: 'source' },
-                previewMode: 'source_upload',
-                message: 'DOCX source upload is running.',
-                context: [
-                    { label: 'Source', value: file?.name || 'DOCX' },
-                    {
-                        label: 'Mode',
-                        value: isAskAIContextMode ? 'Ask AI context' : 'Mind map draft'
-                    },
-                    { label: 'Model', value: intakeModel || 'auto' }
-                ]
-            }
-        );
-        pushNode(LoadingModal, {
-            ...sourceUploadLoading('DOCX', file?.name),
-            operationId,
-            onProgress: (progress) => {
-                const stage = progressStageFromOperation(progress);
-                publishSourceProgressEvent(
-                    progressRequestId,
-                    stage,
-                    progress?.detail || progress?.message || 'Processing DOCX source.',
-                    {
-                        status:
-                            progress?.status === 'failed'
-                                ? 'failed'
-                                : progress?.status === 'completed'
-                                  ? 'completed'
-                                  : 'running',
-                        message: progress?.message || 'DOCX source upload is running.'
-                    }
-                );
-            },
-            onCancel: () => {
-                controller.abort();
-                updateActivity(activityId, {
-                    type: 'source_upload_canceled',
-                    status: 'canceled',
-                    context: 'Upload request was canceled.'
-                });
-                publishSourceProgressEvent(
-                    progressRequestId,
-                    'Validating draft',
-                    'DOCX source upload was canceled.',
-                    {
-                        status: 'canceled',
-                        message: 'DOCX source upload was canceled.'
-                    }
-                );
-                popNode();
-            }
-        });
         const [url, body, headerConfig] = setRequestData('docx', currentFlowId, data);
         axios
             .post(`http://localhost:8000/${url}`, body, {
@@ -404,17 +317,6 @@ const DocxModal = ({
                 signal: controller.signal
             })
             .then((res) => {
-                publishSourceProgressEvent(
-                    progressRequestId,
-                    'Building preview',
-                    isAskAIContextMode
-                        ? 'DOCX source is available to Ask AI.'
-                        : 'DOCX source draft is ready for review.',
-                    {
-                        status: 'completed',
-                        message: 'DOCX source upload completed.'
-                    }
-                );
                 updateActivity(activityId, {
                     type: 'source_upload_completed',
                     status: 'completed',
@@ -433,21 +335,22 @@ const DocxModal = ({
                 if (isCanceledRequest(err)) {
                     return;
                 }
-                publishSourceProgressEvent(
-                    progressRequestId,
-                    'Validating draft',
-                    requestErrorMessage(err),
-                    {
-                        status: 'failed',
-                        message: 'DOCX source upload failed.'
-                    }
-                );
                 updateActivity(activityId, {
                     type: 'source_upload_failed',
                     status: 'failed',
                     context: requestErrorMessage(err)
                 });
-                manageErrors(err);
+                pushNode(LoadingModal, {
+                    ...sourceUploadLoading('DOCX', file?.name),
+                    title: 'DOCX intake needs attention',
+                    detail: requestErrorMessage(err),
+                    operationId,
+                    status: 'failed',
+                    statusMessage: 'DOCX source upload failed.',
+                    onRetry: retryDocxIntake,
+                    retryLabel: 'Retry DOCX intake',
+                    onDismiss: popNode
+                });
             });
     };
 
@@ -712,29 +615,6 @@ const DocxModal = ({
                             Use recommended: {recommendedIntakeProfile.label}
                         </button>
                     ) : null}
-                    <div
-                        id="docx-intake-role-help"
-                        className="source-intake-role-help-panel"
-                    >
-                        <div>
-                            <strong>{selectedIntakeProfile.label}</strong>
-                            <span>{selectedIntakeProfile.description}</span>
-                        </div>
-                        <dl>
-                            <div>
-                                <dt>Best for</dt>
-                                <dd>{selectedIntakeProfile.bestFor}</dd>
-                            </div>
-                            <div>
-                                <dt>What changes</dt>
-                                <dd>{selectedIntakeProfile.changes}</dd>
-                            </div>
-                            <div>
-                                <dt>Skip when</dt>
-                                <dd>{selectedIntakeProfile.avoidWhen}</dd>
-                            </div>
-                        </dl>
-                    </div>
                 </label>
                 <label>
                     DOCX intake model
@@ -749,6 +629,13 @@ const DocxModal = ({
                         ))}
                     </select>
                 </label>
+                <div
+                    id="docx-intake-role-help"
+                    className="source-intake-role-summary"
+                    title={`Best for: ${selectedIntakeProfile.bestFor}. Skip when: ${selectedIntakeProfile.avoidWhen}`}
+                >
+                    <span>{selectedIntakeProfile.description}</span>
+                </div>
                 <textarea
                     value={intakeBrief}
                     onChange={(event) => setIntakeBrief(event.target.value)}

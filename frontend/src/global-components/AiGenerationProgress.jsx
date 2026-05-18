@@ -8,6 +8,7 @@ import {
     FiClock,
     FiList,
     FiMinimize2,
+    FiRefreshCw,
     FiShield,
     FiX
 } from 'react-icons/fi';
@@ -98,6 +99,8 @@ const AiGenerationProgress = ({
     collapsed,
     defaultCollapsed = false,
     onCollapsedChange,
+    onRetry,
+    retryLabel = 'Retry',
     onDismiss,
     className = ''
 }) => {
@@ -145,6 +148,7 @@ const AiGenerationProgress = ({
     const statusLabel = STATUS_LABELS[status] || STATUS_LABELS.running;
     const canShowFeed = showEventFeed && visibleEvents.length > 0;
     const canDismiss = typeof onDismiss === 'function' && ['completed', 'failed', 'canceled'].includes(status);
+    const canRetry = typeof onRetry === 'function' && status === 'failed';
 
     const setCollapsed = (nextCollapsed) => {
         setInternalCollapsed(nextCollapsed);
@@ -201,6 +205,18 @@ const AiGenerationProgress = ({
                         {isCollapsed ? <FiChevronRight /> : <FiMinimize2 />}
                         <span>{isCollapsed ? 'Expand' : 'Minimize'}</span>
                     </button>
+                    {canRetry ? (
+                        <button
+                            type="button"
+                            className="ai-generation-progress__retry"
+                            onClick={onRetry}
+                            title="Retry this request"
+                            aria-label="Retry AI request"
+                        >
+                            <FiRefreshCw />
+                            <span>{retryLabel}</span>
+                        </button>
+                    ) : null}
                     {canDismiss ? (
                         <button
                             type="button"

@@ -133,25 +133,6 @@ const SourceIntakeRoleControls = ({
                         Use recommended: {recommendedProfile.label}
                     </button>
                 ) : null}
-                <div className="source-intake-role-help-panel">
-                    <div>
-                        <strong>{selectedProfile.description}</strong>
-                    </div>
-                    <dl>
-                        <div>
-                            <dt>Best for</dt>
-                            <dd>{selectedProfile.bestFor}</dd>
-                        </div>
-                        <div>
-                            <dt>What changes</dt>
-                            <dd>{selectedProfile.changes}</dd>
-                        </div>
-                        <div>
-                            <dt>Skip when</dt>
-                            <dd>{selectedProfile.avoidWhen}</dd>
-                        </div>
-                    </dl>
-                </div>
             </label>
             <label>
                 <span className="source-intake-label-row">
@@ -168,6 +149,12 @@ const SourceIntakeRoleControls = ({
                     ))}
                 </select>
             </label>
+            <div
+                className="source-intake-role-summary"
+                title={`Best for: ${selectedProfile.bestFor}. Skip when: ${selectedProfile.avoidWhen}`}
+            >
+                <span>{selectedProfile.description}</span>
+            </div>
             <label>
                 Optional brief
                 <textarea

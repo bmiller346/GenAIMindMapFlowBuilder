@@ -32,7 +32,7 @@ test('derives a reviewable map from a workspace brief and preserves MVP actions'
         });
     });
 
-    await page.route('http://localhost:8000/flow-update', async (route) => {
+    await page.route('http://localhost:8000/flow-update/', async (route) => {
         const requestBody = route.request().postDataJSON();
         savedFlowName = requestBody.flow_name;
         savedFlowJson = requestBody.flow_json;
@@ -101,14 +101,14 @@ test('derives a reviewable map from a workspace brief and preserves MVP actions'
     await page.getByText('NEW', { exact: true }).click();
     await page.getByRole('button', { name: 'Blank workspace' }).click();
 
-    await page.getByText('Add New Source').click();
+    await page.getByRole('button', { name: 'Add sources' }).click();
     await expect(
         page.getByText(
-            'Use source-set review for folder-like packages. PDF, DOCX, Markdown, and TXT remain source-traceable single-file paths; other inputs create reviewable drafts.'
+            'Use source set when you want multiple documents in one upload. Single-source uploads are intentionally one file at a time for clearer extraction, role choice, and review. AI draft inputs create reviewable drafts instead of section-cited source records.'
         )
     ).toBeVisible();
-    await expect(page.getByText('Source-traceable | Extracts cited document sections.').first()).toBeVisible();
-    await expect(page.getByText('AI intake | Reviewable draft; no section citations.').first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /Review folder \/ file set/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Upload PPTX/ })).toBeVisible();
     await page.getByRole('button', { name: 'Close source picker' }).click({ force: true });
 
     await page.getByAltText('Open workspaces').click();
@@ -123,6 +123,7 @@ test('derives a reviewable map from a workspace brief and preserves MVP actions'
 
     await page.getByRole('button', { name: 'Derive from brief' }).click();
     await expect(page.getByText('Workspace Goal')).toBeVisible();
+    await page.getByRole('button', { name: 'Unsaved changes' }).click();
     await page.getByRole('button', { name: 'Health' }).click();
     await expect(page.getByRole('button', { name: /Workspace health/ })).toBeVisible();
 
@@ -172,6 +173,7 @@ test('derives a reviewable map from a workspace brief and preserves MVP actions'
         .getByRole('button', { name: 'Apply', exact: true })
         .click();
     await expect(page.getByText('Applied locally')).toBeVisible();
+    await page.getByRole('button', { name: 'Unsaved changes' }).click();
 
     await expect
         .poll(() => {

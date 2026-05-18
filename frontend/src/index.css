@@ -1076,6 +1076,22 @@ h4 {
   text-transform: uppercase;
 }
 
+.source-intake-role-summary {
+  grid-column: 1 / -1;
+  display: block;
+  min-width: 0;
+  color: var(--input-color);
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.08rem;
+  margin-top: -0.25rem;
+  padding: 0 0.05rem;
+}
+
+.source-intake-role-summary span {
+  display: block;
+}
+
 .source-set-modal {
   width: min(44rem, calc(100vw - 2rem));
 }
@@ -1499,7 +1515,7 @@ h5 {
 
 .map-style-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 0.35rem;
 }
 
@@ -1515,6 +1531,7 @@ h5 {
 }
 
 .map-style-actions button:first-child {
+  grid-column: 1 / -1;
   border-color: color-mix(in srgb, #66c2a5 42%, var(--question-border));
   background: color-mix(in srgb, var(--data-source-hover) 78%, #66c2a5 8%);
 }
@@ -2761,7 +2778,7 @@ input:focus {
 .ai-generation-progress {
   display: grid;
   gap: 0.7rem;
-  width: min(25rem, calc(100vw - 2rem));
+  width: min(30rem, calc(100vw - 2rem));
   border: 1px solid color-mix(in srgb, var(--question-border) 72%, #66c2a5);
   border-radius: 0.5rem;
   background-color: color-mix(in srgb, var(--modal-container-color) 94%, transparent);
@@ -2780,9 +2797,9 @@ input:focus {
 
 .ai-generation-progress__header {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 0.65rem;
-  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.5rem 0.65rem;
+  align-items: start;
 }
 
 .ai-generation-progress__mark {
@@ -2850,9 +2867,12 @@ input:focus {
 }
 
 .ai-generation-progress__actions {
+  grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.35rem;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .ai-generation-progress__actions button,
@@ -2877,6 +2897,11 @@ input:focus {
 .ai-generation-progress__actions button:hover,
 .ai-generation-progress__feed > button:hover {
   background-color: var(--data-source-hover);
+}
+
+.ai-generation-progress__actions .ai-generation-progress__retry {
+  border-color: color-mix(in srgb, #66c2a5 56%, var(--question-border));
+  background-color: color-mix(in srgb, #66c2a5 12%, var(--input-bar-color));
 }
 
 .ai-generation-progress__actions svg,
@@ -3186,12 +3211,7 @@ input:focus {
     padding: 0.65rem;
   }
 
-  .ai-generation-progress__header {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
   .ai-generation-progress__actions {
-    grid-column: 1 / -1;
     justify-content: flex-end;
   }
 
@@ -3579,7 +3599,15 @@ input:focus {
   opacity: 0.68;
 }
 
-.loading-modal-cancel {
+.loading-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.55rem;
+}
+
+.loading-modal-cancel,
+.loading-modal-retry {
   border: 1px solid var(--question-border);
   border-radius: 999px;
   background-color: transparent;
@@ -3590,7 +3618,13 @@ input:focus {
   padding: 0.55rem 0.9rem;
 }
 
-.loading-modal-cancel:hover {
+.loading-modal-retry {
+  border-color: color-mix(in srgb, #66c2a5 62%, var(--question-border));
+  background-color: color-mix(in srgb, #66c2a5 12%, transparent);
+}
+
+.loading-modal-cancel:hover,
+.loading-modal-retry:hover {
   border-color: #eece47;
 }
 
@@ -3636,6 +3670,10 @@ input:focus {
   transition: width 700ms ease;
 }
 
+.loading-modal-card--failed .loading-modal-bar span {
+  background: linear-gradient(90deg, #d9534f, #eece47);
+}
+
 .loading-modal-progress {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3651,6 +3689,10 @@ input:focus {
 
 .loading-modal-progress span.active {
   background-color: #eece47;
+}
+
+.loading-modal-card--failed .loading-modal-progress span.active {
+  background-color: #d9534f;
 }
 
 .activity-panel {

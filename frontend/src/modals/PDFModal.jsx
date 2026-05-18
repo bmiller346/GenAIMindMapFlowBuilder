@@ -269,27 +269,7 @@ const PDFModal = ({
             return;
         }
 
-        let currentFlowId;
-        try {
-            currentFlowId = await ensureWorkspace();
-        } catch (err) {
-            showError(
-                err.response?.status || err.status || 500,
-                requestErrorMessage(err)
-            );
-            return;
-        }
-
         const operationId = nanoid();
-        const data = {
-            file: file,
-            processing_type: processingType,
-            sourceIntent: isAskAIContextMode ? 'context' : 'mindmap',
-            operationId,
-            intakeRole: intakeProfileId,
-            intakeModel: intakeModel === 'auto' ? '' : intakeModel,
-            intakePrompt: intakeBrief.trim()
-        };
         const undoSnapshot = createOperationSnapshot({
             nodes,
             edges,
@@ -297,6 +277,7 @@ const PDFModal = ({
             workspaceBrief
         });
         const controller = new AbortController();
+        let requestCanceled = false;
         const activityId = addActivity({
             type: 'source_upload_started',
             title: 'Adding PDF source',
@@ -307,6 +288,7 @@ const PDFModal = ({
             ...sourceUploadLoading('PDF', file?.name),
             operationId,
             onCancel: () => {
+                requestCanceled = true;
                 controller.abort();
                 updateActivity(activityId, {
                     type: 'source_upload_canceled',
@@ -316,6 +298,34 @@ const PDFModal = ({
                 popNode();
             }
         });
+        let currentFlowId;
+        try {
+            currentFlowId = await ensureWorkspace();
+        } catch (err) {
+            updateActivity(activityId, {
+                type: 'source_upload_failed',
+                status: 'failed',
+                context: requestErrorMessage(err)
+            });
+            showError(
+                err.response?.status || err.status || 500,
+                requestErrorMessage(err)
+            );
+            return;
+        }
+        if (requestCanceled) {
+            return;
+        }
+
+        const data = {
+            file: file,
+            processing_type: processingType,
+            sourceIntent: isAskAIContextMode ? 'context' : 'mindmap',
+            operationId,
+            intakeRole: intakeProfileId,
+            intakeModel: intakeModel === 'auto' ? '' : intakeModel,
+            intakePrompt: intakeBrief.trim()
+        };
         const undoSourceAdd = () => {
             restoreOperationSnapshot({
                 snapshot: undoSnapshot,
@@ -627,29 +637,6 @@ const PDFModal = ({
                             Use recommended: {recommendedIntakeProfile.label}
                         </button>
                     ) : null}
-                    <div
-                        id="pdf-intake-role-help"
-                        className="source-intake-role-help-panel"
-                    >
-                        <div>
-                            <strong>{selectedIntakeProfile.label}</strong>
-                            <span>{selectedIntakeProfile.description}</span>
-                        </div>
-                        <dl>
-                            <div>
-                                <dt>Best for</dt>
-                                <dd>{selectedIntakeProfile.bestFor}</dd>
-                            </div>
-                            <div>
-                                <dt>What changes</dt>
-                                <dd>{selectedIntakeProfile.changes}</dd>
-                            </div>
-                            <div>
-                                <dt>Skip when</dt>
-                                <dd>{selectedIntakeProfile.avoidWhen}</dd>
-                            </div>
-                        </dl>
-                    </div>
                 </label>
                 <label>
                     PDF intake model
@@ -664,6 +651,13 @@ const PDFModal = ({
                         ))}
                     </select>
                 </label>
+                <div
+                    id="pdf-intake-role-help"
+                    className="source-intake-role-summary"
+                    title={`Best for: ${selectedIntakeProfile.bestFor}. Skip when: ${selectedIntakeProfile.avoidWhen}`}
+                >
+                    <span>{selectedIntakeProfile.description}</span>
+                </div>
                 <textarea
                     value={intakeBrief}
                     onChange={(event) => setIntakeBrief(event.target.value)}
