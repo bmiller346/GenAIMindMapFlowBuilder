@@ -1371,11 +1371,38 @@ const PromptModal = ({
             { label: 'Output', value: visualLabel(selectedVisual) }
         ]);
         setStageDebug(null);
-        const childEdges = edges.filter((edge) => edge.source === targetNodeId);
-        const sourceRefs =
-            scope === 'source'
-                ? selectedSourcePayload?.source_refs || []
-                : targetData.sourceRefs || [];
+        const failPreflight = (error) => {
+            stopModelWaitProgressUpdates();
+            const detail = messageFromGenerationError(error, 'Unable to prepare the Ask AI preview.');
+            updateStageMessage(`Ask AI setup failed before the request was sent. ${detail}`, 'error');
+            updateStageDebug({
+                timestamp: new Date().toISOString(),
+                mode: 'request_setup_failed',
+                diagnosis: [
+                    'The request failed while preparing local context, before the backend/model call could begin.'
+                ],
+                error: detail
+            });
+            publishGenerationProgress({
+                status: 'failed',
+                message: detail
+            });
+            if (!isFormDismissedRef.current) {
+                setIsGeneratingPreview(false);
+            }
+        };
+        let childEdges = [];
+        let sourceRefs = [];
+        try {
+            childEdges = edges.filter((edge) => edge.source === targetNodeId);
+            sourceRefs =
+                scope === 'source'
+                    ? selectedSourcePayload?.source_refs || []
+                    : targetData.sourceRefs || [];
+        } catch (error) {
+            failPreflight(error);
+            return;
+        }
         const shouldDraftNode = selectedVisual !== 'no_visual' && actionsThatDraftNodes.has(effectiveAction.id);
         const normalizedScope =
             scope === 'workspace'
@@ -1397,17 +1424,23 @@ const PromptModal = ({
                 promptText,
                 activeAIDraftSession?.session_id ? 'update' : 'supplement'
             );
-        const memoryContext = buildAIDraftMemoryContext({
-            nodes,
-            edges,
-            scope: normalizedScope,
-            sourceRefs,
-            selectedSourcePayload,
-            activeDraftSession: activeAIDraftSession,
-            prompt: promptText,
-            changeIntent,
-            outputMode: shouldSeedInitialGraph ? 'initial_graph_seed' : 'draft_preview'
-        });
+        let memoryContext = null;
+        try {
+            memoryContext = buildAIDraftMemoryContext({
+                nodes,
+                edges,
+                scope: normalizedScope,
+                sourceRefs,
+                selectedSourcePayload,
+                activeDraftSession: activeAIDraftSession,
+                prompt: promptText,
+                changeIntent,
+                outputMode: shouldSeedInitialGraph ? 'initial_graph_seed' : 'draft_preview'
+            });
+        } catch (error) {
+            failPreflight(error);
+            return;
+        }
         updateGenerationProgress(
             'Selecting source context',
             selectedSourcePayload?.metadata?.selected_source_count
@@ -1437,17 +1470,24 @@ const PromptModal = ({
                       : 'Workspace graph only'
             }
         ]);
-        const { draftNodes, draftEdges } = buildFallbackDraftGraph({
-            shouldDraftNode,
-            inferredShape,
-            effectiveAction,
-            targetLabel,
-            targetNodeId,
-            localPrompt,
-            compactSuggestions,
-            sourceRefs,
-            selectedVisual
-        });
+        let draftNodes = [];
+        let draftEdges = [];
+        try {
+            ({ draftNodes, draftEdges } = buildFallbackDraftGraph({
+                shouldDraftNode,
+                inferredShape,
+                effectiveAction,
+                targetLabel,
+                targetNodeId,
+                localPrompt,
+                compactSuggestions,
+                sourceRefs,
+                selectedVisual
+            }));
+        } catch (error) {
+            failPreflight(error);
+            return;
+        }
         const draftAnnotations =
             effectiveAction.id === 'custom_prompt'
                 ? []

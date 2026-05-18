@@ -43,6 +43,7 @@ const WorkspaceDock = ({
     workspaceNextSteps = [],
     onOpenNextSteps,
     hasWorkspaceContentNodes,
+    suppressGuidanceNudges = false,
     dockControls
 }) => {
     const [activeTab, setActiveTab] = useState('guidance');
@@ -218,12 +219,14 @@ const WorkspaceDock = ({
                                 </button>
                             </div>
                         ) : null}
-                        <WorkspaceNudgeSurface
-                            validationIssues={validationReport?.issues || []}
-                            onFocusNode={onSelectNode}
-                            onOpenSources={onOpenSources}
-                            onOpenAiHelpers={onOpenAiHelpers}
-                        />
+                        {!suppressGuidanceNudges ? (
+                            <WorkspaceNudgeSurface
+                                validationIssues={validationReport?.issues || []}
+                                onFocusNode={onSelectNode}
+                                onOpenSources={onOpenSources}
+                                onOpenAiHelpers={onOpenAiHelpers}
+                            />
+                        ) : null}
                         {!hasWorkspaceNextSteps ? (
                             <div className="workspace-guide-empty">
                                 <strong>Guide</strong>

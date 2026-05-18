@@ -306,6 +306,39 @@ const MAP_CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph']);
 const mapFallbackCanvas = (fallback) =>
     MAP_CANVAS_VIEWS.has(fallback) ? fallback : 'mindmap';
 
+const draftLooksLikeFlowchart = (session = {}, revision = {}) => {
+    const promptText = [
+        revision.prompt,
+        ...asArray(session.prompt_history).map((entry) =>
+            typeof entry === 'string' ? entry : entry.content || entry.prompt || entry.text
+        )
+    ]
+        .join(' ')
+        .toLowerCase();
+    if (/\b(flowchart|flow chart|process map|swimlane|decision tree)\b/.test(promptText)) {
+        return true;
+    }
+    const draftNodes = asArray(revision.draft_nodes);
+    if (!draftNodes.length) {
+        return false;
+    }
+    const flowNodeTypes = new Set([
+        'process',
+        'decision',
+        'handoff',
+        'milestone',
+        'checkpoint',
+        'dependency',
+        'terminator'
+    ]);
+    const flowNodeCount = draftNodes.filter((node) =>
+        flowNodeTypes.has(String(node.node_type || node.type || node.metadata?.node_type || '').toLowerCase())
+    ).length;
+    return flowNodeCount >= 2 || draftNodes.some((node) =>
+        String(node.node_type || node.type || node.metadata?.node_type || '').toLowerCase() === 'decision'
+    );
+};
+
 const canvasForDraft = (session = {}, revision = {}, fallback = 'mindmap') => {
     const metadata = {
         ...(session.metadata || {}),
@@ -346,6 +379,9 @@ const canvasForDraft = (session = {}, revision = {}, fallback = 'mindmap') => {
         shape.includes('decision tree') ||
         shape.includes('swimlane')
     ) {
+        return 'flowchart';
+    }
+    if (draftLooksLikeFlowchart(session, revision)) {
         return 'flowchart';
     }
     if (shape.includes('knowledge')) {

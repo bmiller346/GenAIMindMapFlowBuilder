@@ -6,7 +6,7 @@ import useActivityStore from '../stores/activityStore';
 import FlowchartRenderer from './flowchart/FlowchartRenderer.jsx';
 import KanbanBoardView from './KanbanBoardView.jsx';
 import { getSavedTableViews, saveSavedTableViews } from '../config/localSettings.js';
-import { createWorkspaceEdge, reflowSiblingSubtrees } from '../utils/manualNodes.js';
+import { createWorkspaceEdge, createWorkspaceNode, reflowSiblingSubtrees } from '../utils/manualNodes.js';
 import {
     buildFilteredGraphProjection,
     getExecutiveOutputProjection,
@@ -548,6 +548,7 @@ const CanvasStructuredView = ({
     activeGraphFilters = [],
     selectedBranchId,
     onOpenNode,
+    onSelectEdge,
     onSelectBranch,
     onFocusInMap,
     onApplyFilters,
@@ -606,6 +607,110 @@ const CanvasStructuredView = ({
     const [hierarchyUndoNotice, setHierarchyUndoNotice] = useState(null);
     const hierarchyUndoTimerRef = useRef(null);
     const label = VIEW_LABELS[view] || 'Structured view';
+    const addFlowchartStep = ({ nodeType = 'process', title = 'New flow step', sourceId = '' } = {}) => {
+        const sourceStep = sourceId
+            ? flowchart.steps.find((step) => step.id === sourceId)
+            : flowchart.steps.at(-1);
+        const sourceNode = nodes.find((node) => node.id === sourceStep?.id);
+        const node = createWorkspaceNode({
+            title,
+            nodeType,
+            status: 'needs_review',
+            position: sourceNode
+                ? {
+                      x: (sourceNode.position?.x || 0) + 430,
+                      y: sourceNode.position?.y || 0
+                  }
+                : {
+                      x: 260,
+                      y: 160
+                  },
+            metadata: {
+                authored_from_view: 'flowchart'
+            }
+        });
+        const edge = sourceStep
+            ? createWorkspaceEdge(sourceStep.id, node.id, {
+                  relationship_type: nodeType === 'decision' ? 'decision_path' : 'next',
+                  label: nodeType === 'decision' ? 'Review' : 'Next',
+                  metadata: {
+                      authored_from_view: 'flowchart'
+                  }
+              })
+            : null;
+        setNodes([...nodes, node]);
+        setEdges(edge ? [...edges, edge] : edges);
+        markDirty();
+        window.setTimeout(() => {
+            window.dispatchEvent(new Event('docmap:save-workspace-now'));
+        }, 0);
+        recordActivity({
+            type: 'flowchart_step_created',
+            title: 'Flowchart step added',
+            summary: `${title} was added from the flowchart view.`,
+            node_ids: [node.id, sourceStep?.id].filter(Boolean),
+            metadata: {
+                node_type: nodeType,
+                source_node_id: sourceStep?.id || ''
+            },
+            status: 'completed'
+        });
+        onOpenNode?.(node.id);
+    };
+    const addFlowchartDecisionBranch = (sourceId, branchKind = 'yes') => {
+        const isNo = branchKind === 'no';
+        const sourceStep = flowchart.steps.find((step) => step.id === sourceId);
+        const sourceNode = nodes.find((node) => node.id === sourceId);
+        if (!sourceStep) {
+            return;
+        }
+        const title = isNo ? 'Handle exception' : 'Continue flow';
+        const node = createWorkspaceNode({
+            title,
+            nodeType: isNo ? 'dependency' : 'process',
+            status: 'needs_review',
+            position: sourceNode
+                ? {
+                      x: (sourceNode.position?.x || 0) + 430,
+                      y: (sourceNode.position?.y || 0) + (isNo ? 120 : -120)
+                  }
+                : { x: 260, y: isNo ? 280 : 40 },
+            metadata: {
+                authored_from_view: 'flowchart',
+                branch_kind: branchKind
+            }
+        });
+        const edge = createWorkspaceEdge(sourceId, node.id, {
+            relationship_type: isNo ? 'exception' : 'decision_path',
+            label: isNo ? 'No' : 'Yes',
+            branch_label: isNo ? 'No' : 'Yes',
+            condition: isNo ? 'Not satisfied' : 'Satisfied',
+            metadata: {
+                authored_from_view: 'flowchart',
+                branch_kind: branchKind,
+                condition: isNo ? 'Not satisfied' : 'Satisfied'
+            }
+        });
+        setNodes([...nodes, node]);
+        setEdges([...edges, edge]);
+        markDirty();
+        window.setTimeout(() => {
+            window.dispatchEvent(new Event('docmap:save-workspace-now'));
+        }, 0);
+        recordActivity({
+            type: 'flowchart_branch_created',
+            title: `${isNo ? 'No' : 'Yes'} branch added`,
+            summary: `${title} was added from ${sourceStep.title}.`,
+            node_ids: [sourceId, node.id],
+            metadata: {
+                edge_id: edge.id,
+                branch_kind: branchKind,
+                relationship_type: edge.relationship_type
+            },
+            status: 'completed'
+        });
+        onOpenNode?.(node.id);
+    };
     const displayedWorkBreakdownRows = useMemo(
         () => {
             if (tableMode === 'condensed') {
@@ -637,6 +742,7 @@ const CanvasStructuredView = ({
     const markDirty = () => {
         if (flowId) {
             setSaveStatus('dirty');
+            window.setTimeout(() => setSaveStatus('dirty'), 100);
         }
     };
 
@@ -1800,6 +1906,9 @@ const CanvasStructuredView = ({
                 <FlowchartRenderer
                     flowchart={flowchart}
                     onOpenNode={onOpenNode}
+                    onOpenEdge={onSelectEdge}
+                    onAddStep={addFlowchartStep}
+                    onAddDecisionBranch={addFlowchartDecisionBranch}
                     onAskAi={onAskAi}
                 />
             ) : null}

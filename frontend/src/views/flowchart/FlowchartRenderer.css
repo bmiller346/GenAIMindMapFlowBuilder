@@ -17,6 +17,7 @@
 .canvas-flowchart-diagram-stage {
   position: relative;
   min-width: 100%;
+  isolation: isolate;
 }
 
 .canvas-flowchart-diagram-svg {
@@ -34,7 +35,7 @@
   stroke: color-mix(in srgb, #58a6ff 72%, var(--question-border));
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 2.25;
+  stroke-width: 2.5;
 }
 
 .canvas-flowchart-diagram-edge-yes {
@@ -56,6 +57,7 @@
   justify-items: center;
   color: var(--font-color);
   text-align: center;
+  z-index: 2;
 }
 
 .canvas-flowchart-diagram-node-surface {
@@ -68,6 +70,16 @@
   justify-items: center;
   gap: 0.24rem;
   padding: 0.78rem 0.95rem;
+}
+
+.canvas-flowchart-diagram-node-actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.25rem;
+  margin-top: 0.16rem;
 }
 
 .canvas-flowchart-diagram-node-svg {
@@ -145,11 +157,22 @@
   color: var(--font-color);
   cursor: pointer;
   font: inherit;
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   font-weight: 850;
   line-height: 1.18rem;
   padding: 0;
   text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.canvas-flowchart-diagram-node-actions button {
+  border: 1px solid color-mix(in srgb, var(--flowchart-accent, #42c89a) 42%, var(--question-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--modal-container-color) 82%, #000);
+  color: var(--input-color);
+  font-size: 0.62rem;
+  line-height: 0.86rem;
+  padding: 0.08rem 0.34rem;
 }
 
 .canvas-flowchart-diagram-node button:hover,
@@ -157,35 +180,20 @@
   text-decoration: underline;
 }
 
-.canvas-flowchart-diagram-node p {
-  position: absolute;
-  top: calc(100% + 0.32rem);
-  left: 0;
-  right: 0;
-  display: -webkit-box;
-  max-height: 2.45rem;
-  overflow: hidden;
-  color: var(--input-color);
-  font-size: 0.76rem;
-  line-height: 1.18rem;
-  margin: 0;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
 .canvas-flowchart-diagram-edge-label {
   position: absolute;
-  z-index: 2;
+  z-index: 3;
   display: grid;
   align-content: center;
   gap: 0.05rem;
-  border: 1px solid var(--question-border);
+  border: 1px solid color-mix(in srgb, var(--question-border) 82%, transparent);
   border-radius: 999px;
-  background-color: var(--modal-container-color);
+  background-color: color-mix(in srgb, var(--modal-container-color) 92%, #000);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
   color: var(--font-color);
   cursor: pointer;
   font: inherit;
-  padding: 0.32rem 0.58rem;
+  padding: 0.25rem 0.5rem;
   text-align: center;
 }
 

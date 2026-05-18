@@ -1071,9 +1071,14 @@ const App = () => {
     }, [setInspectorNodeId, setNodes]);
     const openEdgeInspector = useCallback(
         (event, edge) => {
+            if (typeof event === 'string') {
+                setInspectorEdgeId(event);
+                return;
+            }
             event?.stopPropagation?.();
-            if (edge?.id) {
-                setInspectorEdgeId(edge.id);
+            const edgeId = typeof edge === 'string' ? edge : edge?.id;
+            if (edgeId) {
+                setInspectorEdgeId(edgeId);
             }
         },
         [setInspectorEdgeId]
@@ -1360,6 +1365,14 @@ const App = () => {
     }, []);
 
     const reflowCanvasGraph = useCallback(() => {
+        if (STRUCTURED_CANVAS_VIEWS.has(activeCanvasView)) {
+            window.dispatchEvent(
+                new CustomEvent('docmap:reflow-canvas-skipped', {
+                    detail: { view: activeCanvasView, reason: 'structured_view' }
+                })
+            );
+            return;
+        }
         const graphNodes = reactFlow.getNodes();
         const graphEdges = reactFlow.getEdges();
         const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
@@ -1790,6 +1803,7 @@ const App = () => {
                         activeGraphFilters={activeGraphFilters}
                         selectedBranchId={selectedBranchId}
                         onOpenNode={focusNodeForReview}
+                        onSelectEdge={openEdgeInspector}
                         onSelectBranch={setSelectedBranchId}
                         onFocusInMap={focusStructuredNodeInMap}
                         onApplyFilters={setActiveGraphFilters}
@@ -1826,6 +1840,7 @@ const App = () => {
                         workspaceNextSteps={workspaceNextSteps}
                         onOpenNextSteps={openNextStepsFromDock}
                         hasWorkspaceContentNodes={hasWorkspaceContentNodes}
+                        suppressGuidanceNudges={isStructuredCanvasView}
                     />
                 </FloatingDock>
                 <Panel position="bottom">
@@ -1978,7 +1993,7 @@ const App = () => {
                     style={{ display: 'block' }}
                 >
                     <AiHelpersPanel
-                        hidden={!isAiHelpersOpen}
+                        hidden={!isAiHelpersOpen || activeCanvasView === 'flowchart'}
                         selectedNodes={selectedNodes || []}
                         autoOpenToken={nextStepsOpenToken}
                         summaryLabel={nextStepsOpenToken ? 'Next steps' : 'AI Helpers'}

@@ -887,6 +887,104 @@ test('Ask AI valid submit shows preview-first generation progress before draft r
     );
 });
 
+test('Ask AI flowchart request without sources does not stall on source selection', async ({
+    page
+}) => {
+    const { draftSessionRequests } = await setupMockBackend(page, {
+        initialFlowJson: scopedLensFlowJson
+    });
+    await openExistingFlow(page);
+
+    await openAskAi(page);
+    await promptTextarea(page).fill('short flow chart diagram to confirm this feature is working.');
+    await page.locator('.ai-action-natural select').first().selectOption('flow_chart');
+    await page
+        .locator('.ai-action-footer')
+        .getByRole('button', { name: 'Preview changes' })
+        .evaluate((button) => button.click());
+
+    await expect.poll(() => draftSessionRequests.length, { timeout: 7000 }).toBe(1);
+    expect(draftSessionRequests[0].requestBody.desired_outputs).toContain('flow_chart');
+    expect(draftSessionRequests[0].requestBody.source_chunks).toHaveLength(0);
+    await expect(page.locator('.ai-action-modal')).toHaveCount(0);
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
+    await page
+        .locator('.node-inspector .ai-draft-accept')
+        .getByRole('button', { name: 'Accept 1 item' })
+        .click();
+    await expect(page.locator('.canvas-structured-view-flowchart')).toBeVisible();
+});
+
+test('empty workspace Ask AI flowchart request advances past source selection', async ({
+    page
+}) => {
+    const { draftSessionRequests, savedRequests, state } = await setupMockBackend(page);
+    state.createdFlow = true;
+    state.savedFlowName = 'Empty flowchart QA';
+    state.savedFlowJson = emptyFlowJson;
+
+    await page.goto('/');
+    await expect(page.getByRole('textbox', { name: 'Workspace name' })).toHaveValue('Empty flowchart QA');
+    await page
+        .getByRole('region', { name: 'Empty workspace' })
+        .getByRole('button', { name: 'Ask AI' })
+        .click();
+    await expect(page.locator('.ai-action-modal')).toBeVisible();
+    await promptTextarea(page).fill('short flow chart diagram to confirm this feature is working.');
+    await page.locator('.ai-action-natural select').first().selectOption('flow_chart');
+    await page
+        .locator('.ai-action-footer')
+        .getByRole('button', { name: 'Create initial graph' })
+        .evaluate((button) => button.click());
+
+    await expect.poll(() => draftSessionRequests.length, { timeout: 7000 }).toBe(1);
+    expect(draftSessionRequests[0].requestBody.scope).toEqual({ type: 'workspace' });
+    expect(draftSessionRequests[0].requestBody.desired_outputs).toContain('flow_chart');
+    expect(draftSessionRequests[0].requestBody.source_chunks).toHaveLength(0);
+    await expect(page.locator('.ai-action-modal')).toHaveCount(0);
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
+
+    await page
+        .locator('.node-inspector .ai-draft-accept')
+        .getByRole('button', { name: 'Accept 1 item' })
+        .click();
+    await expect(page.locator('.canvas-structured-view-flowchart')).toBeVisible();
+    const nodeDisplayMenu = page.locator('.local-canvas-command-main').getByRole('button', { name: /Nodes/ });
+    await nodeDisplayMenu.click();
+    await expect(page.getByRole('button', { name: 'Reflow map' })).toBeDisabled();
+    await nodeDisplayMenu.click();
+
+    await page.locator('.canvas-flowchart-summary').getByRole('button', { name: 'Add decision' }).click();
+    await waitForSavedSnapshot(savedRequests, (snapshot) =>
+        snapshot.nodes.some((node) => node.data?.title === 'New decision' && node.data?.node_type === 'decision') &&
+        snapshot.edges.some((edge) => edge.relationship_type === 'decision_path' && edge.label === 'Review')
+    );
+
+    await page
+        .locator('.canvas-flowchart-diagram-node-decision', { hasText: 'New decision' })
+        .getByRole('button', { name: '+ No' })
+        .click();
+    await waitForSavedSnapshot(savedRequests, (snapshot) =>
+        snapshot.nodes.some((node) => node.data?.title === 'Handle exception' && node.data?.node_type === 'dependency') &&
+        snapshot.edges.some((edge) => edge.relationship_type === 'exception' && edge.branch_label === 'No')
+    );
+
+    await page.locator('.canvas-flowchart-diagram-edge-label-no').last().click();
+    const edgeInspector = page.locator('.edge-inspector');
+    await expect(edgeInspector).toBeVisible();
+    await edgeInspector.getByLabel('Branch label').fill('Rejected');
+    await edgeInspector.getByLabel('Condition').fill('Preview did not open');
+    await edgeInspector.getByRole('button', { name: 'Apply connector' }).click();
+    await waitForSavedSnapshot(savedRequests, (snapshot) =>
+        snapshot.edges.some(
+            (edge) =>
+                edge.branch_label === 'Rejected' &&
+                edge.condition === 'Preview did not open' &&
+                edge.metadata?.exception_path === true
+        )
+    );
+});
+
 test('node Ask AI draft stays non-canonical until selected accept, then persists on reopen', async ({
     page
 }) => {

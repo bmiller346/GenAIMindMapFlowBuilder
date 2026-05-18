@@ -14,7 +14,7 @@ const connectorTitle = (connector = {}) =>
 const branchClass = (connector = {}) =>
     `canvas-flowchart-diagram-edge-label canvas-flowchart-diagram-edge-label-${connector.branch_kind || 'default'}`;
 
-const FlowchartNode = ({ step, onOpenNode }) => {
+const FlowchartNode = ({ step, onOpenNode, onAddStep, onAddDecisionBranch }) => {
     const description = summaryText(step);
     const shapeLabel = step.shape === 'terminator' ? 'Terminator' : step.shape;
 
@@ -32,6 +32,7 @@ const FlowchartNode = ({ step, onOpenNode }) => {
                 height: `${step.height}px`
             }}
             aria-label={`${shapeLabel} flowchart step: ${step.title}`}
+            title={description || step.title}
         >
             <div className="canvas-flowchart-diagram-node-surface">
                 <svg
@@ -48,13 +49,52 @@ const FlowchartNode = ({ step, onOpenNode }) => {
                     {step.title}
                 </button>
                 <small>{step.source_backed ? 'Source-backed' : 'Needs source review'}</small>
+                <div className="canvas-flowchart-diagram-node-actions">
+                    <button
+                        type="button"
+                        onClick={() =>
+                            onAddStep?.({
+                                sourceId: step.id,
+                                nodeType: 'process',
+                                title: 'New process step'
+                            })
+                        }
+                    >
+                        + Step
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() =>
+                            step.flow_kind === 'decision'
+                                ? onAddDecisionBranch?.(step.id, 'yes')
+                                : onAddStep?.({
+                                      sourceId: step.id,
+                                      nodeType: 'decision',
+                                      title: 'New decision'
+                                  })
+                        }
+                    >
+                        {step.flow_kind === 'decision' ? '+ Yes' : '+ Decision'}
+                    </button>
+                    {step.flow_kind === 'decision' ? (
+                        <button type="button" onClick={() => onAddDecisionBranch?.(step.id, 'no')}>
+                            + No
+                        </button>
+                    ) : null}
+                </div>
             </div>
-            {description ? <p>{description}</p> : null}
         </article>
     );
 };
 
-const FlowchartRenderer = ({ flowchart = {}, onOpenNode, onAskAi }) => {
+const FlowchartRenderer = ({
+    flowchart = {},
+    onOpenNode,
+    onOpenEdge,
+    onAddStep,
+    onAddDecisionBranch,
+    onAskAi
+}) => {
     const steps = Array.isArray(flowchart.steps) ? flowchart.steps : [];
     const layout = useMemo(() => createFlowchartLayout(flowchart), [flowchart]);
 
@@ -73,6 +113,17 @@ const FlowchartRenderer = ({ flowchart = {}, onOpenNode, onAskAi }) => {
                     }
                 >
                     Ask AI to draft flowchart
+                </button>
+                <button
+                    type="button"
+                    onClick={() =>
+                        onAddStep?.({
+                            nodeType: 'process',
+                            title: 'Start process'
+                        })
+                    }
+                >
+                    Add first step
                 </button>
             </div>
         );
@@ -134,14 +185,20 @@ const FlowchartRenderer = ({ flowchart = {}, onOpenNode, onAskAi }) => {
                             }}
                             title={connectorTitle(connector)}
                             aria-label={`Open ${connector.target_title || connector.target}. Branch ${connector.label || 'Next'}`}
-                            onClick={() => onOpenNode?.(connector.target)}
+                            onClick={() => onOpenEdge?.(connector.id)}
                         >
                             <strong>{connector.label || 'Next'}</strong>
                             {connector.condition ? <span>{connector.condition}</span> : null}
                         </button>
                     ))}
                     {layout.nodes.map((step) => (
-                        <FlowchartNode key={step.id} step={step} onOpenNode={onOpenNode} />
+                        <FlowchartNode
+                            key={step.id}
+                            step={step}
+                            onOpenNode={onOpenNode}
+                            onAddStep={onAddStep}
+                            onAddDecisionBranch={onAddDecisionBranch}
+                        />
                     ))}
                 </div>
             </div>
@@ -161,6 +218,28 @@ const FlowchartRenderer = ({ flowchart = {}, onOpenNode, onAskAi }) => {
                     }
                 >
                     Ask AI to improve flow
+                </button>
+                <button
+                    type="button"
+                    onClick={() =>
+                        onAddStep?.({
+                            nodeType: 'process',
+                            title: 'New process step'
+                        })
+                    }
+                >
+                    Add step
+                </button>
+                <button
+                    type="button"
+                    onClick={() =>
+                        onAddStep?.({
+                            nodeType: 'decision',
+                            title: 'New decision'
+                        })
+                    }
+                >
+                    Add decision
                 </button>
             </aside>
         </div>
