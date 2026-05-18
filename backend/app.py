@@ -1137,6 +1137,235 @@ def source_metadata_fields(source_context: dict) -> dict:
     }
 
 
+def source_ref_from_chunk(source_document: dict, chunk: dict | None = None) -> dict:
+    chunk = chunk if isinstance(chunk, dict) else {}
+    text = str(chunk.get("text") or "")
+    return {
+        "document_id": source_document.get("id", ""),
+        "chunk_id": chunk.get("id", ""),
+        "page": chunk.get("page"),
+        "section": chunk.get("heading") or "",
+        "quote_snippet": text[:280],
+        "source_type": source_document.get("type", ""),
+    }
+
+
+def source_library_record(source_context: dict, component_id: Any | None = None) -> dict:
+    source_document = source_context["source_document"]
+    return {
+        "id": source_document.get("id", ""),
+        "document_id": source_document.get("id", ""),
+        "title": source_document.get("original_filename")
+        or source_document.get("filename")
+        or "Uploaded source",
+        "filename": source_document.get("filename", ""),
+        "original_filename": source_document.get("original_filename", ""),
+        "type": source_document.get("type", "source"),
+        "type_label": str(source_document.get("type", "source")).upper(),
+        "status": "parsed",
+        "component_id": str(component_id or ""),
+        "flow_id": "",
+        "file_hash": source_document.get("file_hash", ""),
+        "size": source_document.get("size", 0),
+        "version": source_document.get("version", 1),
+        "chunks": source_context.get("document_chunks", []),
+        "segments": source_context.get("source_segments", []),
+        "normalized_document_id": source_document.get("id", ""),
+        "metadata": source_document,
+    }
+
+
+def fallback_source_summary(source_context: dict) -> str:
+    source_document = source_context["source_document"]
+    chunks = source_context.get("document_chunks", [])
+    chunk_count = len(chunks)
+    page_values = sorted(
+        {
+            chunk.get("page")
+            for chunk in chunks
+            if isinstance(chunk, dict) and chunk.get("page") is not None
+        }
+    )
+    page_text = (
+        f" across {len(page_values)} page{'s' if len(page_values) != 1 else ''}"
+        if page_values
+        else ""
+    )
+    headings = [
+        str(chunk.get("heading") or "").strip()
+        for chunk in chunks
+        if isinstance(chunk, dict) and str(chunk.get("heading") or "").strip()
+    ][:4]
+    heading_text = f" Key sections: {', '.join(headings)}." if headings else ""
+    return (
+        f"{source_document.get('original_filename') or source_document.get('filename') or 'The source'} "
+        f"was parsed into {chunk_count} source chunk{'s' if chunk_count != 1 else ''}{page_text}. "
+        "The OpenAI request timed out, so TraceSpace saved the parsed source context "
+        "for follow-up questions and review instead of discarding the upload."
+        f"{heading_text}"
+    )
+
+
+def fallback_source_mindmap(source_context: dict, flow_id: str, component_id: Any | None = None) -> dict:
+    source_document = source_context["source_document"]
+    chunks = [
+        chunk
+        for chunk in source_context.get("document_chunks", [])
+        if isinstance(chunk, dict) and str(chunk.get("text") or "").strip()
+    ]
+    filename = source_document.get("original_filename") or source_document.get("filename") or "Uploaded source"
+    id_prefix = re.sub(r"[^A-Za-z0-9_-]+", "-", source_document.get("id", "source")).strip("-") or "source"
+    source_node_id = f"{id_prefix}-timeout-root"
+    summary_node_id = f"{id_prefix}-timeout-summary"
+    review_node_id = f"{id_prefix}-timeout-review"
+    next_steps_node_id = f"{id_prefix}-timeout-next-steps"
+    source_ref = source_ref_from_chunk(source_document, chunks[0] if chunks else None)
+    source_refs = [source_ref] if source_ref.get("document_id") else []
+    nodes = [
+        {
+            "id": source_node_id,
+            "type": "dataSource",
+            "position": {"x": 0, "y": 80},
+            "data": {
+                "name": source_document.get("type", "source"),
+                "content": filename,
+                "flow_id": flow_id,
+                "component_id": str(component_id or ""),
+                "source_document_id": source_document.get("id", ""),
+                "source_document": source_document,
+                "document_chunks": source_context.get("document_chunks", []),
+                "source_segments": source_context.get("source_segments", []),
+                "processing_type": "responses_timeout_fallback",
+            },
+            "deletable": False,
+        },
+        {
+            "id": summary_node_id,
+            "type": "response",
+            "position": {"x": 420, "y": -20},
+            "data": {
+                "title": "Parsed Source Saved",
+                "node_type": "source_summary",
+                "status": "needs_review",
+                "assumption": False,
+                "source_refs": source_refs,
+                "data": {
+                    "summ": fallback_source_summary(source_context),
+                    "query": "",
+                    "df": [],
+                    "graph": {},
+                    "source_refs": source_refs,
+                },
+            },
+            "deletable": True,
+        },
+        {
+            "id": review_node_id,
+            "type": "response",
+            "position": {"x": 420, "y": 170},
+            "data": {
+                "title": "AI Derivation Timed Out",
+                "node_type": "needs_review",
+                "status": "needs_review",
+                "priority": "high",
+                "assumption": True,
+                "source_refs": [],
+                "data": {
+                    "summ": (
+                        "The full source-backed workspace draft did not finish within 120 seconds. "
+                        "Use Ask AI on this saved source, retry derivation with a faster model, or derive a smaller branch."
+                    ),
+                    "query": "",
+                    "df": [],
+                    "graph": {},
+                    "source_refs": [],
+                },
+            },
+            "deletable": True,
+        },
+        {
+            "id": next_steps_node_id,
+            "type": "response",
+            "position": {"x": 840, "y": 170},
+            "data": {
+                "title": "Next Step: Ask From Source Context",
+                "node_type": "task",
+                "status": "needs_review",
+                "priority": "medium",
+                "assumption": True,
+                "source_refs": [],
+                "data": {
+                    "summ": (
+                        "Start with a targeted question such as: summarize the workflow, list risks, "
+                        "extract decisions, or create a concise launch-readiness map from this source."
+                    ),
+                    "query": "",
+                    "df": [],
+                    "graph": {},
+                    "source_refs": [],
+                },
+            },
+            "deletable": True,
+        },
+    ]
+
+    for index, chunk in enumerate(chunks[:3], start=1):
+        chunk_ref = source_ref_from_chunk(source_document, chunk)
+        title = str(chunk.get("heading") or "").strip() or f"Source Chunk {index}"
+        nodes.append(
+            {
+                "id": f"{id_prefix}-timeout-chunk-{index}",
+                "type": "response",
+                "position": {"x": 840, "y": -120 + index * 120},
+                "data": {
+                    "title": title[:90],
+                    "node_type": "reference",
+                    "status": "ai_generated",
+                    "assumption": False,
+                    "source_refs": [chunk_ref],
+                    "data": {
+                        "summ": str(chunk.get("text") or "").strip()[:700],
+                        "query": "",
+                        "df": [],
+                        "graph": {},
+                        "source_refs": [chunk_ref],
+                    },
+                },
+                "deletable": True,
+            }
+        )
+
+    edges = [
+        {"id": f"{id_prefix}-timeout-edge-1", "source": source_node_id, "target": summary_node_id, "type": "smoothstep", "animated": True},
+        {"id": f"{id_prefix}-timeout-edge-2", "source": source_node_id, "target": review_node_id, "type": "smoothstep", "animated": True},
+        {"id": f"{id_prefix}-timeout-edge-3", "source": review_node_id, "target": next_steps_node_id, "type": "smoothstep", "animated": True},
+        *[
+            {
+                "id": f"{id_prefix}-timeout-edge-chunk-{index}",
+                "source": summary_node_id,
+                "target": f"{id_prefix}-timeout-chunk-{index}",
+                "type": "smoothstep",
+                "animated": True,
+            }
+            for index in range(1, min(len(chunks), 3) + 1)
+        ],
+    ]
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "viewport": {"x": 80, "y": 120, "zoom": 0.7},
+        "source_library": [source_library_record(source_context, component_id)],
+        "metadata": {
+            "ai_graph_contract_version": "1",
+            "source_type": source_document.get("type", ""),
+            "source_label": filename,
+            "fallback_reason": "openai_timeout",
+            "fallback": True,
+        },
+    }
+
+
 def parse_source_set_relative_paths(raw_paths: list[str] | str | None, file_count: int) -> list[str]:
     if raw_paths is None:
         return []
@@ -4814,13 +5043,25 @@ def get_summary_from_openai(
             detail="The model is summarizing the document text prepared from your upload.",
             progress=62,
         )
-        summary_text, ai_metadata = generate_document_summary(
-            file_name=source_document["filename"],
-            source_type=file_extension,
-            chunks=source_context["document_chunks"],
-            role_instruction=intake_instruction,
-            model=intake_model,
-        )
+        try:
+            summary_text, ai_metadata = generate_document_summary(
+                file_name=source_document["filename"],
+                source_type=file_extension,
+                chunks=source_context["document_chunks"],
+                role_instruction=intake_instruction,
+                model=intake_model,
+            )
+            processing_type = "responses"
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_504_GATEWAY_TIMEOUT:
+                raise
+            summary_text = fallback_source_summary(source_context)
+            ai_metadata = {
+                "provider": "deterministic_timeout_fallback",
+                "model": intake_model or "",
+                "reason": "OpenAI source summary timed out; saved parsed source context instead.",
+            }
+            processing_type = "responses_timeout_fallback"
         component_metadata = {
             "flow_id": ObjectId(flow_id),
             "file_id": "",
@@ -4828,7 +5069,7 @@ def get_summary_from_openai(
             "vector_store_id": "",
             "size": len(file_bytes),
             "type": file_extension,
-            "processing_type": "responses",
+            "processing_type": processing_type,
             "summary": summary_text,
             "ai_provider": ai_metadata,
             **source_metadata_fields(source_context),
@@ -4840,7 +5081,7 @@ def get_summary_from_openai(
                 {
                     "$set": {
                         "summary": summary_text,
-                        "processing_type": "responses",
+                        "processing_type": processing_type,
                         "ai_provider": ai_metadata,
                     }
                 },
@@ -4850,12 +5091,23 @@ def get_summary_from_openai(
         update_operation_progress(
             operation_id,
             phase="complete",
-            message="Source summary is ready",
-            detail="The source component was saved to the workspace.",
+            message="Source context is ready",
+            detail=(
+                "The parsed source was saved with a timeout fallback."
+                if processing_type == "responses_timeout_fallback"
+                else "The source component was saved to the workspace."
+            ),
             progress=100,
             status_value="completed",
         )
-        return {"component_id": str(component_id), "type": file_extension, flow_type: flow_type}
+        return {
+            "component_id": str(component_id),
+            "type": file_extension,
+            flow_type: flow_type,
+            "processing_type": processing_type,
+            "timeout_fallback": processing_type == "responses_timeout_fallback",
+            **source_metadata_fields(source_context),
+        }
 
     require_legacy_assistants_fallback(file_extension, purpose="source summary")
     assistant_model = resolve_assistants_model(intake_model)
@@ -5065,15 +5317,27 @@ def openai_mindmap_generator(
             detail="The model is turning the source document into a reviewable TraceSpace draft.",
             progress=64,
         )
-        response_json, ai_metadata = generate_document_mindmap(
-            file_name=source_document["filename"],
-            source_type=file_extension,
-            flow_id=flow_id,
-            chunks=source_context["document_chunks"],
-            role_instruction=intake_instruction,
-            model=intake_model,
-        )
-        response_json = ground_mindmap_with_source_refs(response_json, source_context)
+        try:
+            response_json, ai_metadata = generate_document_mindmap(
+                file_name=source_document["filename"],
+                source_type=file_extension,
+                flow_id=flow_id,
+                chunks=source_context["document_chunks"],
+                role_instruction=intake_instruction,
+                model=intake_model,
+            )
+            response_json = ground_mindmap_with_source_refs(response_json, source_context)
+            processing_type = "responses"
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_504_GATEWAY_TIMEOUT:
+                raise
+            response_json = fallback_source_mindmap(source_context, flow_id)
+            ai_metadata = {
+                "provider": "deterministic_timeout_fallback",
+                "model": intake_model or "",
+                "reason": "OpenAI graph derivation timed out; saved parsed source context with a reviewable starter graph.",
+            }
+            processing_type = "responses_timeout_fallback"
         component_metadata = {
             "flow_id": ObjectId(flow_id),
             "file_id": "",
@@ -5081,7 +5345,7 @@ def openai_mindmap_generator(
             "vector_store_id": "",
             "size": len(file_bytes),
             "type": file_extension,
-            "processing_type": "responses",
+            "processing_type": processing_type,
             "mindmap_json": response_json,
             "ai_provider": ai_metadata,
             **source_metadata_fields(source_context),
@@ -5093,19 +5357,29 @@ def openai_mindmap_generator(
                 {
                     "$set": {
                         "mindmap_json": response_json,
-                        "processing_type": "responses",
+                        "processing_type": processing_type,
                         "ai_provider": ai_metadata,
                     }
                 },
             )
         else:
             component_id = component_collection.insert_one(component_metadata).inserted_id
+        if processing_type == "responses_timeout_fallback":
+            response_json = fallback_source_mindmap(source_context, flow_id, component_id)
+            component_collection.update_one(
+                {"_id": component_id},
+                {"$set": {"mindmap_json": response_json}},
+            )
         flow = flow_collection.find_one({"_id": ObjectId(flow_id)})
         update_operation_progress(
             operation_id,
             phase="complete",
-            message="Workspace structure is ready",
-            detail="The generated mind map was saved to the workspace.",
+            message="Source context is ready",
+            detail=(
+                "AI derivation timed out, so TraceSpace saved the parsed source with a reviewable starter graph."
+                if processing_type == "responses_timeout_fallback"
+                else "The generated mind map was saved to the workspace."
+            ),
             progress=100,
             status_value="completed",
         )
@@ -5116,6 +5390,9 @@ def openai_mindmap_generator(
             "type": file_extension,
             "mindmap_json": response_json,
             "flow_type": flow_type,
+            "processing_type": processing_type,
+            "timeout_fallback": processing_type == "responses_timeout_fallback",
+            **source_metadata_fields(source_context),
         }
 
     require_legacy_assistants_fallback(file_extension, purpose="graph generation")

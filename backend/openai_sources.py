@@ -737,7 +737,8 @@ def _post_openai_json(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=(
                 "OpenAI request timed out after 120 seconds while processing the source. "
-                "Try again, use source-context mode, or split the DOCX into a smaller source."
+                "TraceSpace will keep parsed source context when possible; otherwise try again "
+                "or split the source into smaller sections."
             ),
         ) from exc
     except urllib.error.HTTPError as exc:
