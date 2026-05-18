@@ -11,6 +11,7 @@ export const SETTINGS_KEYS = {
     dismissedNudges: 'docmap.dismissedNudges',
     lastUsedGraphFilters: 'docmap.lastUsedGraphFilters',
     lastCanvasView: 'docmap.lastCanvasView',
+    floatingDocks: 'docmap.floatingDocks',
     lastKgRelationshipMode: 'docmap.lastKgRelationshipMode',
     savedTableViews: 'docmap.savedTableViews',
     developerMode: 'docmap:developerMode'
@@ -280,6 +281,60 @@ export const saveLastCanvasView = (view) => {
     const normalized = normalizeCanvasView(view);
     setLocalSetting(SETTINGS_KEYS.lastCanvasView, normalized);
     return normalized;
+};
+
+const FLOATING_DOCK_IDS = new Set(['canvasLens', 'kgRelationships', 'workspaceTools']);
+const FLOATING_DOCK_PLACEMENTS = new Set(['top', 'left', 'right', 'floating']);
+
+export const normalizeFloatingDockPlacement = (placement = {}) => {
+    const dock = FLOATING_DOCK_PLACEMENTS.has(placement?.dock)
+        ? placement.dock
+        : 'top';
+    const x = Number(placement?.offset?.x);
+    const y = Number(placement?.offset?.y);
+    const normalizedX =
+        dock === 'left' || dock === 'right' ? 0 : Number.isFinite(x) ? x : 0;
+    const normalizedY = dock === 'top' ? 0 : Number.isFinite(y) ? y : 0;
+    return {
+        dock,
+        offset: {
+            x: normalizedX,
+            y: normalizedY
+        }
+    };
+};
+
+export const getFloatingDockPlacements = () => {
+    const rawPlacements = getJsonLocalSetting(SETTINGS_KEYS.floatingDocks, {});
+    if (!rawPlacements || typeof rawPlacements !== 'object') {
+        return {};
+    }
+
+    return Object.fromEntries(
+        Object.entries(rawPlacements)
+            .filter(([dockId]) => FLOATING_DOCK_IDS.has(dockId))
+            .map(([dockId, placement]) => [
+                dockId,
+                normalizeFloatingDockPlacement(placement)
+            ])
+    );
+};
+
+export const getFloatingDockPlacement = (dockId, fallback = {}) =>
+    normalizeFloatingDockPlacement(
+        getFloatingDockPlacements()[dockId] || fallback
+    );
+
+export const saveFloatingDockPlacement = (dockId, placement) => {
+    if (!FLOATING_DOCK_IDS.has(dockId)) {
+        return normalizeFloatingDockPlacement(placement);
+    }
+    const nextPlacement = normalizeFloatingDockPlacement(placement);
+    setJsonLocalSetting(SETTINGS_KEYS.floatingDocks, {
+        ...getFloatingDockPlacements(),
+        [dockId]: nextPlacement
+    });
+    return nextPlacement;
 };
 
 const KG_RELATIONSHIP_MODE_IDS = new Set([

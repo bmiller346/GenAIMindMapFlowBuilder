@@ -45,6 +45,18 @@ const HELP_ARTICLES = [
         ]
     },
     {
+        id: 'demo-tour',
+        title: 'Demo Workspace Tour',
+        summary: 'Read seeded demo maps as a guided walkthrough before editing them.',
+        sections: [
+            'Start with the root card on the left. It names the workspace promise and points to the first useful actions.',
+            'Follow the first-level cards from top to bottom. Demo maps usually show the brief, source library, review state, and alternate views as separate branches.',
+            'Open a card menu or Node metadata to see the controls behind the example: review status, map emphasis, source support, and branch actions.',
+            'Use Build / Map style / Make printable when you want the demo map to become a handout or stakeholder-facing snapshot.',
+            'Demo workspaces are safe practice spaces. Rename, edit, restyle, or delete them once you have kicked the tires.'
+        ]
+    },
+    {
         id: 'connections',
         title: 'Connections',
         summary: 'Review semantic relationships without treating the canvas layout as the only source of truth.',

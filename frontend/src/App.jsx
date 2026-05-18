@@ -16,13 +16,12 @@ import {
 import '@xyflow/react/dist/style.css';
 import axios from 'axios';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FiChevronLeft, FiChevronRight, FiMaximize2, FiMessageSquare, FiMove, FiTrash2 } from 'react-icons/fi';
+import { FiChevronLeft, FiChevronRight, FiMaximize2, FiMessageSquare, FiTrash2 } from 'react-icons/fi';
 import { nodeTypes } from './nodes/nodeTypes.js';
 import { useShallow } from 'zustand/shallow';
 import useStore from './stores/store.js';
 import Modal from './global-components/Modal.jsx';
 import Prompts from './global-components/Prompts.jsx';
-import AddDataSource from './global-components/AddDataSource.jsx';
 import getLayoutedElements from './utils/setLayout.js';
 import modalStore from './stores/modalStore';
 import AskMultiple from './global-components/AskMultiple.jsx';
@@ -31,20 +30,17 @@ import Drawer from './global-components/Drawer.jsx';
 import flowStore from './stores/flowStore.js';
 import NodeInspector from './global-components/NodeInspector.jsx';
 import EdgeInspector from './global-components/EdgeInspector.jsx';
-import GraphValidationPanel from './global-components/GraphValidationPanel.jsx';
 import LocalViewsPanel from './views/LocalViewsPanel.jsx';
 import CanvasStructuredView from './views/CanvasStructuredView.jsx';
-import WorkspaceBriefPanel from './global-components/WorkspaceBriefPanel.jsx';
-import MapStylePanel from './global-components/MapStylePanel.jsx';
+import FloatingDock from './global-components/FloatingDock.jsx';
 import ActivityPanel from './global-components/ActivityPanel.jsx';
 import SourcesPanel from './global-components/SourcesPanel.jsx';
 import IntegrationsPanel from './global-components/IntegrationsPanel.jsx';
 import AutomationsPanel from './global-components/AutomationsPanel.jsx';
-import ManualNodeControls from './global-components/ManualNodeControls.jsx';
+import WorkspaceDock, { WORKSPACE_DOCK_OPEN_TAB_EVENT } from './global-components/WorkspaceDock.jsx';
 import AiHelpersPanel from './global-components/AiHelpersPanel.jsx';
 import AiGenerationProgress from './global-components/AiGenerationProgress.jsx';
 import SourceDraftReviewPanel from './global-components/SourceDraftReviewPanel.jsx';
-import WorkspaceNudgeSurface from './global-components/WorkspaceNudgeSurface.jsx';
 import DataSourceSelect from './global-components/DataSourceSelect.jsx';
 import PromptModal from './modals/PromptModal.jsx';
 import {
@@ -440,14 +436,6 @@ const collectVisibleBranchIds = (nodes, edges, selectedBranchId) => {
 const CANVAS_OUT_OF_SCOPE_NODE_CLASS = 'canvas-node-out-of-scope';
 const CANVAS_OUT_OF_SCOPE_EDGE_CLASS = 'canvas-edge-out-of-scope';
 
-const formatUsageNumber = (value) => {
-    const count = Number(value || 0);
-    if (!Number.isFinite(count) || count <= 0) {
-        return '0';
-    }
-    return count.toLocaleString();
-};
-
 const REVIEWABLE_DRAFT_STATUSES = new Set(['', 'draft', 'drafting', 'previewed', 'generated', 'needs_review']);
 
 const isReviewableDraftSessionSummary = (session = {}) =>
@@ -592,12 +580,18 @@ const canvasEdgeClassName = ({
     return classes.join(' ') || undefined;
 };
 
-const edgeMatchesCanvasLens = (edge, activeCanvasView) => {
+const isHierarchyCanvasEdge = (edge = {}) => HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge));
+
+const edgeMatchesCanvasLens = (
+    edge,
+    activeCanvasView,
+    { showMindmapRelationshipFallback = false } = {}
+) => {
     const relationshipType = edgeRelationshipType(edge);
-    const isHierarchy = HIERARCHY_EDGE_TYPES.has(relationshipType);
+    const isHierarchy = isHierarchyCanvasEdge(edge);
 
     if (activeCanvasView === 'mindmap') {
-        return isHierarchy;
+        return isHierarchy || showMindmapRelationshipFallback;
     }
     if (activeCanvasView === 'knowledgeGraph') {
         return true;
@@ -636,7 +630,8 @@ const buildNodeDepths = (nodes = [], edges = []) => {
     const nodeIds = new Set(nodes.map((node) => node.id));
     const childIds = new Set();
     const childrenByParent = edges.reduce((lookup, edge) => {
-        if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target) || !isHierarchyEdge(edge)) {
+        const isHierarchy = HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge));
+        if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target) || !isHierarchy) {
             return lookup;
         }
         childIds.add(edge.target);
@@ -682,8 +677,23 @@ const projectCanvasGraph = ({
     const normalizedMapStyle = normalizeMapStyle(mapStyle);
     const nodeDepths = buildNodeDepths(nodes, edges);
     const isKnowledgeGraph = activeCanvasView === 'knowledgeGraph';
+    const visibleNodeIds = new Set(nodes.map((node) => node.id));
+    const hasMindmapHierarchyEdges =
+        activeCanvasView === 'mindmap' &&
+        edges.some(
+            (edge) =>
+                visibleNodeIds.has(edge.source) &&
+                visibleNodeIds.has(edge.target) &&
+                isHierarchyCanvasEdge(edge)
+        );
+    const showMindmapRelationshipFallback =
+        activeCanvasView === 'mindmap' && !hasMindmapHierarchyEdges && edges.length > 0;
     const visibleEdges = edges
-        .filter((edge) => edgeMatchesCanvasLens(edge, activeCanvasView))
+        .filter((edge) =>
+            edgeMatchesCanvasLens(edge, activeCanvasView, {
+                showMindmapRelationshipFallback
+            })
+        )
         .filter((edge) =>
             isKnowledgeGraph
                 ? shouldShowKgSemanticEdge(edge, kgRelationshipMode, { includeHierarchy: true })
@@ -737,9 +747,15 @@ const projectCanvasGraph = ({
             const semantic = edgeSemanticInfo(edge);
             const isKgMuted =
                 hasKgFocus && !kgFocusIds.has(edge.source) && !kgFocusIds.has(edge.target);
+            const isMindmapFallbackEdge =
+                showMindmapRelationshipFallback && !isHierarchyCanvasEdge(edge);
             return {
                 ...edge,
-                type: isKnowledgeGraph ? 'semantic' : edge.type,
+                type: isKnowledgeGraph
+                    ? 'semantic'
+                    : isMindmapFallbackEdge
+                      ? 'smoothstep'
+                      : edge.type || 'smoothstep',
                 label: isKnowledgeGraph ? semantic.label : edge.label,
                 data: {
                     ...(edge.data || {}),
@@ -752,7 +768,13 @@ const projectCanvasGraph = ({
                 },
                 hidden: !isProjected,
                 className: canvasEdgeClassName({
-                    className: [edge.className, isKgMuted ? 'kg-edge-muted' : ''].filter(Boolean).join(' '),
+                    className: [
+                        edge.className,
+                        isKgMuted ? 'kg-edge-muted' : '',
+                        isMindmapFallbackEdge ? 'canvas-edge-relationship-fallback' : ''
+                    ]
+                        .filter(Boolean)
+                        .join(' '),
                     isOutOfScope: isProjected && isOutOfScope,
                     semantic,
                     activeCanvasView
@@ -851,16 +873,11 @@ const App = () => {
     const [selectedNodes, setSelectedNodes] = useState();
     const [selectedCanvasNodes, setSelectedCanvasNodes] = useState([]);
     const [validationReport, setValidationReport] = useState();
-    const [workspaceDockTab, setWorkspaceDockTab] = useState('guidance');
-    const [workspaceDockCollapsed, setWorkspaceDockCollapsed] = useState(false);
-    const [workspaceDockOffset, setWorkspaceDockOffset] = useState({ x: 16, y: -16 });
-    const [workspaceDockWidth, setWorkspaceDockWidth] = useState(17.65);
     const [aiUsage, setAIUsage] = useState();
     const [aiUsageStatus, setAIUsageStatus] = useState('');
     const [aiUsageReviewStatus, setAIUsageReviewStatus] = useState('');
     const [nextStepsOpenToken, setNextStepsOpenToken] = useState(0);
     const [kgRelationshipTrayCollapsed, setKgRelationshipTrayCollapsed] = useState(false);
-    const [kgRelationshipTrayOffset, setKgRelationshipTrayOffset] = useState({ x: 0, y: 0 });
     const [kgRelationshipMode, setKgRelationshipMode] = useState(() =>
         getLastKgRelationshipMode()
     );
@@ -911,12 +928,6 @@ const App = () => {
     }, [flow_id]);
 
     useEffect(() => {
-        if (workspaceDockTab === 'health') {
-            refreshAIUsage();
-        }
-    }, [refreshAIUsage, workspaceDockTab]);
-
-    useEffect(() => {
         if (flow_id && nodes.length === 0) {
             refreshAIUsage();
         }
@@ -953,87 +964,6 @@ const App = () => {
         }, 1800);
         return () => window.clearTimeout(timeout);
     }, [aiGenerationProgress]);
-
-    const startWorkspaceDockDrag = useCallback((event) => {
-        if (event.button !== 0) {
-            return;
-        }
-        event.preventDefault();
-        const startX = event.clientX;
-        const startY = event.clientY;
-        const startOffset = workspaceDockOffset;
-
-        const handlePointerMove = (moveEvent) => {
-            const nextX = startOffset.x + moveEvent.clientX - startX;
-            const nextY = startOffset.y + moveEvent.clientY - startY;
-            setWorkspaceDockOffset({
-                x: Math.max(0, Math.min(nextX, window.innerWidth - 120)),
-                y: Math.max(-(window.innerHeight - 180), Math.min(nextY, 0))
-            });
-        };
-
-        const stopDrag = () => {
-            window.removeEventListener('pointermove', handlePointerMove);
-            window.removeEventListener('pointerup', stopDrag);
-            window.removeEventListener('pointercancel', stopDrag);
-        };
-
-        window.addEventListener('pointermove', handlePointerMove);
-        window.addEventListener('pointerup', stopDrag);
-        window.addEventListener('pointercancel', stopDrag);
-    }, [workspaceDockOffset]);
-
-    const startWorkspaceDockResize = useCallback((event) => {
-        if (event.button !== 0) {
-            return;
-        }
-        event.preventDefault();
-        event.stopPropagation();
-        const startX = event.clientX;
-        const startWidth = workspaceDockWidth;
-
-        const handlePointerMove = (moveEvent) => {
-            const widthDelta = (moveEvent.clientX - startX) / 16;
-            setWorkspaceDockWidth(Math.max(15.5, Math.min(startWidth + widthDelta, 27)));
-        };
-
-        const stopResize = () => {
-            window.removeEventListener('pointermove', handlePointerMove);
-            window.removeEventListener('pointerup', stopResize);
-        };
-
-        window.addEventListener('pointermove', handlePointerMove);
-        window.addEventListener('pointerup', stopResize);
-    }, [workspaceDockWidth]);
-
-    const startKgRelationshipTrayDrag = useCallback((event) => {
-        if (event.button !== 0) {
-            return;
-        }
-        event.preventDefault();
-        const startX = event.clientX;
-        const startY = event.clientY;
-        const startOffset = kgRelationshipTrayOffset;
-
-        const handlePointerMove = (moveEvent) => {
-            const nextX = startOffset.x + moveEvent.clientX - startX;
-            const nextY = startOffset.y + moveEvent.clientY - startY;
-            setKgRelationshipTrayOffset({
-                x: Math.max(-(window.innerWidth / 2 - 160), Math.min(nextX, window.innerWidth / 2 - 160)),
-                y: Math.max(-72, Math.min(nextY, window.innerHeight - 240))
-            });
-        };
-
-        const stopDrag = () => {
-            window.removeEventListener('pointermove', handlePointerMove);
-            window.removeEventListener('pointerup', stopDrag);
-            window.removeEventListener('pointercancel', stopDrag);
-        };
-
-        window.addEventListener('pointermove', handlePointerMove);
-        window.addEventListener('pointerup', stopDrag);
-        window.addEventListener('pointercancel', stopDrag);
-    }, [kgRelationshipTrayOffset]);
 
     const openUsageDraftSession = useCallback(
         async (session) => {
@@ -1365,10 +1295,18 @@ const App = () => {
         [flow_id, pushNode, recordActivity, selectedBranchId]
     );
 
+    const openWorkspaceDockTab = useCallback((tab) => {
+        window.dispatchEvent(
+            new CustomEvent(WORKSPACE_DOCK_OPEN_TAB_EVENT, {
+                detail: { tab }
+            })
+        );
+    }, []);
+
     const openEmptyCanvasSources = useCallback(() => {
-        setWorkspaceDockTab('sources');
+        openWorkspaceDockTab('sources');
         pushNode(DataSourceSelect);
-    }, [pushNode]);
+    }, [openWorkspaceDockTab, pushNode]);
 
     const openEmptyCanvasAskAi = useCallback((options = {}) => {
         setSelectedBranchId(undefined);
@@ -1389,8 +1327,8 @@ const App = () => {
     }, [pushNode, recordActivity, setInspectorNodeId, setSelectedBranchId]);
 
     const openManualStart = useCallback(() => {
-        setWorkspaceDockTab('build');
-    }, []);
+        openWorkspaceDockTab('build');
+    }, [openWorkspaceDockTab]);
 
     const focusStructuredNodeInMap = useCallback(
         (nodeId) => {
@@ -1681,12 +1619,6 @@ const App = () => {
     const canvasBackgroundColor = getMapStyleCanvasBackground(currentMapStyle, lightMode);
     const backgroundGridColor = getMapStyleGridColor(currentMapStyle, lightMode);
 
-    useEffect(() => {
-        if (workspaceDockTab === 'next') {
-            setWorkspaceDockTab('guidance');
-        }
-    }, [workspaceDockTab]);
-
     return (
         <div className={lightMode ? 'app light' : 'app dark'}>
             <Modal ChildProp={Prompts} />
@@ -1869,184 +1801,33 @@ const App = () => {
                         onCreateStructuredTable={() => openStructuredAiPreset('table')}
                     />
                 ) : null}
-                <Panel
-                    position="bottom-left"
-                    style={{
-                        display: 'block',
-                        transform: `translate(${workspaceDockOffset.x}px, ${workspaceDockOffset.y}px)`
-                    }}
+                <FloatingDock
+                    id="workspaceTools"
+                    ariaLabel="Workspace tools dock"
+                    className="workspace-tools-floating-dock"
+                    defaultPlacement={{ dock: 'left', offset: { x: 0, y: 96 } }}
+                    controlsPlacement="child"
                 >
-                    <section
-                        className={`workspace-dock ${workspaceDockCollapsed ? 'workspace-dock--collapsed' : ''}`}
-                        aria-label="Workspace tools"
-                        style={{ '--workspace-dock-width': `${workspaceDockWidth}rem` }}
-                    >
-                        <nav className="workspace-dock-tabs" aria-label="Workspace panel">
-                            <div className="workspace-dock-panel-actions">
-                                <button
-                                    type="button"
-                                    className="workspace-dock-icon-button workspace-dock-drag-handle"
-                                    title="Move panel"
-                                    aria-label="Move workspace panel"
-                                    onPointerDown={startWorkspaceDockDrag}
-                                >
-                                    <FiMove />
-                                </button>
-                                <button
-                                    type="button"
-                                    className="workspace-dock-icon-button"
-                                    title={workspaceDockCollapsed ? 'Expand panel' : 'Collapse panel'}
-                                    aria-label={workspaceDockCollapsed ? 'Expand workspace panel' : 'Collapse workspace panel'}
-                                    onClick={() => setWorkspaceDockCollapsed((current) => !current)}
-                                >
-                                    {workspaceDockCollapsed ? <FiChevronRight /> : <FiChevronLeft />}
-                                </button>
-                            </div>
-                            {[
-                                ['sources', 'Sources'],
-                                ['health', 'Health'],
-                                ['guidance', 'Guide'],
-                                ['build', 'Build']
-                            ].map(([id, label]) => (
-                                <button
-                                    key={id}
-                                    type="button"
-                                    className={workspaceDockTab === id ? 'active' : ''}
-                                    onClick={() => setWorkspaceDockTab(id)}
-                                >
-                                    {label}
-                                </button>
-                            ))}
-                        </nav>
-                        <div className="workspace-dock-content">
-                            {workspaceDockTab === 'sources' ? (
-                                <div className="workspace-dock-section">
-                                    <div className="workspace-dock-header">
-                                        <strong>Sources</strong>
-                                        <button type="button" onClick={() => setIsSourcesOpen(true)}>
-                                            Library
-                                        </button>
-                                    </div>
-                                    <AddDataSource />
-                                </div>
-                            ) : null}
-                            {workspaceDockTab === 'health' ? (
-                                <div className="workspace-dock-section">
-                                    <GraphValidationPanel
-                                        flowId={flow_id}
-                                        nodes={nodes}
-                                        edges={edges}
-                                        onSelectNode={focusNodeForReview}
-                                        onReportChange={setValidationReport}
-                                        defaultExpanded
-                                    />
-                                    <section className="workspace-ai-usage" aria-label="Workspace AI usage">
-                                        <div>
-                                            <strong>AI usage</strong>
-                                            <button type="button" onClick={refreshAIUsage}>
-                                                Refresh
-                                            </button>
-                                        </div>
-                                        <p>
-                                            {formatUsageNumber(aiUsage?.total_tokens)} tokens
-                                            {aiUsage?.estimated_cost_usd
-                                                ? ` · ${aiUsage.estimated_cost_usd} est.`
-                                                : ''}
-                                        </p>
-                                        <span>
-                                            {aiUsageStatus ||
-                                                `${formatUsageNumber(aiUsage?.session_count)} draft sessions tracked`}
-                                        </span>
-                                        {aiUsageReviewStatus ? <small>{aiUsageReviewStatus}</small> : null}
-                                        {Array.isArray(aiUsage?.sessions) && aiUsage.sessions.length ? (
-                                            <details>
-                                                <summary>Details</summary>
-                                                <div className="workspace-ai-usage-sessions">
-                                                    {aiUsage.sessions.slice(0, 5).map((session) => (
-                                                        <article key={session.session_id || session.created_at}>
-                                                            <div>
-                                                                <strong>{session.selected_model || 'auto'}</strong>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => openUsageDraftSession(session)}
-                                                                    disabled={!session.session_id}
-                                                                >
-                                                                    Review
-                                                                </button>
-                                                            </div>
-                                                            <span>
-                                                                {formatUsageNumber(session.total_tokens)} tokens
-                                                                {session.estimated_cost_usd
-                                                                    ? ` · ${session.estimated_cost_usd} est.`
-                                                                    : ''}
-                                                            </span>
-                                                            <small>
-                                                                {session.status || 'draft'} ·{' '}
-                                                                {formatUsageNumber(session.revisions?.length)} revisions
-                                                            </small>
-                                                        </article>
-                                                    ))}
-                                                </div>
-                                            </details>
-                                        ) : null}
-                                    </section>
-                                </div>
-                            ) : null}
-                            {workspaceDockTab === 'guidance' ? (
-                                <div className="workspace-dock-section workspace-guide-panel">
-                                    {hasWorkspaceNextSteps ? (
-                                        <div className="workspace-next-steps-launcher">
-                                            <div className="workspace-dock-header">
-                                                <strong>Next steps</strong>
-                                                <span>{workspaceNextSteps.length}</span>
-                                            </div>
-                                            <p>
-                                                Reopen recommended AI actions for the current workspace.
-                                            </p>
-                                            <button type="button" onClick={openNextStepsFromDock}>
-                                                Open next steps
-                                            </button>
-                                        </div>
-                                    ) : null}
-                                    <WorkspaceNudgeSurface
-                                        validationIssues={validationReport?.issues || []}
-                                        onFocusNode={focusNodeForReview}
-                                        onOpenSources={() => setIsSourcesOpen(true)}
-                                        onOpenAiHelpers={() => setIsAiHelpersOpen(true)}
-                                    />
-                                    {!hasWorkspaceNextSteps ? (
-                                        <div className="workspace-guide-empty">
-                                            <strong>Guide</strong>
-                                            <p>
-                                                {hasWorkspaceContentNodes
-                                                    ? 'No recommended AI actions right now.'
-                                                    : 'Create the first workspace node before guidance starts making recommendations.'}
-                                            </p>
-                                        </div>
-                                    ) : null}
-                                </div>
-                            ) : null}
-                            {workspaceDockTab === 'build' ? (
-                                <div className="workspace-flow-controls">
-                                    <WorkspaceBriefPanel embedded />
-                                    <MapStylePanel />
-                                    <ManualNodeControls />
-                                </div>
-                            ) : null}
-                        </div>
-                        {!workspaceDockCollapsed ? (
-                            <button
-                                type="button"
-                                className="workspace-dock-resize-handle"
-                                title="Resize panel"
-                                aria-label="Resize workspace panel"
-                                onPointerDown={startWorkspaceDockResize}
-                            >
-                                <FiMaximize2 />
-                            </button>
-                        ) : null}
-                    </section>
-                </Panel>
+                    <WorkspaceDock
+                        flowId={flow_id}
+                        nodes={nodes}
+                        edges={edges}
+                        validationReport={validationReport}
+                        onValidationReportChange={setValidationReport}
+                        onSelectNode={focusNodeForReview}
+                        onOpenSources={() => setIsSourcesOpen(true)}
+                        onOpenAiHelpers={() => setIsAiHelpersOpen(true)}
+                        aiUsage={aiUsage}
+                        aiUsageStatus={aiUsageStatus}
+                        aiUsageReviewStatus={aiUsageReviewStatus}
+                        onRefreshAiUsage={refreshAIUsage}
+                        onOpenUsageDraftSession={openUsageDraftSession}
+                        hasWorkspaceNextSteps={hasWorkspaceNextSteps}
+                        workspaceNextSteps={workspaceNextSteps}
+                        onOpenNextSteps={openNextStepsFromDock}
+                        hasWorkspaceContentNodes={hasWorkspaceContentNodes}
+                    />
+                </FloatingDock>
                 <Panel position="bottom">
                     <AskMultiple
                         data={askMultipleClass}
@@ -2099,22 +1880,31 @@ const App = () => {
                         </section>
                     </Panel>
                 ) : null}
-                <Panel
-                    position={CANVAS_VIEWS.has(activeView) ? 'top-center' : 'top-right'}
-                    style={{ display: 'block' }}
+                <FloatingDock
+                    id="canvasLens"
+                    ariaLabel="Canvas lens toolbar"
+                    className="canvas-lens-floating-dock"
+                    defaultPlacement={{
+                        dock: CANVAS_VIEWS.has(activeView) ? 'top' : 'right',
+                        offset: CANVAS_VIEWS.has(activeView)
+                            ? { x: 0, y: 0 }
+                            : { x: -12, y: 86 }
+                    }}
                 >
                     <LocalViewsPanel
                         hidden={false}
                         onSelectNode={focusNodeForReview}
                         onSelectEdge={setInspectorEdgeId}
                     />
-                </Panel>
+                </FloatingDock>
                 {activeCanvasView === 'knowledgeGraph' && nodes.length > 0 ? (
-                    <Panel
-                        position="top-center"
-                        style={{
-                            display: 'block',
-                            transform: `translate(${kgRelationshipTrayOffset.x}px, ${kgRelationshipTrayOffset.y}px)`
+                    <FloatingDock
+                        id="kgRelationships"
+                        ariaLabel="Knowledge graph relationship toolbar"
+                        className="kg-relationship-floating-dock"
+                        defaultPlacement={{
+                            dock: 'top',
+                            offset: { x: 0, y: 54 }
                         }}
                     >
                         <section
@@ -2122,15 +1912,6 @@ const App = () => {
                             aria-label="Knowledge graph relationship focus"
                         >
                             <div className="kg-relationship-header">
-                                <button
-                                    type="button"
-                                    className="kg-relationship-icon-button"
-                                    title="Move relationship tray"
-                                    aria-label="Move relationship tray"
-                                    onPointerDown={startKgRelationshipTrayDrag}
-                                >
-                                    <FiMove />
-                                </button>
                                 <div>
                                     <span>KG focus</span>
                                     <strong>
@@ -2190,7 +1971,7 @@ const App = () => {
                                 </>
                             ) : null}
                         </section>
-                    </Panel>
+                    </FloatingDock>
                 ) : null}
                 <Panel
                     position="bottom-right"
