@@ -11,6 +11,7 @@
     "test:graph-projection": "node --test tests/graphProjection.test.mjs",
     "test:manual-nodes": "node --test tests/manualNodes.test.mjs",
     "test:flow-snapshots": "node --test tests/flowSnapshots.test.mjs",
+    "test:pdf-export-studio": "node --test tests/pdfExportStudio.test.mjs",
     "test:e2e": "playwright test",
     "preview": "vite preview"
   },

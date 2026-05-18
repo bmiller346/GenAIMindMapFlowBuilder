@@ -39,6 +39,22 @@ const summarizeSource = (source = {}) => ({
     normalized_document_id: source.normalized_document_id
 });
 
+const summarizePendingSourceDraft = (draft = {}) => ({
+    id: draft.id,
+    sourceName: draft.sourceName,
+    sourceType: draft.sourceType,
+    componentId: draft.componentId,
+    flowType: draft.flowType,
+    initialCanvas: Boolean(draft.initialCanvas),
+    graph_nodes: Array.isArray(draft.graph?.nodes) ? draft.graph.nodes.length : 0,
+    graph_edges: Array.isArray(draft.graph?.edges) ? draft.graph.edges.length : 0,
+    source_library_items: Array.isArray(draft.graph?.source_library)
+        ? draft.graph.source_library.length
+        : Array.isArray(draft.graph?.source_library?.documents)
+          ? draft.graph.source_library.documents.length
+          : 0
+});
+
 const DevDebugModal = () => {
     const popNode = modalStore((s) => s.popNode);
     const [copyState, setCopyState] = useState('Copy debug JSON');
@@ -54,6 +70,7 @@ const DevDebugModal = () => {
             inspectorNodeId: s.inspectorNodeId,
             workspaceBrief: s.workspaceBrief,
             sourceLibrary: s.sourceLibrary,
+            pendingSourceDraft: s.pendingSourceDraft,
             generatedHelperPreviews: s.generatedHelperPreviews,
             activeAIDraftSession: s.activeAIDraftSession,
             aiActionRuns: s.aiActionRuns
@@ -114,6 +131,9 @@ const DevDebugModal = () => {
             nodes: workspaceState.nodes.map(summarizeNode),
             edges: workspaceState.edges.map(summarizeEdge),
             sources: workspaceState.sourceLibrary.map(summarizeSource),
+            pendingSourceDraft: workspaceState.pendingSourceDraft
+                ? summarizePendingSourceDraft(workspaceState.pendingSourceDraft)
+                : null,
             workspaceBrief: workspaceState.workspaceBrief,
             generatedHelperPreviews: workspaceState.generatedHelperPreviews,
             activeAIDraftSession: workspaceState.activeAIDraftSession,

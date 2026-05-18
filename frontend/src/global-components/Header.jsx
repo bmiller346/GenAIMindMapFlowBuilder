@@ -4,7 +4,6 @@ import flowStore from '../stores/flowStore';
 import modalStore from '../stores/modalStore';
 import axios from 'axios';
 import {
-    getNodesBounds,
     getViewportForBounds,
     useReactFlow
 } from '@xyflow/react';
@@ -14,6 +13,7 @@ import SettingsModal from '../modals/SettingsModal';
 import PromptModal from '../modals/PromptModal';
 import HelpModal from '../modals/HelpModal';
 import DevDebugModal from '../modals/DevDebugModal';
+import PdfStudioModal from '../modals/PdfStudioModal';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -146,7 +146,7 @@ const Header = ({
         aiActionRuns,
         setAIActionRuns
     } = useStore(useShallow(selector));
-    const { getNodes, setViewport } = useReactFlow();
+    const { getNodes, getEdges, getNodesBounds, setViewport } = useReactFlow();
     const exportFormats = [
         { id: 'json', label: 'JSON', extension: 'json' },
         { id: 'markdown', label: 'Markdown', extension: 'md' },
@@ -187,8 +187,7 @@ const Header = ({
     ];
     const imageExportFormats = [
         { id: 'png', label: 'PNG', extension: 'png' },
-        { id: 'svg', label: 'SVG', extension: 'svg' },
-        { id: 'pdf', label: 'PDF', extension: 'pdf' }
+        { id: 'svg', label: 'SVG', extension: 'svg' }
     ];
     const buildCurrentSnapshot = useCallback(() => {
         const flowObject = rfInstance?.toObject
@@ -1018,40 +1017,48 @@ const Header = ({
         const theme = getMapStyleTheme(useStore.getState().mapStyle?.theme);
         return {
             backgroundColor: theme.exportBackground,
+            fontEmbedCSS: '',
+            skipFonts: true,
+            width: 1920,
+            height: 1080,
             style: {
                 transform: `translate(${viewPort.x}px, ${viewPort.y}px, scale(${viewPort.zoom}))`
             }
         };
     };
 
-    const downloadMindMapPdf = async (viewport, exportOptions, fileName) => {
-        const [{ toPng }, jsPdfModule] = await Promise.all([
-            import('html-to-image'),
-            import('jspdf')
-        ]);
-        const pngUrl = await toPng(viewport, exportOptions);
-        const jsPDF = jsPdfModule.default;
-        const pdf = new jsPDF({
-            orientation: 'landscape',
-            unit: 'mm',
-            format: 'a4'
-        });
-        const pageWidth = pdf.internal.pageSize.getWidth();
-        const pageHeight = pdf.internal.pageSize.getHeight();
-        const margin = 10;
-        const availableWidth = pageWidth - margin * 2;
-        const availableHeight = pageHeight - margin * 2;
-        const imageRatio = 1920 / 1080;
-        const pageRatio = availableWidth / availableHeight;
-        const imageWidth =
-            imageRatio > pageRatio ? availableWidth : availableHeight * imageRatio;
-        const imageHeight =
-            imageRatio > pageRatio ? availableWidth / imageRatio : availableHeight;
-        const x = (pageWidth - imageWidth) / 2;
-        const y = (pageHeight - imageHeight) / 2;
+    const openPdfStudio = () => {
+        const visibleNodes = getNodes().filter((node) => !node.hidden);
+        if (visibleNodes.length === 0) {
+            setStatus(400);
+            setMsg('Add nodes to the workspace before exporting a PDF.');
+            pushNode(ErrorModal);
+            return;
+        }
 
-        pdf.addImage(pngUrl, 'PNG', x, y, imageWidth, imageHeight);
-        pdf.save(fileName);
+        setIsExportMenuOpen(false);
+        pushNode(PdfStudioModal, {
+            nodes: visibleNodes,
+            edges: getEdges(),
+            flowName: flow_name,
+            mapStyle: mapStyle?.theme || mapStyle,
+            workspaceBrief,
+            onExportComplete: (result) => {
+                recordActivity({
+                    type: 'export_pdf_downloaded',
+                    title: `Exported ${result.profile.label} PDF`,
+                    summary: `Downloaded ${result.filename}.`,
+                    metadata: {
+                        format: 'pdf',
+                        profile: result.profile.id,
+                        page_size: result.pageSize.id,
+                        orientation: result.pageSize.orientation,
+                        page_count: result.pageCount,
+                        file_name: result.filename
+                    }
+                });
+            }
+        });
     };
 
     const downloadMindMap = async (format) => {
@@ -1071,8 +1078,6 @@ const Header = ({
                 const { toSvg } = await import('html-to-image');
                 const svgUrl = await toSvg(viewport, exportOptions);
                 triggerUrlDownload(svgUrl, fileName);
-            } else if (format.id === 'pdf') {
-                await downloadMindMapPdf(viewport, exportOptions, fileName);
             } else {
                 const { toPng } = await import('html-to-image');
                 const pngUrl = await toPng(viewport, exportOptions);
@@ -1382,7 +1387,7 @@ const Header = ({
                     </button>
                     {isExportMenuOpen ? (
                         <div className="export-menu">
-                            <p className="export-menu-label">Workspace map image</p>
+                            <p className="export-menu-label">Workspace map</p>
                             {imageExportFormats.map((format) => (
                                 <button
                                     key={format.id}
@@ -1392,6 +1397,14 @@ const Header = ({
                                     Download {format.label}
                                 </button>
                             ))}
+                            <div className="export-menu-divider" />
+                            <p className="export-menu-label">PDF studio</p>
+                            <button
+                                type="button"
+                                onClick={openPdfStudio}
+                            >
+                                Open PDF Studio
+                            </button>
                             <div className="export-menu-divider" />
                             <p className="export-menu-label">Neutral files</p>
                             {exportFormats.map((format) => (
