@@ -35,6 +35,7 @@ const EMPTY_GRAPH_ALLOWED_ACTIVITY_TYPES = new Set([
     'workspace_reset',
     'revert_snapshot_restored'
 ]);
+const AUTOSAVE_DELAY_MS = 30000;
 
 const latestMeaningfulActivity = (events = []) =>
     (Array.isArray(events) ? events : []).find(
@@ -76,6 +77,7 @@ const Header = ({
     const setAutomations = useAutomationStore((s) => s.setAutomations);
     const autosaveTimerRef = useRef();
     const exportInFlightRef = useRef(false);
+    const saveInFlightFingerprintRef = useRef('');
     const utilityMenuRef = useRef(null);
     const pushNode = modalStore((s) => s.pushNode);
     const popNode = modalStore((s) => s.popNode);
@@ -87,9 +89,12 @@ const Header = ({
     const setFlowType = flowStore((s) => s.setFlowType);
     const saveStatus = flowStore((s) => s.saveStatus);
     const lastSavedSnapshot = flowStore((s) => s.lastSavedSnapshot);
-    const lastSavedFingerprint = flowStore((s) => s.lastSavedFingerprint);
     const lastSavedFlowName = flowStore((s) => s.lastSavedFlowName);
     const lastSavedFlowType = flowStore((s) => s.lastSavedFlowType);
+    const lastPersistedSnapshot = flowStore((s) => s.lastPersistedSnapshot);
+    const lastPersistedFingerprint = flowStore((s) => s.lastPersistedFingerprint);
+    const lastPersistedFlowName = flowStore((s) => s.lastPersistedFlowName);
+    const lastPersistedFlowType = flowStore((s) => s.lastPersistedFlowType);
     const lastSavedAt = flowStore((s) => s.lastSavedAt);
     const lastSaveError = flowStore((s) => s.lastSaveError);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
@@ -268,10 +273,10 @@ const Header = ({
 
     const hasUnsavedChanges = Boolean(
         flow_id &&
-        lastSavedFingerprint &&
-        (currentFingerprint !== lastSavedFingerprint ||
-            flow_name !== lastSavedFlowName ||
-            flow_type !== lastSavedFlowType)
+        lastPersistedFingerprint &&
+        (currentFingerprint !== lastPersistedFingerprint ||
+            flow_name !== lastPersistedFlowName ||
+            flow_type !== lastPersistedFlowType)
     );
     const acceptedArtifactTypes = useMemo(
         () => acceptedArtifactTypesFromActivity(activityEvents),
@@ -279,7 +284,7 @@ const Header = ({
     );
 
     useEffect(() => {
-        if (!flow_id || !lastSavedFingerprint || !hasUnsavedChanges) {
+        if (!flow_id || !lastPersistedFingerprint || !hasUnsavedChanges) {
             return;
         }
 
@@ -291,9 +296,9 @@ const Header = ({
         flow_name,
         flow_type,
         hasUnsavedChanges,
-        lastSavedFingerprint,
-        lastSavedFlowName,
-        lastSavedFlowType,
+        lastPersistedFingerprint,
+        lastPersistedFlowName,
+        lastPersistedFlowType,
         saveStatus,
         setSaveStatus
     ]);
@@ -307,20 +312,25 @@ const Header = ({
         if (showLoading) {
             pushNode(LoadingModal);
         }
+        let savedFingerprint = '';
         try {
-            recordActivity({
-                type: showLoading ? 'save_manual' : 'autosave_persisted',
-                title: showLoading ? 'Saved workspace' : 'Autosaved workspace',
-                summary: showLoading
-                    ? 'Saved the current workspace snapshot.'
-                    : 'Persisted local workspace changes.',
-                metadata: {
-                    nodes: nodes.length,
-                    edges: edges.length
-                }
-            });
+            if (showLoading) {
+                recordActivity({
+                    type: 'save_manual',
+                    title: 'Saved workspace',
+                    summary: 'Saved the current workspace snapshot.',
+                    metadata: {
+                        nodes: nodes.length,
+                        edges: edges.length
+                    }
+                });
+            }
             const savedSnapshot = buildCurrentSnapshot();
-            const savedFingerprint = stringifyFlowSnapshot(savedSnapshot);
+            savedFingerprint = stringifyFlowSnapshot(savedSnapshot);
+            if (!showLoading && saveInFlightFingerprintRef.current === savedFingerprint) {
+                return;
+            }
+            saveInFlightFingerprintRef.current = savedFingerprint;
             await saveFlowCall(undefined, savedSnapshot);
             const latestSnapshot = buildLatestSnapshotFromStores();
             const latestFingerprint = stringifyFlowSnapshot(latestSnapshot);
@@ -331,7 +341,9 @@ const Header = ({
                 latestFlowState.flow_name === flow_name &&
                 latestFlowState.flow_type === flow_type
             ) {
-                setSavedSnapshot(savedSnapshot, savedFingerprint, flow_name, flow_type);
+                setSavedSnapshot(savedSnapshot, savedFingerprint, flow_name, flow_type, {
+                    checkpoint: showLoading
+                });
             } else {
                 setSaveStatus('dirty');
             }
@@ -343,13 +355,17 @@ const Header = ({
             if (showLoading) {
                 manageErrors(err);
             }
+        } finally {
+            if (saveInFlightFingerprintRef.current === savedFingerprint) {
+                saveInFlightFingerprintRef.current = '';
+            }
         }
     };
 
     const saveFlowCall = (nameOverride, snapshotOverride) => {
         const snapshot = snapshotOverride || buildCurrentSnapshot();
-        const lastNodeCount = Array.isArray(lastSavedSnapshot?.nodes)
-            ? lastSavedSnapshot.nodes.length
+        const lastNodeCount = Array.isArray(lastPersistedSnapshot?.nodes)
+            ? lastPersistedSnapshot.nodes.length
             : 0;
         const nextNodeCount = Array.isArray(snapshot?.nodes) ? snapshot.nodes.length : 0;
         const lastMeaningfulActivity = latestMeaningfulActivity(
@@ -388,6 +404,10 @@ const Header = ({
         const latestSnapshot = buildLatestSnapshotFromStores();
         const latestFingerprint = stringifyFlowSnapshot(latestSnapshot);
         const latestFlowState = flowStore.getState();
+        if (saveInFlightFingerprintRef.current === latestFingerprint) {
+            return;
+        }
+        saveInFlightFingerprintRef.current = latestFingerprint;
         setSaveStatus('saving');
         try {
             await saveFlowCall(latestFlowState.flow_name, latestSnapshot);
@@ -395,10 +415,15 @@ const Header = ({
                 latestSnapshot,
                 latestFingerprint,
                 latestFlowState.flow_name,
-                latestFlowState.flow_type
+                latestFlowState.flow_type,
+                { checkpoint: false }
             );
         } catch (err) {
             setSaveError(err?.message || 'Autosave failed');
+        } finally {
+            if (saveInFlightFingerprintRef.current === latestFingerprint) {
+                saveInFlightFingerprintRef.current = '';
+            }
         }
     }, [
         buildLatestSnapshotFromStores,
@@ -430,7 +455,7 @@ const Header = ({
         clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = setTimeout(() => {
             saveFlow({ showLoading: false });
-        }, 1500);
+        }, AUTOSAVE_DELAY_MS);
 
         return () => clearTimeout(autosaveTimerRef.current);
     }, [currentFingerprint, flow_name, flow_type, hasUnsavedChanges, saveStatus]);
@@ -1082,24 +1107,29 @@ const Header = ({
         if (!flow_id) {
             return;
         }
+        const normalizedNextName = String(nextName || '').trim();
+        const normalizedCurrentName = String(flow_name || '').trim();
+        if (normalizedNextName === normalizedCurrentName) {
+            return;
+        }
 
         setSaveStatus('saving');
         try {
             recordActivity({
                 type: 'workspace_renamed',
                 title: 'Renamed workspace',
-                summary: `Workspace name changed to ${nextName || 'Untitled workspace'}.`,
+                summary: `Workspace name changed to ${normalizedNextName || 'Untitled workspace'}.`,
                 metadata: {
                     previous_name: flow_name,
-                    next_name: nextName
+                    next_name: normalizedNextName
                 }
             });
             const savedSnapshot = buildCurrentSnapshot();
-            await saveFlowCall(nextName, savedSnapshot);
+            await saveFlowCall(normalizedNextName, savedSnapshot);
             setSavedSnapshot(
                 savedSnapshot,
                 stringifyFlowSnapshot(savedSnapshot),
-                nextName,
+                normalizedNextName,
                 flow_type
             );
         } catch (err) {

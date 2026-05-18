@@ -286,8 +286,6 @@ const DEFAULT_BRIEF = {
     review_rules: ''
 };
 
-const allOutputOptions = OUTPUT_GROUPS.flatMap((group) => group.options);
-
 const uniqueValues = (values) => Array.from(new Set(values.filter(Boolean)));
 
 const findPreset = (presetId) =>
@@ -870,5 +868,4 @@ const WorkspaceBriefModal = () => {
     );
 };
 
-export { allOutputOptions };
 export default WorkspaceBriefModal;

@@ -13,15 +13,19 @@ import {
     normalizeAIActionRuns
 } from '../utils/aiActionRuns';
 import {
+    getLastCanvasView,
     getLastUsedGraphFilters,
     getNudgePreferences,
     isDeveloperModeEnabled,
+    normalizeCanvasView,
+    saveLastCanvasView,
     saveLastUsedGraphFilters,
     saveDeveloperMode,
     saveNudgePreferences
 } from '../config/localSettings';
 
 const CANVAS_VIEW_IDS = new Set(['mindmap', 'knowledgeGraph', 'flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
+const initialCanvasView = getLastCanvasView();
 
 // Sample
 const data = {
@@ -218,8 +222,8 @@ const useStore = create((set, get) => ({
         // }
     ],
     edges: [],
-    activeView: 'mindmap',
-    activeCanvasView: 'mindmap',
+    activeView: initialCanvasView,
+    activeCanvasView: initialCanvasView,
     activeGraphFilters: getLastUsedGraphFilters(),
     canvasNodeDensity: 'compact',
     developerMode: isDeveloperModeEnabled(),
@@ -298,17 +302,23 @@ const useStore = create((set, get) => ({
         return edge;
     },
     setActiveView: (activeView) => {
+        const isCanvasView = CANVAS_VIEW_IDS.has(activeView);
+        if (isCanvasView) {
+            saveLastCanvasView(activeView);
+        }
         set({
             activeView,
-            ...(CANVAS_VIEW_IDS.has(activeView)
+            ...(isCanvasView
                 ? { activeCanvasView: activeView }
                 : {})
         });
     },
     setActiveCanvasView: (activeCanvasView) => {
+        const nextCanvasView = normalizeCanvasView(activeCanvasView);
+        saveLastCanvasView(nextCanvasView);
         set({
-            activeCanvasView,
-            activeView: activeCanvasView
+            activeCanvasView: nextCanvasView,
+            activeView: nextCanvasView
         });
     },
     setActiveGraphFilters: (filters = []) => {
@@ -412,6 +422,14 @@ const useStore = create((set, get) => ({
             args.length === 1
                 ? args[0]
                 : { x: args[0] || 0, y: args[1] || 0, zoom: args[2] || 1 };
+        const current = get().viewport || {};
+        const sameViewport =
+            Math.abs(Number(current.x || 0) - Number(viewport?.x || 0)) < 0.01 &&
+            Math.abs(Number(current.y || 0) - Number(viewport?.y || 0)) < 0.01 &&
+            Math.abs(Number(current.zoom || 1) - Number(viewport?.zoom || 1)) < 0.0001;
+        if (sameViewport) {
+            return;
+        }
         set({ viewport })
     }
 }));

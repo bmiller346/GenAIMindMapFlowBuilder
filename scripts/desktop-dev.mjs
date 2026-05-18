@@ -27,7 +27,7 @@ function getPortOwnerPids(port) {
     return Promise.resolve([]);
   }
 
-  return execFileAsync('netstat.exe', ['-ano', '-p', 'tcp'], {
+  const fromNetstat = execFileAsync('netstat.exe', ['-ano', '-p', 'tcp'], {
     windowsHide: true
   })
     .then(({ stdout }) => stdout
@@ -37,8 +37,27 @@ function getPortOwnerPids(port) {
       .filter(([, localAddress, , state]) => state === 'LISTENING' && localAddress.endsWith(`:${port}`))
       .map((columns) => Number.parseInt(columns.at(-1), 10))
       .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid))
-    .then((pids) => [...new Set(pids)])
     .catch(() => []);
+
+  const fromPowerShell = execFileAsync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`
+    ],
+    { windowsHide: true }
+  )
+    .then(({ stdout }) => stdout
+      .split(/\r?\n/)
+      .map((line) => Number.parseInt(line.trim(), 10))
+      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid))
+    .catch(() => []);
+
+  return Promise.all([fromNetstat, fromPowerShell])
+    .then((pidGroups) => [...new Set(pidGroups.flat())]);
 }
 
 async function stopPortOwners(port) {
@@ -63,6 +82,8 @@ async function stopPortOwners(port) {
       // The process may have exited after we inspected the port.
     }
   }
+
+  await waitForPort(port, frontendHost, true, 5000);
 }
 
 function canBindPort(host, port) {

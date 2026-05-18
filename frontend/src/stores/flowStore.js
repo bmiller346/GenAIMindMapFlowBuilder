@@ -16,6 +16,10 @@ const flowStore = create((set, get) => ({
 			lastSavedFingerprint: '',
 			lastSavedFlowName: undefined,
 			lastSavedFlowType: undefined,
+			lastPersistedSnapshot: undefined,
+			lastPersistedFingerprint: '',
+			lastPersistedFlowName: undefined,
+			lastPersistedFlowType: undefined,
 			lastSavedAt: undefined,
 			lastSaveError: undefined,
 			saveStatus: 'idle'
@@ -48,17 +52,31 @@ const flowStore = create((set, get) => ({
 	lastSavedFingerprint: '',
 	lastSavedFlowName: undefined,
 	lastSavedFlowType: undefined,
+	lastPersistedSnapshot: undefined,
+	lastPersistedFingerprint: '',
+	lastPersistedFlowName: undefined,
+	lastPersistedFlowType: undefined,
 	lastSavedAt: undefined,
 	lastSaveError: undefined,
 	setSaveStatus: (saveStatus) => {
 		set({ saveStatus })
 	},
-	setSavedSnapshot: (snapshot, fingerprint, flowName, flowType) => {
+	setSavedSnapshot: (snapshot, fingerprint, flowName, flowType, options = {}) => {
+		const nextFlowType = flowType || get().flow_type || 'manual';
+		const shouldCheckpoint = options.checkpoint !== false;
 		set({
-			lastSavedSnapshot: snapshot,
-			lastSavedFingerprint: fingerprint,
-			lastSavedFlowName: flowName,
-			lastSavedFlowType: flowType || get().flow_type || 'manual',
+			lastPersistedSnapshot: snapshot,
+			lastPersistedFingerprint: fingerprint,
+			lastPersistedFlowName: flowName,
+			lastPersistedFlowType: nextFlowType,
+			...(shouldCheckpoint
+				? {
+					lastSavedSnapshot: snapshot,
+					lastSavedFingerprint: fingerprint,
+					lastSavedFlowName: flowName,
+					lastSavedFlowType: nextFlowType
+				}
+				: {}),
 			lastSavedAt: new Date().toISOString(),
 			lastSaveError: undefined,
 			saveStatus: 'saved'
