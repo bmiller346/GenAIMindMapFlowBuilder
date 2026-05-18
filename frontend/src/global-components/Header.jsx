@@ -18,7 +18,8 @@ import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { FiGitBranch, FiMoreHorizontal } from 'react-icons/fi';
+import { FiMoreHorizontal } from 'react-icons/fi';
+import traceLogo from '../assets/landing-logo.svg';
 import {
     createFlowSnapshot,
     parseFlowSnapshot,
@@ -28,6 +29,7 @@ import useActivityStore from '../stores/activityStore';
 import useAutomationStore from '../stores/automationStore';
 import { createSourceLibrarySnapshot } from '../views/graphProjection';
 import { getMapStyleTheme } from '../utils/mapStyles';
+import { buildPdfStudioWorkspaceGraph } from '../export/pdf';
 
 const EMPTY_GRAPH_ALLOWED_ACTIVITY_TYPES = new Set([
     'manual_nodes_deleted',
@@ -1028,18 +1030,23 @@ const Header = ({
     };
 
     const openPdfStudio = () => {
-        const visibleNodes = getNodes().filter((node) => !node.hidden);
-        if (visibleNodes.length === 0) {
+        const exportGraph = buildPdfStudioWorkspaceGraph({
+            nodes,
+            edges,
+            flowNodes: getNodes(),
+            flowEdges: getEdges()
+        });
+        if (exportGraph.nodes.length === 0) {
             setStatus(400);
-            setMsg('Add nodes to the workspace before exporting a PDF.');
+            setMsg('Add exportable nodes to the workspace before exporting a PDF.');
             pushNode(ErrorModal);
             return;
         }
 
         setIsExportMenuOpen(false);
         pushNode(PdfStudioModal, {
-            nodes: visibleNodes,
-            edges: getEdges(),
+            nodes: exportGraph.nodes,
+            edges: exportGraph.edges,
             flowName: flow_name,
             mapStyle: mapStyle?.theme || mapStyle,
             workspaceBrief,
@@ -1355,7 +1362,7 @@ const Header = ({
                     title="About TraceSpace"
                     aria-label="About TraceSpace"
                 >
-                    <FiGitBranch aria-hidden="true" />
+                    <img src={traceLogo} alt="" aria-hidden="true" />
                 </Link>
                 <input
                     type="text"

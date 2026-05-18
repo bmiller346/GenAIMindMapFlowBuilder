@@ -27,6 +27,12 @@ const NODE_BOX = { width: 150, height: 58 };
 const AUTO_FIT_PAGE_SIZE_IDS = ['letter', 'tabloid', 'arch-c', 'arch-d', 'arch-e'];
 const TITLE_BLOCK_HEIGHT = 74;
 const NOTES_PANEL_MIN_WIDTH = 210;
+const DIAGRAM_DENSITY = {
+    roomy: { id: 'roomy', label: 'Roomy', positionScale: 1, maxScale: 1.15, padding: 26 },
+    balanced: { id: 'balanced', label: 'Balanced', positionScale: 0.86, maxScale: 1.25, padding: 22 },
+    compact: { id: 'compact', label: 'Compact', positionScale: 0.72, maxScale: 1.35, padding: 18 },
+    fit: { id: 'fit', label: 'Fit', positionScale: 0.6, maxScale: 1.45, padding: 14 }
+};
 
 const cleanText = (value = '') => String(value || '').replace(/\s+/g, ' ').trim();
 
@@ -122,6 +128,9 @@ const nodeSize = (node = {}) => ({
     width: Number.isFinite(node.size?.width) ? node.size.width : NODE_BOX.width,
     height: Number.isFinite(node.size?.height) ? node.size.height : NODE_BOX.height
 });
+
+const diagramDensityFor = (value) =>
+    DIAGRAM_DENSITY[String(value || '').toLowerCase()] || DIAGRAM_DENSITY.balanced;
 
 const edgeTone = (edge = {}) => {
     const relationship = String(edge.relationshipType || '').toLowerCase();
@@ -255,11 +264,35 @@ const graphBounds = (nodes = []) => {
     );
 };
 
-const transformForDiagram = (nodes, box) => {
+const compactDiagramNodes = (nodes = [], densityId = 'balanced') => {
+    const density = diagramDensityFor(densityId);
+    if (!nodes.length || density.positionScale === 1) {
+        return nodes;
+    }
+    const bounds = graphBounds(nodes);
+    const centerX = bounds.left + (bounds.right - bounds.left) / 2;
+    const centerY = bounds.top + (bounds.bottom - bounds.top) / 2;
+
+    return nodes.map((node) => {
+        const size = nodeSize(node);
+        const nodeCenterX = node.position.x + size.width / 2;
+        const nodeCenterY = node.position.y + size.height / 2;
+        return {
+            ...node,
+            position: {
+                x: centerX + (nodeCenterX - centerX) * density.positionScale - size.width / 2,
+                y: centerY + (nodeCenterY - centerY) * density.positionScale - size.height / 2
+            }
+        };
+    });
+};
+
+const transformForDiagram = (nodes, box, options = {}) => {
     const bounds = graphBounds(nodes);
     const contentWidth = Math.max(bounds.right - bounds.left, 1);
     const contentHeight = Math.max(bounds.bottom - bounds.top, 1);
-    const scale = Math.min(box.width / contentWidth, box.height / contentHeight, 1.3);
+    const density = diagramDensityFor(options.diagramDensity);
+    const scale = Math.min(box.width / contentWidth, box.height / contentHeight, density.maxScale);
     const scaledWidth = contentWidth * scale;
     const scaledHeight = contentHeight * scale;
     const offsetX = box.x + Math.max(0, (box.width - scaledWidth) / 2) - bounds.left * scale;
@@ -295,16 +328,18 @@ const titleBlockHeightFor = ({ profile, options = {}, section = {} }) => {
 };
 
 const estimateDiagramScale = (nodes, pageSize, { data = {}, profile = {}, options = {} } = {}) => {
-    const bounds = graphBounds(nodes);
+    const diagramNodes = compactDiagramNodes(nodes, options.diagramDensity);
+    const bounds = graphBounds(diagramNodes);
     const contentWidth = Math.max(bounds.right - bounds.left, 1);
     const contentHeight = Math.max(bounds.bottom - bounds.top, 1);
+    const density = diagramDensityFor(options.diagramDensity);
     const diagramSection = profile.sections?.find((section) => section.type === 'diagram') || {};
     const sidePanelWidth = sidePanelWidthFor({ pageSize, data, profile, options, section: diagramSection });
     const titleBlockHeight = titleBlockHeightFor({ profile, options, section: diagramSection });
     const gutter = sidePanelWidth > 0 ? 14 : 0;
     const drawableWidth = pageSize.width - MARGINS.left - MARGINS.right - 44 - sidePanelWidth - gutter;
     const drawableHeight = pageSize.height - MARGINS.top - MARGINS.bottom - 74 - titleBlockHeight;
-    return Math.min(drawableWidth / contentWidth, drawableHeight / contentHeight, 1.3);
+    return Math.min(drawableWidth / contentWidth, drawableHeight / contentHeight, density.maxScale);
 };
 
 const resolvePageSize = ({ pageSizeId, orientation, profile, data, options = {} }) => {
@@ -505,13 +540,19 @@ const drawDiagram = (doc, context, section) => {
         return;
     }
 
-    const toPage = transformForDiagram(data.nodes, {
-        x: box.x + 22,
-        y: box.y + 22,
-        width: box.width - 44,
-        height: box.height - 44
-    });
-    const nodeById = new Map(data.nodes.map((node) => [node.id, node]));
+    const density = diagramDensityFor(context.options.diagramDensity);
+    const diagramNodes = compactDiagramNodes(data.nodes, density.id);
+    const toPage = transformForDiagram(
+        diagramNodes,
+        {
+            x: box.x + density.padding,
+            y: box.y + density.padding,
+            width: box.width - density.padding * 2,
+            height: box.height - density.padding * 2
+        },
+        context.options
+    );
+    const nodeById = new Map(diagramNodes.map((node) => [node.id, node]));
 
     data.edges.forEach((edge) => {
         const source = nodeById.get(edge.source);
@@ -570,7 +611,7 @@ const drawDiagram = (doc, context, section) => {
         }
     });
 
-    data.nodes.forEach((node) => {
+    diagramNodes.forEach((node) => {
         const point = toPage(node.position);
         const scale = point.scale;
         const size = nodeSize(node);

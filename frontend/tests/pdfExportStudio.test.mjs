@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     AUTO_PAGE_SIZE_ID,
     buildPdfExportDocument,
+    buildPdfStudioWorkspaceGraph,
     getPdfExportPreview,
     listPdfExportProfiles,
     projectPdfExportData
@@ -112,6 +113,44 @@ test('PDF export projection preserves measured node dimensions for rendering', (
     assert.deepEqual(data.nodes[0].size, { width: 420, height: 140 });
 });
 
+test('PDF Studio graph source is view-agnostic and enriches from live canvas measurements', () => {
+    const graph = buildPdfStudioWorkspaceGraph({
+        nodes: [
+            node('canonical', 'Canonical workspace node', 'concept', 10, 20),
+            node('hidden', 'Hidden workspace node', 'concept', 40, 50, {
+                hidden_from_export: true
+            })
+        ],
+        edges: [edge('canonical', 'hidden', 'canonical-hidden')],
+        flowNodes: [
+            {
+                id: 'canonical',
+                position: { x: 999, y: 888 },
+                positionAbsolute: { x: 100, y: 200 },
+                measured: { width: 444, height: 155 }
+            }
+        ],
+        flowEdges: []
+    });
+
+    assert.deepEqual(graph.nodes.map((item) => item.id), ['canonical']);
+    assert.deepEqual(graph.nodes[0].measured, { width: 444, height: 155 });
+    assert.deepEqual(graph.nodes[0].positionAbsolute, { x: 100, y: 200 });
+    assert.equal(graph.edges[0].id, 'canonical-hidden');
+});
+
+test('PDF Studio graph source falls back to live canvas when workspace graph is unavailable', () => {
+    const graph = buildPdfStudioWorkspaceGraph({
+        nodes: [],
+        edges: [],
+        flowNodes: [node('flow-only', 'Flow-only node', 'concept', 0, 0)],
+        flowEdges: [edge('flow-only', 'flow-only', 'self')]
+    });
+
+    assert.deepEqual(graph.nodes.map((item) => item.id), ['flow-only']);
+    assert.equal(graph.edges[0].id, 'self');
+});
+
 test('PDF Studio preview resolves auto-fit and readability for every profile', () => {
     for (const profile of listPdfExportProfiles()) {
         const preview = getPdfExportPreview({
@@ -134,6 +173,33 @@ test('PDF Studio preview resolves auto-fit and readability for every profile', (
     }
 });
 
+test('PDF Studio diagram density changes the export fit calculation', () => {
+    const roomyPreview = getPdfExportPreview({
+        ...baseOptions,
+        profileId: 'map-outline',
+        pageSizeId: 'tabloid',
+        orientation: 'landscape',
+        options: {
+            includeTitleBlock: true,
+            includeOutlinePanel: true,
+            diagramDensity: 'roomy'
+        }
+    });
+    const compactPreview = getPdfExportPreview({
+        ...baseOptions,
+        profileId: 'map-outline',
+        pageSizeId: 'tabloid',
+        orientation: 'landscape',
+        options: {
+            includeTitleBlock: true,
+            includeOutlinePanel: true,
+            diagramDensity: 'compact'
+        }
+    });
+
+    assert.ok(compactPreview.diagramScale >= roomyPreview.diagramScale);
+});
+
 test('PDF renderer builds non-empty vector PDF documents for studio profiles', async () => {
     for (const profile of listPdfExportProfiles()) {
         const result = await buildPdfExportDocument({
@@ -145,6 +211,7 @@ test('PDF renderer builds non-empty vector PDF documents for studio profiles', a
                 includeTitleBlock: true,
                 includeOutlinePanel: profile.id !== 'outline-tasks',
                 includeNotesPanel: profile.id === 'review-sheet',
+                diagramDensity: profile.id === 'vector-map' ? 'roomy' : 'compact',
                 projectName: 'Security Review Export',
                 preparedFor: 'Engineering review',
                 revision: 'Draft'

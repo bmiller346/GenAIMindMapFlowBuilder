@@ -19,41 +19,53 @@ const profileSectionLabels = {
     legend: 'Legend'
 };
 
+const diagramDensityOptions = [
+    { id: 'roomy', label: 'Roomy' },
+    { id: 'balanced', label: 'Balanced' },
+    { id: 'compact', label: 'Compact' },
+    { id: 'fit', label: 'Fit' }
+];
+
 const profileDefaults = {
     'vector-map': {
         pageSizeId: AUTO_PAGE_SIZE_ID,
         orientation: 'landscape',
         includeTitleBlock: false,
         includeOutlinePanel: false,
-        includeNotesPanel: false
+        includeNotesPanel: false,
+        diagramDensity: 'balanced'
     },
     'map-outline': {
         pageSizeId: AUTO_PAGE_SIZE_ID,
         orientation: 'landscape',
         includeTitleBlock: true,
         includeOutlinePanel: true,
-        includeNotesPanel: false
+        includeNotesPanel: false,
+        diagramDensity: 'balanced'
     },
     'build-review': {
         pageSizeId: AUTO_PAGE_SIZE_ID,
         orientation: 'landscape',
         includeTitleBlock: true,
         includeOutlinePanel: true,
-        includeNotesPanel: false
+        includeNotesPanel: false,
+        diagramDensity: 'compact'
     },
     'review-sheet': {
         pageSizeId: AUTO_PAGE_SIZE_ID,
         orientation: 'landscape',
         includeTitleBlock: true,
         includeOutlinePanel: false,
-        includeNotesPanel: true
+        includeNotesPanel: true,
+        diagramDensity: 'compact'
     },
     'outline-tasks': {
         pageSizeId: 'letter',
         orientation: 'portrait',
         includeTitleBlock: true,
         includeOutlinePanel: false,
-        includeNotesPanel: false
+        includeNotesPanel: false,
+        diagramDensity: 'balanced'
     }
 };
 
@@ -75,6 +87,7 @@ const PdfStudioModal = ({
     const [includeTitleBlock, setIncludeTitleBlock] = useState(true);
     const [includeNotesPanel, setIncludeNotesPanel] = useState(false);
     const [includeOutlinePanel, setIncludeOutlinePanel] = useState(true);
+    const [diagramDensity, setDiagramDensity] = useState('balanced');
     const [projectName, setProjectName] = useState(flowName || '');
     const [preparedFor, setPreparedFor] = useState(workspaceBrief?.audience || '');
     const [revision, setRevision] = useState('Draft');
@@ -89,11 +102,13 @@ const PdfStudioModal = ({
             includeTitleBlock,
             includeNotesPanel,
             includeOutlinePanel,
+            diagramDensity,
             projectName,
             preparedFor,
             revision
         }),
         [
+            diagramDensity,
             includeNotesPanel,
             includeOutlinePanel,
             includeTitleBlock,
@@ -150,6 +165,7 @@ const PdfStudioModal = ({
         setIncludeTitleBlock(defaults.includeTitleBlock);
         setIncludeOutlinePanel(defaults.includeOutlinePanel);
         setIncludeNotesPanel(defaults.includeNotesPanel);
+        setDiagramDensity(defaults.diagramDensity || 'balanced');
     };
 
     const exportPdf = async () => {
@@ -325,6 +341,21 @@ const PdfStudioModal = ({
                             />
                             Markup panel
                         </label>
+                    </div>
+                    <div className="pdf-studio-field">
+                        <label>Map density</label>
+                        <div className="pdf-studio-segmented pdf-studio-segmented--density">
+                            {diagramDensityOptions.map((option) => (
+                                <button
+                                    key={option.id}
+                                    type="button"
+                                    className={diagramDensity === option.id ? 'is-selected' : ''}
+                                    onClick={() => setDiagramDensity(option.id)}
+                                >
+                                    {option.label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                     <div className="pdf-studio-details">
                         <label>
