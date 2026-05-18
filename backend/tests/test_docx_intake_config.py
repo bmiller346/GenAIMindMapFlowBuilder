@@ -13,6 +13,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app
 
 
+def _docx_upload_bytes(text="Short source document."):
+    from docx import Document
+    from io import BytesIO
+
+    document = Document()
+    document.add_heading("Source Brief", level=1)
+    document.add_paragraph(text)
+    output = BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
 def test_docx_intake_role_is_optional():
     assert app.resolve_source_intake_role(None) == ""
     assert app.resolve_source_intake_role("") == ""
@@ -248,6 +260,104 @@ def test_docx_component_rejects_pdf_before_processing(monkeypatch):
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "Only DOCX files are allowed."
     assert token_checks == []
+
+
+def test_docx_timeout_saves_automatic_fallback_graph(monkeypatch):
+    flow_id = str(ObjectId())
+    inserted_id = ObjectId()
+
+    class FakeInsertResult:
+        def __init__(self, value):
+            self.inserted_id = value
+
+    class FakeSourceCollection:
+        def __init__(self):
+            self.inserted = []
+            self.updates = []
+
+        def find_one(self, query):
+            return None
+
+        def count_documents(self, query):
+            return 0
+
+        def insert_one(self, record):
+            self.inserted.append(record)
+            return FakeInsertResult(inserted_id)
+
+        def update_one(self, query, update):
+            self.updates.append((query, update))
+
+    fake_collection = FakeSourceCollection()
+    monkeypatch.setattr(app, "component_collection", fake_collection)
+    monkeypatch.setattr(
+        app,
+        "get_upload_flow_or_400",
+        lambda workspace_id: {"flow_type": "automatic", "flow_name": "DOCX Workspace"},
+    )
+    monkeypatch.setattr(app, "is_within_gpt4o_token_limit", lambda file: True)
+
+    def raise_timeout(*args, **kwargs):
+        raise HTTPException(status_code=504, detail="OpenAI request timed out after 120 seconds.")
+
+    monkeypatch.setattr(app, "openai_mindmap_generator", raise_timeout)
+
+    upload = UploadFile(
+        filename="sample.docx",
+        file=SimpleNamespace(
+            seek=lambda position: None,
+            read=lambda: _docx_upload_bytes("Use this short document to create a starter map."),
+        ),
+    )
+
+    response = app.create_docx_component(
+        upload,
+        flow_id=flow_id,
+        source_intent="mindmap",
+        operation_id="op-timeout",
+    )
+
+    assert response["timeout_fallback"] is True
+    assert response["processing_type"] == "responses_timeout_fallback"
+    assert response["component_id"] == str(inserted_id)
+    assert response["flow_type"] == "automatic"
+    assert response["mindmap_json"]["metadata"]["fallback_reason"] == "openai_timeout"
+    assert fake_collection.inserted[0]["processing_type"] == "responses_timeout_fallback"
+    assert fake_collection.updates[-1][1]["$set"]["mindmap_json"]["metadata"]["fallback"] is True
+
+
+def test_source_upload_reingests_stale_existing_component_without_chunks(monkeypatch):
+    flow_id = str(ObjectId())
+    file_bytes = _docx_upload_bytes("Fresh chunks should be rebuilt.")
+
+    class FakeStaleCollection:
+        def find_one(self, query):
+            return {
+                "_id": ObjectId(),
+                "source_document": {"id": "stale-doc", "filename": "sample.docx"},
+                "document_chunks": [],
+                "source_segments": [],
+                "version": 1,
+            }
+
+        def count_documents(self, query):
+            return 1
+
+    monkeypatch.setattr(app, "component_collection", FakeStaleCollection())
+
+    upload = UploadFile(
+        filename="sample.docx",
+        file=SimpleNamespace(
+            seek=lambda position: None,
+            read=lambda: file_bytes,
+        ),
+    )
+
+    context = app.prepare_source_upload(upload, flow_id, expected_extension="docx")
+
+    assert context.get("reused_existing_source") is not True
+    assert context["source_document"]["id"] != "stale-doc"
+    assert context["document_chunks"]
 
 
 def test_flow_snapshot_repair_marks_unsourced_ai_nodes_needs_review_on_save():

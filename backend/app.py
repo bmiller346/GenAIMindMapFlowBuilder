@@ -1005,17 +1005,17 @@ def prepare_source_upload(file: UploadFile, flow_id: str, expected_extension: st
 
     if existing_component:
         source_document = dict(existing_component.get("source_document") or {})
-        if not source_document:
-            source_document = source_document_from_upload(upload, version=existing_component.get("version", 1) or 1)
-        return {
-            "upload": upload,
-            "file_bytes": file_bytes,
-            "source_document": source_document,
-            "source_segments": existing_component.get("source_segments", []),
-            "document_chunks": existing_component.get("document_chunks", []),
-            "existing_component": existing_component,
-            "reused_existing_source": True,
-        }
+        document_chunks = existing_component.get("document_chunks", [])
+        if source_document and document_chunks:
+            return {
+                "upload": upload,
+                "file_bytes": file_bytes,
+                "source_document": source_document,
+                "source_segments": existing_component.get("source_segments", []),
+                "document_chunks": document_chunks,
+                "existing_component": existing_component,
+                "reused_existing_source": True,
+            }
 
     return ingest_supported_document(
         upload["filename"],
@@ -1052,21 +1052,17 @@ def prepare_ai_intake_upload(file: UploadFile, flow_id: str) -> dict:
 
     if existing_component:
         source_document = dict(existing_component.get("source_document") or {})
-        if not source_document:
-            source_document = build_ai_intake_source_document(
-                upload["filename"],
-                file_bytes,
-                version=existing_component.get("version", 1) or 1,
-            )
-        return {
-            "upload": upload,
-            "file_bytes": file_bytes,
-            "source_document": source_document,
-            "source_segments": existing_component.get("source_segments", []),
-            "document_chunks": existing_component.get("document_chunks", []),
-            "existing_component": existing_component,
-            "reused_existing_source": True,
-        }
+        document_chunks = existing_component.get("document_chunks", [])
+        if source_document and document_chunks:
+            return {
+                "upload": upload,
+                "file_bytes": file_bytes,
+                "source_document": source_document,
+                "source_segments": existing_component.get("source_segments", []),
+                "document_chunks": document_chunks,
+                "existing_component": existing_component,
+                "reused_existing_source": True,
+            }
 
     source_document = build_ai_intake_source_document(
         upload["filename"],
@@ -6710,6 +6706,119 @@ def create_html_component(
         raise HTTPException(status_code=400, detail="Only HTML files are allowed.")
 
 
+def save_docx_timeout_fallback(
+    file: UploadFile,
+    flow_id: str,
+    flow_type: str,
+    processing_flow_type: str,
+    operation_id: str | None = None,
+    intake_model: str | None = None,
+) -> dict:
+    update_operation_progress(
+        operation_id,
+        phase="saving",
+        message="Saving parsed DOCX fallback",
+        detail="OpenAI timed out, so TraceSpace is preserving the parsed DOCX context.",
+        progress=88,
+    )
+    source_context = prepare_ai_intake_upload(file, flow_id)
+    source_document = source_context["source_document"]
+    file_bytes = source_context["file_bytes"]
+    file_extension = source_document["type"]
+    existing_component = source_context.get("existing_component")
+    ai_metadata = {
+        "provider": "deterministic_timeout_fallback",
+        "model": intake_model or "",
+        "reason": "OpenAI DOCX intake timed out; saved parsed source context instead.",
+    }
+
+    if processing_flow_type == "automatic":
+        response_json = fallback_source_mindmap(source_context, flow_id)
+        component_metadata = {
+            "flow_id": ObjectId(flow_id),
+            "file_id": "",
+            "assistant_id": "",
+            "vector_store_id": "",
+            "size": len(file_bytes),
+            "type": file_extension,
+            "processing_type": "responses_timeout_fallback",
+            "mindmap_json": response_json,
+            "ai_provider": ai_metadata,
+            **source_metadata_fields(source_context),
+        }
+        if existing_component:
+            component_id = existing_component["_id"]
+            component_collection.update_one(
+                {"_id": component_id},
+                {"$set": component_metadata},
+            )
+        else:
+            component_id = component_collection.insert_one(component_metadata).inserted_id
+        response_json = fallback_source_mindmap(source_context, flow_id, component_id)
+        component_collection.update_one(
+            {"_id": component_id},
+            {"$set": {"mindmap_json": response_json}},
+        )
+        flow = get_upload_flow_or_400(flow_id)
+        update_operation_progress(
+            operation_id,
+            phase="complete",
+            message="DOCX source context is ready",
+            detail="OpenAI timed out, so TraceSpace saved a reviewable starter graph from parsed DOCX context.",
+            progress=100,
+            status_value="completed",
+        )
+        return {
+            "flow_id": flow_id,
+            "flow_name": flow["flow_name"],
+            "component_id": str(component_id),
+            "type": file_extension,
+            "mindmap_json": response_json,
+            "flow_type": flow_type,
+            "processing_type": "responses_timeout_fallback",
+            "timeout_fallback": True,
+            **source_metadata_fields(source_context),
+        }
+
+    summary_text = fallback_source_summary(source_context)
+    component_metadata = {
+        "flow_id": ObjectId(flow_id),
+        "file_id": "",
+        "assistant_id": "",
+        "vector_store_id": "",
+        "size": len(file_bytes),
+        "type": file_extension,
+        "processing_type": "responses_timeout_fallback",
+        "summary": summary_text,
+        "ai_provider": ai_metadata,
+        **source_metadata_fields(source_context),
+    }
+    if existing_component:
+        component_id = existing_component["_id"]
+        component_collection.update_one(
+            {"_id": component_id},
+            {"$set": component_metadata},
+        )
+    else:
+        component_id = component_collection.insert_one(component_metadata).inserted_id
+    update_operation_progress(
+        operation_id,
+        phase="complete",
+        message="DOCX source context is ready",
+        detail="OpenAI timed out, so TraceSpace saved the parsed DOCX as source context.",
+        progress=100,
+        status_value="completed",
+    )
+    return {
+        "component_id": str(component_id),
+        "type": file_extension,
+        flow_type: flow_type,
+        "processing_type": "responses_timeout_fallback",
+        "timeout_fallback": True,
+        **source_metadata_fields(source_context),
+    }
+
+
 @app.post("/component-create-docx")
 def create_docx_component(
     file: UploadFile,
@@ -6797,6 +6906,30 @@ def create_docx_component(
                 detail="DOCX is too large for OpenAI processing. Split it into smaller source files and try again.",
             )
     except HTTPException as exc:
+        if exc.status_code == status.HTTP_504_GATEWAY_TIMEOUT:
+            try:
+                return save_docx_timeout_fallback(
+                    file,
+                    flow_id=flow_id,
+                    flow_type=flow["flow_type"],
+                    processing_flow_type=processing_flow_type,
+                    operation_id=operation_id,
+                    intake_model=intake_model,
+                )
+            except Exception as fallback_exc:
+                traceback.print_exc()
+                update_operation_progress(
+                    operation_id,
+                    phase="failed",
+                    message="DOCX fallback save failed",
+                    detail=str(fallback_exc),
+                    progress=100,
+                    status_value="failed",
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"DOCX timeout fallback failed: {str(fallback_exc)}",
+                ) from fallback_exc
         update_operation_progress(
             operation_id,
             phase="failed",
