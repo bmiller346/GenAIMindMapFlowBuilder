@@ -4741,9 +4741,24 @@ input:focus {
 .node-inline-ai-message-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   gap: 0.45rem;
   margin-top: 0.35rem;
+}
+
+.node-inline-ai-source-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.2rem;
+  border: 1px solid color-mix(in srgb, #66c2a5 42%, var(--question-border));
+  border-radius: 999px;
+  background: rgba(102, 194, 165, 0.09);
+  color: var(--font-color);
+  font-size: 0.58rem;
+  font-weight: 850;
+  line-height: 1;
+  padding: 0 0.38rem;
 }
 
 .node-inline-ai-message-actions button {

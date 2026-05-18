@@ -148,6 +148,16 @@ const shouldAnswerInlineAiAsMessage = (prompt = '', actionId = '') => {
     return INLINE_AI_QUESTION_STARTERS.test(text) && !INLINE_AI_ACTION_TERMS.test(text);
 };
 
+const inlineAiSourceLabel = (message = {}) => {
+    if (message.sourceRefCount > 0) {
+        return `${message.sourceRefCount} cited ${message.sourceRefCount === 1 ? 'ref' : 'refs'}`;
+    }
+    if (message.sourceStatus === 'missing_required_source') {
+        return 'No cited refs';
+    }
+    return 'Node context only';
+};
+
 const inferInlineAIIntent = (prompt, profiles) => {
     const normalizedPrompt = prompt.toLowerCase();
     const rules = [
@@ -1253,6 +1263,10 @@ const ResponseNode = ({ id, data }) => {
                     model: null,
                     model_policy: 'balanced',
                     source_refs: sourceRefs,
+                    message_history: inlineAiMessages.map((message) => ({
+                        prompt: message.prompt,
+                        answer: message.answer
+                    })),
                     metadata: {
                         preview_mode: 'inline_node_message',
                         source_node_id: id,
@@ -1262,6 +1276,7 @@ const ResponseNode = ({ id, data }) => {
                 });
                 const message = response?.data || {};
                 const answer = String(message.answer || '').trim();
+                const responseSourceRefs = Array.isArray(message.source_refs) ? message.source_refs : [];
                 setInlineAiMessages((current) =>
                     [
                         {
@@ -1269,6 +1284,8 @@ const ResponseNode = ({ id, data }) => {
                             prompt: localPrompt,
                             answer: answer || 'I could not find a useful answer from this node yet.',
                             model: message.selected_model || 'auto',
+                            sourceStatus: inlineSourceStatus,
+                            sourceRefCount: responseSourceRefs.length,
                             draftPrompt: `Review this inline answer and suggest any node changes:\n\nQuestion: ${localPrompt}\n\nAnswer: ${
                                 answer || 'I could not find a useful answer from this node yet.'
                             }`,
@@ -2065,6 +2082,9 @@ const ResponseNode = ({ id, data }) => {
                                 <p>{message.answer}</p>
                                 <div className="node-inline-ai-message-actions">
                                     {message.model ? <small>{message.model}</small> : null}
+                                    <span className="node-inline-ai-source-badge">
+                                        {inlineAiSourceLabel(message)}
+                                    </span>
                                     <button
                                         type="button"
                                         onClick={() => reviewInlineAiMessageAsDraft(message)}

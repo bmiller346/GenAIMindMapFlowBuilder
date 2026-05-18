@@ -55,6 +55,24 @@ const scopedLensFlowJson = JSON.stringify({
     automations: []
 });
 
+const directAnswerFlowJson = JSON.stringify({
+    nodes: [
+        {
+            id: 'direct-answer-root',
+            type: 'response',
+            position: { x: 0, y: 0 },
+            data: { title: 'Direct answer root', node_type: 'concept', status: 'reviewed', manual: true }
+        }
+    ],
+    edges: [],
+    viewport: { x: 120, y: 180, zoom: 0.9 },
+    workspace_brief: {},
+    source_library: [],
+    activity_events: [],
+    ai_action_runs: [],
+    automations: []
+});
+
 const publishableArtifactFlowJson = JSON.stringify({
     ...JSON.parse(scopedLensFlowJson),
     activity_events: [
@@ -99,6 +117,7 @@ const setupMockBackend = async (
     };
     const savedRequests = [];
     const previewRequests = [];
+    const nodeMessageRequests = [];
     const draftSessionRequests = [];
     const draftRevisionRequests = [];
     const draftAcceptRequests = [];
@@ -224,6 +243,27 @@ const setupMockBackend = async (
                         scope === 'branch'
                             ? []
                             : ['Generated action preview is not source-backed.']
+                })
+            });
+        }
+    );
+
+    await page.route(
+        /http:\/\/localhost:8000\/api\/workspaces\/[^/]+\/ai\/node-message$/,
+        async (route) => {
+            const requestBody = route.request().postDataJSON();
+            nodeMessageRequests.push(requestBody);
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({
+                    message_id: `node-message-${nodeMessageRequests.length}`,
+                    answer:
+                        nodeMessageRequests.length === 1
+                            ? 'Inline direct answer from the node context.'
+                            : 'Inline follow-up answer using prior context.',
+                    selected_model: 'gpt-4.1-mini',
+                    source_refs: []
                 })
             });
         }
@@ -571,6 +611,7 @@ const setupMockBackend = async (
 
     return {
         previewRequests,
+        nodeMessageRequests,
         draftSessionRequests,
         draftRevisionRequests,
         draftAcceptRequests,
@@ -1035,6 +1076,79 @@ test('inline node Ask stages a canvas-native draft without opening branch scope'
     });
     expect(structuralNodes(latestSnapshot(savedRequests))).toEqual(
         structuralNodes(beforePreview)
+    );
+});
+
+test('inline node Ask direct answer does not open a draft session', async ({ page }) => {
+    const { nodeMessageRequests, draftSessionRequests, savedRequests } = await setupMockBackend(page, {
+        initialFlowJson: directAnswerFlowJson
+    });
+    await page.goto('/');
+    await page.getByAltText('Open workspaces').click();
+    await page.locator('.flow-row-main').filter({ hasText: 'AI Action QA' }).click();
+    const beforeAnswer = parseSnapshot(directAnswerFlowJson);
+    const rootId = beforeAnswer.nodes[0].id;
+    const rootNode = page.locator('.node-response').filter({ hasText: 'Direct answer root' });
+    const prompt = 'What does this node mean?';
+
+    await expect(rootNode).toBeVisible();
+    await rootNode
+        .getByLabel('Inline AI route')
+        .getByRole('button', { name: 'Answer' })
+        .dispatchEvent('click');
+    await rootNode.getByLabel('Ask AI from this node').fill(prompt);
+    await rootNode.locator('.node-inline-ai-send').evaluate((button) => button.click());
+
+    await expect(rootNode.getByLabel('Inline AI answers')).toContainText('Inline direct answer from the node context.');
+    await expect(rootNode.getByLabel('Inline AI answers')).toContainText('Node context only');
+    await expect(rootNode.locator('.node-inline-ai-status')).toContainText('No draft session was opened');
+    await expect(page.locator('.ai-draft-session-panel')).toHaveCount(0);
+    await expect(page.locator('.ai-action-modal')).toHaveCount(0);
+    await expect.poll(() => nodeMessageRequests.length, { timeout: 7000 }).toBe(1);
+
+    expect(draftSessionRequests).toHaveLength(0);
+    expect(nodeMessageRequests[0].scope).toEqual({
+        type: 'node',
+        node_id: rootId
+    });
+    expect(nodeMessageRequests[0].prompt).toBe(prompt);
+    expect(nodeMessageRequests[0].message_history).toEqual([]);
+    expect(nodeMessageRequests[0].metadata).toMatchObject({
+        preview_mode: 'inline_node_message',
+        source_node_id: rootId
+    });
+
+    const followUpPrompt = 'Can you clarify the risk angle?';
+    await rootNode.getByLabel('Ask AI from this node').fill(followUpPrompt);
+    await rootNode.locator('.node-inline-ai-send').evaluate((button) => button.click());
+
+    await expect(rootNode.getByLabel('Inline AI answers')).toContainText('Inline follow-up answer using prior context.');
+    await expect.poll(() => nodeMessageRequests.length, { timeout: 7000 }).toBe(2);
+    expect(nodeMessageRequests[1].prompt).toBe(followUpPrompt);
+    expect(nodeMessageRequests[1].message_history).toEqual([
+        {
+            prompt,
+            answer: 'Inline direct answer from the node context.'
+        }
+    ]);
+
+    await rootNode
+        .getByLabel('Inline AI answers')
+        .getByRole('button', { name: 'Draft review' })
+        .first()
+        .dispatchEvent('click');
+    await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
+    await expect.poll(() => draftSessionRequests.length, { timeout: 7000 }).toBe(1);
+    expect(draftSessionRequests[0].requestBody.scope).toEqual({
+        type: 'node',
+        node_id: rootId
+    });
+    expect(draftSessionRequests[0].requestBody.prompt).toContain('Review this inline answer');
+    expect(draftSessionRequests[0].requestBody.prompt).toContain('Inline follow-up answer using prior context.');
+
+    expect(savedRequests).toHaveLength(0);
+    expect(structuralNodes(parseSnapshot(directAnswerFlowJson))).toEqual(
+        structuralNodes(beforeAnswer)
     );
 });
 
