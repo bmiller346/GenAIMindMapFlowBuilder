@@ -1,12 +1,7 @@
-<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="256" height="256" rx="56" fill="#111111"/>
-  <path d="M72 76C72 62.7452 82.7452 52 96 52H160C173.255 52 184 62.7452 184 76V180C184 193.255 173.255 204 160 204H96C82.7452 204 72 193.255 72 180V76Z" fill="#1E1E1E" stroke="#EECE47" stroke-width="10"/>
-  <path d="M101 91H155" stroke="#F7F7F7" stroke-width="10" stroke-linecap="round"/>
-  <path d="M101 121H155" stroke="#F7F7F7" stroke-width="10" stroke-linecap="round"/>
-  <path d="M101 151H136" stroke="#F7F7F7" stroke-width="10" stroke-linecap="round"/>
-  <circle cx="72" cy="76" r="18" fill="#33A1FF"/>
-  <circle cx="184" cy="76" r="18" fill="#33A1FF"/>
-  <circle cx="184" cy="180" r="18" fill="#33A1FF"/>
-  <circle cx="72" cy="180" r="18" fill="#33A1FF"/>
-  <path d="M72 76L104 104M184 76L152 104M184 180L152 152M72 180L104 152" stroke="#33A1FF" stroke-width="8" stroke-linecap="round"/>
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="256" rx="48" fill="#2F8F8C"/>
+  <g fill="#FFFFFF">
+    <rect x="52" y="62" width="152" height="32" rx="7"/>
+    <rect x="104" y="62" width="48" height="132" rx="7"/>
+  </g>
 </svg>

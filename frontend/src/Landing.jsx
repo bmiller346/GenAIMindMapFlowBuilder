@@ -1,25 +1,29 @@
 import { Link } from 'react-router-dom';
 import {
     FiArrowRight,
-    FiCheckSquare,
-    FiDatabase,
-    FiFileText,
+    FiBookOpen,
+    FiBriefcase,
+    FiClipboard,
     FiGitBranch,
-    FiGrid,
     FiLayers,
+    FiMail,
     FiPrinter,
+    FiRefreshCw,
     FiSearch,
+    FiSend,
     FiShield,
     FiUploadCloud
 } from 'react-icons/fi';
+import landingLogo from './assets/landing-logo.svg';
+import landingWorkspacePreview from './assets/landing-workspace-preview.png';
 import './Landing.css';
 
 const flowSteps = [
-    'Add sources',
-    'Build workspace',
+    'Collect sources',
+    'Shape the workspace',
     'Review evidence',
-    'Preview changes',
-    'Handoff work'
+    'Choose export path',
+    'Publish or hand off'
 ];
 
 const howItWorks = [
@@ -35,7 +39,7 @@ const howItWorks = [
     },
     {
         title: 'Structure',
-        text: 'View the same material as a map, outline, table, task list, checklist, flowchart, or knowledge graph.',
+        text: 'View the same material as a map, outline, table, task list, checklist, flowchart, executive view, or knowledge graph.',
         icon: FiLayers
     },
     {
@@ -49,26 +53,69 @@ const howItWorks = [
         icon: FiSearch
     },
     {
-        title: 'Handoff',
-        text: 'Package reviewed work for implementation, stakeholder review, Miro, monday.com, or export.',
-        icon: FiCheckSquare
+        title: 'Export',
+        text: 'Package reviewed work as AEC deliverable reviews, executive reports, newsletters, help outlines, Pinnacle overviews, Miro boards, monday.com work, or PDF exports.',
+        icon: FiSend
     }
+];
+
+const scenarioCards = [
+    {
+        title: 'AEC deliverables',
+        text: 'Review SOWs, project briefs, standards, meeting notes, and deliverable lists for missing information, discipline dependencies, risks, assumptions, and owner decisions.',
+        icon: FiClipboard
+    },
+    {
+        title: 'Executive reports',
+        text: 'Turn source-backed findings into repeatable leadership packets with findings, actions, risks, decisions, and source appendices.',
+        icon: FiBriefcase
+    },
+    {
+        title: 'Newsletters',
+        text: 'Create consistent updates that reuse the same pillars, sections, highlights, and review markers each cycle.',
+        icon: FiMail
+    },
+    {
+        title: 'Help articles',
+        text: 'Use maps, outlines, and flowcharts to plan walkthroughs, expose missing steps, and guide authors toward complete help content.',
+        icon: FiBookOpen
+    },
+    {
+        title: 'Pinnacle overviews',
+        text: 'Export mind maps and flow charts as high-level section overviews that explain how features, tasks, and decisions connect.',
+        icon: FiGitBranch
+    }
+];
+
+const exportPillars = [
+    'Audience and decision',
+    'Context and evidence',
+    'Findings and importance',
+    'Actions, owners, and risks',
+    'Review state and source trail'
 ];
 
 const differentiators = [
     'Source-grounded, not just summarized',
     'Preview changes before they apply',
     'One accepted workspace, many views',
-    'Maps, tables, tasks, checklists, flowcharts, and knowledge graphs',
+    'Maps, tables, tasks, checklists, flowcharts, executive outputs, and knowledge graphs',
+    'Reusable export patterns for reports, newsletters, help, and walkthroughs',
     'Confidence, citation, rationale, and review states',
-    'Relationship review exports for stakeholder handoff',
-    'Built for reviewable handoff'
+    'Relationship review exports for stakeholder handoff'
 ];
 
 const useCases = [
+    'AEC SOW review for missing scope, assumptions, owner decisions, and discipline handoffs',
+    'Map design, engineering, construction, operations, and client dependencies across a project timeline',
+    'Project deliverable handoff to Miro or monday.com',
     'Review a standards folder for missing pieces',
     'Software inventory overlap and rationalization report',
     'Turn a complex document into a team roadmap',
+    'Create an executive report from source-backed findings',
+    'Build a recurring newsletter from the same editorial pillars',
+    'Draft help article outlines and workflow walkthroughs',
+    'Export Pinnacle-ready section maps and flow charts',
     'SOP to checklist',
     'Requirements doc to implementation plan',
     'Excel tracker to task/status map',
@@ -89,7 +136,7 @@ export const Landing = () => {
             <nav className="landing-nav" aria-label="TraceSpace">
                 <Link to="/" className="landing-product-mark" aria-label="Open workspace">
                     <span className="landing-mark">
-                        <FiGitBranch />
+                        <img src={landingLogo} alt="" />
                     </span>
                     <span>TraceSpace</span>
                 </Link>
@@ -101,15 +148,17 @@ export const Landing = () => {
             <div className="landing-hero-grid">
                 <div className="landing-hero-copy">
                     <p className="landing-kicker">Source-grounded thinking workspace</p>
-                    <h1 id="landing-title">Turn messy source material into trusted workspaces.</h1>
+                    <h1 id="landing-title">Turn messy knowledge into trusted exports.</h1>
                     <p className="landing-value">
                         TraceSpace turns documents, folders, notes, and trackers into
-                        source-cited maps, graphs, tables, checklists, roadmaps, and
-                        handoff packages.
+                        source-cited workspaces, visual overviews, AEC deliverable
+                        reviews, executive reports, newsletters, help outlines, and
+                        Miro or monday.com handoff packages.
                     </p>
                     <p className="landing-support">
-                        Use AI to find structure, gaps, relationships, and next actions
-                        without changing accepted work until you preview and approve it.
+                        Use AI to find structure, gaps, relationships, and next actions,
+                        then publish repeatable exports that keep the important pillars
+                        visible for every audience.
                     </p>
                     <div className="landing-actions">
                         <Link to="/" className="landing-primary-cta">
@@ -127,22 +176,12 @@ export const Landing = () => {
                     </div>
                 </div>
 
-                <div className="landing-graph-visual" aria-hidden="true">
-                    <div className="source-stack">
-                        <span><FiFileText /> Requirements.docx</span>
-                        <span><FiGrid /> Tracker.xlsx</span>
-                        <span><FiDatabase /> Source notes</span>
-                    </div>
-                    <div className="graph-stage">
-                        <span className="graph-line graph-line-a" />
-                        <span className="graph-line graph-line-b" />
-                        <span className="graph-line graph-line-c" />
-                        <span className="graph-node node-source">Source</span>
-                        <span className="graph-node node-map">Reconcile</span>
-                        <span className="graph-node node-review">Review</span>
-                        <span className="graph-node node-task">Handoff</span>
-                        <span className="confidence-chip"><FiSearch /> cited 0.86</span>
-                    </div>
+                <div className="landing-workspace-preview" aria-hidden="true">
+                    <img
+                        src={landingWorkspacePreview}
+                        alt=""
+                        loading="eager"
+                    />
                 </div>
             </div>
         </section>
@@ -159,7 +198,7 @@ export const Landing = () => {
         <section className="landing-section" id="how-it-works">
             <div className="landing-section-heading">
                 <p>How it works</p>
-                <h2>From evidence to accountable structure</h2>
+                <h2>From evidence to accountable output</h2>
             </div>
             <div className="landing-work-grid">
                 {howItWorks.map(({ title, text, icon: Icon }) => (
@@ -169,6 +208,45 @@ export const Landing = () => {
                         <p>{text}</p>
                     </article>
                 ))}
+            </div>
+        </section>
+
+        <section className="landing-section landing-scenarios">
+            <div className="landing-section-heading">
+                <p>Export scenarios</p>
+                <h2>Build once, explain it in the format people need</h2>
+            </div>
+            <div className="landing-scenario-grid">
+                {scenarioCards.map(({ title, text, icon: Icon }) => (
+                    <article className="landing-scenario-card" key={title}>
+                        <Icon aria-hidden="true" />
+                        <h3>{title}</h3>
+                        <p>{text}</p>
+                    </article>
+                ))}
+            </div>
+        </section>
+
+        <section className="landing-section landing-export-studio">
+            <div className="landing-section-heading">
+                <p>Export Studio</p>
+                <h2>Repeatable deliverables with the right pillars every time</h2>
+            </div>
+            <div className="landing-export-panel">
+                <div>
+                    <FiRefreshCw aria-hidden="true" />
+                    <h3>Keep exports consistent across teams, cycles, and audiences.</h3>
+                    <p>
+                        Executive reports, newsletters, help content, workflow walkthroughs,
+                        and Pinnacle overviews can all draw from the same reviewed workspace
+                        while keeping their own structure, tone, and review expectations.
+                    </p>
+                </div>
+                <ol className="landing-pillar-list" aria-label="Export pillars">
+                    {exportPillars.map((pillar) => (
+                        <li key={pillar}>{pillar}</li>
+                    ))}
+                </ol>
             </div>
         </section>
 
