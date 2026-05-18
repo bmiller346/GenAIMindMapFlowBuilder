@@ -3,6 +3,7 @@ import { FiGitBranch, FiMap } from 'react-icons/fi';
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
+import FlowchartRenderer from './flowchart/FlowchartRenderer.jsx';
 import KanbanBoardView from './KanbanBoardView.jsx';
 import { getSavedTableViews, saveSavedTableViews } from '../config/localSettings.js';
 import { createWorkspaceEdge, reflowSiblingSubtrees } from '../utils/manualNodes.js';
@@ -539,105 +540,6 @@ const ExecutiveList = ({ title, items = [], empty = 'No items projected.' }) => 
         )}
     </section>
 );
-
-const FlowchartView = ({ flowchart, onOpenNode, onAskAi }) => {
-    if (!flowchart.steps.length) {
-        return (
-            <div className="canvas-structured-empty inline">
-                <strong>No flowchart steps projected</strong>
-                <span>Ask AI to infer process steps, decisions, and handoffs from the current scope.</span>
-                <button
-                    type="button"
-                    onClick={() =>
-                        onAskAi?.({
-                            initialVisual: 'flow_chart',
-                            initialPrompt: 'Create a flowchart from this workspace with ordered steps, decision points, dependencies, handoffs, exception paths, and source-backed review notes.'
-                        })
-                    }
-                >
-                    Ask AI to draft flowchart
-                </button>
-            </div>
-        );
-    }
-
-    return (
-        <div className="canvas-flowchart-view" aria-label="Flowchart">
-            <div className="canvas-flowchart-lane">
-                {flowchart.steps.map((step, index) => {
-                    const outgoing = flowchart.connectors.filter((connector) => connector.source === step.id);
-                    return (
-                        <div key={step.id} className="canvas-flowchart-step-wrap">
-                            <article
-                                className={[
-                                    'canvas-flowchart-step',
-                                    `canvas-flowchart-step-${step.flow_kind}`,
-                                    `canvas-flowchart-shape-${step.shape || 'process'}`
-                                ].join(' ')}
-                            >
-                                <div className="canvas-flowchart-symbol-shell">
-                                    <div className="canvas-flowchart-symbol">
-                                        <span>{step.flow_kind === 'decision' ? 'Decision' : step.shape}</span>
-                                        <button type="button" onClick={() => onOpenNode?.(step.id)}>
-                                            {step.title}
-                                        </button>
-                                    </div>
-                                </div>
-                                <div className="canvas-flowchart-step-meta">
-                                    <small>{step.source_backed ? 'source-backed' : 'needs source review'}</small>
-                                    {summaryText(step) ? <p>{summaryText(step)}</p> : null}
-                                </div>
-                            </article>
-                            {index < flowchart.steps.length - 1 ? (
-                                <div
-                                    className={[
-                                        'canvas-flowchart-connectors',
-                                        step.flow_kind === 'decision' ? 'canvas-flowchart-branches' : ''
-                                    ].join(' ')}
-                                >
-                                    {outgoing.length ? (
-                                        outgoing.map((connector) => (
-                                            <button
-                                                type="button"
-                                                key={connector.id}
-                                                className={`canvas-flowchart-connector canvas-flowchart-connector-${connector.branch_kind || 'default'}`}
-                                                onClick={() => onOpenNode?.(connector.target)}
-                                            >
-                                                <strong>{connector.label}</strong>
-                                                <span>{connector.target_title}</span>
-                                                {connector.condition ? <small>{connector.condition}</small> : null}
-                                            </button>
-                                        ))
-                                    ) : (
-                                        <span className="canvas-flowchart-connector">Next</span>
-                                    )}
-                                </div>
-                            ) : null}
-                        </div>
-                    );
-                })}
-            </div>
-            <aside className="canvas-flowchart-summary">
-                <strong>Flow signals</strong>
-                <span>{flowchart.metadata.step_count} steps</span>
-                <span>{flowchart.metadata.connector_count} connectors</span>
-                <span>{flowchart.metadata.decision_count} decisions</span>
-                <span>{flowchart.metadata.source_backed_count} sourced</span>
-                <button
-                    type="button"
-                    onClick={() =>
-                        onAskAi?.({
-                            initialVisual: 'flow_chart',
-                            initialPrompt: 'Improve this flowchart with clearer step order, decision paths, dependencies, handoffs, and source-backed review notes.'
-                        })
-                    }
-                >
-                    Ask AI to improve flow
-                </button>
-            </aside>
-        </div>
-    );
-};
 
 const CanvasStructuredView = ({
     view,
@@ -1895,7 +1797,7 @@ const CanvasStructuredView = ({
             </header>
 
             {view === 'flowchart' ? (
-                <FlowchartView
+                <FlowchartRenderer
                     flowchart={flowchart}
                     onOpenNode={onOpenNode}
                     onAskAi={onAskAi}
