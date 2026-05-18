@@ -29,6 +29,7 @@ const SourceDraftReviewPanel = () => {
         clearPendingSourceDraft
     } = useStore(useShallow(selector));
     const setFlow = flowStore((s) => s.setFlow);
+    const currentFlowId = flowStore((s) => s.flow_id);
     const setFlowName = flowStore((s) => s.setFlowName);
     const setFlowType = flowStore((s) => s.setFlowType);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
@@ -43,9 +44,17 @@ const SourceDraftReviewPanel = () => {
         return null;
     }
 
+    const requestImmediateWorkspaceSave = () => {
+        window.setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('docmap:save-workspace-now'));
+        }, 0);
+    };
+
     const commitDraft = (draftGraph, mode) => {
         const viewport = draftGraph.viewport || {};
-        setFlow(pendingSourceDraft.flowId);
+        if (pendingSourceDraft.flowId && pendingSourceDraft.flowId !== currentFlowId) {
+            setFlow(pendingSourceDraft.flowId);
+        }
         setFlowName(pendingSourceDraft.flowName || 'Untitled workspace');
         setFlowType(pendingSourceDraft.flowType || 'automatic');
         setNodes(draftGraph.nodes || []);
@@ -68,6 +77,7 @@ const SourceDraftReviewPanel = () => {
             source_ids: [pendingSourceDraft.sourceName].filter(Boolean)
         });
         clearPendingSourceDraft();
+        requestImmediateWorkspaceSave();
         window.setTimeout(() => fitView({ maxZoom: 1 }), 50);
     };
 

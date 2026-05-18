@@ -52,6 +52,8 @@ export const sourceRecordFromUpload = (
             fromGraph.source_document_id ||
             data?.normalized_document_id ||
             data?.source_document_id ||
+            data?.source_document?.id ||
+            data?.source_document?.document_id ||
             data?.document_id ||
             data?.component_id ||
             inputTitle ||
@@ -99,6 +101,8 @@ export const sourceRecordFromUpload = (
             fromGraph.normalized_document_id ||
             data?.normalized_document_id ||
             data?.source_document_id ||
+            data?.source_document?.id ||
+            data?.source_document?.document_id ||
             ''
     };
 };

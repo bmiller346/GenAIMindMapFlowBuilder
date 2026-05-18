@@ -27,12 +27,20 @@ const node = ({
         owner_id: owner,
         assumption,
         source_refs: sourceRefs,
+        metadata: {
+            demo_workspace: true,
+            initial_seed_visual: nodeType === 'workspace_goal' ? 'tour-root' : 'tour-step'
+        },
         data: {
             summ: summary,
             query: '',
             df: [],
             graph: {},
             source_refs: sourceRefs,
+            metadata: {
+                demo_workspace: true,
+                initial_seed_visual: nodeType === 'workspace_goal' ? 'tour-root' : 'tour-step'
+            },
             ...extraData
         }
     },
@@ -444,4 +452,3 @@ export const DEMO_WORKSPACE_TEMPLATES = [
         buildSnapshot: outputViewsDemo
     }
 ];
-

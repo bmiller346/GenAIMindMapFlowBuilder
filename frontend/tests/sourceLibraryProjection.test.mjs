@@ -4,8 +4,10 @@ import {
     applyGraphFilters,
     buildGraphProjection,
     buildSourceLibraryProjection,
-    createSourceLibrarySnapshot
+    createSourceLibrarySnapshot,
+    WORKSPACE_BRIEF_SOURCE_ID
 } from '../src/views/graphProjection.js';
+import { sourceRecordFromUpload } from '../src/utils/sourceUploadRecords.js';
 
 const sourceNode = {
     id: 'component-1',
@@ -111,6 +113,64 @@ test('backend source library document object is normalized for frontend projecti
     assert.equal(projection.sources[0].component_id, 'component-backend');
     assert.equal(projection.sources[0].chunks[0].id, 'chunk-backend');
     assert.equal(projection.sources[0].segments[0].snippet, 'Backend segment text');
+});
+
+test('source library projection can keep workspace brief beside document sources for Ask AI', () => {
+    const projection = buildSourceLibraryProjection(
+        [sourceNode],
+        [],
+        {
+            configured: true,
+            goal: 'Review webhook event processing'
+        },
+        [],
+        { includeWorkspaceBriefSource: true }
+    );
+
+    assert.equal(projection.sources.length, 2);
+    assert.ok(projection.sources.some((source) => source.id === 'src_plan_v1'));
+    const briefSource = projection.sources.find(
+        (source) => source.id === WORKSPACE_BRIEF_SOURCE_ID
+    );
+    assert.equal(briefSource.title, 'Review webhook event processing');
+    assert.equal(briefSource.type, 'brief');
+});
+
+test('source library projection still falls back to brief-only when no documents exist', () => {
+    const projection = buildSourceLibraryProjection(
+        [],
+        [],
+        {
+            configured: true,
+            goal: 'Shape the workspace'
+        }
+    );
+
+    assert.equal(projection.sources.length, 1);
+    assert.equal(projection.sources[0].id, WORKSPACE_BRIEF_SOURCE_ID);
+});
+
+test('uploaded source records use nested source document ids and chunks', () => {
+    const record = sourceRecordFromUpload(
+        {
+            component_id: 'component-1',
+            type: 'docx',
+            source_document: {
+                id: 'doc-1',
+                filename: 'brief.docx',
+                original_filename: 'Brief.docx'
+            },
+            document_chunks: [{ id: 'chunk-1', text: 'Use this source.' }],
+            source_segments: [{ text: 'Use this source.' }]
+        },
+        { name: 'Brief.docx', size: 123 },
+        'workspace-1'
+    );
+
+    assert.equal(record.id, 'doc-1');
+    assert.equal(record.normalized_document_id, 'doc-1');
+    assert.equal(record.chunks.length, 1);
+    assert.equal(record.segments.length, 1);
 });
 
 test('source library projection exposes source-set review intelligence', () => {

@@ -34,7 +34,7 @@ import {
     normalizeAIDraftExpansionTarget
 } from "../utils/aiDraftSessions";
 import { createAIActionRun } from "../utils/aiActionRuns";
-import { buildSourceLibraryProjection } from "../views/graphProjection";
+import { buildSourceLibraryProjection, WORKSPACE_BRIEF_SOURCE_ID } from "../views/graphProjection";
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from "../utils/askAiGenerationProgress";
 
 const viewForAction = (actionId) => {
@@ -806,7 +806,7 @@ const PromptModal = ({
     initialChangeIntent = '',
     initialPromptPlaceholder = '',
     initialContextSourceId = '',
-    initialContextSourceIds = [],
+    initialContextSourceIds,
     onGenerationProgress
 }) => {
     const selector = (state) => ({
@@ -879,14 +879,20 @@ const PromptModal = ({
             initialCitationPolicy || (scope === 'source' ? 'required' : 'preferred')
         )
     );
-    const [selectedContextSourceIds, setSelectedContextSourceIds] = useState(() =>
-        Array.from(
+    const [selectedContextSourceIds, setSelectedContextSourceIds] = useState(() => {
+        const hasExplicitContextSelection = Array.isArray(initialContextSourceIds);
+        const defaultContextSourceIds =
+            !hasExplicitContextSelection && !initialContextSourceId && hasWorkspaceBriefContext(workspaceBrief)
+                ? [WORKSPACE_BRIEF_SOURCE_ID]
+                : [];
+        return Array.from(
             new Set([
+                ...defaultContextSourceIds,
                 ...(Array.isArray(initialContextSourceIds) ? initialContextSourceIds : []),
                 initialContextSourceId || ''
             ].filter(Boolean))
-        )
-    );
+        );
+    });
     const [customPrompt, setCustomPrompt] = useState(initialPrompt || '');
     const [stageMessage, setStageMessage] = useState('');
     const [generationStage, setGenerationStage] = useState('');
@@ -909,7 +915,9 @@ const PromptModal = ({
     const targetData = targetNode ? getWorkspaceNodeData(targetNode) : {};
     const loadedSources = useMemo(
         () =>
-            buildSourceLibraryProjection(nodes, edges, workspaceBrief, sourceLibrary).sources,
+            buildSourceLibraryProjection(nodes, edges, workspaceBrief, sourceLibrary, {
+                includeWorkspaceBriefSource: true
+            }).sources,
         [edges, nodes, sourceLibrary, workspaceBrief]
     );
     const selectedContextSources = loadedSources.filter((source) =>
@@ -925,6 +933,10 @@ const PromptModal = ({
               : selectedContextSources.length === 1
                 ? buildSelectedSourceDraftPayload(selectedContextSources[0])
               : null;
+    const shouldUseWorkspaceBrief =
+        scope === 'source' ||
+        selectedContextSourceIds.includes(WORKSPACE_BRIEF_SOURCE_ID);
+    const effectiveWorkspaceBrief = shouldUseWorkspaceBrief ? workspaceBrief : {};
     const targetLabel =
         selectedSourcePayload?.metadata?.selected_source_title ||
         (selectedSourcePayload?.metadata?.selected_source_count
@@ -1689,7 +1701,7 @@ const PromptModal = ({
                 selectedModel,
                 selectedSourcePayload,
                 desiredOutputs,
-                workspaceBrief,
+                workspaceBrief: effectiveWorkspaceBrief,
                 memoryContext,
                 changeIntent,
                 expansionMode: selectedExpansionMode,
@@ -1767,7 +1779,7 @@ const PromptModal = ({
                 selectedModel,
                 selectedSourcePayload,
                 desiredOutputs,
-                workspaceBrief,
+                workspaceBrief: effectiveWorkspaceBrief,
                 memoryContext,
                 changeIntent,
                 expansionMode: selectedExpansionMode,
@@ -1895,9 +1907,13 @@ const PromptModal = ({
                         ? workspaceBrief.goal || workspaceBrief.domain_context || 'Brief configured'
                         : 'No brief configured'}
                 </strong>
-                {hasWorkspaceBriefContext(workspaceBrief) ? (
+                {hasWorkspaceBriefContext(workspaceBrief) && shouldUseWorkspaceBrief ? (
                     <small>
                         Ask AI will use this as the project foundation; your question refines this run.
+                    </small>
+                ) : hasWorkspaceBriefContext(workspaceBrief) ? (
+                    <small>
+                        Brief configured but not selected for this run.
                     </small>
                 ) : (
                     <small>

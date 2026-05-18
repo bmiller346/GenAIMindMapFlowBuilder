@@ -96,8 +96,10 @@ const DataSourceSelect = ({
 	const [activeSourceIds, setActiveSourceIds] = useState(initialSourceIds);
 	const loadedSources = useMemo(
 		() =>
-			buildSourceLibraryProjection(nodes, edges, workspaceBrief, sourceLibrary).sources,
-		[edges, nodes, sourceLibrary, workspaceBrief]
+			buildSourceLibraryProjection(nodes, edges, workspaceBrief, sourceLibrary, {
+				includeWorkspaceBriefSource: isAskAIContext
+			}).sources,
+		[edges, isAskAIContext, nodes, sourceLibrary, workspaceBrief]
 	);
 	const modalProps = isAskAIContext
 		? {

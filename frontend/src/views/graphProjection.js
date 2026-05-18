@@ -1127,11 +1127,36 @@ const buildSourceSetReview = ({ sources, workspaceBrief = {}, uncitedNodes = [] 
     };
 };
 
+export const WORKSPACE_BRIEF_SOURCE_ID = 'brief-only';
+
+const hasWorkspaceBriefSourceContext = (brief = {}) =>
+    Boolean(
+        brief?.configured ||
+            String(brief?.goal || '').trim() ||
+            String(brief?.audience || '').trim() ||
+            String(brief?.domain_context || '').trim() ||
+            String(brief?.review_rules || '').trim() ||
+            (Array.isArray(brief?.desired_outputs) &&
+                brief.desired_outputs.some((output) => output !== 'mind_map'))
+    );
+
+const workspaceBriefSourceRecord = (workspaceBrief = {}) => ({
+    id: WORKSPACE_BRIEF_SOURCE_ID,
+    title: workspaceBrief.goal || 'Workspace brief',
+    type: 'brief',
+    type_label: 'Brief',
+    status: 'brief only',
+    metadata: workspaceBrief,
+    chunks: [],
+    segments: []
+});
+
 export const buildSourceLibraryProjection = (
     nodes,
     edges,
     workspaceBrief = {},
-    persistedSources = []
+    persistedSources = [],
+    options = {}
 ) => {
     const projection = buildGraphProjection(nodes, edges);
     const sourceMap = new Map();
@@ -1227,17 +1252,17 @@ export const buildSourceLibraryProjection = (
         });
     });
 
-    if (sourceMap.size === 0 && workspaceBrief?.configured) {
-        sourceMap.set('brief-only', {
-            id: 'brief-only',
-            title: workspaceBrief.goal || 'Workspace brief',
-            type: 'brief',
-            type_label: 'Brief',
-            status: 'brief only',
-            metadata: workspaceBrief,
-            chunks: [],
-            segments: []
-        });
+    const shouldIncludeBriefSource = options.includeWorkspaceBriefSource
+        ? hasWorkspaceBriefSourceContext(workspaceBrief)
+        : sourceMap.size === 0 && workspaceBrief?.configured;
+    if (shouldIncludeBriefSource) {
+        sourceMap.set(
+            WORKSPACE_BRIEF_SOURCE_ID,
+            mergeSourceRecord(
+                sourceMap.get(WORKSPACE_BRIEF_SOURCE_ID),
+                workspaceBriefSourceRecord(workspaceBrief)
+            )
+        );
     }
 
     const sources = Array.from(sourceMap.values())

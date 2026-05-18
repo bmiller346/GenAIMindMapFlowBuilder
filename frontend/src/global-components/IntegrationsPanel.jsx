@@ -65,6 +65,9 @@ const IntegrationsPanel = ({ validationReport }) => {
     const updateActivity = useActivityStore((s) => s.updateActivity);
     const [credentials, setCredentials] = useState({});
     const [actionStatus, setActionStatus] = useState('');
+    const [miroBoardId, setMiroBoardId] = useState('');
+    const [mondayBoardId, setMondayBoardId] = useState('');
+    const [mondayGroupId, setMondayGroupId] = useState('');
 
     useEffect(() => {
         let cancelled = false;
@@ -232,20 +235,21 @@ const IntegrationsPanel = ({ validationReport }) => {
     };
 
     const promptMiroBoard = () => {
-        const boardId = window.prompt('Miro board ID');
-        return boardId?.trim() || '';
+        const boardId = miroBoardId.trim();
+        if (!boardId) {
+            setActionStatus('Enter a Miro board ID before running this action.');
+        }
+        return boardId;
     };
 
     const promptMondayTarget = () => {
-        const boardId = window.prompt('monday board ID');
-        if (!boardId?.trim()) {
+        const boardId = mondayBoardId.trim();
+        const groupId = mondayGroupId.trim();
+        if (!boardId || !groupId) {
+            setActionStatus('Enter monday board and group IDs before running this action.');
             return null;
         }
-        const groupId = window.prompt('monday group ID');
-        if (!groupId?.trim()) {
-            return null;
-        }
-        return { boardId: boardId.trim(), groupId: groupId.trim() };
+        return { boardId, groupId };
     };
 
     const runMiroBoard = (dryRun) => {
@@ -382,32 +386,67 @@ const IntegrationsPanel = ({ validationReport }) => {
                             </span>
                         </div>
                         {summary.provider === 'miro' ? (
-                            <div className="integration-actions">
-                                <button type="button" onClick={() => runMiroBoard(true)}>
-                                    Board preview
-                                </button>
-                                <button type="button" onClick={() => runMiroBoard(false)}>
-                                    Push board
-                                </button>
-                                <button type="button" onClick={runMiroBranchFrame}>
-                                    Branch frame
-                                </button>
-                            </div>
+                            <>
+                                <div className="integration-target-inputs">
+                                    <label>
+                                        <span>Board ID</span>
+                                        <input
+                                            type="text"
+                                            value={miroBoardId}
+                                            onChange={(event) => setMiroBoardId(event.target.value)}
+                                            placeholder="Miro board ID"
+                                        />
+                                    </label>
+                                </div>
+                                <div className="integration-actions">
+                                    <button type="button" onClick={() => runMiroBoard(true)}>
+                                        Board preview
+                                    </button>
+                                    <button type="button" onClick={() => runMiroBoard(false)}>
+                                        Push board
+                                    </button>
+                                    <button type="button" onClick={runMiroBranchFrame}>
+                                        Branch frame
+                                    </button>
+                                </div>
+                            </>
                         ) : (
-                            <div className="integration-actions">
-                                <button type="button" onClick={() => runMondayExistingGroup(true)}>
-                                    Preflight group
-                                </button>
-                                <button type="button" onClick={() => runMondayExistingGroup(false)}>
-                                    Push tasks
-                                </button>
-                                <button type="button" onClick={() => runMondayStatusPull(false)}>
-                                    Status preview
-                                </button>
-                                <button type="button" onClick={() => runMondayStatusPull(true)}>
-                                    Pull status
-                                </button>
-                            </div>
+                            <>
+                                <div className="integration-target-inputs integration-target-inputs-two">
+                                    <label>
+                                        <span>Board ID</span>
+                                        <input
+                                            type="text"
+                                            value={mondayBoardId}
+                                            onChange={(event) => setMondayBoardId(event.target.value)}
+                                            placeholder="monday board ID"
+                                        />
+                                    </label>
+                                    <label>
+                                        <span>Group ID</span>
+                                        <input
+                                            type="text"
+                                            value={mondayGroupId}
+                                            onChange={(event) => setMondayGroupId(event.target.value)}
+                                            placeholder="monday group ID"
+                                        />
+                                    </label>
+                                </div>
+                                <div className="integration-actions">
+                                    <button type="button" onClick={() => runMondayExistingGroup(true)}>
+                                        Preflight group
+                                    </button>
+                                    <button type="button" onClick={() => runMondayExistingGroup(false)}>
+                                        Push tasks
+                                    </button>
+                                    <button type="button" onClick={() => runMondayStatusPull(false)}>
+                                        Status preview
+                                    </button>
+                                    <button type="button" onClick={() => runMondayStatusPull(true)}>
+                                        Pull status
+                                    </button>
+                                </div>
+                            </>
                         )}
                     </article>
                 ))}
