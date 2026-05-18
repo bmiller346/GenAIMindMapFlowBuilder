@@ -429,6 +429,761 @@ const outputViewsDemo = () => {
     });
 };
 
+const aecSowDeliverablesDemo = () => {
+    const sowRef = sourceRef('demo-aec-sow', 'Clinic Renovation SOW Excerpt', 'Scope and deliverables');
+    const bimRef = sourceRef('demo-aec-bim', 'BIM Execution Notes', 'Coordination requirements');
+    const scheduleRef = sourceRef('demo-aec-schedule', 'Milestone Tracker', 'Design and permit dates');
+    const nodes = [
+        node({
+            id: 'demo-aec-root',
+            title: 'AEC SOW Delivery Plan',
+            summary:
+                'Turn a messy AEC scope into disciplines, deliverables, phase dependencies, risks, missing owner decisions, and handoff-ready work.',
+            nodeType: 'workspace_goal',
+            x: 80,
+            y: 80,
+            priority: 'high',
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [sowRef, bimRef, scheduleRef]
+        }),
+        node({
+            id: 'demo-aec-arch',
+            title: 'Architecture: Permit Drawing Package',
+            summary:
+                'Architecture owns the permit drawing package and must confirm room finish scope before construction document closeout.',
+            nodeType: 'deliverable',
+            x: 540,
+            y: -180,
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [sowRef, scheduleRef]
+        }),
+        node({
+            id: 'demo-aec-mep',
+            title: 'MEP: Existing Conditions And Load Impacts',
+            summary:
+                'MEP review depends on existing ceiling conditions and equipment loads before finalizing design impacts.',
+            nodeType: 'discipline_scope',
+            x: 540,
+            y: 0,
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [sowRef]
+        }),
+        node({
+            id: 'demo-aec-bim',
+            title: 'BIM/VDC: Coordination Model',
+            summary:
+                'The BIM/VDC lead must maintain a coordination model and track clashes across architecture, MEP, and contractor inputs.',
+            nodeType: 'coordination',
+            x: 540,
+            y: 180,
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [bimRef]
+        }),
+        node({
+            id: 'demo-aec-owner-decision',
+            title: 'Missing Owner Decision: Phasing Constraints',
+            summary:
+                'The SOW references active clinic operations, but does not define acceptable downtime windows or phasing constraints.',
+            nodeType: 'missing_info',
+            x: 980,
+            y: -80,
+            priority: 'high',
+            sourceRefs: [sowRef, scheduleRef]
+        }),
+        node({
+            id: 'demo-aec-risk',
+            title: 'Risk: Permit Date Depends On Unconfirmed Scope',
+            summary:
+                'Permit submission could slip if finish scope, equipment loads, or phasing constraints remain unresolved.',
+            nodeType: 'risk',
+            x: 980,
+            y: 100,
+            priority: 'high',
+            sourceRefs: [sowRef, scheduleRef]
+        }),
+        node({
+            id: 'demo-aec-sme-question',
+            title: 'SME Question: Who Approves Final Scope?',
+            summary:
+                'Ask the owner representative which role approves the final scope matrix and how approval should be recorded.',
+            nodeType: 'question',
+            x: 1380,
+            y: -80,
+            priority: 'high',
+            sourceRefs: [sowRef]
+        }),
+        node({
+            id: 'demo-aec-monday',
+            title: 'monday.com Handoff: Delivery Board',
+            summary:
+                'Create grouped work items for architecture, MEP, BIM/VDC, owner decisions, risks, and blocked milestones.',
+            nodeType: 'handoff',
+            x: 1380,
+            y: 120,
+            priority: 'medium'
+        }),
+        node({
+            id: 'demo-aec-miro',
+            title: 'Miro Handoff: Dependency Map',
+            summary:
+                'Export a dependency map that shows discipline handoffs, decision gates, and unresolved assumptions for kickoff review.',
+            nodeType: 'visual_export',
+            x: 1380,
+            y: 300,
+            priority: 'medium'
+        })
+    ];
+
+    return baseSnapshot({
+        nodes,
+        edges: [
+            edge({ id: 'demo-aec-e1', source: 'demo-aec-root', target: 'demo-aec-arch' }),
+            edge({ id: 'demo-aec-e2', source: 'demo-aec-root', target: 'demo-aec-mep' }),
+            edge({ id: 'demo-aec-e3', source: 'demo-aec-root', target: 'demo-aec-bim' }),
+            edge({
+                id: 'demo-aec-e4',
+                source: 'demo-aec-arch',
+                target: 'demo-aec-owner-decision',
+                relationshipType: 'blocked_by',
+                label: 'scope approval needed',
+                confidence: 0.84,
+                rationale: 'The permit package cannot be treated as complete until the owner confirms scope and phasing constraints.'
+            }),
+            edge({
+                id: 'demo-aec-e5',
+                source: 'demo-aec-mep',
+                target: 'demo-aec-bim',
+                relationshipType: 'depends_on',
+                label: 'loads inform coordination',
+                confidence: 0.8,
+                rationale: 'MEP impacts should be reflected in the coordination model before closeout.'
+            }),
+            edge({
+                id: 'demo-aec-e6',
+                source: 'demo-aec-owner-decision',
+                target: 'demo-aec-risk',
+                relationshipType: 'causes',
+                label: 'unresolved decision creates risk',
+                confidence: 0.86
+            }),
+            edge({
+                id: 'demo-aec-e7',
+                source: 'demo-aec-owner-decision',
+                target: 'demo-aec-sme-question',
+                relationshipType: 'requires',
+                label: 'needs owner answer',
+                confidence: 0.88
+            }),
+            edge({
+                id: 'demo-aec-e8',
+                source: 'demo-aec-risk',
+                target: 'demo-aec-monday',
+                relationshipType: 'routes_to',
+                label: 'track blocked work',
+                confidence: 0.78
+            }),
+            edge({
+                id: 'demo-aec-e9',
+                source: 'demo-aec-bim',
+                target: 'demo-aec-miro',
+                relationshipType: 'supports',
+                label: 'visual dependency review',
+                confidence: 0.81
+            }),
+            edge({
+                id: 'demo-aec-e10',
+                source: 'demo-aec-sme-question',
+                target: 'demo-aec-monday',
+                relationshipType: 'feeds',
+                label: 'owner decision task',
+                confidence: 0.83
+            })
+        ],
+        sourceLibrary: [
+            {
+                id: 'demo-aec-sow',
+                title: 'Clinic Renovation SOW Excerpt',
+                type: 'demo',
+                status: 'example',
+                coverage_count: 5
+            },
+            {
+                id: 'demo-aec-bim',
+                title: 'BIM Execution Notes',
+                type: 'demo',
+                status: 'example',
+                coverage_count: 3
+            },
+            {
+                id: 'demo-aec-schedule',
+                title: 'Milestone Tracker',
+                type: 'demo',
+                status: 'example',
+                coverage_count: 3
+            }
+        ],
+        workspaceBrief: {
+            configured: true,
+            preset: 'custom',
+            goal: 'Show how the AEC SOW Deliverables Planner turns scope material into a delivery graph with disciplines, dependencies, risks, missing owner decisions, and handoff-ready outputs.',
+            audience: 'AEC project managers, BIM/VDC leads, owner representatives, and delivery teams',
+            domain_context:
+                'Demo clinic renovation SOW with architecture, MEP, BIM/VDC, owner decision, schedule, and handoff concerns. The workspace should show what depends on what across the project timeline.',
+            desired_outputs: ['knowledge_graph', 'flow_chart', 'tasks', 'source_set_review'],
+            source_mode: 'source_plus_context',
+            assumptions_allowed: false,
+            output_style: 'aec_delivery_dependency_map',
+            node_types: ['workspace_goal', 'deliverable', 'discipline_scope', 'coordination', 'missing_info', 'risk', 'question', 'handoff', 'visual_export'],
+            review_policy: ['mark_uncited_needs_review', 'generate_sme_questions', 'explain_dependency_risk'],
+            expected_artifacts: ['SOW deliverable map', 'discipline dependency graph', 'owner decision list', 'monday.com handoff tasks', 'Miro dependency overview'],
+            review_rules: 'Separate source-backed scope from assumptions. Keep missing owner decisions and handoff blockers marked Needs Review.'
+        },
+        activityEvents: [
+            activity(
+                'demo_aec_sow_seeded',
+                'Seeded AEC SOW delivery demo',
+                'Includes disciplines, dependencies, risks, missing owner decisions, and Miro/monday handoff targets.'
+            )
+        ]
+    });
+};
+
+const askAiKnowledgeGraphDemo = () => {
+    const userQuestionRef = sourceRef('demo-kg-prompt', 'Ask AI Knowledge Graph Prompt', 'Robustness scenario');
+    const internalNotesRef = sourceRef('demo-kg-internal', 'Research Assistant Notes', 'Retrieval behavior');
+    const externalDocsRef = sourceRef('demo-kg-external', 'Vendor Documentation Excerpt', 'Source policy');
+    const nodes = [
+        node({
+            id: 'demo-kg-root',
+            title: 'Ask AI Knowledge Graph Robustness Test',
+            summary:
+                'A seeded scenario for testing whether Ask AI can create labeled nodes and relationships with conflicts, confidence, limitations, and feedback loops.',
+            nodeType: 'workspace_goal',
+            x: 80,
+            y: 80,
+            priority: 'high',
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [userQuestionRef]
+        }),
+        node({
+            id: 'demo-kg-question',
+            title: 'Question: How Does The Assistant Answer?',
+            summary:
+                'The user asks how a research assistant turns vague, specific, or multi-part questions into cited answers.',
+            nodeType: 'question',
+            x: 500,
+            y: -170,
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [userQuestionRef]
+        }),
+        node({
+            id: 'demo-kg-entities',
+            title: 'Entities: Intent, Sources, Evidence',
+            summary:
+                'The same question mentions multiple entities that should connect into search, ranking, answer, and citation behavior.',
+            nodeType: 'entity',
+            x: 500,
+            y: 0,
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [userQuestionRef]
+        }),
+        node({
+            id: 'demo-kg-internal-source',
+            title: 'Internal Knowledge Base',
+            summary:
+                'Internal notes provide trusted retrieval context and should connect to both evidence and search result nodes.',
+            nodeType: 'source',
+            x: 500,
+            y: 180,
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [internalNotesRef]
+        }),
+        node({
+            id: 'demo-kg-external-source',
+            title: 'External Source',
+            summary:
+                'External docs can add coverage but may conflict with internal notes and should be evaluated before synthesis.',
+            nodeType: 'source',
+            x: 500,
+            y: 360,
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [externalDocsRef]
+        }),
+        node({
+            id: 'demo-kg-conflict',
+            title: 'Conflict: Source Priority Disagrees',
+            summary:
+                'Internal notes say internal content wins by default, while external docs say newer public docs should override stale internal notes.',
+            nodeType: 'conflict',
+            x: 940,
+            y: 250,
+            priority: 'high',
+            sourceRefs: [internalNotesRef, externalDocsRef]
+        }),
+        node({
+            id: 'demo-kg-answer',
+            title: 'Answer With Citations And Limitations',
+            summary:
+                'The final answer should cite supporting evidence, explain uncertainty when sources conflict, and avoid treating unsupported claims as facts.',
+            nodeType: 'answer',
+            x: 940,
+            y: -60,
+            status: 'needs_review',
+            sourceRefs: [internalNotesRef, externalDocsRef]
+        }),
+        node({
+            id: 'demo-kg-low-confidence',
+            title: 'Low Confidence Triggers Follow-up',
+            summary:
+                'When evidence is weak or contradictory, the assistant should ask a targeted follow-up question before overcommitting.',
+            nodeType: 'confidence_score',
+            x: 1360,
+            y: 70,
+            priority: 'high'
+        }),
+        node({
+            id: 'demo-kg-limitation',
+            title: 'Limitation: Unsupported Latency Claim',
+            summary:
+                'A claim that the assistant always answers under two seconds has no source and should remain marked as a limitation.',
+            nodeType: 'limitation',
+            x: 1360,
+            y: 250,
+            status: 'needs_review',
+            priority: 'medium'
+        }),
+        node({
+            id: 'demo-kg-feedback',
+            title: 'Feedback Improves Future Retrieval',
+            summary:
+                'User feedback should loop back into future retrieval and ranking rather than only attaching to the final answer.',
+            nodeType: 'feedback',
+            x: 940,
+            y: 470,
+            priority: 'medium'
+        })
+    ];
+
+    return baseSnapshot({
+        nodes,
+        edges: [
+            edge({ id: 'demo-kg-e1', source: 'demo-kg-root', target: 'demo-kg-question' }),
+            edge({
+                id: 'demo-kg-e2',
+                source: 'demo-kg-question',
+                target: 'demo-kg-entities',
+                relationshipType: 'mentions',
+                label: 'mentions entities',
+                confidence: 0.92
+            }),
+            edge({
+                id: 'demo-kg-e3',
+                source: 'demo-kg-entities',
+                target: 'demo-kg-internal-source',
+                relationshipType: 'guides',
+                label: 'guides internal search',
+                confidence: 0.88
+            }),
+            edge({
+                id: 'demo-kg-e4',
+                source: 'demo-kg-entities',
+                target: 'demo-kg-external-source',
+                relationshipType: 'guides',
+                label: 'guides external search',
+                confidence: 0.78
+            }),
+            edge({
+                id: 'demo-kg-e5',
+                source: 'demo-kg-internal-source',
+                target: 'demo-kg-answer',
+                relationshipType: 'supports',
+                label: 'supports answer',
+                confidence: 0.86,
+                rationale: 'Internal notes describe retrieval and synthesis behavior.'
+            }),
+            edge({
+                id: 'demo-kg-e6',
+                source: 'demo-kg-external-source',
+                target: 'demo-kg-answer',
+                relationshipType: 'supports',
+                label: 'adds citation',
+                confidence: 0.72
+            }),
+            edge({
+                id: 'demo-kg-e7',
+                source: 'demo-kg-internal-source',
+                target: 'demo-kg-conflict',
+                relationshipType: 'conflicts_with',
+                label: 'priority rule conflicts',
+                confidence: 0.74
+            }),
+            edge({
+                id: 'demo-kg-e8',
+                source: 'demo-kg-external-source',
+                target: 'demo-kg-conflict',
+                relationshipType: 'conflicts_with',
+                label: 'freshness rule conflicts',
+                confidence: 0.76
+            }),
+            edge({
+                id: 'demo-kg-e9',
+                source: 'demo-kg-conflict',
+                target: 'demo-kg-low-confidence',
+                relationshipType: 'causes',
+                label: 'reduces confidence',
+                confidence: 0.81
+            }),
+            edge({
+                id: 'demo-kg-e10',
+                source: 'demo-kg-low-confidence',
+                target: 'demo-kg-answer',
+                relationshipType: 'qualifies',
+                label: 'requires uncertainty note',
+                confidence: 0.83
+            }),
+            edge({
+                id: 'demo-kg-e11',
+                source: 'demo-kg-limitation',
+                target: 'demo-kg-answer',
+                relationshipType: 'qualifies',
+                label: 'unsupported claim',
+                confidence: 0.69
+            }),
+            edge({
+                id: 'demo-kg-e12',
+                source: 'demo-kg-feedback',
+                target: 'demo-kg-internal-source',
+                relationshipType: 'improves',
+                label: 'future retrieval loop',
+                confidence: 0.8
+            }),
+            edge({
+                id: 'demo-kg-e13',
+                source: 'demo-kg-answer',
+                target: 'demo-kg-feedback',
+                relationshipType: 'receives',
+                label: 'user rates answer',
+                confidence: 0.84
+            })
+        ],
+        sourceLibrary: [
+            {
+                id: 'demo-kg-prompt',
+                title: 'Ask AI Knowledge Graph Prompt',
+                type: 'demo',
+                status: 'example',
+                coverage_count: 3
+            },
+            {
+                id: 'demo-kg-internal',
+                title: 'Research Assistant Notes',
+                type: 'demo',
+                status: 'example',
+                coverage_count: 4
+            },
+            {
+                id: 'demo-kg-external',
+                title: 'Vendor Documentation Excerpt',
+                type: 'demo',
+                status: 'example',
+                coverage_count: 3
+            }
+        ],
+        workspaceBrief: {
+            configured: true,
+            preset: 'custom',
+            goal: 'Stress-test Ask AI knowledge graph generation with labeled relationships, conflicts, confidence, limitations, many-to-many links, and feedback loops.',
+            audience: 'Product reviewers testing the Ask AI knowledge graph feature',
+            domain_context:
+                'Seeded research assistant scenario based on the Ask AI prompt. It intentionally includes contradictory source priority rules and one unsupported claim.',
+            desired_outputs: ['knowledge_graph', 'mind_map', 'source_set_review'],
+            source_mode: 'source_plus_context',
+            assumptions_allowed: true,
+            output_style: 'relationship_graph_test_fixture',
+            node_types: ['workspace_goal', 'question', 'entity', 'source', 'conflict', 'answer', 'confidence_score', 'limitation', 'feedback'],
+            review_policy: ['mark_uncited_needs_review', 'mark_low_confidence_needs_review', 'explain_conflicting_evidence'],
+            expected_artifacts: ['labeled graph', 'conflict explanation', 'follow-up question', 'limitation note'],
+            review_rules: 'Keep the latency claim as unsupported, preserve the feedback loop, and label non-hierarchical relationships clearly.'
+        }
+    });
+};
+
+const askAiFlowchartDemo = () => {
+    const promptRef = sourceRef('demo-flow-prompt', 'Ask AI Flowchart Prompt', 'Decision process');
+    const nodes = [
+        node({
+            id: 'demo-flow-root',
+            title: 'Ask AI Flowchart Robustness Test',
+            summary:
+                'A seeded scenario for testing nested branching, source checks, safety handling, conflict handling, and quality loops.',
+            nodeType: 'workspace_goal',
+            x: 80,
+            y: 80,
+            priority: 'high',
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-receive',
+            title: 'Receive User Request',
+            summary:
+                'Start when the user submits a simple, complex, clear, unclear, safe, or unsafe request.',
+            nodeType: 'process',
+            x: 500,
+            y: -160,
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-type',
+            title: 'Decision: Request Type',
+            summary:
+                'Classify the request as simple, complex, or requiring specialized handling before drafting.',
+            nodeType: 'decision',
+            x: 500,
+            y: 20,
+            status: 'ai_generated',
+            assumption: false,
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-clear',
+            title: 'Decision: Clear Enough?',
+            summary:
+                'If the request is unclear, ask one focused clarifying question and loop back to analysis.',
+            nodeType: 'decision',
+            x: 500,
+            y: 210,
+            priority: 'high',
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-clarify',
+            title: 'Ask Clarifying Question',
+            summary:
+                'Ask for the missing detail needed to proceed, then return to request analysis after the user replies.',
+            nodeType: 'question',
+            x: 80,
+            y: 300,
+            priority: 'medium',
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-knowledge',
+            title: 'Decision: Enough Knowledge?',
+            summary:
+                'Use current knowledge for stable topics, or retrieve more information when the answer depends on sources.',
+            nodeType: 'decision',
+            x: 940,
+            y: 20,
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-retrieve',
+            title: 'Retrieve And Evaluate Sources',
+            summary:
+                'Search for supporting material, evaluate source reliability, and flag weak or unreliable evidence.',
+            nodeType: 'process',
+            x: 940,
+            y: 210,
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-conflict',
+            title: 'Decision: Sources Conflict?',
+            summary:
+                'When sources disagree, compare evidence and explain uncertainty instead of flattening the disagreement.',
+            nodeType: 'decision',
+            x: 1360,
+            y: 210,
+            priority: 'high',
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-safety',
+            title: 'Decision: Safe Request?',
+            summary:
+                'Unsafe requests should route to a refusal or safer alternative before final answer delivery.',
+            nodeType: 'decision',
+            x: 940,
+            y: 400,
+            priority: 'high',
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-draft',
+            title: 'Draft Response',
+            summary:
+                'Compose a relevant answer with citations, uncertainty notes, and the right level of detail.',
+            nodeType: 'process',
+            x: 1360,
+            y: 400,
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-quality',
+            title: 'Quality Check',
+            summary:
+                'Check safety, relevance, completeness, and source handling before final delivery.',
+            nodeType: 'review_policy',
+            x: 1360,
+            y: 590,
+            sourceRefs: [promptRef]
+        }),
+        node({
+            id: 'demo-flow-final',
+            title: 'Provide Final Answer',
+            summary:
+                'Deliver the answer and offer a useful next step when appropriate.',
+            nodeType: 'answer',
+            x: 940,
+            y: 590,
+            sourceRefs: [promptRef]
+        })
+    ];
+
+    return baseSnapshot({
+        nodes,
+        edges: [
+            edge({ id: 'demo-flow-e1', source: 'demo-flow-root', target: 'demo-flow-receive' }),
+            edge({ id: 'demo-flow-e2', source: 'demo-flow-receive', target: 'demo-flow-type' }),
+            edge({ id: 'demo-flow-e3', source: 'demo-flow-type', target: 'demo-flow-clear' }),
+            edge({
+                id: 'demo-flow-e4',
+                source: 'demo-flow-clear',
+                target: 'demo-flow-clarify',
+                relationshipType: 'routes_to',
+                label: 'unclear',
+                confidence: 0.9
+            }),
+            edge({
+                id: 'demo-flow-e5',
+                source: 'demo-flow-clarify',
+                target: 'demo-flow-type',
+                relationshipType: 'loops_to',
+                label: 'user clarifies',
+                confidence: 0.88
+            }),
+            edge({
+                id: 'demo-flow-e6',
+                source: 'demo-flow-clear',
+                target: 'demo-flow-knowledge',
+                relationshipType: 'routes_to',
+                label: 'clear',
+                confidence: 0.91
+            }),
+            edge({
+                id: 'demo-flow-e7',
+                source: 'demo-flow-knowledge',
+                target: 'demo-flow-retrieve',
+                relationshipType: 'routes_to',
+                label: 'needs retrieval',
+                confidence: 0.84
+            }),
+            edge({
+                id: 'demo-flow-e8',
+                source: 'demo-flow-knowledge',
+                target: 'demo-flow-safety',
+                relationshipType: 'routes_to',
+                label: 'enough knowledge',
+                confidence: 0.78
+            }),
+            edge({
+                id: 'demo-flow-e9',
+                source: 'demo-flow-retrieve',
+                target: 'demo-flow-conflict',
+                relationshipType: 'routes_to',
+                label: 'evaluate reliability',
+                confidence: 0.85
+            }),
+            edge({
+                id: 'demo-flow-e10',
+                source: 'demo-flow-conflict',
+                target: 'demo-flow-draft',
+                relationshipType: 'qualifies',
+                label: 'explain uncertainty',
+                confidence: 0.82
+            }),
+            edge({
+                id: 'demo-flow-e11',
+                source: 'demo-flow-conflict',
+                target: 'demo-flow-safety',
+                relationshipType: 'routes_to',
+                label: 'consistent evidence',
+                confidence: 0.76
+            }),
+            edge({
+                id: 'demo-flow-e12',
+                source: 'demo-flow-safety',
+                target: 'demo-flow-draft',
+                relationshipType: 'routes_to',
+                label: 'safe',
+                confidence: 0.9
+            }),
+            edge({
+                id: 'demo-flow-e13',
+                source: 'demo-flow-draft',
+                target: 'demo-flow-quality',
+                relationshipType: 'routes_to',
+                label: 'review draft',
+                confidence: 0.92
+            }),
+            edge({
+                id: 'demo-flow-e14',
+                source: 'demo-flow-quality',
+                target: 'demo-flow-draft',
+                relationshipType: 'loops_to',
+                label: 'fails check',
+                confidence: 0.86
+            }),
+            edge({
+                id: 'demo-flow-e15',
+                source: 'demo-flow-quality',
+                target: 'demo-flow-final',
+                relationshipType: 'routes_to',
+                label: 'passes check',
+                confidence: 0.9
+            })
+        ],
+        sourceLibrary: [
+            {
+                id: 'demo-flow-prompt',
+                title: 'Ask AI Flowchart Prompt',
+                type: 'demo',
+                status: 'example',
+                coverage_count: 8
+            }
+        ],
+        workspaceBrief: {
+            configured: true,
+            preset: 'custom',
+            goal: 'Stress-test Ask AI flowchart generation with decisions, nested branches, source evaluation, safety handling, conflict handling, and loops.',
+            audience: 'Product reviewers testing the Ask AI flowchart feature',
+            domain_context:
+                'Seeded assistant decision-process scenario based on the Ask AI flowchart prompt. It should render as a flowchart and remain readable as a map.',
+            desired_outputs: ['flow_chart', 'mind_map', 'checklist'],
+            source_mode: 'context_only',
+            assumptions_allowed: true,
+            output_style: 'workflow_test_fixture',
+            node_types: ['workspace_goal', 'process', 'decision', 'question', 'review_policy', 'answer'],
+            review_policy: ['mark_unclear_requires_question', 'explain_conflicting_evidence', 'quality_check_before_final'],
+            expected_artifacts: ['flowchart', 'decision branches', 'clarification loop', 'quality loop'],
+            review_rules: 'Preserve the clarification loop and draft-quality loop, and keep decision labels concise.'
+        }
+    });
+};
+
 export const DEMO_WORKSPACE_TEMPLATES = [
     {
         id: 'tracespace-tour',
@@ -450,5 +1205,26 @@ export const DEMO_WORKSPACE_TEMPLATES = [
         summary: 'A compact workspace for trying map, knowledge graph, flowchart, table, checklist, and task views.',
         cta: 'Create output demo',
         buildSnapshot: outputViewsDemo
+    },
+    {
+        id: 'aec-sow-deliverables',
+        name: 'Example: AEC SOW Delivery Plan',
+        summary: 'A discipline dependency demo with SOW deliverables, risks, missing owner decisions, and Miro/monday handoff targets.',
+        cta: 'Create AEC demo',
+        buildSnapshot: aecSowDeliverablesDemo
+    },
+    {
+        id: 'ask-ai-knowledge-graph',
+        name: 'Example: Ask AI Knowledge Graph',
+        summary: 'A graph stress test with labeled relationships, conflicting evidence, confidence, limitations, and feedback loops.',
+        cta: 'Create graph test',
+        buildSnapshot: askAiKnowledgeGraphDemo
+    },
+    {
+        id: 'ask-ai-flowchart',
+        name: 'Example: Ask AI Flowchart',
+        summary: 'A flowchart stress test with nested decisions, retrieval, conflict handling, safety checks, and loops.',
+        cta: 'Create flowchart test',
+        buildSnapshot: askAiFlowchartDemo
     }
 ];
