@@ -265,7 +265,13 @@ const Drawer = ({
             </div>
             {isViewModal ? (
                 <div onClick={(event) => event.stopPropagation()}>
-                    <FlowModal isDrawer={isDrawer} setIsDrawer={setIsDrawer} isViewModal={isViewModal} setIsViewFlowModal={setIsViewFlowModal}/>
+                    <FlowModal
+                        isDrawer={isDrawer}
+                        setIsDrawer={setIsDrawer}
+                        isViewModal={isViewModal}
+                        setIsViewFlowModal={setIsViewFlowModal}
+                        setFlowList={setFlowList}
+                    />
                 </div>
             ) : null}
         </div>

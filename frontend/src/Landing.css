@@ -134,6 +134,10 @@
   cursor: pointer;
 }
 
+.landing-print-cta {
+  border: 1px solid #d8ddd2;
+}
+
 .landing-secondary-cta:disabled {
   cursor: not-allowed;
   opacity: 0.62;
@@ -446,5 +450,89 @@
 
   .landing-flow {
     margin-top: 0;
+  }
+}
+
+@media print {
+  @page {
+    margin: 0.45in;
+  }
+
+  .landing-page {
+    background: #ffffff;
+    color: #151715;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .landing-hero {
+    min-height: auto;
+    padding: 0 0 2rem;
+  }
+
+  .landing-nav,
+  .landing-hero-grid,
+  .landing-flow,
+  .landing-section,
+  .landing-footer {
+    width: 100%;
+  }
+
+  .landing-nav-link,
+  .landing-actions,
+  .landing-footer a {
+    display: none;
+  }
+
+  .landing-hero-grid {
+    grid-template-columns: 1fr 0.72fr;
+    gap: 1.5rem;
+    padding: 2rem 0 1.5rem;
+  }
+
+  .landing-hero h1 {
+    font-size: 3.2rem;
+  }
+
+  .landing-value {
+    font-size: 1.45rem;
+  }
+
+  .landing-graph-visual {
+    min-height: 22rem;
+  }
+
+  .graph-stage {
+    height: 19rem;
+  }
+
+  .landing-flow {
+    margin: 0;
+    box-shadow: none;
+  }
+
+  .landing-section {
+    break-inside: avoid;
+    padding-top: 2rem;
+  }
+
+  .landing-work-card,
+  .landing-use-cases article,
+  .landing-difference-panel,
+  .source-stack span,
+  .confidence-chip,
+  .graph-stage,
+  .graph-node {
+    box-shadow: none;
+  }
+
+  .landing-work-grid,
+  .landing-use-cases {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .landing-footer {
+    margin-top: 2rem;
+    padding-bottom: 0;
   }
 }

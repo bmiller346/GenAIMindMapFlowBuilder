@@ -2150,6 +2150,34 @@ input:focus {
   opacity: 0.72;
 }
 
+.flow-demo-section {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.flow-demo-section > p {
+  color: var(--font-color);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  opacity: 0.62;
+  text-transform: uppercase;
+}
+
+.flow-demo-grid {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.flow-demo-card {
+  background-color: color-mix(in srgb, var(--input-bar-color) 78%, #66c2a5 10%);
+}
+
+.flow-demo-card strong {
+  font-size: 0.95rem;
+}
+
 #add {
   border-radius: 2rem;
   padding: 0.75rem 1rem;

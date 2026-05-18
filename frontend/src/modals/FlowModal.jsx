@@ -8,10 +8,11 @@ import DataSourceSelect from '../global-components/DataSourceSelect';
 import ErrorModal from './ErrorModal';
 import errorStore from '../stores/errorStore';
 import { EMPTY_FLOW_SNAPSHOT, stringifyFlowSnapshot } from '../utils/flowSnapshots';
+import { DEMO_WORKSPACE_TEMPLATES } from '../utils/demoWorkspaces';
 import useActivityStore from '../stores/activityStore';
 import useAutomationStore from '../stores/automationStore';
 
-const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
+const FlowModal = ({ setIsDrawer, setIsViewFlowModal, setFlowList }) => {
    const selector = (state) => ({
         trigger: state.trigger,
         setTrigger: state.setTrigger,
@@ -19,6 +20,8 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
         setEdges: state.setEdges,
         setWorkspaceBrief: state.setWorkspaceBrief,
         setMapStyle: state.setMapStyle,
+        setSourceLibrary: state.setSourceLibrary,
+        setAIActionRuns: state.setAIActionRuns,
         setViewPort: state.setViewPort
     });
 
@@ -29,6 +32,8 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
         setEdges,
         setWorkspaceBrief,
         setMapStyle,
+        setSourceLibrary,
+        setAIActionRuns,
         setViewPort
     } = useStore(useShallow(selector));
     const setFlow = flowStore((s) => s.setFlow);
@@ -79,33 +84,82 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
             .catch((err) => manageErrors(err));
     };
 
+    const createDemoFlow = (template) => {
+        setIsDrawer(false);
+        setIsViewFlowModal(false);
+        const snapshot = template.buildSnapshot();
+        const data = {
+            flow_name: template.name,
+            summary: template.summary,
+            flow_json: stringifyFlowSnapshot(snapshot),
+            flow_type: 'manual'
+        };
+        axios
+            .post(`http://localhost:8000/create-flow`, data, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then((res) =>
+                setupNewFlow(res, {
+                    snapshot,
+                    flowName: template.name,
+                    summary: template.summary
+                })
+            )
+            .catch((err) => manageErrors(err));
+    };
 
-    const setupNewFlow = (res, { openSourcePicker = false } = {}) => {
+    const setupNewFlow = (
+        res,
+        {
+            openSourcePicker = false,
+            snapshot = EMPTY_FLOW_SNAPSHOT,
+            flowName = 'New Flow',
+            summary = 'Flow is empty'
+        } = {}
+    ) => {
         setFlow(res.data.flow_id);
-        setActivityEvents([], res.data.flow_id);
-        setAutomations(EMPTY_FLOW_SNAPSHOT.automations || []);
+        setActivityEvents(snapshot.activity_events || [], res.data.flow_id);
+        setAutomations(snapshot.automations || []);
         setFlowType(res.data.flow_type);
         setIsDrawer(false);
-        setNodes([]);
-        setEdges([]);
-        setWorkspaceBrief({});
-        setMapStyle(EMPTY_FLOW_SNAPSHOT.map_style);
-        setViewPort({});
-        setFlowName('New Flow');
+        setNodes(snapshot.nodes || []);
+        setEdges(snapshot.edges || []);
+        setWorkspaceBrief(snapshot.workspace_brief || {});
+        setMapStyle(snapshot.map_style || EMPTY_FLOW_SNAPSHOT.map_style);
+        setSourceLibrary(snapshot.source_library || []);
+        setAIActionRuns(snapshot.ai_action_runs || []);
+        setViewPort(snapshot.viewport || {});
+        setFlowName(flowName);
         setSavedSnapshot(
-            EMPTY_FLOW_SNAPSHOT,
-            stringifyFlowSnapshot(EMPTY_FLOW_SNAPSHOT),
-            'New Flow'
+            snapshot,
+            stringifyFlowSnapshot(snapshot),
+            flowName,
+            res.data.flow_type || 'manual'
         );
+        setFlowList?.((currentList = []) => [
+            {
+                flow_id: res.data.flow_id,
+                flow_name: flowName,
+                flow_json: stringifyFlowSnapshot(snapshot),
+                flow_type: res.data.flow_type || 'manual',
+                summary
+            },
+            ...currentList
+        ]);
         recordActivity({
             type: 'workspace_created',
             title: 'Created workspace',
             summary:
-                res.data.flow_type === 'automatic'
+                snapshot.nodes?.length
+                    ? `Started from ${flowName}.`
+                    : res.data.flow_type === 'automatic'
                     ? 'Started an auto-generated workspace.'
                     : 'Started a blank workspace.',
             metadata: {
-                flow_type: res.data.flow_type || 'manual'
+                flow_type: res.data.flow_type || 'manual',
+                demo_workspace: Boolean(snapshot.nodes?.length)
             }
         });
         setTrigger(!trigger);
@@ -156,6 +210,22 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
                         <strong>Blank workspace</strong>
                         <span>Start empty and add sources, nodes, and review details yourself.</span>
                     </button>
+                </div>
+                <div className="flow-demo-section">
+                    <p>Try an example</p>
+                    <div className="flow-demo-grid">
+                        {DEMO_WORKSPACE_TEMPLATES.map((template) => (
+                            <button
+                                key={template.id}
+                                className="flow-choice-card flow-demo-card"
+                                type="button"
+                                onClick={() => createDemoFlow(template)}
+                            >
+                                <strong>{template.name.replace('Example: ', '')}</strong>
+                                <span>{template.summary}</span>
+                            </button>
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>

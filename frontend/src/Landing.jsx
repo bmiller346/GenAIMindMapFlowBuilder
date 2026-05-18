@@ -7,6 +7,7 @@ import {
     FiGitBranch,
     FiGrid,
     FiLayers,
+    FiPrinter,
     FiSearch,
     FiShield,
     FiUploadCloud
@@ -77,8 +78,13 @@ const useCases = [
     'Implementation handoff package'
 ];
 
-export const Landing = () => (
-    <main className="landing-page">
+export const Landing = () => {
+    const handlePrint = () => {
+        window.print();
+    };
+
+    return (
+        <main className="landing-page">
         <section className="landing-hero" aria-labelledby="landing-title">
             <nav className="landing-nav" aria-label="TraceSpace">
                 <Link to="/" className="landing-product-mark" aria-label="Open workspace">
@@ -110,6 +116,14 @@ export const Landing = () => (
                             Open workspace
                             <FiArrowRight />
                         </Link>
+                        <button
+                            className="landing-secondary-cta landing-print-cta"
+                            type="button"
+                            onClick={handlePrint}
+                        >
+                            Save PDF
+                            <FiPrinter />
+                        </button>
                     </div>
                 </div>
 
@@ -192,4 +206,5 @@ export const Landing = () => (
             <Link to="/">Open workspace</Link>
         </footer>
     </main>
-);
+    );
+};
