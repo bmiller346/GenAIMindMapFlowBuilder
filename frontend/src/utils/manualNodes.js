@@ -618,7 +618,19 @@ export const createWorkspaceEdge = (source, target, options = {}) => ({
     source,
     target,
     type: options.type || getEdgeTypeForLayoutMode(options.layoutMode),
-    animated: Boolean(options.animated)
+    animated: Boolean(options.animated),
+    ...(options.relationship_type ? { relationship_type: options.relationship_type } : {}),
+    ...(options.label ? { label: options.label } : {}),
+    ...(options.branch_label ? { branch_label: options.branch_label } : {}),
+    ...(options.condition ? { condition: options.condition } : {}),
+    ...(options.metadata && typeof options.metadata === 'object' ? { metadata: cloneValue(options.metadata, {}) } : {}),
+    data: {
+        ...(options.data && typeof options.data === 'object' ? options.data : {}),
+        ...(options.relationship_type ? { relationship_type: options.relationship_type } : {}),
+        ...(options.label ? { label: options.label } : {}),
+        ...(options.branch_label ? { branch_label: options.branch_label } : {}),
+        ...(options.condition ? { condition: options.condition } : {})
+    }
 });
 
 export const normalizeWorkspaceEdges = (nodes = [], edges = []) => {

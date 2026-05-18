@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import modalStore from '../stores/modalStore';
+import AnchoredPopover from '../global-components/AnchoredPopover';
 import DataSourceSelect from '../global-components/DataSourceSelect';
 import PromptModal from '../modals/PromptModal';
 import WorkspaceBriefModal from '../modals/WorkspaceBriefModal';
@@ -536,6 +537,10 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const [followUpActionsOpen, setFollowUpActionsOpen] = useState(false);
     const [relationshipExportStatus, setRelationshipExportStatus] = useState('');
     const panelRef = useRef(null);
+    const viewMenuButtonRef = useRef(null);
+    const nodeViewMenuButtonRef = useRef(null);
+    const outputMenuButtonRef = useRef(null);
+    const filtersMenuButtonRef = useRef(null);
     const addActivity = useActivityStore((s) => s.addActivity);
     const recordActivity = useActivityStore((s) => s.recordActivity);
     const flowId = flowStore((s) => s.flow_id);
@@ -686,6 +691,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const activeNextActionDetail = NEXT_ACTION_DETAILS[outputModeValue];
     const isCanvasView = CANVAS_VIEW_IDS.has(activeView);
     const activeCanvasOption = CORE_VIEWS.find((view) => view.id === activeCanvasView);
+    const canReflowCanvas = activeCanvasView === 'mindmap' || activeCanvasView === 'knowledgeGraph';
     const showCanvasNudges = isNudgeCategoryEnabled(nudgePreferences, 'canvas');
     const showTaskNudges = isNudgeCategoryEnabled(nudgePreferences, 'tasks');
     useEffect(() => {
@@ -694,7 +700,10 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
         }
 
         const handlePointerDown = (event) => {
-            if (panelRef.current?.contains(event.target)) {
+            if (
+                panelRef.current?.contains(event.target) ||
+                event.target?.closest?.('[data-overlay-root="local-views-popover"]')
+            ) {
                 return;
             }
             setFiltersOpen(false);
@@ -1021,6 +1030,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
             >
                 <div className="local-canvas-command-main">
                     <button
+                        ref={viewMenuButtonRef}
                         type="button"
                         className={`local-canvas-view-button ${viewMenuOpen ? 'active' : ''}`}
                         onClick={() => {
@@ -1058,6 +1068,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         </div>
                         {nodes.length > 0 ? (
                             <button
+                                ref={nodeViewMenuButtonRef}
                                 type="button"
                                 className={`local-filter-menu-button local-canvas-menu-button ${nodeViewMenuOpen ? 'active' : ''}`}
                                 onClick={() => {
@@ -1075,6 +1086,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             </button>
                         ) : null}
                         <button
+                            ref={outputMenuButtonRef}
                             type="button"
                             className={`local-output-menu-button local-canvas-menu-button ${
                                 outputMenuOpen || outputModeValue ? 'active' : ''
@@ -1093,6 +1105,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             </span>
                         </button>
                         <button
+                            ref={filtersMenuButtonRef}
                             type="button"
                             className={`local-filter-menu-button local-canvas-menu-button ${filtersOpen ? 'active' : ''}`}
                             onClick={() => {
@@ -1112,8 +1125,14 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                     </div>
                 </div>
 
-                {viewMenuOpen ? (
-                    <div className="local-view-popover local-canvas-popover" aria-label="Canvas views">
+                <AnchoredPopover
+                    open={viewMenuOpen}
+                    anchorRef={viewMenuButtonRef}
+                    avoidRef={panelRef}
+                    className="local-view-popover local-canvas-popover local-canvas-popover-portal"
+                    ariaLabel="Canvas views"
+                    dataAttribute="local-views-popover"
+                >
                         {CORE_VIEWS.map((view) => (
                             <button
                                 key={view.id}
@@ -1130,11 +1149,16 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                 <strong>{view.label}</strong>
                             </button>
                         ))}
-                    </div>
-                ) : null}
+                </AnchoredPopover>
 
-                {nodeViewMenuOpen ? (
-                    <div className="local-node-view-popover local-canvas-popover" aria-label="Node display">
+                <AnchoredPopover
+                    open={nodeViewMenuOpen}
+                    anchorRef={nodeViewMenuButtonRef}
+                    avoidRef={panelRef}
+                    className="local-node-view-popover local-canvas-popover local-canvas-popover-portal"
+                    ariaLabel="Node display"
+                    dataAttribute="local-views-popover"
+                >
                         <div className="local-node-view-options">
                             {NODE_DENSITY_OPTIONS.map((option) => (
                                 <button
@@ -1150,18 +1174,32 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         <button
                             type="button"
                             className="local-node-view-reflow"
+                            disabled={!canReflowCanvas}
+                            title={
+                                canReflowCanvas
+                                    ? 'Reflow the current map layout'
+                                    : 'Map reflow is available in mind map and knowledge graph views'
+                            }
                             onClick={() => {
+                                if (!canReflowCanvas) {
+                                    return;
+                                }
                                 window.dispatchEvent(new CustomEvent('docmap:reflow-canvas'));
                                 setNodeViewMenuOpen(false);
                             }}
                         >
                             Reflow map
                         </button>
-                    </div>
-                ) : null}
+                </AnchoredPopover>
 
-                {filtersOpen ? (
-                    <div className="local-filter-popover local-canvas-popover" aria-label="Persisted graph filters">
+                <AnchoredPopover
+                    open={filtersOpen}
+                    anchorRef={filtersMenuButtonRef}
+                    avoidRef={panelRef}
+                    className="local-filter-popover local-canvas-popover local-canvas-popover-portal"
+                    ariaLabel="Persisted graph filters"
+                    dataAttribute="local-views-popover"
+                >
                         <div className="local-filter-popover-header">
                             <span>Node filters</span>
                             <button type="button" onClick={() => setFiltersOpen(false)}>
@@ -1185,11 +1223,16 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                 </button>
                             ))}
                         </div>
-                    </div>
-                ) : null}
+                </AnchoredPopover>
 
-                {outputMenuOpen ? (
-                    <div className="local-output-popover local-canvas-popover" aria-label="Workspace actions">
+                <AnchoredPopover
+                    open={outputMenuOpen}
+                    anchorRef={outputMenuButtonRef}
+                    avoidRef={panelRef}
+                    className="local-output-popover local-canvas-popover local-canvas-popover-portal"
+                    ariaLabel="Workspace actions"
+                    dataAttribute="local-views-popover"
+                >
                         <div className="local-output-popover-header">
                             <span>Choose what to do next</span>
                             <button type="button" onClick={() => setOutputMenuOpen(false)}>
@@ -1218,8 +1261,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                 </div>
                             ))}
                         </div>
-                    </div>
-                ) : null}
+                </AnchoredPopover>
 
                 {nodes.length > 0 ? (
                     <section className="local-follow-up-panel local-follow-up-panel-compact" aria-label="Follow-up actions">
@@ -1344,6 +1386,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         <div className="local-view-section local-view-section-output">
                             <span>{outputModeValue ? 'Next action' : 'Improve workspace'}</span>
                             <button
+                                ref={outputMenuButtonRef}
                                 type="button"
                                 className={`local-output-menu-button ${outputMenuOpen || outputModeValue ? 'active' : ''}`}
                                 onClick={() => setOutputMenuOpen((open) => !open)}
@@ -1358,6 +1401,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         <div className="local-view-section local-view-section-filters">
                             <span>Filters</span>
                             <button
+                                ref={filtersMenuButtonRef}
                                 type="button"
                                 className={`local-filter-menu-button ${filtersOpen ? 'active' : ''}`}
                                 onClick={() => setFiltersOpen((open) => !open)}
@@ -1400,8 +1444,13 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                     ) : null}
                 </div>
             </div>
-            {filtersOpen ? (
-                <div className="local-filter-popover" aria-label="Persisted graph filters">
+            <AnchoredPopover
+                open={filtersOpen}
+                anchorRef={filtersMenuButtonRef}
+                className="local-filter-popover local-canvas-popover-portal"
+                ariaLabel="Persisted graph filters"
+                dataAttribute="local-views-popover"
+            >
                     <div className="local-filter-popover-header">
                         <span>Node filters</span>
                         <button type="button" onClick={() => setFiltersOpen(false)}>
@@ -1425,11 +1474,15 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             </button>
                         ))}
                     </div>
-                </div>
-            ) : null}
+            </AnchoredPopover>
 
-            {outputMenuOpen ? (
-                <div className="local-output-popover" aria-label="Workspace actions">
+            <AnchoredPopover
+                open={outputMenuOpen}
+                anchorRef={outputMenuButtonRef}
+                className="local-output-popover local-canvas-popover-portal"
+                ariaLabel="Workspace actions"
+                dataAttribute="local-views-popover"
+            >
                     <div className="local-output-popover-header">
                         <span>Choose what to do next</span>
                         <button type="button" onClick={() => setOutputMenuOpen(false)}>
@@ -1458,8 +1511,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             </div>
                         ))}
                     </div>
-                </div>
-            ) : null}
+            </AnchoredPopover>
 
             {!filtersOpen ? (
                 <div className="local-active-filter-strip" aria-label="Current scope and filters">

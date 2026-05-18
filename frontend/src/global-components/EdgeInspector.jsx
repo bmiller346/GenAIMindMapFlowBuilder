@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
@@ -110,6 +110,38 @@ const sourceSignalForEdge = (edge = {}) =>
 
 const reviewStateForEdge = (edge = {}) =>
     firstText(edge.review_state, edge.data?.review_state, edge.metadata?.review_state);
+
+const branchLabelForEdge = (edge = {}) =>
+    firstText(
+        edge.branch_label,
+        edge.condition,
+        edge.label,
+        edge.data?.branch_label,
+        edge.data?.condition,
+        edge.data?.label,
+        edge.metadata?.branch_label,
+        edge.metadata?.condition
+    );
+
+const conditionForEdge = (edge = {}) =>
+    firstText(edge.condition, edge.data?.condition, edge.metadata?.condition);
+
+const isExceptionEdge = (edge = {}) =>
+    edge.exception_path === true ||
+    edge.data?.exception_path === true ||
+    edge.metadata?.exception_path === true ||
+    relationshipForEdge(edge) === 'exception';
+
+const FLOW_RELATIONSHIP_OPTIONS = [
+    'contains',
+    'next',
+    'sequence',
+    'decision_path',
+    'exception',
+    'handoff',
+    'depends_on',
+    'supports'
+];
 
 const supportStatusForEdge = ({ sourceRefs = [], sourceSignal = '', isHierarchy = false }) => {
     if (isHierarchy) {
@@ -224,6 +256,24 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
         () => edges.find((edge) => edge.id === selectedEdgeId),
         [edges, selectedEdgeId]
     );
+    const [draft, setDraft] = useState({
+        relationship_type: '',
+        branch_label: '',
+        condition: '',
+        exception_path: false
+    });
+
+    useEffect(() => {
+        if (!selectedEdge) {
+            return;
+        }
+        setDraft({
+            relationship_type: relationshipForEdge(selectedEdge),
+            branch_label: branchLabelForEdge(selectedEdge),
+            condition: conditionForEdge(selectedEdge),
+            exception_path: isExceptionEdge(selectedEdge)
+        });
+    }, [selectedEdge]);
 
     if (!selectedEdge) {
         return null;
@@ -243,6 +293,68 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
     const supportStatus = supportStatusForEdge({ sourceRefs, sourceSignal, isHierarchy });
     const reviewAction = reviewActionForFamily(relationshipSummary.family);
     const canCreateReviewItem = !isHierarchy && sourceNode && targetNode;
+
+    const updateDraft = (field, value) => {
+        setDraft((current) => ({
+            ...current,
+            [field]: value
+        }));
+    };
+
+    const applyEdgeMetadata = () => {
+        const relationshipType = draft.relationship_type || relationship;
+        const branchLabel = draft.branch_label.trim();
+        const condition = draft.condition.trim();
+        setEdges(
+            edges.map((edge) =>
+                edge.id === selectedEdge.id
+                    ? {
+                          ...edge,
+                          relationship_type: relationshipType,
+                          label: branchLabel || edge.label,
+                          branch_label: branchLabel,
+                          condition,
+                          exception_path: draft.exception_path,
+                          data: {
+                              ...(edge.data || {}),
+                              relationship_type: relationshipType,
+                              label: branchLabel || edge.data?.label,
+                              branch_label: branchLabel,
+                              condition,
+                              exception_path: draft.exception_path
+                          },
+                          metadata: {
+                              ...(edge.metadata || {}),
+                              relationship_type: relationshipType,
+                              branch_label: branchLabel,
+                              condition,
+                              exception_path: draft.exception_path
+                          }
+                      }
+                    : edge
+            )
+        );
+        if (flowId) {
+            setSaveStatus('dirty');
+            window.setTimeout(() => {
+                window.dispatchEvent(new Event('docmap:save-workspace-now'));
+            }, 0);
+        }
+        recordActivity({
+            type: 'flow_edge_metadata_applied',
+            title: 'Flow edge metadata applied',
+            summary: `${humanize(relationshipType)} edge metadata was updated.`,
+            node_ids: [sourceId, targetId].filter(Boolean),
+            metadata: {
+                edge_id: selectedEdge.id,
+                relationship_type: relationshipType,
+                branch_label: branchLabel,
+                condition,
+                exception_path: draft.exception_path
+            },
+            status: 'completed'
+        });
+    };
 
     const markReviewed = () => {
         setEdges(
@@ -371,6 +483,50 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
                         value={formatConfidence(confidenceForEdge(selectedEdge))}
                     />
                     <Detail label="Review state" value={reviewState} />
+                </div>
+
+                <div className="node-inspector-section edge-inspector-edit">
+                    <strong>Flow connector</strong>
+                    <label>
+                        Relationship
+                        <select
+                            value={draft.relationship_type}
+                            onChange={(event) => updateDraft('relationship_type', event.target.value)}
+                        >
+                            {FLOW_RELATIONSHIP_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                    {humanize(option)}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label>
+                        Branch label
+                        <input
+                            value={draft.branch_label}
+                            onChange={(event) => updateDraft('branch_label', event.target.value)}
+                            placeholder="Yes, No, Approved, Exception"
+                        />
+                    </label>
+                    <label>
+                        Condition
+                        <input
+                            value={draft.condition}
+                            onChange={(event) => updateDraft('condition', event.target.value)}
+                            placeholder="What makes this path true?"
+                        />
+                    </label>
+                    <label className="edge-inspector-checkbox">
+                        <input
+                            type="checkbox"
+                            checked={draft.exception_path}
+                            onChange={(event) => updateDraft('exception_path', event.target.checked)}
+                        />
+                        Exception path
+                    </label>
+                    <button type="button" onClick={applyEdgeMetadata}>
+                        Apply connector
+                    </button>
                 </div>
 
                 {rationale || sourceSignal ? (

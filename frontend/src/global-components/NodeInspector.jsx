@@ -32,8 +32,11 @@ const NODE_TYPES = [
     'standard',
     'workflow',
     'procedure',
+    'process',
+    'step',
     'finding',
     'decision',
+    'approval',
     'risk',
     'requirement',
     'task',
@@ -41,6 +44,11 @@ const NODE_TYPES = [
     'definition',
     'question',
     'dependency',
+    'handoff',
+    'milestone',
+    'phase',
+    'checkpoint',
+    'exception',
     'needs_review'
 ];
 

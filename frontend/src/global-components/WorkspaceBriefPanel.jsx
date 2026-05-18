@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import AnchoredPopover from './AnchoredPopover';
 import modalStore from '../stores/modalStore';
 import useStore from '../stores/store';
 import WorkspaceBriefModal from '../modals/WorkspaceBriefModal';
@@ -53,6 +54,7 @@ const hasBriefContent = (brief = {}) =>
 
 const WorkspaceBriefPanel = ({ embedded = false }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const toggleRef = useRef(null);
     const pushNode = modalStore((s) => s.pushNode);
     const workspaceBrief = useStore((s) => s.workspaceBrief) || {};
     const isBriefSet = hasBriefContent(workspaceBrief);
@@ -115,6 +117,7 @@ const WorkspaceBriefPanel = ({ embedded = false }) => {
     return (
         <section className="workspace-brief-panel">
             <button
+                ref={toggleRef}
                 type="button"
                 className="workspace-brief-panel-toggle"
                 aria-expanded={isExpanded}
@@ -127,11 +130,16 @@ const WorkspaceBriefPanel = ({ embedded = false }) => {
                         : 'Not set'}
                 </strong>
             </button>
-            {isExpanded ? (
-                <div className="workspace-brief-panel-popover">
+            <AnchoredPopover
+                open={isExpanded}
+                anchorRef={toggleRef}
+                className="workspace-brief-panel-popover"
+                ariaLabel="Workspace setup summary"
+                placement="top-start"
+                dataAttribute="workspace-brief-popover"
+            >
                     {panelBody}
-                </div>
-            ) : null}
+            </AnchoredPopover>
         </section>
     );
 };

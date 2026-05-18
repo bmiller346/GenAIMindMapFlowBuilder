@@ -77,6 +77,24 @@ test('createWorkspaceNode preserves artifact payloads for structured data childr
     assert.deepEqual(node.data.metadata, { domain: 'structured_data', query_id: 'query-1' });
 });
 
+test('createWorkspaceEdge preserves flowchart relationship metadata', () => {
+    const edge = createWorkspaceEdge('decision', 'approved', {
+        relationship_type: 'decision_path',
+        label: 'Yes',
+        branch_label: 'Approved',
+        condition: 'Preview opened',
+        metadata: { branch_kind: 'yes' }
+    });
+
+    assert.equal(edge.relationship_type, 'decision_path');
+    assert.equal(edge.label, 'Yes');
+    assert.equal(edge.branch_label, 'Approved');
+    assert.equal(edge.condition, 'Preview opened');
+    assert.equal(edge.data.relationship_type, 'decision_path');
+    assert.equal(edge.data.branch_label, 'Approved');
+    assert.deepEqual(edge.metadata, { branch_kind: 'yes' });
+});
+
 test('updateWorkspaceNode keeps legacy summary compatibility in sync', () => {
     const node = createWorkspaceNode({ id: 'node-1', title: 'Old title' });
     const updated = updateWorkspaceNode(node, {

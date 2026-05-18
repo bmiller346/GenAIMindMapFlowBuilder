@@ -1,6 +1,6 @@
 import { Handle } from '@xyflow/react';
 import axios from 'axios';
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
     FiCalendar,
     FiBarChart2,
@@ -20,6 +20,7 @@ import {
 } from 'react-icons/fi';
 import SQLSvg from '../assets/sql.svg';
 import STARSvg from '../assets/star.svg';
+import AnchoredPopover from '../global-components/AnchoredPopover';
 import NodeMetadataBadges from './NodeMetadataBadges';
 import ManualTableEditor from '../global-components/ManualTableEditor';
 import PromptModal from '../modals/PromptModal';
@@ -364,6 +365,8 @@ const sessionFromResponse = (responseData, fallbackSession) =>
             : fallbackSession;
 
 const ResponseNode = ({ id, data }) => {
+    const titleInputRef = useRef(null);
+    const menuButtonRef = useRef(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isSlashOpen, setIsSlashOpen] = useState(false);
     const [slashQuery, setSlashQuery] = useState('');
@@ -1877,6 +1880,27 @@ const ResponseNode = ({ id, data }) => {
         }
     };
 
+    useEffect(() => {
+        if (!isMenuOpen && !isSlashOpen) {
+            return undefined;
+        }
+
+        const handlePointerDown = (event) => {
+            if (
+                titleInputRef.current?.contains(event.target) ||
+                menuButtonRef.current?.contains(event.target) ||
+                event.target?.closest?.('[data-overlay-root="node-popover"]')
+            ) {
+                return;
+            }
+            setIsMenuOpen(false);
+            setIsSlashOpen(false);
+        };
+
+        document.addEventListener('pointerdown', handlePointerDown);
+        return () => document.removeEventListener('pointerdown', handlePointerDown);
+    }, [isMenuOpen, isSlashOpen]);
+
     const summaryBlock = () => {
         return (
             <div className="summary-block">
@@ -1940,6 +1964,7 @@ const ResponseNode = ({ id, data }) => {
             <div className="node-response-main">
                 <div className="node-response-row">
                     <textarea
+                        ref={titleInputRef}
                         className="node-title-input nodrag"
                         value={titleValue}
                         placeholder="Untitled node"
@@ -1954,6 +1979,7 @@ const ResponseNode = ({ id, data }) => {
                         }}
                     />
                     <button
+                        ref={menuButtonRef}
                         type="button"
                         className="node-menu-trigger nodrag"
                         aria-haspopup="menu"
@@ -2105,8 +2131,13 @@ const ResponseNode = ({ id, data }) => {
                         ))}
                     </div>
                 ) : null}
-                {isSlashOpen ? (
-                    <div className="node-slash-menu nodrag">
+                <AnchoredPopover
+                    open={isSlashOpen}
+                    anchorRef={titleInputRef}
+                    className="node-slash-menu nodrag"
+                    ariaLabel="Node slash commands"
+                    dataAttribute="node-popover"
+                >
                         {filteredSlashCommands.length ? (
                             Array.from(groupedSlashCommands.entries()).map(
                                 ([group, commands]) => (
@@ -2151,10 +2182,16 @@ const ResponseNode = ({ id, data }) => {
                         ) : (
                             <div className="node-slash-empty">No matching commands</div>
                         )}
-                    </div>
-                ) : null}
-                {isMenuOpen ? (
-                    <div className="node-action-menu nodrag" role="menu">
+                </AnchoredPopover>
+                <AnchoredPopover
+                    open={isMenuOpen}
+                    anchorRef={menuButtonRef}
+                    className="node-action-menu nodrag"
+                    ariaLabel="Node actions"
+                    role="menu"
+                    placement="bottom-end"
+                    dataAttribute="node-popover"
+                >
                         <div className="node-action-group">
                             <p>Insert</p>
                             <button type="button" onClick={() => addSibling('above')}>
@@ -2258,8 +2295,7 @@ const ResponseNode = ({ id, data }) => {
                                 Delete
                             </button>
                         </div>
-                    </div>
-                ) : null}
+                </AnchoredPopover>
             </div>
             {(directChildIds.length > 0 || dueDate || assignee) && (
                 <div className="node-quick-meta">

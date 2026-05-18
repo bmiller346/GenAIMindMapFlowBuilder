@@ -119,6 +119,19 @@ const menuPointInViewport = ({ x, y }) => {
     };
 };
 
+const currentAppThemeClass = () => {
+    if (typeof document === 'undefined') {
+        return '';
+    }
+    if (document.querySelector('.app.light')) {
+        return 'light';
+    }
+    if (document.querySelector('.app.dark')) {
+        return 'dark';
+    }
+    return '';
+};
+
 const FloatingDock = ({
     id,
     ariaLabel,
@@ -310,7 +323,7 @@ const FloatingDock = ({
             ? createPortal(
                   <div
                       ref={menuRef}
-                      className="floating-dock-menu floating-dock-menu--portal"
+                      className={`floating-dock-menu floating-dock-menu--portal ${currentAppThemeClass()}`.trim()}
                       role="menu"
                       style={{
                           left: `${menuPoint.x}px`,
