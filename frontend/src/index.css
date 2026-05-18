@@ -2129,6 +2129,11 @@ h5 {
   width: 28rem;
 }
 
+.workspace-start-modal {
+  max-height: min(46rem, calc(100vh - 2rem));
+  overflow: hidden;
+}
+
 .title {
   display: flex;
   justify-content: space-between;
@@ -2221,7 +2226,9 @@ input:focus {
 .flow-demo-section {
   display: grid;
   gap: 0.65rem;
+  min-height: 0;
   margin-top: 1rem;
+  overflow: hidden;
 }
 
 .flow-demo-section > p {
@@ -2236,6 +2243,13 @@ input:focus {
 .flow-demo-grid {
   display: grid;
   gap: 0.6rem;
+}
+
+.workspace-start-modal .flow-demo-grid {
+  max-height: clamp(10rem, calc(100vh - 27rem), 24rem);
+  overflow-y: auto;
+  padding-right: 0.2rem;
+  scrollbar-width: thin;
 }
 
 .flow-demo-card {

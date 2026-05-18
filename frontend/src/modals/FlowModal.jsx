@@ -184,7 +184,7 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal, setFlowList }) => {
     };
     return (
         <div className='container'>
-            <div className="modal-container">
+            <div className="modal-container workspace-start-modal">
                 <div className="title">
                     <div>
                         <p>Start a workspace</p>
