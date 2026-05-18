@@ -623,13 +623,23 @@ export const createWorkspaceEdge = (source, target, options = {}) => ({
     ...(options.label ? { label: options.label } : {}),
     ...(options.branch_label ? { branch_label: options.branch_label } : {}),
     ...(options.condition ? { condition: options.condition } : {}),
+    ...(options.confidence !== undefined && options.confidence !== null ? { confidence: options.confidence } : {}),
+    ...(options.rationale ? { rationale: options.rationale } : {}),
+    ...(options.source_signal ? { source_signal: options.source_signal } : {}),
+    ...(options.review_state ? { review_state: options.review_state } : {}),
+    ...(Array.isArray(options.source_refs) ? { source_refs: cloneArray(options.source_refs) } : {}),
     ...(options.metadata && typeof options.metadata === 'object' ? { metadata: cloneValue(options.metadata, {}) } : {}),
     data: {
         ...(options.data && typeof options.data === 'object' ? options.data : {}),
         ...(options.relationship_type ? { relationship_type: options.relationship_type } : {}),
         ...(options.label ? { label: options.label } : {}),
         ...(options.branch_label ? { branch_label: options.branch_label } : {}),
-        ...(options.condition ? { condition: options.condition } : {})
+        ...(options.condition ? { condition: options.condition } : {}),
+        ...(options.confidence !== undefined && options.confidence !== null ? { confidence: options.confidence } : {}),
+        ...(options.rationale ? { rationale: options.rationale } : {}),
+        ...(options.source_signal ? { source_signal: options.source_signal } : {}),
+        ...(options.review_state ? { review_state: options.review_state } : {}),
+        ...(Array.isArray(options.source_refs) ? { source_refs: cloneArray(options.source_refs) } : {})
     }
 });
 

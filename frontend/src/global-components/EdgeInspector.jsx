@@ -132,15 +132,33 @@ const isExceptionEdge = (edge = {}) =>
     edge.metadata?.exception_path === true ||
     relationshipForEdge(edge) === 'exception';
 
-const FLOW_RELATIONSHIP_OPTIONS = [
+const RELATIONSHIP_OPTIONS = [
     'contains',
+    'related_to',
+    'depends_on',
+    'blocks',
+    'supports',
+    'conflicts_with',
+    'duplicates',
+    'overlaps',
+    'owned_by',
+    'responsible_for',
+    'measured_by',
+    'requires_approval',
+    'cites',
+    'derived_from',
     'next',
     'sequence',
     'decision_path',
     'exception',
-    'handoff',
-    'depends_on',
-    'supports'
+    'handoff'
+];
+
+const REVIEW_STATE_OPTIONS = [
+    'needs_review',
+    'reviewed',
+    'approved',
+    'rejected'
 ];
 
 const supportStatusForEdge = ({ sourceRefs = [], sourceSignal = '', isHierarchy = false }) => {
@@ -260,7 +278,11 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
         relationship_type: '',
         branch_label: '',
         condition: '',
-        exception_path: false
+        exception_path: false,
+        confidence: '',
+        rationale: '',
+        source_signal: '',
+        review_state: ''
     });
 
     useEffect(() => {
@@ -271,7 +293,11 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
             relationship_type: relationshipForEdge(selectedEdge),
             branch_label: branchLabelForEdge(selectedEdge),
             condition: conditionForEdge(selectedEdge),
-            exception_path: isExceptionEdge(selectedEdge)
+            exception_path: isExceptionEdge(selectedEdge),
+            confidence: confidenceForEdge(selectedEdge) ?? '',
+            rationale: rationaleForEdge(selectedEdge),
+            source_signal: sourceSignalForEdge(selectedEdge),
+            review_state: reviewStateForEdge(selectedEdge) || 'needs_review'
         });
     }, [selectedEdge]);
 
@@ -301,10 +327,23 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
         }));
     };
 
+    const requestImmediateSave = () => {
+        if (flowId) {
+            setSaveStatus('dirty');
+            window.setTimeout(() => {
+                window.dispatchEvent(new Event('docmap:save-workspace-now'));
+            }, 0);
+        }
+    };
+
     const applyEdgeMetadata = () => {
         const relationshipType = draft.relationship_type || relationship;
         const branchLabel = draft.branch_label.trim();
         const condition = draft.condition.trim();
+        const confidence = String(draft.confidence ?? '').trim();
+        const rationaleDraft = draft.rationale.trim();
+        const sourceSignalDraft = draft.source_signal.trim();
+        const reviewState = draft.review_state || reviewStateForEdge(selectedEdge) || 'needs_review';
         setEdges(
             edges.map((edge) =>
                 edge.id === selectedEdge.id
@@ -314,6 +353,10 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
                           label: branchLabel || edge.label,
                           branch_label: branchLabel,
                           condition,
+                          confidence,
+                          rationale: rationaleDraft,
+                          source_signal: sourceSignalDraft,
+                          review_state: reviewState,
                           exception_path: draft.exception_path,
                           data: {
                               ...(edge.data || {}),
@@ -321,6 +364,10 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
                               label: branchLabel || edge.data?.label,
                               branch_label: branchLabel,
                               condition,
+                              confidence,
+                              rationale: rationaleDraft,
+                              source_signal: sourceSignalDraft,
+                              review_state: reviewState,
                               exception_path: draft.exception_path
                           },
                           metadata: {
@@ -328,18 +375,17 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
                               relationship_type: relationshipType,
                               branch_label: branchLabel,
                               condition,
+                              confidence,
+                              rationale: rationaleDraft,
+                              source_signal: sourceSignalDraft,
+                              review_state: reviewState,
                               exception_path: draft.exception_path
                           }
                       }
                     : edge
             )
         );
-        if (flowId) {
-            setSaveStatus('dirty');
-            window.setTimeout(() => {
-                window.dispatchEvent(new Event('docmap:save-workspace-now'));
-            }, 0);
-        }
+        requestImmediateSave();
         recordActivity({
             type: 'flow_edge_metadata_applied',
             title: 'Flow edge metadata applied',
@@ -350,6 +396,10 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
                 relationship_type: relationshipType,
                 branch_label: branchLabel,
                 condition,
+                confidence,
+                rationale: rationaleDraft,
+                source_signal: sourceSignalDraft,
+                review_state: reviewState,
                 exception_path: draft.exception_path
             },
             status: 'completed'
@@ -376,9 +426,7 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
                     : edge
             )
         );
-        if (flowId) {
-            setSaveStatus('dirty');
-        }
+        requestImmediateSave();
         recordActivity({
             type: 'relationship_reviewed',
             title: 'Relationship marked reviewed',
@@ -433,9 +481,7 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
         };
         setNodes([...nodes, reviewNode]);
         setEdges([...edges, nextEdge]);
-        if (flowId) {
-            setSaveStatus('dirty');
-        }
+        requestImmediateSave();
         recordActivity({
             type: 'relationship_review_item_created',
             title: reviewAction.label,
@@ -486,19 +532,56 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
                 </div>
 
                 <div className="node-inspector-section edge-inspector-edit">
-                    <strong>Flow connector</strong>
+                    <strong>Relationship metadata</strong>
                     <label>
                         Relationship
                         <select
                             value={draft.relationship_type}
                             onChange={(event) => updateDraft('relationship_type', event.target.value)}
                         >
-                            {FLOW_RELATIONSHIP_OPTIONS.map((option) => (
+                            {RELATIONSHIP_OPTIONS.map((option) => (
                                 <option key={option} value={option}>
                                     {humanize(option)}
                                 </option>
                             ))}
                         </select>
+                    </label>
+                    <label>
+                        Confidence
+                        <input
+                            value={draft.confidence}
+                            onChange={(event) => updateDraft('confidence', event.target.value)}
+                            placeholder="0.85, 85%, high"
+                        />
+                    </label>
+                    <label>
+                        Review state
+                        <select
+                            value={draft.review_state}
+                            onChange={(event) => updateDraft('review_state', event.target.value)}
+                        >
+                            {REVIEW_STATE_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                    {humanize(option)}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label>
+                        Rationale
+                        <textarea
+                            value={draft.rationale}
+                            onChange={(event) => updateDraft('rationale', event.target.value)}
+                            placeholder="Why should these nodes be connected?"
+                        />
+                    </label>
+                    <label>
+                        Source signal
+                        <input
+                            value={draft.source_signal}
+                            onChange={(event) => updateDraft('source_signal', event.target.value)}
+                            placeholder="Manual review, shared source, AI inferred"
+                        />
                     </label>
                     <label>
                         Branch label
@@ -525,7 +608,7 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
                         Exception path
                     </label>
                     <button type="button" onClick={applyEdgeMetadata}>
-                        Apply connector
+                        Apply relationship
                     </button>
                 </div>
 

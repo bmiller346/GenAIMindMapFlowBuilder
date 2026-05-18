@@ -343,6 +343,76 @@ const branchTableSummary = (rows = []) => {
     };
 };
 
+const tableReadiness = (summary = {}) => {
+    const issues = [];
+    if (!summary.itemCount) {
+        issues.push('No rows');
+    }
+    if (summary.unsourcedCount > 0) {
+        issues.push(`${summary.unsourcedCount} unsourced`);
+    }
+    if (summary.unassignedCount > 0) {
+        issues.push(`${summary.unassignedCount} unassigned`);
+    }
+    if (summary.averageConfidence === null) {
+        issues.push('Missing confidence');
+    } else if (summary.averageConfidence < 0.6) {
+        issues.push('Low confidence');
+    }
+    if (summary.averageReadiness !== null && summary.averageReadiness < 70) {
+        issues.push('Low handoff readiness');
+    }
+    return {
+        ready: issues.length === 0,
+        issues
+    };
+};
+
+const executiveReadiness = (output = {}) => {
+    const metadata = output.metadata || {};
+    const issues = [];
+    if (!metadata.source_backed_node_count) {
+        issues.push('No sourced appendix');
+    }
+    if (!metadata.task_count) {
+        issues.push('No recommended actions');
+    }
+    if (!output.risks?.length) {
+        issues.push('No risk section');
+    }
+    if (!output.required_decisions?.length) {
+        issues.push('No decision section');
+    }
+    if ((metadata.needs_review_count || 0) > 0) {
+        issues.push(`${metadata.needs_review_count} review items`);
+    }
+    return {
+        ready: issues.length === 0,
+        issues
+    };
+};
+
+const ReadinessCallout = ({ title, detail, issues = [], actionLabel, onAction }) => (
+    <section className="canvas-structured-readiness-callout" aria-label={title}>
+        <div>
+            <strong>{title}</strong>
+            <span>{detail}</span>
+        </div>
+        {issues.length ? (
+            <div className="canvas-structured-readiness-issues">
+                {issues.slice(0, 4).map((issue) => (
+                    <span key={issue}>{issue}</span>
+                ))}
+            </div>
+        ) : null}
+        {onAction ? (
+            <button type="button" onClick={onAction}>
+                {actionLabel}
+            </button>
+        ) : null}
+    </section>
+);
+
 const childDetailRows = (children = []) =>
     children.map((child) => ({
         title: child.title || child.id,
@@ -557,7 +627,9 @@ const CanvasStructuredView = ({
     onBackToMap,
     onStartManual,
     onGenerateTaskCandidates,
-    onCreateStructuredTable
+    onPrepareKanbanBoard,
+    onCreateStructuredTable,
+    onCreateExecutiveOutput
 }) => {
     const projection = useMemo(
         () =>
@@ -582,11 +654,19 @@ const CanvasStructuredView = ({
         () => branchTableSummary(allWorkBreakdownRows),
         [allWorkBreakdownRows]
     );
+    const tableReadyState = useMemo(
+        () => tableReadiness(workBreakdownSummary),
+        [workBreakdownSummary]
+    );
     const kanbanColumns = useMemo(() => getKanbanColumns(projection), [projection]);
     const flowchart = useMemo(() => getFlowchartProjection(projection), [projection]);
     const executiveOutput = useMemo(
         () => getExecutiveOutputProjection(projection, { title: 'Executive Output' }),
         [projection]
+    );
+    const executiveReadyState = useMemo(
+        () => executiveReadiness(executiveOutput),
+        [executiveOutput]
     );
     const potentialTaskRows = useMemo(
         () => getTaskCandidateRows(projection).slice(0, 24),
@@ -1889,6 +1969,24 @@ const CanvasStructuredView = ({
                             Create structured table
                         </button>
                     ) : null}
+                    {view === 'executive' ? (
+                        <button
+                            type="button"
+                            className="canvas-structured-header-action"
+                            onClick={onCreateExecutiveOutput}
+                        >
+                            Make executive-ready
+                        </button>
+                    ) : null}
+                    {view === 'kanban' ? (
+                        <button
+                            type="button"
+                            className="canvas-structured-header-action"
+                            onClick={onPrepareKanbanBoard}
+                        >
+                            Prepare board
+                        </button>
+                    ) : null}
                     {onBackToMap ? (
                         <button
                             type="button"
@@ -1933,6 +2031,15 @@ const CanvasStructuredView = ({
 
             {view === 'executive' ? (
                 <div className="canvas-structured-executive">
+                    {!executiveReadyState.ready ? (
+                        <ReadinessCallout
+                            title="Executive reconciliation needed"
+                            detail="This view is projected from the graph, but it needs stronger executive fields before it should be treated as final."
+                            issues={executiveReadyState.issues}
+                            actionLabel="Make executive-ready"
+                            onAction={onCreateExecutiveOutput}
+                        />
+                    ) : null}
                     <section className="canvas-structured-executive-summary">
                         <strong>Summary</strong>
                         <p>{executiveOutput.summary}</p>
@@ -2108,9 +2215,9 @@ const CanvasStructuredView = ({
                 ) : (
                     <div className="canvas-structured-empty inline">
                         <strong>No tasks on the board yet</strong>
-                        <span>Confirm task candidates or generate tasks, then move them across columns.</span>
-                        <button type="button" onClick={onGenerateTaskCandidates}>
-                            Generate task candidates
+                        <span>Kanban needs task metadata first. Ask AI to supplement this workspace with board-ready cards, then review and accept them.</span>
+                        <button type="button" onClick={onPrepareKanbanBoard || onGenerateTaskCandidates}>
+                            Prepare Kanban board
                         </button>
                     </div>
                 )
@@ -2119,6 +2226,15 @@ const CanvasStructuredView = ({
             {view === 'table' ? (
                 projection.nodes.length > 0 ? (
                     <div className="canvas-structured-table-surface">
+                        {!tableReadyState.ready ? (
+                            <ReadinessCallout
+                                title="Table reconciliation needed"
+                                detail="This table is projected from graph nodes. Ask AI to add stable columns, evidence, confidence, and handoff fields when the shape is thin."
+                                issues={tableReadyState.issues}
+                                actionLabel="Create structured table"
+                                onAction={onCreateStructuredTable}
+                            />
+                        ) : null}
                         <section className="canvas-structured-branch-summary">
                             <div>
                                 <span>{selectedBranchId ? 'Selected branch' : 'Workspace'}</span>

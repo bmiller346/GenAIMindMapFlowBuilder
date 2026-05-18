@@ -956,6 +956,12 @@ test('empty workspace Ask AI flowchart request advances past source selection', 
     await nodeDisplayMenu.click();
     await expect(page.getByRole('button', { name: 'Reflow map' })).toBeDisabled();
     await nodeDisplayMenu.click();
+    await page.getByRole('button', { name: /Actions/ }).click();
+    await expect(page.getByRole('button', { name: /Prepare Kanban/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Create knowledge graph/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Create table/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Create executive view/ })).toBeVisible();
+    await page.getByRole('button', { name: /Actions/ }).click();
 
     await page.locator('.canvas-flowchart-summary').getByRole('button', { name: 'Add decision' }).click();
     await waitForSavedSnapshot(savedRequests, (snapshot) =>
@@ -977,7 +983,7 @@ test('empty workspace Ask AI flowchart request advances past source selection', 
     await expect(edgeInspector).toBeVisible();
     await edgeInspector.getByLabel('Branch label').fill('Rejected');
     await edgeInspector.getByLabel('Condition').fill('Preview did not open');
-    await edgeInspector.getByRole('button', { name: 'Apply connector' }).click();
+    await edgeInspector.getByRole('button', { name: 'Apply relationship' }).click();
     await waitForSavedSnapshot(savedRequests, (snapshot) =>
         snapshot.edges.some(
             (edge) =>

@@ -95,6 +95,34 @@ test('createWorkspaceEdge preserves flowchart relationship metadata', () => {
     assert.deepEqual(edge.metadata, { branch_kind: 'yes' });
 });
 
+test('createWorkspaceEdge preserves knowledge graph relationship metadata', () => {
+    const sourceRefs = [{ document_id: 'doc-1', page: 3, quote_snippet: 'Supports the dependency.' }];
+    const edge = createWorkspaceEdge('source-node', 'target-node', {
+        relationship_type: 'depends_on',
+        label: 'Depends on',
+        confidence: '0.82',
+        rationale: 'Target work cannot start until the source node is complete.',
+        source_signal: 'Manual review',
+        review_state: 'needs_review',
+        source_refs: sourceRefs,
+        metadata: { authored_from_view: 'knowledgeGraph' }
+    });
+
+    assert.equal(edge.relationship_type, 'depends_on');
+    assert.equal(edge.confidence, '0.82');
+    assert.equal(edge.rationale, 'Target work cannot start until the source node is complete.');
+    assert.equal(edge.source_signal, 'Manual review');
+    assert.equal(edge.review_state, 'needs_review');
+    assert.deepEqual(edge.source_refs, sourceRefs);
+    assert.equal(edge.data.relationship_type, 'depends_on');
+    assert.equal(edge.data.confidence, '0.82');
+    assert.equal(edge.data.rationale, 'Target work cannot start until the source node is complete.');
+    assert.equal(edge.data.source_signal, 'Manual review');
+    assert.equal(edge.data.review_state, 'needs_review');
+    assert.deepEqual(edge.data.source_refs, sourceRefs);
+    assert.deepEqual(edge.metadata, { authored_from_view: 'knowledgeGraph' });
+});
+
 test('updateWorkspaceNode keeps legacy summary compatibility in sync', () => {
     const node = createWorkspaceNode({ id: 'node-1', title: 'Old title' });
     const updated = updateWorkspaceNode(node, {

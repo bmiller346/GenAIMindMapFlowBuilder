@@ -54,7 +54,7 @@ import { parseFlowSnapshot, stringifyFlowSnapshot } from './utils/flowSnapshots'
 import { rememberWorkspace, selectStartupWorkspace } from './utils/workspaceSession';
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from './utils/askAiGenerationProgress';
 import { buildWorkspaceNextSteps } from './utils/workspaceNudges';
-import { reflowSiblingSubtrees } from './utils/manualNodes';
+import { createWorkspaceEdge, reflowSiblingSubtrees } from './utils/manualNodes';
 import {
     KG_RELATIONSHIP_MODE_OPTIONS,
     KG_RELATIONSHIP_MODES,
@@ -130,12 +130,34 @@ const STRUCTURED_AI_PRESETS = {
     tasks: {
         role: 'task-planner',
         action: 'generate_tasks',
-        scope: 'branch'
+        scope: 'branch',
+        visual: 'tasks',
+        prompt:
+            'Create task candidates from the current workspace scope. Include action-oriented titles, status, priority, owner cues, due-date cues, dependencies, blockers, and review state.'
+    },
+    kanban: {
+        role: 'task-planner',
+        action: 'generate_tasks',
+        scope: 'branch',
+        visual: 'kanban',
+        prompt:
+            'Create a Kanban-ready board from the current workspace scope. Supplement the graph with task nodes or task metadata, board status columns, priority, owner cues, due-date cues, dependencies, blockers, and review state so Kanban is populated after review.'
     },
     table: {
         role: 'data-table-interpreter',
         action: 'interpret_table_data',
-        scope: 'workspace'
+        scope: 'workspace',
+        visual: 'table',
+        prompt:
+            'Create a structured table from the current workspace. Supplement nodes with stable columns, row candidates, source-backed evidence, and review flags.'
+    },
+    executive: {
+        role: 'enterprise-readiness-planner',
+        action: 'create_stakeholder_review_package',
+        scope: 'workspace',
+        visual: 'executive_summary',
+        prompt:
+            'Make this workspace executive-ready. Supplement missing key findings, recommended actions, risks, required decisions, confidence, source-backed appendix entries, and review state while preserving the current graph.'
     }
 };
 const TASK_CANVAS_TYPES = new Set([
@@ -1273,6 +1295,61 @@ const App = () => {
         });
     }, [pushNode, selectedVisibleNodes]);
 
+    const createKgRelationshipFromSelection = useCallback(() => {
+        const selectedResponseNodes = selectedVisibleNodes.filter((node) => node.type === 'response');
+        if (selectedResponseNodes.length !== 2) {
+            return;
+        }
+        const [sourceNode, targetNode] = selectedResponseNodes;
+        const existingEdge = edges.find(
+            (edge) =>
+                edge.source === sourceNode.id &&
+                edge.target === targetNode.id &&
+                !isHierarchyEdge(edge)
+        );
+        if (existingEdge) {
+            setInspectorEdgeId(existingEdge.id);
+            return;
+        }
+        const sourceTitle = nodeData(sourceNode).title || sourceNode.id;
+        const targetTitle = nodeData(targetNode).title || targetNode.id;
+        const sourceRefs = [
+            ...nodeSourceRefs(sourceNode),
+            ...nodeSourceRefs(targetNode)
+        ].slice(0, 8);
+        const edge = createWorkspaceEdge(sourceNode.id, targetNode.id, {
+            relationship_type: 'related_to',
+            label: 'Related',
+            confidence: '0.5',
+            rationale: `Manual relationship created between ${sourceTitle} and ${targetTitle}.`,
+            source_signal: 'Manual review',
+            review_state: 'needs_review',
+            source_refs: sourceRefs,
+            metadata: {
+                authored_from_view: 'knowledgeGraph',
+                source_node_title: sourceTitle,
+                target_node_title: targetTitle
+            }
+        });
+        setEdges([...edges, edge]);
+        setSaveStatus('dirty');
+        window.setTimeout(() => {
+            window.dispatchEvent(new Event('docmap:save-workspace-now'));
+        }, 0);
+        recordActivity({
+            type: 'kg_relationship_created',
+            title: 'Knowledge graph relationship created',
+            summary: `${sourceTitle} was connected to ${targetTitle}.`,
+            node_ids: [sourceNode.id, targetNode.id],
+            metadata: {
+                edge_id: edge.id,
+                relationship_type: edge.relationship_type
+            },
+            status: 'completed'
+        });
+        setInspectorEdgeId(edge.id);
+    }, [edges, recordActivity, selectedVisibleNodes, setEdges, setInspectorEdgeId, setSaveStatus]);
+
     const openStructuredAiPreset = useCallback(
         (presetKey) => {
             const preset = STRUCTURED_AI_PRESETS[presetKey];
@@ -1285,7 +1362,9 @@ const App = () => {
                 scope: preferredScope,
                 nodeId: preferredScope === 'branch' ? selectedBranchId : undefined,
                 initialRoleId: preset.role,
-                initialActionId: preset.action
+                initialActionId: preset.action,
+                initialPrompt: preset.prompt,
+                initialVisual: preset.visual || 'auto'
             });
             recordActivity({
                 type: 'ai_action_picker_opened',
@@ -1812,7 +1891,9 @@ const App = () => {
                         onBackToMap={() => setActiveView('mindmap')}
                         onStartManual={openManualStart}
                         onGenerateTaskCandidates={() => openStructuredAiPreset('tasks')}
+                        onPrepareKanbanBoard={() => openStructuredAiPreset('kanban')}
                         onCreateStructuredTable={() => openStructuredAiPreset('table')}
+                        onCreateExecutiveOutput={() => openStructuredAiPreset('executive')}
                     />
                 ) : null}
                 <FloatingDock
@@ -1870,6 +1951,11 @@ const App = () => {
                                 {selectedVisibleNodes.length} selected
                             </strong>
                             {selectedBranchId ? <span>Branch lens active</span> : null}
+                            {activeCanvasView === 'knowledgeGraph' && selectedVisibleNodes.length === 2 ? (
+                                <button type="button" onClick={createKgRelationshipFromSelection}>
+                                    Connect
+                                </button>
+                            ) : null}
                             <button type="button" onClick={askAiAboutSelection}>
                                 <FiMessageSquare />
                                 Ask AI

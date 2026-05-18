@@ -276,6 +276,81 @@ const FOLLOW_UP_ACTIONS = [
     }
 ];
 
+const VIEW_CONVERSION_ACTIONS = [
+    {
+        id: 'convert-to-map',
+        label: 'Create map',
+        intent: 'Convert',
+        role: 'workflow-mapper',
+        action: 'custom_prompt',
+        initialVisual: 'mind_map',
+        targetViews: ['knowledgeGraph', 'flowchart'],
+        prompt:
+            'Convert the current exploratory view into a clean TraceSpace mind map. Preserve useful relationships as hierarchy where appropriate, keep evidence and source refs, add missing bridge nodes when needed, and mark inferred structure needs_review.',
+        description: 'Supplements the current view into a reviewable map.'
+    },
+    {
+        id: 'convert-to-knowledge-graph',
+        label: 'Create knowledge graph',
+        intent: 'Convert',
+        role: 'standards-extractor',
+        action: 'custom_prompt',
+        initialVisual: 'knowledge_graph',
+        targetViews: ['mindmap', 'flowchart'],
+        prompt:
+            'Convert the current exploratory view into a knowledge graph layer. Preserve the existing content, then supplement it with cross-branch relationship edges, dependencies, overlaps, conflicts, confidence, rationale, and source signals so the Connections view becomes useful.',
+        description: 'Adds relationship metadata for the Connections view.'
+    },
+    {
+        id: 'convert-to-flowchart',
+        label: 'Create flowchart',
+        intent: 'Convert',
+        role: 'workflow-mapper',
+        action: 'custom_prompt',
+        initialVisual: 'flow_chart',
+        targetViews: ['mindmap', 'knowledgeGraph'],
+        prompt:
+            'Convert the current exploratory view into a flowchart. Supplement the graph with ordered process steps, decisions, branch labels, conditions, handoffs, dependencies, exception paths, and review notes without deleting existing useful content.',
+        description: 'Adds process metadata for Flowchart.'
+    },
+    {
+        id: 'convert-to-kanban',
+        label: 'Prepare Kanban',
+        intent: 'Convert',
+        role: 'task-planner',
+        action: 'generate_tasks',
+        initialVisual: 'kanban',
+        targetViews: ['mindmap', 'knowledgeGraph', 'flowchart'],
+        prompt:
+            'Convert the current exploratory view into a Kanban-ready task board. Supplement the graph with action-oriented task nodes or task metadata, board status, priority, owner cues, due-date cues, dependencies, blockers, and review state so the Kanban columns are populated after review.',
+        description: 'Adds task metadata needed for Kanban.'
+    },
+    {
+        id: 'convert-to-table',
+        label: 'Create table',
+        intent: 'Convert',
+        role: 'data-table-interpreter',
+        action: 'interpret_table_data',
+        initialVisual: 'table',
+        targetViews: ['mindmap', 'knowledgeGraph', 'flowchart'],
+        prompt:
+            'Convert the current exploratory view into a structured table. Supplement the graph with stable columns, row candidates, source-backed evidence, review flags, and enough metadata for table and executive outputs.',
+        description: 'Adds structured fields for table review.'
+    },
+    {
+        id: 'convert-to-executive',
+        label: 'Create executive view',
+        intent: 'Convert',
+        role: 'enterprise-readiness-planner',
+        action: 'create_stakeholder_review_package',
+        initialVisual: 'executive_summary',
+        targetViews: ['mindmap', 'knowledgeGraph', 'flowchart'],
+        prompt:
+            'Convert the current exploratory view into an executive-ready output. Supplement missing findings, recommended actions, risks, required decisions, evidence appendix items, confidence, and review state while preserving the existing graph.',
+        description: 'Adds summary metadata for Executive output.'
+    }
+];
+
 const GRAPH_FILTERS = [
     { id: 'source-backed', label: 'Source-backed' },
     { id: 'needs-review', label: 'Needs review' },
@@ -692,6 +767,15 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const isCanvasView = CANVAS_VIEW_IDS.has(activeView);
     const activeCanvasOption = CORE_VIEWS.find((view) => view.id === activeCanvasView);
     const canReflowCanvas = activeCanvasView === 'mindmap' || activeCanvasView === 'knowledgeGraph';
+    const followUpActions = useMemo(
+        () => [
+            ...FOLLOW_UP_ACTIONS,
+            ...VIEW_CONVERSION_ACTIONS.filter((action) =>
+                action.targetViews.includes(activeCanvasView)
+            )
+        ],
+        [activeCanvasView]
+    );
     const showCanvasNudges = isNudgeCategoryEnabled(nudgePreferences, 'canvas');
     const showTaskNudges = isNudgeCategoryEnabled(nudgePreferences, 'tasks');
     useEffect(() => {
@@ -1286,7 +1370,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                         </div>
                         {followUpActionsOpen ? (
                             <div className="local-follow-up-actions">
-                                {FOLLOW_UP_ACTIONS.map((action) => {
+                                {followUpActions.map((action) => {
                                     const needsSource = action.requiresSource && activeSourceIds.length === 0;
                                     return (
                                         <button
@@ -1570,7 +1654,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                     </div>
                     {followUpActionsOpen ? (
                     <div className="local-follow-up-actions">
-                        {FOLLOW_UP_ACTIONS.map((action) => {
+                        {followUpActions.map((action) => {
                             const needsSource = action.requiresSource && activeSourceIds.length === 0;
                             return (
                                 <button
