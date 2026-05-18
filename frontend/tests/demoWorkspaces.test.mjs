@@ -7,6 +7,21 @@ test('demo workspace templates include Ask AI graph and flowchart robustness see
 
     assert.ok(templatesById.has('ask-ai-knowledge-graph'));
     assert.ok(templatesById.has('ask-ai-flowchart'));
+    assert.ok(templatesById.has('aec-sow-deliverables'));
+
+    const aecSnapshot = templatesById.get('aec-sow-deliverables').buildSnapshot();
+    const aecRelationships = aecSnapshot.edges.map((edge) => edge.data.relationship_type);
+    const aecNodeTypes = aecSnapshot.nodes.map((node) => node.data.node_type);
+
+    assert.ok(aecSnapshot.nodes.length >= 8);
+    assert.ok(aecSnapshot.workspace_brief.desired_outputs.includes('knowledge_graph'));
+    assert.ok(aecSnapshot.workspace_brief.desired_outputs.includes('tasks'));
+    assert.ok(aecSnapshot.workspace_brief.expected_artifacts.includes('monday.com handoff tasks'));
+    assert.ok(aecNodeTypes.includes('discipline_scope'));
+    assert.ok(aecNodeTypes.includes('missing_info'));
+    assert.ok(aecNodeTypes.includes('handoff'));
+    assert.ok(aecRelationships.includes('blocked_by'));
+    assert.ok(aecRelationships.includes('depends_on'));
 
     const graphSnapshot = templatesById.get('ask-ai-knowledge-graph').buildSnapshot();
     const graphRelationships = graphSnapshot.edges.map((edge) => edge.data.relationship_type);
