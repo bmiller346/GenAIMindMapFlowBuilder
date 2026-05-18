@@ -1843,13 +1843,15 @@ const App = () => {
                         suppressGuidanceNudges={isStructuredCanvasView}
                     />
                 </FloatingDock>
-                <Panel position="bottom">
-                    <AskMultiple
-                        data={askMultipleClass}
-                        selectedNodes={selectedNodes}
-                    />
-                </Panel>
-                {selectedBranchId ? (
+                {!isStructuredCanvasView ? (
+                    <Panel position="bottom">
+                        <AskMultiple
+                            data={askMultipleClass}
+                            selectedNodes={selectedNodes}
+                        />
+                    </Panel>
+                ) : null}
+                {selectedBranchId && !isStructuredCanvasView ? (
                     <Panel position="top-left" style={{ display: 'block' }}>
                         <section className="canvas-scope-banner" aria-label="Active canvas scope">
                             <span>Branch lens</span>
@@ -1861,7 +1863,7 @@ const App = () => {
                         </section>
                     </Panel>
                 ) : null}
-                {selectedVisibleNodes.length ? (
+                {selectedVisibleNodes.length && !isStructuredCanvasView ? (
                     <Panel position="bottom-center" style={{ display: 'block' }}>
                         <section className="selection-action-bar" aria-label="Selected node actions">
                             <strong>
@@ -1993,7 +1995,7 @@ const App = () => {
                     style={{ display: 'block' }}
                 >
                     <AiHelpersPanel
-                        hidden={!isAiHelpersOpen || activeCanvasView === 'flowchart'}
+                        hidden={!isAiHelpersOpen || isStructuredCanvasView}
                         selectedNodes={selectedNodes || []}
                         autoOpenToken={nextStepsOpenToken}
                         summaryLabel={nextStepsOpenToken ? 'Next steps' : 'AI Helpers'}

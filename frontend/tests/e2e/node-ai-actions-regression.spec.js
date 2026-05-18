@@ -949,6 +949,9 @@ test('empty workspace Ask AI flowchart request advances past source selection', 
         .getByRole('button', { name: 'Accept 1 item' })
         .click();
     await expect(page.locator('.canvas-structured-view-flowchart')).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Ask a Question' })).toHaveCount(0);
+    await expect(page.locator('.selection-action-bar')).toHaveCount(0);
+    await expect(page.locator('.ai-helpers-panel')).toHaveCount(0);
     const nodeDisplayMenu = page.locator('.local-canvas-command-main').getByRole('button', { name: /Nodes/ });
     await nodeDisplayMenu.click();
     await expect(page.getByRole('button', { name: 'Reflow map' })).toBeDisabled();
