@@ -32,6 +32,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
         setNodes: state.setNodes,
         setEdges: state.setEdges,
         setWorkspaceBrief: state.setWorkspaceBrief,
+        setMapStyle: state.setMapStyle,
         setViewPort: state.setViewPort
     });
 
@@ -43,6 +44,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
         setNodes,
         setEdges,
         setWorkspaceBrief,
+        setMapStyle,
         setViewPort
     } = useStore(useShallow(selector));
 
@@ -75,6 +77,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
                 setNodes([]);
                 setEdges([]);
                 setWorkspaceBrief(flow.workspace_brief || {});
+                setMapStyle(flow.map_style || {});
                 setIsDrawer(false);
                 setTrigger(!trigger);
                 setViewPort(0, 0, 1);
@@ -87,6 +90,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
                 setNodes(flow.nodes || []);
                 setEdges(flow.edges || []);
                 setWorkspaceBrief(flow.workspace_brief || {});
+                setMapStyle(flow.map_style || {});
                 setViewPort(x, y, zoom);
                 setViewport({ x, y, zoom });
                 // fitView();
@@ -113,6 +117,7 @@ const Flow = ({ data, isDrawer, setIsDrawer, flows, setFlowList }) => {
             setNodes([]);
             setEdges([]);
             setWorkspaceBrief({});
+            setMapStyle(emptySnapshot.map_style || {});
             setViewPort({});
             setViewport({ x: 0, y: 0, zoom: 1 });
             fitView({ maxZoom: 1 });

@@ -23,6 +23,7 @@ import {
     saveDeveloperMode,
     saveNudgePreferences
 } from '../config/localSettings';
+import { DEFAULT_MAP_STYLE, normalizeMapStyle } from '../utils/mapStyles';
 
 const CANVAS_VIEW_IDS = new Set(['mindmap', 'knowledgeGraph', 'flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
 const initialCanvasView = getLastCanvasView();
@@ -255,6 +256,7 @@ const useStore = create((set, get) => ({
         review_policy: ['mark_uncited_needs_review'],
         review_rules: ''
     },
+    mapStyle: DEFAULT_MAP_STYLE,
     viewport: {},
     sourceLibrary: [],
     pendingSourceDraft: undefined,
@@ -350,6 +352,9 @@ const useStore = create((set, get) => ({
     },
     setWorkspaceBrief: (workspaceBrief) => {
         set({ workspaceBrief });
+    },
+    setMapStyle: (mapStyle) => {
+        set({ mapStyle: normalizeMapStyle(mapStyle) });
     },
     setSourceLibrary: (sourceLibrary) => {
         set({ sourceLibrary: Array.isArray(sourceLibrary) ? sourceLibrary : [] });

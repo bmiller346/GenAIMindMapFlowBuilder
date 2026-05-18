@@ -27,6 +27,7 @@ import {
 import useActivityStore from '../stores/activityStore';
 import useAutomationStore from '../stores/automationStore';
 import { createSourceLibrarySnapshot } from '../views/graphProjection';
+import { getMapStyleTheme } from '../utils/mapStyles';
 
 const EMPTY_GRAPH_ALLOWED_ACTIVITY_TYPES = new Set([
     'manual_nodes_deleted',
@@ -110,11 +111,13 @@ const Header = ({
         setEdges: s.setEdges,
         setViewPort: s.setViewPort,
         setWorkspaceBrief: s.setWorkspaceBrief,
+        setMapStyle: s.setMapStyle,
         setSourceLibrary: s.setSourceLibrary,
         setSelectedBranchId: s.setSelectedBranchId,
         setInspectorNodeId: s.setInspectorNodeId,
         viewport: s.viewport,
         workspaceBrief: s.workspaceBrief,
+        mapStyle: s.mapStyle,
         sourceLibrary: s.sourceLibrary,
         developerMode: s.developerMode,
         aiActionRuns: s.aiActionRuns,
@@ -131,11 +134,13 @@ const Header = ({
         setEdges,
         setViewPort,
         setWorkspaceBrief,
+        setMapStyle,
         setSourceLibrary,
         setSelectedBranchId,
         setInspectorNodeId,
         viewport,
         workspaceBrief,
+        mapStyle,
         sourceLibrary,
         developerMode,
         aiActionRuns,
@@ -194,6 +199,7 @@ const Header = ({
             nodes,
             edges,
             viewport,
+            mapStyle,
             workspaceBrief,
             sourceLibrary: createSourceLibrarySnapshot({
                 nodes,
@@ -213,6 +219,7 @@ const Header = ({
         rfInstance,
         sourceLibrary,
         aiActionRuns,
+        mapStyle,
         viewport,
         workspaceBrief
     ]);
@@ -258,6 +265,7 @@ const Header = ({
             nodes: latestState.nodes,
             edges: latestState.edges,
             viewport: latestState.viewport,
+            mapStyle: latestState.mapStyle,
             workspaceBrief: latestState.workspaceBrief,
             sourceLibrary: createSourceLibrarySnapshot({
                 nodes: latestState.nodes,
@@ -1007,8 +1015,9 @@ const Header = ({
     const buildMindMapExportOptions = () => {
         const nodeBounds = getNodesBounds(getNodes());
         const viewPort = getViewportForBounds(nodeBounds, 1920, 1080, 0, 2);
+        const theme = getMapStyleTheme(useStore.getState().mapStyle?.theme);
         return {
-            backgroundColor: '#1e1e1e',
+            backgroundColor: theme.exportBackground,
             style: {
                 transform: `translate(${viewPort.x}px, ${viewPort.y}px, scale(${viewPort.zoom}))`
             }
@@ -1142,6 +1151,7 @@ const Header = ({
         setNodes(snapshot.nodes || []);
         setEdges(snapshot.edges || []);
         setWorkspaceBrief(snapshot.workspace_brief || {});
+        setMapStyle(snapshot.map_style || {});
         setSourceLibrary(snapshot.source_library || []);
         setAIActionRuns(snapshot.ai_action_runs || []);
         setActivityEvents(snapshot.activity_events || [], flow_id);

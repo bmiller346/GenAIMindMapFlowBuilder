@@ -3,12 +3,13 @@ import {
     restoreOperationSnapshot
 } from './operationSnapshots';
 
-export const createSourceUndoSnapshot = ({ nodes, edges, viewport, workspaceBrief }) =>
+export const createSourceUndoSnapshot = ({ nodes, edges, viewport, workspaceBrief, mapStyle }) =>
     createOperationSnapshot({
         nodes,
         edges,
         viewport,
-        workspaceBrief
+        workspaceBrief,
+        mapStyle
     });
 
 export const createSourceUndoHandler = ({
@@ -18,6 +19,7 @@ export const createSourceUndoHandler = ({
     setNodes,
     setEdges,
     setWorkspaceBrief,
+    setMapStyle,
     setViewPort,
     setViewport,
     context
@@ -27,6 +29,7 @@ export const createSourceUndoHandler = ({
         setNodes,
         setEdges,
         setWorkspaceBrief,
+        setMapStyle,
         setViewPort,
         setViewport
     });

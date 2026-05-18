@@ -25,6 +25,7 @@ const ManualNodeControls = () => {
     const setNodes = useStore((state) => state.setNodes);
     const setEdges = useStore((state) => state.setEdges);
     const setWorkspaceBrief = useStore((state) => state.setWorkspaceBrief);
+    const setMapStyle = useStore((state) => state.setMapStyle);
     const setViewPort = useStore((state) => state.setViewPort);
     const flowId = flowStore((state) => state.flow_id);
     const setFlow = flowStore((state) => state.setFlow);
@@ -60,6 +61,7 @@ const ManualNodeControls = () => {
         setFlowType(response.data.flow_type || 'manual');
         setEdges([]);
         setWorkspaceBrief({});
+        setMapStyle(EMPTY_FLOW_SNAPSHOT.map_style);
         setViewPort({});
         setSavedSnapshot(
             EMPTY_FLOW_SNAPSHOT,
@@ -93,6 +95,7 @@ const ManualNodeControls = () => {
             setFlowType(workspace.flow_type || 'manual');
             setEdges(snapshot.edges);
             setWorkspaceBrief(snapshot.workspace_brief || {});
+            setMapStyle(snapshot.map_style || {});
             setViewPort(snapshot.viewport || {});
             setSavedSnapshot(
                 snapshot,

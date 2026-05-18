@@ -18,6 +18,7 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
         setNodes: state.setNodes,
         setEdges: state.setEdges,
         setWorkspaceBrief: state.setWorkspaceBrief,
+        setMapStyle: state.setMapStyle,
         setViewPort: state.setViewPort
     });
 
@@ -27,6 +28,7 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
         setNodes,
         setEdges,
         setWorkspaceBrief,
+        setMapStyle,
         setViewPort
     } = useStore(useShallow(selector));
     const setFlow = flowStore((s) => s.setFlow);
@@ -87,6 +89,7 @@ const FlowModal = ({ setIsDrawer, setIsViewFlowModal }) => {
         setNodes([]);
         setEdges([]);
         setWorkspaceBrief({});
+        setMapStyle(EMPTY_FLOW_SNAPSHOT.map_style);
         setViewPort({});
         setFlowName('New Flow');
         setSavedSnapshot(

@@ -3,11 +3,13 @@ import {
     normalizeWorkspaceNodes
 } from './manualNodes.js';
 import { normalizeAIActionRuns } from './aiActionRuns.js';
+import { DEFAULT_MAP_STYLE, normalizeMapStyle } from './mapStyles.js';
 
 export const EMPTY_FLOW_SNAPSHOT = {
     nodes: [],
     edges: [],
     viewport: {},
+    map_style: DEFAULT_MAP_STYLE,
     workspace_brief: {},
     source_library: [],
     activity_events: [],
@@ -32,6 +34,7 @@ export const parseFlowSnapshot = (flowJson) => {
                 Array.isArray(parsed.edges) ? parsed.edges : []
             ),
             viewport: parsed.viewport || {},
+            map_style: normalizeMapStyle(parsed.map_style),
             workspace_brief: parsed.workspace_brief || {},
             source_library: Array.isArray(parsed.source_library)
                 ? parsed.source_library
@@ -53,6 +56,7 @@ export const createFlowSnapshot = ({
     nodes = [],
     edges = [],
     viewport,
+    mapStyle,
     workspaceBrief = {},
     sourceLibrary = [],
     activityEvents = [],
@@ -70,6 +74,7 @@ export const createFlowSnapshot = ({
         nodes: normalizedNodes,
         edges: connectedEdges,
         viewport: viewport || flowObject.viewport || {},
+        map_style: normalizeMapStyle(mapStyle ?? flowObject.map_style),
         workspace_brief: workspaceBrief || {},
         source_library: Array.isArray(sourceLibrary) ? sourceLibrary : [],
         activity_events: Array.isArray(activityEvents) ? activityEvents : [],
@@ -108,6 +113,7 @@ export const stringifyFlowSnapshot = (snapshot) =>
                 nodes: snapshot?.nodes || [],
                 edges: snapshot?.edges || [],
                 viewport: snapshot?.viewport || {},
+                mapStyle: snapshot?.map_style || DEFAULT_MAP_STYLE,
                 workspaceBrief: snapshot?.workspace_brief || {},
                 sourceLibrary: snapshot?.source_library || [],
                 activityEvents,

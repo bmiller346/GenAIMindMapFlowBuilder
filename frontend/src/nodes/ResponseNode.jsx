@@ -55,6 +55,7 @@ import {
     structuredDataChildData
 } from '../utils/structuredDataArtifacts';
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from '../utils/askAiGenerationProgress';
+import { NODE_EMPHASIS_OPTIONS } from '../utils/mapStyles';
 
 const Graph = lazy(() => import('../global-components/Graph'));
 const TableComponent = lazy(() => import('../global-components/TableComponent'));
@@ -94,6 +95,9 @@ const INLINE_AI_ROUTE_OPTIONS = [
     { id: 'direct', label: 'Answer', title: 'Answer inline on this node' },
     { id: 'draft', label: 'Draft', title: 'Open a reviewable AI draft session' }
 ];
+const NODE_EMPHASIS_LABELS = Object.fromEntries(
+    NODE_EMPHASIS_OPTIONS.map((option) => [option.id, option.label])
+);
 const HIERARCHY_EDGE_TYPES = new Set([
     '',
     'contains',
@@ -405,6 +409,7 @@ const ResponseNode = ({ id, data }) => {
         summaryPreview.length > 0 &&
         compactNodeText(titleValue).toLowerCase() !== summaryPreview.toLowerCase();
     const nodeStatus = workspaceData.status || 'ai_generated';
+    const nodeEmphasis = workspaceData.display?.emphasis || '';
     const dueDate = workspaceData.dueDate || '';
     const assignee = workspaceData.ownerId || '';
     const directChildIds = useMemo(
@@ -1893,6 +1898,7 @@ const ResponseNode = ({ id, data }) => {
         'node-response',
         `node-response-status-${nodeStatus}`,
         workspaceData.nodeType ? `node-response-type-${workspaceData.nodeType}` : '',
+        nodeEmphasis ? `node-response-emphasis-${nodeEmphasis}` : '',
         initialSeedVisual ? 'node-response-initial-seed' : '',
         initialSeedVisual ? `node-response-initial-seed-${initialSeedVisual}` : ''
     ]
@@ -2270,6 +2276,11 @@ const ResponseNode = ({ id, data }) => {
                     {assignee ? <span>{assignee}</span> : null}
                 </div>
             )}
+            {nodeEmphasis ? (
+                <span className={`node-emphasis-badge node-emphasis-badge-${nodeEmphasis}`}>
+                    {NODE_EMPHASIS_LABELS[nodeEmphasis] || nodeEmphasis}
+                </span>
+            ) : null}
             <NodeMetadataBadges data={data} />
             {!data.manual && summary.length > 0 ? (
                 areDetailsExpanded ? (

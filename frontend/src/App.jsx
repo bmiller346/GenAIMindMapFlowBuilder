@@ -35,6 +35,7 @@ import GraphValidationPanel from './global-components/GraphValidationPanel.jsx';
 import LocalViewsPanel from './views/LocalViewsPanel.jsx';
 import CanvasStructuredView from './views/CanvasStructuredView.jsx';
 import WorkspaceBriefPanel from './global-components/WorkspaceBriefPanel.jsx';
+import MapStylePanel from './global-components/MapStylePanel.jsx';
 import ActivityPanel from './global-components/ActivityPanel.jsx';
 import SourcesPanel from './global-components/SourcesPanel.jsx';
 import IntegrationsPanel from './global-components/IntegrationsPanel.jsx';
@@ -66,6 +67,12 @@ import {
 } from './utils/kgRelationshipFilters';
 import useActivityStore from './stores/activityStore';
 import useAutomationStore from './stores/automationStore';
+import {
+    getMapStyleCanvasBackground,
+    getMapStyleClassNames,
+    getMapStyleGridColor,
+    normalizeMapStyle
+} from './utils/mapStyles';
 
 const CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
 const STRUCTURED_CANVAS_VIEWS = new Set(['flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
@@ -623,6 +630,39 @@ const buildKgFocusNodeIds = (edges = [], focusNodeIds = []) => {
     return visibleIds;
 };
 
+const buildNodeDepths = (nodes = [], edges = []) => {
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const childIds = new Set();
+    const childrenByParent = edges.reduce((lookup, edge) => {
+        if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target) || !isHierarchyEdge(edge)) {
+            return lookup;
+        }
+        childIds.add(edge.target);
+        const children = lookup.get(edge.source) || [];
+        children.push(edge.target);
+        lookup.set(edge.source, children);
+        return lookup;
+    }, new Map());
+    const roots = nodes
+        .map((node) => node.id)
+        .filter((nodeId) => !childIds.has(nodeId));
+    const depths = new Map(roots.map((nodeId) => [nodeId, 0]));
+    const queue = roots.map((nodeId) => ({ nodeId, depth: 0 }));
+
+    while (queue.length > 0) {
+        const { nodeId, depth } = queue.shift();
+        (childrenByParent.get(nodeId) || []).forEach((childId) => {
+            const nextDepth = depth + 1;
+            if (!depths.has(childId) || nextDepth < depths.get(childId)) {
+                depths.set(childId, nextDepth);
+                queue.push({ nodeId: childId, depth: nextDepth });
+            }
+        });
+    }
+
+    return depths;
+};
+
 const projectCanvasGraph = ({
     nodes,
     edges,
@@ -630,12 +670,15 @@ const projectCanvasGraph = ({
     activeGraphFilters,
     selectedBranchId,
     canvasNodeDensity,
+    mapStyle,
     kgRelationshipMode = KG_RELATIONSHIP_MODES.INSIGHTS,
     kgFocusNodeIds = []
 }) => {
     const hasBranchScope = Boolean(selectedBranchId);
     const branchIds = collectVisibleBranchIds(nodes, edges, selectedBranchId);
     const filters = Array.isArray(activeGraphFilters) ? activeGraphFilters : [];
+    const normalizedMapStyle = normalizeMapStyle(mapStyle);
+    const nodeDepths = buildNodeDepths(nodes, edges);
     const isKnowledgeGraph = activeCanvasView === 'knowledgeGraph';
     const visibleEdges = edges
         .filter((edge) => edgeMatchesCanvasLens(edge, activeCanvasView))
@@ -670,10 +713,19 @@ const projectCanvasGraph = ({
             const kgMutedClass = hasKgFocus && isProjected && !kgFocusIds.has(node.id)
                 ? 'kg-node-muted'
                 : '';
+            const emphasis = node.data?.display?.emphasis || '';
+            const emphasisClass = emphasis ? `canvas-node-emphasis-${emphasis}` : '';
+            const depth = nodeDepths.get(node.id) || 0;
+            const depthClass =
+                normalizedMapStyle.hierarchy === 'depth'
+                    ? `canvas-node-depth-${Math.min(depth, 3)}`
+                    : '';
             return {
                 ...node,
                 hidden: !isProjected,
-                className: [nextClassName, densityClass, kgMutedClass].filter(Boolean).join(' ')
+                className: [nextClassName, densityClass, kgMutedClass, emphasisClass, depthClass]
+                    .filter(Boolean)
+                    .join(' ')
             };
         }),
         edges: visibleEdges.map((edge) => {
@@ -735,6 +787,7 @@ const App = () => {
         activeGraphFilters: state.activeGraphFilters,
         setActiveGraphFilters: state.setActiveGraphFilters,
         canvasNodeDensity: state.canvasNodeDensity,
+        mapStyle: state.mapStyle,
         selectedBranchId: state.selectedBranchId,
         workspaceBrief: state.workspaceBrief,
         sourceLibrary: state.sourceLibrary,
@@ -747,6 +800,7 @@ const App = () => {
         setActiveView: state.setActiveView,
         setViewPort: state.setViewPort,
         setWorkspaceBrief: state.setWorkspaceBrief,
+        setMapStyle: state.setMapStyle,
         setSourceLibrary: state.setSourceLibrary,
         setAIActionRuns: state.setAIActionRuns
     });
@@ -763,6 +817,7 @@ const App = () => {
         activeGraphFilters,
         setActiveGraphFilters,
         canvasNodeDensity,
+        mapStyle,
         selectedBranchId,
         workspaceBrief,
         sourceLibrary,
@@ -775,6 +830,7 @@ const App = () => {
         setActiveView,
         setViewPort,
         setWorkspaceBrief,
+        setMapStyle,
         setSourceLibrary,
         setAIActionRuns
     } = useStore(useShallow(selector));
@@ -793,7 +849,7 @@ const App = () => {
     const [selectedNodes, setSelectedNodes] = useState();
     const [selectedCanvasNodes, setSelectedCanvasNodes] = useState([]);
     const [validationReport, setValidationReport] = useState();
-    const [workspaceDockTab, setWorkspaceDockTab] = useState('sources');
+    const [workspaceDockTab, setWorkspaceDockTab] = useState('guidance');
     const [workspaceDockCollapsed, setWorkspaceDockCollapsed] = useState(false);
     const [workspaceDockOffset, setWorkspaceDockOffset] = useState({ x: 16, y: -16 });
     const [workspaceDockWidth, setWorkspaceDockWidth] = useState(17.65);
@@ -1032,6 +1088,7 @@ const App = () => {
                 activeGraphFilters,
                 selectedBranchId,
                 canvasNodeDensity,
+                mapStyle,
                 kgRelationshipMode,
                 kgFocusNodeIds: selectedCanvasNodes.map((node) => node.id)
             }),
@@ -1041,6 +1098,7 @@ const App = () => {
             canvasNodeDensity,
             edges,
             kgRelationshipMode,
+            mapStyle,
             nodes,
             selectedBranchId,
             selectedCanvasNodes
@@ -1493,7 +1551,9 @@ const App = () => {
                 setNodes(newNodes);
                 setEdges(newEdges);
                 fitView({ nodes: newNodes, maxZoom: 1 });
-                popNode();
+                if (modalStore.getState().node?.name === 'LoadingModal') {
+                    popNode();
+                }
             }, 1000);
         }
     }, [areNodesIntialised, trigger]);
@@ -1532,6 +1592,7 @@ const App = () => {
                 setNodes(snapshot.nodes || []);
                 setEdges(snapshot.edges || []);
                 setWorkspaceBrief(snapshot.workspace_brief || {});
+                setMapStyle(snapshot.map_style || {});
                 setSourceLibrary(snapshot.source_library || []);
                 setAIActionRuns(snapshot.ai_action_runs || []);
                 setActivityEvents(snapshot.activity_events || [], workspace.flow_id);
@@ -1568,6 +1629,7 @@ const App = () => {
         setAIActionRuns,
         setSourceLibrary,
         setViewPort,
+        setMapStyle,
         setWorkspaceBrief
     ]);
 
@@ -1599,6 +1661,7 @@ const App = () => {
             : 'No canvas changes are applied until you review and accept the draft.';
     const isAiGenerationActive = Boolean(aiGenerationProgress) && aiProgressStatus === 'running';
     const shouldShowEmptyCanvasState = nodes.length === 0 && (!aiGenerationProgress || isAiGenerationActive);
+    const hasWorkspaceContentNodes = nodes.some((node) => node.type !== 'dataSource');
     const workspaceNextSteps = useMemo(
         () =>
             buildWorkspaceNextSteps({
@@ -1612,6 +1675,9 @@ const App = () => {
         [activeGraphFilters, edges, nodes, selectedBranchId, sourceLibrary, workspaceBrief]
     );
     const hasWorkspaceNextSteps = workspaceNextSteps.length > 0;
+    const currentMapStyle = normalizeMapStyle(mapStyle);
+    const canvasBackgroundColor = getMapStyleCanvasBackground(currentMapStyle, lightMode);
+    const backgroundGridColor = getMapStyleGridColor(currentMapStyle, lightMode);
 
     useEffect(() => {
         if (workspaceDockTab === 'next') {
@@ -1662,11 +1728,12 @@ const App = () => {
                 fitViewOptions={{ maxZoom: 1 }}
                 proOptions={{ hideAttribution: true }}
                 onInit={setRfInstance}
-                className={
+                className={[
+                    getMapStyleClassNames(mapStyle),
                     activeCanvasView === 'knowledgeGraph' && selectedCanvasNodes.length > 0
                         ? 'kg-focus-active'
                         : ''
-                }
+                ].filter(Boolean).join(' ')}
                 minZoom={0.2}
                 maxZoom={2.5}
                 multiSelectionKeyCode={['Control', 'Meta']}
@@ -1674,7 +1741,8 @@ const App = () => {
                 <Background
                     gap={28}
                     size={1}
-                    color={lightMode ? '#d8d8d8' : '#2d2d2d'}
+                    color={backgroundGridColor}
+                    style={{ backgroundColor: canvasBackgroundColor }}
                 />
                 {aiGenerationProgress ? (
                     <Panel
@@ -1947,7 +2015,11 @@ const App = () => {
                                     {!hasWorkspaceNextSteps ? (
                                         <div className="workspace-guide-empty">
                                             <strong>Guide</strong>
-                                            <p>No recommended AI actions right now.</p>
+                                            <p>
+                                                {hasWorkspaceContentNodes
+                                                    ? 'No recommended AI actions right now.'
+                                                    : 'Create the first workspace node before guidance starts making recommendations.'}
+                                            </p>
                                         </div>
                                     ) : null}
                                 </div>
@@ -1955,6 +2027,7 @@ const App = () => {
                             {workspaceDockTab === 'build' ? (
                                 <div className="workspace-flow-controls">
                                     <WorkspaceBriefPanel embedded />
+                                    <MapStylePanel />
                                     <ManualNodeControls />
                                 </div>
                             ) : null}

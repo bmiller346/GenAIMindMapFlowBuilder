@@ -133,6 +133,23 @@ test('flow snapshots preserve automation definitions and run history', () => {
     assert.equal(snapshot.automations[0].run_history[0].id, 'run-1');
 });
 
+test('flow snapshots preserve workspace map style settings', () => {
+    const serialized = stringifyFlowSnapshot({
+        nodes: [createWorkspaceNode({ id: 'node-1' })],
+        edges: [],
+        map_style: {
+            theme: 'sketchbook',
+            hierarchy: 'balanced',
+            showEmphasisBadges: false
+        }
+    });
+    const snapshot = parseFlowSnapshot(serialized);
+
+    assert.equal(snapshot.map_style.theme, 'sketchbook');
+    assert.equal(snapshot.map_style.hierarchy, 'balanced');
+    assert.equal(snapshot.map_style.showEmphasisBadges, false);
+});
+
 test('stringifyFlowSnapshot normalizes missing automation run history', () => {
     const parsed = JSON.parse(
         stringifyFlowSnapshot({

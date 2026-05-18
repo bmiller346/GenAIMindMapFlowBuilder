@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid';
+import { normalizeNodeEmphasis } from './mapStyles.js';
 
 export const WORKSPACE_NODE_TYPE = 'response';
 export const DEFAULT_LAYOUT_MODE = 'vertical-children';
@@ -273,7 +274,8 @@ export const getRootFocusViewport = ({
 
 export const getNodeDisplayState = (node = {}) => ({
     collapsed: Boolean(node.data?.display?.collapsed),
-    layoutMode: normalizeLayoutMode(node.data?.display?.layoutMode)
+    layoutMode: normalizeLayoutMode(node.data?.display?.layoutMode),
+    emphasis: normalizeNodeEmphasis(node.data?.display?.emphasis)
 });
 
 export const getWorkspaceNodeData = (node = {}) => {
@@ -529,7 +531,8 @@ export const createWorkspaceNode = ({
         external_refs: [],
         display: {
             collapsed: Boolean(display.collapsed),
-            layoutMode: normalizeLayoutMode(display.layoutMode)
+            layoutMode: normalizeLayoutMode(display.layoutMode),
+            emphasis: normalizeNodeEmphasis(display.emphasis)
         },
         data: createLegacyResponseData({
             title,
@@ -585,7 +588,8 @@ export const updateWorkspaceNode = (node, patch = {}) => {
 
     nextData.display = {
         collapsed: Boolean(nextDisplay.collapsed),
-        layoutMode: normalizeLayoutMode(nextDisplay.layoutMode)
+        layoutMode: normalizeLayoutMode(nextDisplay.layoutMode),
+        emphasis: normalizeNodeEmphasis(nextDisplay.emphasis)
     };
     nextData.data = createLegacyResponseData({
         title: nextData.title || node?.id || 'Untitled node',

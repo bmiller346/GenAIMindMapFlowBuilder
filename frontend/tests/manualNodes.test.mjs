@@ -17,6 +17,7 @@ import {
     reflowSiblingSubtrees,
     updateWorkspaceNode
 } from '../src/utils/manualNodes.js';
+import { autoStyleWorkspaceNodes } from '../src/utils/mapStyles.js';
 
 test('createWorkspaceNode emits the durable manual node shape', () => {
     const node = createWorkspaceNode({
@@ -25,7 +26,11 @@ test('createWorkspaceNode emits the durable manual node shape', () => {
         nodeType: 'task',
         position: { x: 12, y: 24 },
         df: [{ Step: 'Review' }],
-        display: { collapsed: true, layoutMode: LAYOUT_MODES.OUTLINE_STACK }
+        display: {
+            collapsed: true,
+            layoutMode: LAYOUT_MODES.OUTLINE_STACK,
+            emphasis: 'key'
+        }
     });
 
     assert.equal(node.id, 'node-1');
@@ -38,7 +43,8 @@ test('createWorkspaceNode emits the durable manual node shape', () => {
     assert.deepEqual(node.data.data.df, [{ Step: 'Review' }]);
     assert.deepEqual(node.data.display, {
         collapsed: true,
-        layoutMode: LAYOUT_MODES.OUTLINE_STACK
+        layoutMode: LAYOUT_MODES.OUTLINE_STACK,
+        emphasis: 'key'
     });
 });
 
@@ -77,7 +83,7 @@ test('updateWorkspaceNode keeps legacy summary compatibility in sync', () => {
         title: 'New title',
         nodeType: 'question',
         status: 'reviewed',
-        display: { collapsed: true }
+        display: { collapsed: true, emphasis: 'critical' }
     });
 
     assert.equal(updated.data.title, 'New title');
@@ -86,7 +92,8 @@ test('updateWorkspaceNode keeps legacy summary compatibility in sync', () => {
     assert.equal(updated.data.status, 'reviewed');
     assert.deepEqual(getNodeDisplayState(updated), {
         collapsed: true,
-        layoutMode: LAYOUT_MODES.VERTICAL_CHILDREN
+        layoutMode: LAYOUT_MODES.VERTICAL_CHILDREN,
+        emphasis: 'critical'
     });
 });
 
@@ -385,7 +392,8 @@ test('getWorkspaceNodeData exposes the canonical data contract', () => {
         externalRefs: [],
         display: {
             collapsed: true,
-            layoutMode: LAYOUT_MODES.COMPACT_TASK_STACK
+            layoutMode: LAYOUT_MODES.COMPACT_TASK_STACK,
+            emphasis: ''
         },
         df: [],
         graph: {},
@@ -460,4 +468,43 @@ test('createWorkspaceEdge keeps manual links static unless animation is requeste
         createWorkspaceEdge('parent', 'generated-child', { animated: true }).animated,
         true
     );
+});
+
+test('autoStyleWorkspaceNodes derives print emphasis from graph metadata', () => {
+    const root = createWorkspaceNode({ id: 'root', title: 'Main idea' });
+    const risk = createWorkspaceNode({
+        id: 'risk',
+        title: 'Risk',
+        nodeType: 'risk',
+        position: { x: 430, y: 0 }
+    });
+    const task = createWorkspaceNode({
+        id: 'task',
+        title: 'Follow up',
+        nodeType: 'task',
+        position: { x: 860, y: 0 }
+    });
+    const evidence = createWorkspaceNode({
+        id: 'evidence',
+        title: 'Reference',
+        nodeType: 'reference',
+        sourceRefs: [{ document_id: 'doc-1' }],
+        position: { x: 1290, y: 0 }
+    });
+    const styled = autoStyleWorkspaceNodes(
+        [root, risk, task, evidence],
+        [
+            createWorkspaceEdge('root', 'risk'),
+            createWorkspaceEdge('risk', 'task'),
+            createWorkspaceEdge('task', 'evidence')
+        ]
+    );
+    const emphasisById = Object.fromEntries(
+        styled.map((node) => [node.id, node.data.display.emphasis])
+    );
+
+    assert.equal(emphasisById.root, 'key');
+    assert.equal(emphasisById.risk, 'critical');
+    assert.equal(emphasisById.task, 'action');
+    assert.equal(emphasisById.evidence, 'evidence');
 });

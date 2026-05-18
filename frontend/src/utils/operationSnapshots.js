@@ -2,12 +2,14 @@ export const createOperationSnapshot = ({
     nodes = [],
     edges = [],
     viewport = {},
-    workspaceBrief = {}
+    workspaceBrief = {},
+    mapStyle = {}
 }) => ({
     nodes: structuredClone(nodes),
     edges: structuredClone(edges),
     viewport: { ...(viewport || {}) },
-    workspace_brief: structuredClone(workspaceBrief || {})
+    workspace_brief: structuredClone(workspaceBrief || {}),
+    map_style: structuredClone(mapStyle || {})
 });
 
 export const restoreOperationSnapshot = ({
@@ -15,6 +17,7 @@ export const restoreOperationSnapshot = ({
     setNodes,
     setEdges,
     setWorkspaceBrief,
+    setMapStyle,
     setViewPort,
     setViewport
 }) => {
@@ -25,6 +28,9 @@ export const restoreOperationSnapshot = ({
     setNodes(structuredClone(snapshot.nodes || []));
     setEdges(structuredClone(snapshot.edges || []));
     setWorkspaceBrief(structuredClone(snapshot.workspace_brief || {}));
+    if (setMapStyle) {
+        setMapStyle(structuredClone(snapshot.map_style || {}));
+    }
     const viewport = snapshot.viewport || {};
     setViewPort(viewport);
     if (setViewport) {

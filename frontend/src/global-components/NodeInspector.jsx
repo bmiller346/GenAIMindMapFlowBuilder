@@ -24,6 +24,7 @@ import {
     structuredDataAcceptance,
     structuredDataChildData
 } from '../utils/structuredDataArtifacts';
+import { NODE_EMPHASIS_OPTIONS } from '../utils/mapStyles';
 
 const NODE_TYPES = [
     'category',
@@ -61,6 +62,61 @@ const TASK_CAPABLE_TYPES = new Set([
     'needs_review',
     'requirement'
 ]);
+
+const HIERARCHY_EDGE_TYPES = new Set([
+    '',
+    'contains',
+    'parent_child',
+    'parent-child',
+    'child',
+    'section',
+    'subtopic',
+    'branch',
+    'step',
+    'smoothstep'
+]);
+
+const edgeRelationshipType = (edge = {}) =>
+    String(
+        edge.relationship_type ||
+            edge.data?.relationship_type ||
+            edge.data?.relationshipType ||
+            edge.metadata?.relationship_type ||
+            edge.type ||
+            ''
+    )
+        .trim()
+        .toLowerCase();
+
+const isHierarchyEdge = (edge = {}) => HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge));
+
+const collectBranchNodeIds = (edges = [], rootId = '') => {
+    if (!rootId) {
+        return new Set();
+    }
+    const childrenByParent = edges
+        .filter(isHierarchyEdge)
+        .reduce((lookup, edge) => {
+            const children = lookup.get(edge.source) || [];
+            children.push(edge.target);
+            lookup.set(edge.source, children);
+            return lookup;
+        }, new Map());
+    const nodeIds = new Set([rootId]);
+    const queue = [rootId];
+
+    while (queue.length > 0) {
+        const nodeId = queue.shift();
+        (childrenByParent.get(nodeId) || []).forEach((childId) => {
+            if (!nodeIds.has(childId)) {
+                nodeIds.add(childId);
+                queue.push(childId);
+            }
+        });
+    }
+
+    return nodeIds;
+};
 
 const getNestedData = (data) => {
     if (data?.data && typeof data.data === 'object') {
@@ -226,6 +282,10 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
         () => nodes.find((node) => node.id === selectedNodeId),
         [nodes, selectedNodeId]
     );
+    const branchNodeIds = useMemo(
+        () => collectBranchNodeIds(edges, selectedNodeId),
+        [edges, selectedNodeId]
+    );
     const structuredDataContext = useMemo(
         () => getStructuredDataArtifactContext(selectedNode?.data || {}),
         [selectedNode]
@@ -281,6 +341,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
             due_date: firstValue(data, ['due_date']),
             confidence:
                 firstValue(data, ['confidence']) || sourceRef.confidence || '',
+            emphasis: data.display?.emphasis || '',
             source_document: sourceRef.document_id || '',
             source_page: sourceRef.page || '',
             source_section: sourceRef.section || '',
@@ -412,6 +473,10 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
                         owner_id: draft.owner_id,
                         due_date: draft.due_date,
                         confidence: draft.confidence,
+                        display: {
+                            ...(node.data?.display || {}),
+                            emphasis: draft.emphasis || ''
+                        },
                         source_refs: sourceRefs,
                         external_refs: externalRefs,
                         ...(node.data?.manual
@@ -439,6 +504,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
                 node_type: draft.node_type,
                 status: draft.status,
                 priority: draft.priority,
+                emphasis: draft.emphasis,
                 has_source: isSourceBacked
             }
         });
@@ -447,6 +513,41 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
                 ? 'Applied locally. Save or autosave will persist this workspace.'
                 : 'Applied locally. Create or open a workspace to persist it.'
         );
+    };
+
+    const applyEmphasisToBranch = () => {
+        if (!selectedNode || branchNodeIds.size <= 1) {
+            return;
+        }
+        const nextEmphasis = draft.emphasis || '';
+        setNodes(
+            nodes.map((node) =>
+                branchNodeIds.has(node.id)
+                    ? updateWorkspaceNode(node, {
+                          display: {
+                              ...(node.data?.display || {}),
+                              emphasis: nextEmphasis
+                          }
+                      })
+                    : node
+            )
+        );
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        recordActivity({
+            type: 'node_branch_emphasis_applied',
+            title: 'Styled branch',
+            summary: `${branchNodeIds.size} nodes set to ${
+                NODE_EMPHASIS_OPTIONS.find((option) => option.id === nextEmphasis)?.label || 'Normal'
+            }.`,
+            node_ids: [...branchNodeIds],
+            metadata: {
+                emphasis: nextEmphasis,
+                branch_size: branchNodeIds.size
+            }
+        });
+        setApplyMessage(`Applied emphasis to ${branchNodeIds.size} branch nodes.`);
     };
 
     const acceptStructuredEvidence = () => {
@@ -984,6 +1085,33 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
                         onChange={(e) => updateDraft('confidence', e.target.value)}
                     />
                 </label>
+                <div className="node-inspector-section">
+                    <p>Map emphasis</p>
+                    <label>
+                        Visual role
+                        <select
+                            value={draft.emphasis || ''}
+                            onChange={(e) => updateDraft('emphasis', e.target.value)}
+                        >
+                            {NODE_EMPHASIS_OPTIONS.map((option) => (
+                                <option key={option.id || 'normal'} value={option.id}>
+                                    {option.label}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    {branchNodeIds.size > 1 ? (
+                        <div className="node-emphasis-branch-actions">
+                            <button type="button" onClick={applyEmphasisToBranch}>
+                                Apply to branch
+                            </button>
+                            <span>{branchNodeIds.size} nodes</span>
+                        </div>
+                    ) : null}
+                    <p className="node-inspector-help">
+                        Emphasis changes visual hierarchy on the map and exported images.
+                    </p>
+                </div>
 
                 {validationIssues.length > 0 ? (
                     <div className="node-inspector-section node-validation-issues">
