@@ -236,6 +236,9 @@ const SourceRepairPreview = ({
         (sourceOnlyModeBlocked
             ? 'Select at least one source-only section before applying this mode.'
             : '');
+    const applyButtonLabel = isSourceOnlyMode
+        ? 'Apply source sections to workspace'
+        : 'Apply selected repairs';
 
     useEffect(() => {
         setSelectedSourceOnlyIds(new Set(sourceOnlyChunkIds));
@@ -487,7 +490,7 @@ const SourceRepairPreview = ({
             context: 'Helper: Source Librarian'
         });
         onRejectGeneratedPreview?.();
-        setActiveView('table');
+        setActiveView('mindmap');
     };
 
     const rejectGeneratedPreview = () => {
@@ -509,15 +512,15 @@ const SourceRepairPreview = ({
                     <strong>{repairLabel}</strong>
                     <span>
                     {generatedPreview ? 'AI-generated source artifact' : 'Accepted source coverage'} |{' '}
-                        {repairSummary}
+                        {repairSummary}. Apply repairs to update the workspace, then continue on the canvas.
                     </span>
                 </div>
                 <span className="output-state-pill">
-                    {generatedPreview ? 'AI-generated' : 'Accepted workspace'}
+                    {generatedPreview ? 'AI-generated' : 'Repair preview'}
                 </span>
                 {hasGraphNodes ? (
                     <button type="button" onClick={acceptRepairs} disabled={sourceOnlyModeBlocked}>
-                        {applyMode === 'update_matches' ? 'Accept selected' : 'Apply mode'}
+                        {applyButtonLabel}
                     </button>
                 ) : null}
                 {generatedPreview ? (
@@ -527,6 +530,19 @@ const SourceRepairPreview = ({
                 ) : null}
             </div>
             {hasGraphNodes ? <PreviewDiffSummary changes={diffSummary} /> : null}
+            {hasGraphNodes ? (
+                <div className="source-repair-next-step">
+                    <div>
+                        <strong>After apply</strong>
+                        <span>
+                            The selected source refs and review states are written to the workspace, saved, and the canvas reopens.
+                        </span>
+                    </div>
+                    <button type="button" onClick={acceptRepairs} disabled={sourceOnlyModeBlocked}>
+                        {applyButtonLabel}
+                    </button>
+                </div>
+            ) : null}
             {generatedPreview?.warnings?.length ? (
                 <div className="local-preview-warning">
                     {generatedPreview.warnings.map((warning) => (

@@ -361,11 +361,151 @@
 .landing-scenario-card,
 .landing-use-cases article,
 .landing-difference-panel,
-.landing-export-panel {
+.landing-export-panel,
+.landing-model-panel,
+.landing-view-panel {
   border: 1px solid #d8ddd2;
   border-radius: 0.6rem;
   background: #fff;
   box-shadow: 0 12px 30px rgba(20, 26, 20, 0.06);
+}
+
+.landing-model-layer {
+  padding-top: 5rem;
+}
+
+.landing-model-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 0.86fr) minmax(0, 1.14fr);
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding: 0.8rem;
+}
+
+.landing-model-intro {
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+  border-radius: 0.5rem;
+  background: #f1f4ef;
+  padding: 1rem;
+}
+
+.landing-model-intro svg {
+  color: #2a8178;
+  font-size: 1.25rem;
+}
+
+.landing-model-intro h3 {
+  color: #20251f;
+  font-size: 1.15rem;
+  line-height: 1.16;
+}
+
+.landing-model-intro p {
+  color: #60685f;
+  font-size: 0.94rem;
+  font-weight: 520;
+  line-height: 1.5;
+}
+
+.landing-model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.landing-model-grid article {
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+  min-height: 8rem;
+  border: 1px solid #e6ebe1;
+  border-radius: 0.5rem;
+  background: #fff;
+  padding: 0.8rem;
+}
+
+.landing-model-grid span {
+  color: #20251f;
+  font-size: 0.95rem;
+  font-weight: 850;
+}
+
+.landing-model-grid p {
+  color: #60685f;
+  font-size: 0.86rem;
+  font-weight: 520;
+  line-height: 1.42;
+}
+
+.landing-view-capabilities {
+  padding-top: 5rem;
+}
+
+.landing-view-panel {
+  display: grid;
+  grid-template-columns: minmax(18rem, 0.92fr) minmax(0, 1.35fr);
+  gap: 1rem;
+  margin-top: 1.5rem;
+  padding: 0.8rem;
+}
+
+.landing-view-intro {
+  display: grid;
+  gap: 0.8rem;
+  align-content: start;
+  border-radius: 0.5rem;
+  background: #eff5f4;
+  padding: 1rem;
+}
+
+.landing-view-intro svg {
+  color: #2a8178;
+  font-size: 1.25rem;
+}
+
+.landing-view-intro h3 {
+  color: #20251f;
+  font-size: 1.15rem;
+  line-height: 1.16;
+}
+
+.landing-view-intro p {
+  color: #60685f;
+  font-size: 0.94rem;
+  font-weight: 520;
+  line-height: 1.5;
+}
+
+.landing-view-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.landing-view-grid article {
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+  min-height: 8.5rem;
+  border: 1px solid #e6ebe1;
+  border-radius: 0.5rem;
+  background: #fff;
+  padding: 0.8rem;
+}
+
+.landing-view-grid span {
+  color: #20251f;
+  font-size: 0.95rem;
+  font-weight: 850;
+}
+
+.landing-view-grid p {
+  color: #60685f;
+  font-size: 0.85rem;
+  font-weight: 520;
+  line-height: 1.42;
 }
 
 .landing-work-card {
@@ -533,6 +673,8 @@
   .landing-hero-grid,
   .landing-split,
   .landing-export-panel,
+  .landing-model-panel,
+  .landing-view-panel,
   .landing-work-grid,
   .landing-scenario-grid,
   .landing-use-cases {
@@ -559,6 +701,19 @@
   }
 
   .landing-scenario-card {
+    min-height: auto;
+  }
+
+  .landing-model-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-view-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .landing-model-grid article,
+  .landing-view-grid article {
     min-height: auto;
   }
 }
@@ -589,6 +744,10 @@
 
   .landing-workspace-preview {
     border-radius: 0.6rem;
+  }
+
+  .landing-view-grid {
+    grid-template-columns: 1fr;
   }
 
   .graph-stage {
@@ -689,6 +848,7 @@
   .landing-use-cases article,
   .landing-difference-panel,
   .landing-export-panel,
+  .landing-model-panel,
   .source-stack span,
   .confidence-chip,
   .export-chip,
@@ -726,6 +886,24 @@
 
   .landing-export-panel {
     grid-template-columns: 1fr;
+  }
+
+  .landing-model-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-model-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .landing-model-grid article {
+    min-height: 5.5rem;
+    padding: 0.6rem 0.7rem;
+  }
+
+  .landing-model-grid p {
+    font-size: 0.78rem;
+    line-height: 1.22;
   }
 
   .landing-footer {

@@ -20,7 +20,8 @@ import './Landing.css';
 
 const flowSteps = [
     'Collect sources',
-    'Shape the workspace',
+    'Build the model',
+    'Shape the views',
     'Review evidence',
     'Choose export path',
     'Publish or hand off'
@@ -38,8 +39,8 @@ const howItWorks = [
         icon: FiGitBranch
     },
     {
-        title: 'Structure',
-        text: 'View the same material as a map, outline, table, task list, checklist, flowchart, executive view, or knowledge graph.',
+        title: 'Model',
+        text: 'Turn source chunks into typed nodes, relationship edges, owners, dependencies, risks, and review states.',
         icon: FiLayers
     },
     {
@@ -56,6 +57,60 @@ const howItWorks = [
         title: 'Export',
         text: 'Package reviewed work as AEC deliverable reviews, executive reports, newsletters, help outlines, Pinnacle overviews, Miro boards, monday.com work, or PDF exports.',
         icon: FiSend
+    }
+];
+
+const creationLens = [
+    {
+        title: 'Node model',
+        text: 'Requirements, decisions, deliverables, risks, gaps, tasks, questions, and sources become structured workspace objects.'
+    },
+    {
+        title: 'Relationship layer',
+        text: 'Edges capture depends on, blocks, supports, conflicts with, routes to, and handoff relationships.'
+    },
+    {
+        title: 'Review contract',
+        text: 'Each item can carry citations, confidence, rationale, assumptions, owner placeholders, and needs-review status.'
+    },
+    {
+        title: 'View adapters',
+        text: 'The same accepted model can render as a mind map, knowledge graph, flowchart, table, checklist, report, or handoff package.'
+    },
+    {
+        title: 'View reconciliation',
+        text: 'Ask AI to supplement missing relationships, process steps, task fields, table columns, or executive findings so one view can become another.'
+    },
+    {
+        title: 'Professional authoring',
+        text: 'Flowcharts, relationship graphs, and boards keep typed nodes, edges, labels, review states, and source evidence instead of becoming loose drawings.'
+    }
+];
+
+const viewCapabilities = [
+    {
+        title: 'Mind map',
+        text: 'Organize hierarchy, branch structure, source-backed ideas, gaps, and reviewable next steps.'
+    },
+    {
+        title: 'Knowledge graph',
+        text: 'Author typed relationships, inspect rationale and confidence, track source refs, and prepare relationship review packets.'
+    },
+    {
+        title: 'Flowchart',
+        text: 'Shape processes with decisions, terminators, branch labels, exception paths, and saved connector metadata.'
+    },
+    {
+        title: 'Kanban',
+        text: 'Use task/status/owner/priority/dependency metadata; ask AI to prepare the board when the model is too sparse.'
+    },
+    {
+        title: 'Table',
+        text: 'Turn accepted nodes and evidence into structured rows and columns for scanning, comparison, and export.'
+    },
+    {
+        title: 'Executive view',
+        text: 'Synthesize findings, actions, risks, decisions, confidence, and source appendices for leadership review.'
     }
 ];
 
@@ -98,10 +153,11 @@ const exportPillars = [
 const differentiators = [
     'Source-grounded, not just summarized',
     'Preview changes before they apply',
-    'One accepted workspace, many views',
-    'Maps, tables, tasks, checklists, flowcharts, executive outputs, and knowledge graphs',
+    'Structured workspace model before export',
+    'Typed nodes, relationship edges, owners, dependencies, and review states',
+    'One accepted model, many views',
     'Reusable export patterns for reports, newsletters, help, and walkthroughs',
-    'Confidence, citation, rationale, and review states',
+    'Maps, tables, tasks, checklists, flowcharts, executive outputs, and knowledge graphs',
     'Relationship review exports for stakeholder handoff'
 ];
 
@@ -195,6 +251,33 @@ export const Landing = () => {
             ))}
         </section>
 
+        <section className="landing-section landing-model-layer" aria-labelledby="landing-model-layer-title">
+            <div className="landing-section-heading">
+                <p>Creation layer</p>
+                <h2 id="landing-model-layer-title">The export starts as a structured workspace model</h2>
+            </div>
+            <div className="landing-model-panel">
+                <div className="landing-model-intro">
+                    <FiGitBranch aria-hidden="true" />
+                    <h3>TraceSpace creates the lens first, then the deliverable.</h3>
+                    <p>
+                        AI drafts turn source material into a reviewable model of nodes,
+                        relationships, evidence, dependencies, risks, and ownership. Mind
+                        maps, knowledge graphs, flowcharts, task boards, reports, and
+                        handoff packages are different views of that accepted model.
+                    </p>
+                </div>
+                <div className="landing-model-grid">
+                    {creationLens.map(({ title, text }) => (
+                        <article key={title}>
+                            <span>{title}</span>
+                            <p>{text}</p>
+                        </article>
+                    ))}
+                </div>
+            </div>
+        </section>
+
         <section className="landing-section" id="how-it-works">
             <div className="landing-section-heading">
                 <p>How it works</p>
@@ -208,6 +291,32 @@ export const Landing = () => {
                         <p>{text}</p>
                     </article>
                 ))}
+            </div>
+        </section>
+
+        <section className="landing-section landing-view-capabilities" aria-labelledby="landing-view-capabilities-title">
+            <div className="landing-section-heading">
+                <p>Model-aware views</p>
+                <h2 id="landing-view-capabilities-title">Views are work surfaces, not just export formats</h2>
+            </div>
+            <div className="landing-view-panel">
+                <div className="landing-view-intro">
+                    <FiLayers aria-hidden="true" />
+                    <h3>Each view reads and writes the same accepted workspace model.</h3>
+                    <p>
+                        When a view needs more structure, AI can add the missing layer:
+                        relationships for a knowledge graph, process steps for a flowchart,
+                        task fields for Kanban, table columns, or executive-ready findings.
+                    </p>
+                </div>
+                <div className="landing-view-grid">
+                    {viewCapabilities.map(({ title, text }) => (
+                        <article key={title}>
+                            <span>{title}</span>
+                            <p>{text}</p>
+                        </article>
+                    ))}
+                </div>
             </div>
         </section>
 
