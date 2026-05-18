@@ -370,9 +370,22 @@ def _apply_graph_review_state_to_react_node(raw_node: dict, graph_node: dict) ->
         nested_data = None
 
     if status_value:
-        data["status"] = status_value
-        if nested_data is not None:
-            nested_data["status"] = status_value
+        existing_source_refs = data.get("source_refs")
+        if not isinstance(existing_source_refs, list) and nested_data is not None:
+            existing_source_refs = nested_data.get("source_refs")
+        existing_status = data.get("status") or (
+            nested_data.get("status") if nested_data is not None else None
+        )
+        preserves_sourced_ai_status = (
+            status_value == "needs_review"
+            and existing_status in {"ai_generated", "AI Generated"}
+            and isinstance(existing_source_refs, list)
+            and bool(existing_source_refs)
+        )
+        if not preserves_sourced_ai_status:
+            data["status"] = status_value
+            if nested_data is not None:
+                nested_data["status"] = status_value
 
     if isinstance(source_refs, list) and source_refs:
         data["source_refs"] = source_refs
