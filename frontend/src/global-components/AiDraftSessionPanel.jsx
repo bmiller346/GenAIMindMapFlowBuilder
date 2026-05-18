@@ -590,12 +590,14 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         () => buildDraftOutlinePreview(revision, session),
         [revision, session]
     );
+    const hasGraphDraft = useMemo(() => revisionHasGraphDraft(revision), [revision]);
     const selectedSet = useMemo(() => new Set(selectedItemIds), [selectedItemIds]);
     const modelMeta = useMemo(() => getAIDraftModelMetadata(session, revision), [revision, session]);
     const acceptModeDetail = useMemo(
         () => getAIDraftAcceptModeDetail(acceptMode),
         [acceptMode]
     );
+    const isReportOnlyDraft = !hasGraphDraft && (items.length > 0 || publishableArtifacts.length > 0);
     const acceptImpact = useMemo(
         () => {
             const diff = buildAIDraftPreviewDiff(session, {
@@ -800,13 +802,16 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             Boolean(session.scope?.node_id) &&
             ['append', 'selected', 'merge'].includes(mode) &&
             MAP_CANVAS_VIEWS.has(activeCanvasView || 'mindmap');
+        const acceptedCanvasView = canvasForDraft(session, revision, activeCanvasView);
         const applyAcceptedGraph = (graph = {}, { preservePositions = false } = {}) => {
             const hasNodes = Array.isArray(graph.nodes);
             const hasEdges = Array.isArray(graph.edges);
             let nextNodes = hasNodes ? graph.nodes : null;
             let nextEdges = hasEdges ? graph.edges : null;
             if (hasNodes && !preservePositions) {
-                const layouted = getLayoutedElements(nextNodes, hasEdges ? nextEdges : edges);
+                const layouted = getLayoutedElements(nextNodes, hasEdges ? nextEdges : edges, {
+                    mode: acceptedCanvasView
+                });
                 nextNodes = layouted.nodes;
                 nextEdges = layouted.edges;
             }
@@ -894,10 +899,6 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                     status: 'accepted'
                 }
             );
-            if (flowId) {
-                setSaveStatus('dirty');
-                requestImmediateWorkspaceSave();
-            }
             recordActivity({
                 type: 'ai_draft_accepted',
                 title: 'Accepted AI draft session',
@@ -914,9 +915,13 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             });
             clearActiveAIDraftSession();
             clearGeneratedHelperPreview('nodeAiActionRequest');
-            setActiveView(canvasForDraft(session, revision, activeCanvasView));
+            setActiveView(acceptedCanvasView);
             onAccepted?.({ session, result, mode });
             onClose?.();
+            if (flowId) {
+                setSaveStatus('dirty');
+                requestImmediateWorkspaceSave();
+            }
         } catch (error) {
             setProgressMessage('Applying the local draft fallback.');
             const fallback = acceptAIDraftSession({
@@ -928,10 +933,6 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             });
             applyAcceptedGraph(fallback, { preservePositions: shouldPreserveScopedLayout });
             updateActiveAIDraftSession(fallback.session);
-            if (flowId) {
-                setSaveStatus('dirty');
-                requestImmediateWorkspaceSave();
-            }
             setMessage('Backend accept is unavailable; applied the local draft contract fallback.');
             recordActivity({
                 type: 'ai_draft_accepted_local',
@@ -945,9 +946,13 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             });
             clearActiveAIDraftSession();
             clearGeneratedHelperPreview('nodeAiActionRequest');
-            setActiveView(canvasForDraft(session, revision, activeCanvasView));
+            setActiveView(acceptedCanvasView);
             onAccepted?.({ session, result: fallback, mode, localFallback: true });
             onClose?.();
+            if (flowId) {
+                setSaveStatus('dirty');
+                requestImmediateWorkspaceSave();
+            }
         } finally {
             setProgressMessage('');
             setIsAccepting(false);
@@ -1181,6 +1186,17 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
 
             <DraftOutlinePreview preview={outlinePreview} />
 
+            {isReportOnlyDraft ? (
+                <div className="ai-draft-guidance" role="status">
+                    <strong>This preview is a review packet, not a graph expansion.</strong>
+                    <span>
+                        It did not return draft nodes or relationship edges to place on the canvas.
+                        Copy the artifact, use the Connections review/export table, or refine the
+                        draft to ask for explicit relationship edges.
+                    </span>
+                </div>
+            ) : null}
+
             {publishableArtifacts.length ? (
                 <PublishableArtifactPreviews
                     artifacts={publishableArtifacts}
@@ -1391,6 +1407,30 @@ const PublishableArtifactPreviews = ({ artifacts, copiedArtifactId, onCopy }) =>
                         </ul>
                     ) : null}
                     {artifact.body ? <p className="ai-draft-artifact-body">{artifact.body}</p> : null}
+                    {artifact.recommendedActions?.length ? (
+                        <div className="ai-draft-artifact-sections">
+                            <section>
+                                <strong>Recommended actions</strong>
+                                <ul>
+                                    {artifact.recommendedActions.slice(0, 4).map((point) => (
+                                        <li key={point}>{point}</li>
+                                    ))}
+                                </ul>
+                            </section>
+                        </div>
+                    ) : null}
+                    {artifact.risks?.length ? (
+                        <div className="ai-draft-artifact-sections">
+                            <section>
+                                <strong>Risks</strong>
+                                <ul>
+                                    {artifact.risks.slice(0, 4).map((point) => (
+                                        <li key={point}>{point}</li>
+                                    ))}
+                                </ul>
+                            </section>
+                        </div>
+                    ) : null}
                     {artifact.sections.length ? (
                         <div className="ai-draft-artifact-sections">
                             {artifact.sections.slice(0, 4).map((section) => (
@@ -1407,6 +1447,12 @@ const PublishableArtifactPreviews = ({ artifacts, copiedArtifactId, onCopy }) =>
                                 </section>
                             ))}
                         </div>
+                    ) : null}
+                    {artifact.assumptions?.length ? (
+                        <p className="ai-draft-artifact-body">
+                            <strong>Assumptions: </strong>
+                            {artifact.assumptions.slice(0, 3).join('; ')}
+                        </p>
                     ) : null}
                 </article>
             );

@@ -128,6 +128,17 @@ const CITATION_POLICY_OPTIONS = [
     { id: 'not_required', label: 'Not required' }
 ];
 
+const SUMMARY_COMPANION_OUTPUTS = [
+    {
+        shape: 'executive_summary',
+        pattern: /\b(executive summary|exec summary|leadership summary|board summary|briefing memo|decision brief)\b/
+    },
+    {
+        shape: 'news_article',
+        pattern: /\b(news article|article draft|newsletter|monthly update|press release|current news|latest news)\b/
+    }
+];
+
 const evidenceModeLabel = (mode = '') =>
     EVIDENCE_MODE_OPTIONS.find((option) => option.id === mode)?.label || 'Workspace only';
 
@@ -187,6 +198,12 @@ const inferOutputShape = (prompt, actionId = '') => {
     ) {
         return 'software_overlap_report';
     }
+    if (/\b(knowledge graph|relationship|relationships|connections|dependencies)\b/.test(text)) {
+        return 'knowledge_graph';
+    }
+    if (/\b(mind map|brainstorm|cluster|map out)\b/.test(text)) {
+        return 'mind_map';
+    }
     if (/\b(executive summary|exec summary|leadership summary|board summary|briefing memo|decision brief)\b/.test(text)) {
         return 'executive_summary';
     }
@@ -230,13 +247,23 @@ const inferOutputShape = (prompt, actionId = '') => {
     if (/\b(gap|missing|risk|question|review)\b/.test(text)) {
         return 'review_annotations';
     }
-    if (/\b(relationship|connections|dependencies|knowledge graph)\b/.test(text)) {
-        return 'knowledge_graph';
-    }
-    if (/\b(mind map|brainstorm|cluster|map out)\b/.test(text)) {
-        return 'mind_map';
-    }
     return 'graph_draft';
+};
+
+const desiredOutputsForPrompt = ({ inferredShape, prompt }) => {
+    if (['graph_draft', 'no_visual'].includes(inferredShape)) {
+        return [];
+    }
+    const outputs = [inferredShape];
+    if (['knowledge_graph', 'mind_map'].includes(inferredShape)) {
+        const text = String(prompt || '').toLowerCase();
+        SUMMARY_COMPANION_OUTPUTS.forEach(({ shape, pattern }) => {
+            if (shape !== inferredShape && pattern.test(text)) {
+                outputs.push(shape);
+            }
+        });
+    }
+    return [...new Set(outputs)];
 };
 
 const viewForOutputShape = (shape, actionId) =>
@@ -795,6 +822,7 @@ const PromptModal = ({
         setActiveView: state.setActiveView,
         setSelectedBranchId: state.setSelectedBranchId,
         setGeneratedHelperPreview: state.setGeneratedHelperPreview,
+        clearGeneratedHelperPreview: state.clearGeneratedHelperPreview,
         setActiveAIActionPreview: state.setActiveAIActionPreview,
         setActiveAIDraftSession: state.setActiveAIDraftSession,
         activeAIDraftSession: state.activeAIDraftSession,
@@ -810,6 +838,7 @@ const PromptModal = ({
         setActiveView,
         setSelectedBranchId,
         setGeneratedHelperPreview,
+        clearGeneratedHelperPreview,
         setActiveAIActionPreview,
         setActiveAIDraftSession,
         activeAIDraftSession,
@@ -1436,6 +1465,7 @@ const PromptModal = ({
                 routed_role_id: effectiveRole.id,
                 action_label: effectiveAction.label,
                 output_shape: inferredShape,
+                requested_output_shapes: desiredOutputsForPrompt({ inferredShape, prompt: promptText }),
                 requested_visual: selectedVisual,
                 expansion_mode: selectedExpansionMode,
                 expansion_target: selectedExpansionTarget,
@@ -1488,6 +1518,7 @@ const PromptModal = ({
             metadata: {
                 preview_mode: 'local_fallback',
                 output_shape: inferredShape,
+                requested_output_shapes: desiredOutputsForPrompt({ inferredShape, prompt: promptText }),
                 requested_visual: selectedVisual,
                 expansion_mode: selectedExpansionMode,
                 expansion_target: selectedExpansionTarget,
@@ -1530,7 +1561,11 @@ const PromptModal = ({
                   : session?.session?.session_id
                     ? session.session
                     : fallbackSession;
-            setGeneratedHelperPreview('nodeAiActionRequest', legacyPreview);
+            if (isLocalFallbackDraftSession(nextSession)) {
+                setGeneratedHelperPreview('nodeAiActionRequest', legacyPreview);
+            } else {
+                clearGeneratedHelperPreview('nodeAiActionRequest');
+            }
             setActiveAIActionPreview(undefined);
             setActiveAIDraftSession(nextSession);
             if (scope === 'branch' || scope === 'node') {
@@ -1645,6 +1680,7 @@ const PromptModal = ({
 
         try {
             const endpoint = flowId ? draftSessionEndpoint({ flowId }) : '';
+            const desiredOutputs = desiredOutputsForPrompt({ inferredShape, prompt: promptText });
             const requestPayload = buildAIDraftSessionRequestPayload({
                 role: effectiveRole,
                 action: effectiveAction,
@@ -1652,7 +1688,7 @@ const PromptModal = ({
                 prompt: promptText,
                 selectedModel,
                 selectedSourcePayload,
-                desiredOutputs: ['graph_draft', 'no_visual'].includes(inferredShape) ? [] : [inferredShape],
+                desiredOutputs,
                 workspaceBrief,
                 memoryContext,
                 changeIntent,
@@ -1663,6 +1699,7 @@ const PromptModal = ({
                 metadata: {
                     requested_visual: selectedVisual,
                     output_shape: inferredShape,
+                    requested_output_shapes: desiredOutputs,
                     expansion_mode: selectedExpansionMode,
                     expansion_target: selectedExpansionTarget,
                     evidence_mode: selectedEvidenceMode,
@@ -1720,6 +1757,7 @@ const PromptModal = ({
         } catch (error) {
             const detail = messageFromGenerationError(error);
             const endpoint = flowId ? draftSessionEndpoint({ flowId }) : '';
+            const desiredOutputs = desiredOutputsForPrompt({ inferredShape, prompt: promptText });
             updateGenerationProgress('Validating draft', 'The request returned an error; preparing the debug details.');
             const requestPayload = buildAIDraftSessionRequestPayload({
                 role: effectiveRole,
@@ -1728,7 +1766,7 @@ const PromptModal = ({
                 prompt: promptText,
                 selectedModel,
                 selectedSourcePayload,
-                desiredOutputs: ['graph_draft', 'no_visual'].includes(inferredShape) ? [] : [inferredShape],
+                desiredOutputs,
                 workspaceBrief,
                 memoryContext,
                 changeIntent,
@@ -1739,6 +1777,7 @@ const PromptModal = ({
                 metadata: {
                     requested_visual: selectedVisual,
                     output_shape: inferredShape,
+                    requested_output_shapes: desiredOutputs,
                     expansion_mode: selectedExpansionMode,
                     expansion_target: selectedExpansionTarget,
                     evidence_mode: selectedEvidenceMode,

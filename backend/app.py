@@ -197,6 +197,7 @@ from ai_helpers import (
     generate_ai_action_preview,
     generate_ai_draft_session_with_provider,
     generate_helper_preview,
+    generate_node_info_message_with_provider,
     generate_source_reconciliation_preview,
     generate_source_librarian_preview,
     normalize_ai_draft_scope,
@@ -3787,6 +3788,40 @@ def create_ai_draft_session(
         session=saved_session,
     )
     return saved_session
+
+
+@app.post("/api/workspaces/{flow_id}/ai/node-message")
+def create_node_info_message(
+    flow_id: str,
+    request: dict[str, Any] | None = None,
+):
+    request = request or {}
+    graph = get_workspace_graph_or_404(flow_id)
+    scope = normalize_ai_draft_scope(request.get("scope") if isinstance(request.get("scope"), dict) else {"type": "workspace"})
+    try:
+        return generate_node_info_message_with_provider(
+            graph,
+            prompt=_requested_prompt(request),
+            scope=scope,
+            role=request.get("role") or "Ask AI",
+            model_policy=_requested_model_policy(request),
+            model=_requested_model(request),
+            source_chunks=_requested_source_chunks(request),
+            message_history=request.get("message_history") if isinstance(request.get("message_history"), list) else [],
+            metadata=request.get("metadata") if isinstance(request.get("metadata"), dict) else {},
+        )
+    except MissingConfigurationError as exc:
+        raise configuration_http_error(exc) from exc
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "AI node message failed while calling the model provider.",
+                "error_type": exc.__class__.__name__,
+                "error": str(exc),
+            },
+        ) from exc
 
 
 @app.get("/api/workspaces/{flow_id}/ai/draft-sessions/{session_id}")

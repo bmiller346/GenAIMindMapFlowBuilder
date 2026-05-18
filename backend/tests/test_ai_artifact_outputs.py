@@ -525,6 +525,74 @@ def test_top_level_executive_summary_projection_becomes_review_artifact_without_
     assert draft_item["metadata"]["artifact_type"] == "executive_summary"
 
 
+def test_secondary_requested_executive_summary_projection_becomes_review_artifact():
+    revision = parse_ai_draft_revision_response(
+        {
+            "intent": "draft_knowledge_graph",
+            "output_shape": "knowledge_graph",
+            "summary": "Graph plus executive-ready output.",
+            "draft_nodes": [
+                {
+                    "id": "draft_goal",
+                    "title": "Governed AI assistant pilot",
+                    "summary": "Pilot the assistant with clear approval gates.",
+                    "node_type": "concept",
+                    "source_refs": [SOURCE_REF],
+                }
+            ],
+            "draft_edges": [],
+            "draft_annotations": [],
+            "draft_items": [],
+            "generated_artifacts": [],
+            "executive_summary": {
+                "title": "AI assistant pilot summary",
+                "summary": "Approve a governed pilot before broad deployment.",
+                "key_points": [
+                    {
+                        "id": "point-1",
+                        "title": "Pilot gate",
+                        "description": "Approval is required before deployment.",
+                        "source_refs": [SOURCE_REF],
+                        "assumptions": [],
+                        "metadata": {},
+                    }
+                ],
+                "recommended_actions": [],
+                "risks": [],
+                "source_backed_appendix": [],
+                "source_refs": [SOURCE_REF],
+                "assumptions": [],
+            },
+            "source_coverage": [],
+            "tasks": [],
+            "checklist": [],
+            "flow_chart": {},
+            "knowledge_graph": {},
+            "chart": {},
+            "outline": [],
+            "table": [],
+            "kanban": [],
+            "presentation_sections": [],
+            "review_annotations": [],
+            "assumptions": [],
+            "source_refs": [SOURCE_REF],
+        },
+        prompt="Create a knowledge graph and include an executive summary.",
+        scope={"type": "workspace"},
+        source_refs=[SOURCE_REF],
+        classification={
+            "output_shape": "knowledge_graph",
+            "intent": "draft_knowledge_graph",
+            "requested_artifact_types": ["knowledge_graph", "executive_summary"],
+        },
+    )
+
+    assert revision["output_shape"] == "knowledge_graph"
+    [artifact] = revision["generated_artifacts"]
+    assert artifact["artifact_type"] == "executive_summary"
+    assert artifact["data"]["summary"] == "Approve a governed pilot before broad deployment."
+
+
 def test_top_level_executive_output_projection_becomes_review_artifact_without_nodes():
     item = {
         "id": "finding-approval",

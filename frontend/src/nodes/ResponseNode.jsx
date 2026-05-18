@@ -89,9 +89,64 @@ const INLINE_AI_STAGE_ID = INLINE_AI_PROGRESS_STAGES.reduce(
 
 const INLINE_AI_COMPLETE_STATUSES = new Set(['success', 'fallback', 'completed']);
 const INLINE_AI_FAILED_STATUSES = new Set(['error', 'failed', 'blocked']);
+const INLINE_AI_ROUTE_OPTIONS = [
+    { id: 'auto', label: 'Auto', title: 'Let AI choose answer or draft review' },
+    { id: 'direct', label: 'Answer', title: 'Answer inline on this node' },
+    { id: 'draft', label: 'Draft', title: 'Open a reviewable AI draft session' }
+];
+const HIERARCHY_EDGE_TYPES = new Set([
+    '',
+    'contains',
+    'parent_child',
+    'parent-child',
+    'child',
+    'section',
+    'subtopic',
+    'branch',
+    'step',
+    'smoothstep'
+]);
+
+const edgeRelationshipType = (edge = {}) =>
+    String(
+        edge.relationship_type ||
+            edge.data?.relationship_type ||
+            edge.data?.relationshipType ||
+            edge.metadata?.relationship_type ||
+            edge.type ||
+            ''
+    )
+        .trim()
+        .toLowerCase();
+
+const isHierarchyEdge = (edge = {}) => HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge));
 
 const draftSessionEndpoint = ({ flowId }) =>
     `http://localhost:8000/api/workspaces/${flowId}/ai/draft-sessions`;
+
+const nodeMessageEndpoint = ({ flowId }) =>
+    `http://localhost:8000/api/workspaces/${flowId}/ai/node-message`;
+
+const INLINE_AI_QUESTION_STARTERS =
+    /^(what|why|how|when|where|who|which|can you explain|explain|describe|tell me|clarify|summarize|define)\b/i;
+const INLINE_AI_ACTION_TERMS =
+    /\b(add|append|build|change|convert|create|draft|expand|generate|make|merge|organize|propose|replace|rewrite|split|turn this into|update)\b/i;
+const INLINE_AI_INFO_TERMS =
+    /\b(what does|what is|why is|how does|explain|clarify|definition|meaning|summarize|summary|context|overview|tell me about)\b/i;
+
+const shouldAnswerInlineAiAsMessage = (prompt = '', actionId = '') => {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+    if (actionId && actionId !== 'custom_prompt' && actionId !== 'ask_follow_up') {
+        return false;
+    }
+    if (INLINE_AI_INFO_TERMS.test(text)) {
+        return !INLINE_AI_ACTION_TERMS.test(text);
+    }
+    return INLINE_AI_QUESTION_STARTERS.test(text) && !INLINE_AI_ACTION_TERMS.test(text);
+};
 
 const inferInlineAIIntent = (prompt, profiles) => {
     const normalizedPrompt = prompt.toLowerCase();
@@ -302,6 +357,8 @@ const ResponseNode = ({ id, data }) => {
     const [inlineAiPrompt, setInlineAiPrompt] = useState('');
     const [inlineAiStatus, setInlineAiStatus] = useState('');
     const [inlineAiProgress, setInlineAiProgress] = useState(null);
+    const [inlineAiMessages, setInlineAiMessages] = useState([]);
+    const [inlineAiRoute, setInlineAiRoute] = useState('auto');
     const [isInlineAiGenerating, setIsInlineAiGenerating] = useState(false);
     const [isTableExpanded, setIsTableExpanded] = useState(false);
     const [areDetailsExpanded, setAreDetailsExpanded] = useState(false);
@@ -341,7 +398,10 @@ const ResponseNode = ({ id, data }) => {
     const dueDate = workspaceData.dueDate || '';
     const assignee = workspaceData.ownerId || '';
     const directChildIds = useMemo(
-        () => edges.filter((edge) => edge.source === id).map((edge) => edge.target),
+        () =>
+            edges
+                .filter((edge) => edge.source === id && isHierarchyEdge(edge))
+                .map((edge) => edge.target),
         [edges, id]
     );
     const hasActiveInlineDraft =
@@ -425,7 +485,7 @@ const ResponseNode = ({ id, data }) => {
         const descendantIds = new Set();
         const collectDescendants = (currentParentId) => {
             edges
-                .filter((edge) => edge.source === currentParentId)
+                .filter((edge) => edge.source === currentParentId && isHierarchyEdge(edge))
                 .forEach((edge) => {
                     if (!descendantIds.has(edge.target)) {
                         descendantIds.add(edge.target);
@@ -1054,9 +1114,8 @@ const ResponseNode = ({ id, data }) => {
             intent: 'specialize_branch'
         });
 
-    const stageInlineAiDraft = async (event) => {
-        event.preventDefault();
-        const localPrompt = inlineAiPrompt.trim();
+    const submitInlineAiPrompt = async ({ prompt, route = inlineAiRoute }) => {
+        const localPrompt = String(prompt || '').trim();
 
         if (!localPrompt || isInlineAiGenerating) {
             if (!localPrompt) {
@@ -1169,6 +1228,93 @@ const ResponseNode = ({ id, data }) => {
             changeIntent,
             outputMode: 'inline_node_prompt'
         });
+        const shouldAnswerInline =
+            route === 'direct' ||
+            (route === 'auto' && shouldAnswerInlineAiAsMessage(localPrompt, selectedAction.id));
+
+        if (shouldAnswerInline) {
+            publishInlineAiProgress(
+                'Selecting source context',
+                'Reading this node so AI can answer directly.'
+            );
+            try {
+                publishInlineAiProgress(
+                    'Calling AI model',
+                    'Asking for a direct answer without preparing a draft.'
+                );
+                if (!flowId) {
+                    throw new Error('Save or reopen this workspace before asking AI for a direct node answer.');
+                }
+                const response = await axios.post(nodeMessageEndpoint({ flowId }), {
+                    prompt: localPrompt,
+                    scope: normalizedScope,
+                    role: role.label,
+                    selected_model: 'auto',
+                    model: null,
+                    model_policy: 'balanced',
+                    source_refs: sourceRefs,
+                    metadata: {
+                        preview_mode: 'inline_node_message',
+                        source_node_id: id,
+                        follow_up_memory: memoryContext,
+                        source_status: inlineSourceStatus
+                    }
+                });
+                const message = response?.data || {};
+                const answer = String(message.answer || '').trim();
+                setInlineAiMessages((current) =>
+                    [
+                        {
+                            id: message.message_id || requestId,
+                            prompt: localPrompt,
+                            answer: answer || 'I could not find a useful answer from this node yet.',
+                            model: message.selected_model || 'auto',
+                            draftPrompt: `Review this inline answer and suggest any node changes:\n\nQuestion: ${localPrompt}\n\nAnswer: ${
+                                answer || 'I could not find a useful answer from this node yet.'
+                            }`,
+                            createdAt: new Date().toISOString()
+                        },
+                        ...current
+                    ].slice(0, 3)
+                );
+                publishInlineAiProgress(
+                    'Building preview',
+                    'Answer delivered here. No draft session was opened.',
+                    { status: 'success' }
+                );
+                recordActivity({
+                    type: 'inline_ai_message_delivered',
+                    title: `${role.label}: direct node answer`,
+                    summary: localPrompt,
+                    node_ids: [id],
+                    metadata: {
+                        scope: 'node',
+                        role: role.label,
+                        action: selectedAction.id,
+                        model: message.selected_model || 'auto',
+                        preview_mode: 'inline_node_message'
+                    }
+                });
+                setInlineAiPrompt('');
+                setIsMenuOpen(false);
+                setIsSlashOpen(false);
+                return;
+            } catch (error) {
+                const detail =
+                    error.response?.data?.detail?.message ||
+                    error.response?.data?.detail ||
+                    error.message ||
+                    'Unable to answer from this node.';
+                publishInlineAiProgress(
+                    'Building preview',
+                    String(detail),
+                    { status: 'error' }
+                );
+                return;
+            } finally {
+                setIsInlineAiGenerating(false);
+            }
+        }
         publishInlineAiProgress(
             'Selecting source context',
             'Reading this node, child context, and attached source references.'
@@ -1391,6 +1537,23 @@ const ResponseNode = ({ id, data }) => {
         } finally {
             setIsInlineAiGenerating(false);
         }
+    };
+
+    const stageInlineAiDraft = (event) => {
+        event.preventDefault();
+        submitInlineAiPrompt({ prompt: inlineAiPrompt });
+    };
+
+    const reviewInlineAiMessageAsDraft = (message) => {
+        if (isInlineAiGenerating) {
+            return;
+        }
+        submitInlineAiPrompt({
+            prompt:
+                message.draftPrompt ||
+                `Review this inline answer and suggest any node changes:\n\nQuestion: ${message.prompt}\n\nAnswer: ${message.answer}`,
+            route: 'draft'
+        });
     };
 
     const deleteNode = () => {
@@ -1788,6 +1951,20 @@ const ResponseNode = ({ id, data }) => {
                     onSubmit={stageInlineAiDraft}
                 >
                     <FiMessageSquare aria-hidden="true" />
+                    <div className="node-inline-ai-route" aria-label="Inline AI route">
+                        {INLINE_AI_ROUTE_OPTIONS.map((option) => (
+                            <button
+                                key={option.id}
+                                type="button"
+                                className={inlineAiRoute === option.id ? 'active' : ''}
+                                aria-pressed={inlineAiRoute === option.id}
+                                title={option.title}
+                                onClick={() => setInlineAiRoute(option.id)}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
+                    </div>
                     <textarea
                         className="node-inline-ai-textarea"
                         value={inlineAiPrompt}
@@ -1820,7 +1997,13 @@ const ResponseNode = ({ id, data }) => {
                         type="submit"
                         className="node-inline-ai-send"
                         disabled={isInlineAiGenerating || !inlineAiPrompt.trim()}
-                        title="Generate a draft from this node"
+                        title={
+                            inlineAiRoute === 'direct'
+                                ? 'Answer inline from this node'
+                                : inlineAiRoute === 'draft'
+                                  ? 'Generate a draft review from this node'
+                                  : 'Ask AI from this node'
+                        }
                     >
                         <FiSend />
                     </button>
@@ -1871,6 +2054,31 @@ const ResponseNode = ({ id, data }) => {
                         </ol>
                     ) : null}
                 </form>
+                {inlineAiMessages.length ? (
+                    <div className="node-inline-ai-messages nodrag" aria-label="Inline AI answers">
+                        {inlineAiMessages.map((message) => (
+                            <article key={message.id} className="node-inline-ai-message">
+                                <div>
+                                    <FiMessageSquare aria-hidden="true" />
+                                    <strong>{message.prompt}</strong>
+                                </div>
+                                <p>{message.answer}</p>
+                                <div className="node-inline-ai-message-actions">
+                                    {message.model ? <small>{message.model}</small> : null}
+                                    <button
+                                        type="button"
+                                        onClick={() => reviewInlineAiMessageAsDraft(message)}
+                                        disabled={isInlineAiGenerating}
+                                        title="Follow up as a draft review"
+                                    >
+                                        <FiFileText />
+                                        Draft review
+                                    </button>
+                                </div>
+                            </article>
+                        ))}
+                    </div>
+                ) : null}
                 {isSlashOpen ? (
                     <div className="node-slash-menu nodrag">
                         {filteredSlashCommands.length ? (

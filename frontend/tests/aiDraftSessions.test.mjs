@@ -1189,7 +1189,10 @@ test('publishable draft artifacts normalize executive summary preview fields', (
                 artifact_type: 'executive_summary',
                 headline: 'Modernize source review',
                 dek: 'A concise leadership brief for operational rollout.',
+                summary: 'Source review needs a governed operating cadence.',
                 key_points: ['Reduce review drift', { text: 'Protect cited decisions' }],
+                recommended_actions: [{ title: 'Name a source owner' }],
+                risks: [{ title: 'Unowned reviews drift again' }],
                 sections: [
                     {
                         heading: 'Decision needed',
@@ -1213,7 +1216,11 @@ test('publishable draft artifacts normalize executive summary preview fields', (
     assert.equal(previews[0].label, 'Executive summary');
     assert.equal(previews[0].title, 'Modernize source review');
     assert.equal(previews[0].dek, 'A concise leadership brief for operational rollout.');
+    assert.equal(previews[0].summary, 'Source review needs a governed operating cadence.');
     assert.deepEqual(previews[0].keyPoints, ['Reduce review drift', 'Protect cited decisions']);
+    assert.deepEqual(previews[0].recommendedActions, ['Name a source owner']);
+    assert.deepEqual(previews[0].risks, ['Unowned reviews drift again']);
+    assert.deepEqual(previews[0].assumptions, ['Quarterly cadence needs owner confirmation.']);
     assert.equal(previews[0].sections[0].title, 'Decision needed');
     assert.equal(previews[0].audience, 'Leadership team');
     assert.equal(previews[0].publishTarget, 'SharePoint news');
@@ -1226,6 +1233,11 @@ test('publishable draft artifacts normalize executive summary preview fields', (
         previews[0].provenance.summary,
         'Uploaded sources | Citations required | 1 cited ref | 1 assumption'
     );
+    const markdown = draftArtifactPreviewToMarkdown(previews[0]);
+    assert.match(markdown, /## Summary\n\nSource review needs a governed operating cadence\./);
+    assert.match(markdown, /## Recommended actions\n- Name a source owner/);
+    assert.match(markdown, /## Risks\n- Unowned reviews drift again/);
+    assert.match(markdown, /## Assumptions\n- Quarterly cadence needs owner confirmation\./);
 });
 
 test('publishable draft artifacts normalize news article payloads and copy markdown', () => {

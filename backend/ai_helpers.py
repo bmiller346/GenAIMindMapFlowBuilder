@@ -837,6 +837,7 @@ def revise_ai_draft_session(
     draft_edges: list[dict[str, Any]] | None = None,
     draft_items: list[dict[str, Any]] | None = None,
     draft_annotations: list[dict[str, Any]] | None = None,
+    generated_artifacts: list[dict[str, Any]] | None = None,
     model: str = "",
     created_at: str | None = None,
 ) -> dict[str, Any]:
@@ -5042,6 +5043,124 @@ def generate_ai_draft_session_with_provider(
     return validate_ai_draft_session(session)
 
 
+def generate_node_info_message_with_provider(
+    graph: dict[str, Any],
+    *,
+    prompt: str,
+    scope: dict[str, Any] | None = None,
+    role: str = "Ask AI",
+    model_policy: str | None = None,
+    model: str | None = None,
+    source_chunks: list[dict[str, Any]] | None = None,
+    message_history: list[dict[str, Any]] | None = None,
+    metadata: dict[str, Any] | None = None,
+    provider: DocMapAIProvider | None = None,
+) -> dict[str, Any]:
+    normalized_scope = normalize_ai_draft_scope(scope)
+    scoped_graph = _scope_graph_for_ai_draft(graph, normalized_scope)
+    include_library_sources = bool(source_chunks)
+    source_context = build_ai_draft_source_context(
+        graph,
+        scope=normalized_scope,
+        source_chunks=source_chunks or [],
+        include_source_library=include_library_sources,
+    )
+    source_refs = source_context["source_refs"]
+    policy = normalize_model_policy(model_policy or "balanced", requested_model=model)
+    decision = choose_openai_model(
+        requested_model=model,
+        model_policy=policy,
+        task="answer node clarification question",
+        content=f"{prompt}\n{json.dumps(source_context)[:6000]}",
+        source_chunks=source_context["source_chunks"],
+        requires_source_grounding=bool(source_refs),
+    )
+    if provider is None:
+        api_key = get_setting("openai_api_key")
+        if not api_key:
+            raise MissingConfigurationError("Missing required environment variable(s): openai_api_key.")
+        provider = OpenAIResponsesDocMapProvider(api_key=api_key)
+    request = DocMapGenerationRequest(
+        model=decision.model,
+        instructions=(
+            f"You are TraceSpace's {role or 'Ask AI'} node assistant. "
+            "Answer the user's question directly using the selected node context. "
+            "Do not propose graph changes, create nodes, or ask the user to review a draft. "
+            "Use concise Markdown. If recent node Q&A is provided, use it only to resolve follow-up references. "
+            "If the answer needs action, name the likely next action only as a follow-up option."
+        ),
+        input=[
+            {
+                "role": "user",
+                "content": f"""
+User question:
+{prompt}
+
+Selected scope:
+{json.dumps(normalized_scope, indent=2)}
+
+Node context:
+{json.dumps(scoped_graph, indent=2)[:12000]}
+
+Recent node Q&A:
+{json.dumps(_normalize_node_message_history(message_history or []), indent=2)[:4000]}
+
+Allowed source_refs. Do not claim source support unless it appears here:
+{json.dumps(source_refs, indent=2)[:6000]}
+
+Source context:
+{json.dumps(source_context, indent=2)[:10000]}
+""".strip(),
+            }
+        ],
+        metadata={
+            "feature": "node_info_message",
+            "scope_type": normalized_scope.get("type", "node"),
+        },
+        store=False,
+    )
+    generated = provider.generate_json(request)
+    actual_model = generated.model or _model_from_raw_response(generated.raw_response) or request.model
+    return {
+        "message_id": f"node_info_{_utc_token()}",
+        "answer": str(generated.text or "").strip(),
+        "scope": normalized_scope,
+        "role": role,
+        "prompt": prompt,
+        "selected_model": actual_model,
+        "model_reason": decision.reason,
+        "provider": generated.provider,
+        "source_refs": source_refs,
+        "metadata": {
+            **(metadata or {}),
+            "model_policy": policy,
+            "actual_model": actual_model,
+            "usage": _normalize_generation_usage(generated.usage, model=actual_model, provider=generated.provider),
+            "history_messages": len(_normalize_node_message_history(message_history or [])),
+            "source_context": _source_context_metadata(source_context),
+            **_source_context_budget_metadata(source_context),
+        },
+    }
+
+
+def _normalize_node_message_history(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    for message in messages[:5]:
+        if not isinstance(message, dict):
+            continue
+        question = str(message.get("prompt") or message.get("question") or "").strip()
+        answer = str(message.get("answer") or message.get("content") or "").strip()
+        if not question and not answer:
+            continue
+        normalized.append(
+            {
+                "question": question[:500],
+                "answer": answer[:1200],
+            }
+        )
+    return normalized
+
+
 def revise_ai_draft_session_with_provider(
     session: dict[str, Any],
     graph: dict[str, Any],
@@ -5259,8 +5378,15 @@ def parse_ai_draft_revision_response(
     raw_generated_artifacts = parsed.get("generated_artifacts", [])
     if not isinstance(raw_generated_artifacts, list):
         raw_generated_artifacts = []
-    projection_artifact = _artifact_from_top_level_projection(parsed, shape)
-    if projection_artifact:
+    projection_artifacts = [
+        artifact
+        for artifact in (
+            _artifact_from_top_level_projection(parsed, projection_shape)
+            for projection_shape in _top_level_projection_artifact_shapes(shape, classification)
+        )
+        if artifact
+    ]
+    for projection_artifact in projection_artifacts:
         projection_type = projection_artifact["artifact_type"]
         projection_consumed = False
         merged_artifacts: list[dict[str, Any]] = []
@@ -5423,6 +5549,7 @@ Output requirements:
 - Silently self-review before returning JSON: if the draft only contains generic category labels, is missing obvious domain-standard subtopics, or has fewer than 3 useful child branches under major concepts, revise it internally before finalizing.
 - Use your model knowledge of the requested domain to choose depth and subtopics; do not rely on hardcoded examples or stop at framework headings.
 - Populate generated_artifacts for visual or review outputs such as knowledge_graph, flow_chart, chart, checklist, tasks, source_coverage, software_overlap_report, and implementation_handoff_package.
+- If Intent classification.requested_artifact_types lists multiple outputs, keep output_shape as the primary lens but also fill any relevant secondary publishable top-level projections, such as executive_summary or news_article, so they can be reviewed as generated artifacts after the graph is accepted.
 - For executive_summary outputs, write a leadership business case / decision memo, not a generic summary. Lead with the recommendation or decision requested, then explain why now, proposed scope, business value, governance/risk controls, investment/resource assumptions, success metrics, and the go/no-go decision gate. Distinguish existing capability from new investment. Use calm executive language such as controlled pilot, governed deployment, planning-level estimate, approval-gated, auditability, measured adoption, and operational leverage. Avoid hype and implementation minutiae.
 - Executive summaries should connect capabilities to measurable operational impact: time saved, rework reduced, standardization improved, support dependency lowered, scalability increased, risk reduced, or governance strengthened. When exact numbers are unavailable, use planning-level ranges only if the prompt/source supports them; otherwise identify the missing baseline metric as an assumption or review item.
 - For executive_summary and news_article outputs, fill the top-level executive_summary or news_article projection; it will be converted into a generated review artifact. Prefer these review artifacts over draft_nodes unless the user explicitly asks to change the graph. Keep unsourced claims, quotes, costs, timelines, ROI estimates, and inferred findings source_refs: [], include assumptions, and mark them needs_review.
@@ -5573,6 +5700,18 @@ def _artifact_from_top_level_projection(
         if isinstance(data.get("assumptions"), list)
         else [],
     }
+
+
+def _top_level_projection_artifact_shapes(shape: str, classification: dict[str, Any] | None) -> list[str]:
+    supported_shapes = {"software_overlap_report", "flow_chart", "executive_output", "executive_summary", "news_article"}
+    requested_shapes = []
+    if isinstance(classification, dict):
+        requested_shapes = classification.get("requested_artifact_types", [])
+    return [
+        candidate
+        for candidate in dict.fromkeys([shape, *requested_shapes])
+        if isinstance(candidate, str) and candidate in supported_shapes
+    ]
 
 
 def _items_from_model_output(

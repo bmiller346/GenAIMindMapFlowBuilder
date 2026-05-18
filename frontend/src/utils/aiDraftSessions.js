@@ -1124,6 +1124,19 @@ export const normalizePublishableDraftArtifacts = (revision = {}) => {
                 payload.highlights,
                 payload.recommendations
             );
+            const recommendedActions = collectTextList(
+                payload.recommended_actions,
+                payload.actions,
+                payload.next_actions,
+                payload.recommended_next_actions
+            );
+            const risks = collectTextList(payload.risks, payload.risk_items);
+            const sourceBackedAppendix = collectTextList(
+                payload.source_backed_appendix,
+                payload.source_appendix,
+                payload.appendix
+            );
+            const assumptions = artifactAssumptions(payload);
             return {
                 id: firstText(payload.id, payload.artifact_id, `draft-artifact-${index + 1}`),
                 artifactType: type,
@@ -1145,6 +1158,7 @@ export const normalizePublishableDraftArtifacts = (revision = {}) => {
                     payload.metadata?.publish_target,
                     payload.metadata?.channel
                 ),
+                summary: firstText(payload.summary, payload.abstract),
                 reviewState: firstText(
                     payload.review_state,
                     payload.review_status,
@@ -1152,6 +1166,10 @@ export const normalizePublishableDraftArtifacts = (revision = {}) => {
                     payload.metadata?.review_state,
                     'needs_review'
                 ),
+                recommendedActions,
+                risks,
+                sourceBackedAppendix,
+                assumptions,
                 provenance
             };
         })
@@ -1177,8 +1195,17 @@ export const draftArtifactPreviewToMarkdown = (artifact = {}) => {
     if (artifact.provenance?.summary) {
         lines.push('', `Evidence: ${artifact.provenance.summary}`);
     }
+    if (artifact.summary) {
+        lines.push('', '## Summary', '', artifact.summary);
+    }
     if (artifact.keyPoints?.length) {
         lines.push('', '## Key points', ...artifact.keyPoints.map((point) => `- ${point}`));
+    }
+    if (artifact.recommendedActions?.length) {
+        lines.push('', '## Recommended actions', ...artifact.recommendedActions.map((point) => `- ${point}`));
+    }
+    if (artifact.risks?.length) {
+        lines.push('', '## Risks', ...artifact.risks.map((point) => `- ${point}`));
     }
     if (artifact.body) {
         lines.push('', artifact.body);
@@ -1192,6 +1219,12 @@ export const draftArtifactPreviewToMarkdown = (artifact = {}) => {
             lines.push('', ...section.bullets.map((point) => `- ${point}`));
         }
     });
+    if (artifact.sourceBackedAppendix?.length) {
+        lines.push('', '## Source-backed appendix', ...artifact.sourceBackedAppendix.map((point) => `- ${point}`));
+    }
+    if (artifact.assumptions?.length) {
+        lines.push('', '## Assumptions', ...artifact.assumptions.map((point) => `- ${point}`));
+    }
     return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 };
 

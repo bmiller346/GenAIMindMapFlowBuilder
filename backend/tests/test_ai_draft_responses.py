@@ -11,6 +11,7 @@ from ai_helpers import (
     build_ai_draft_source_context,
     classify_ai_draft_intent,
     generate_ai_draft_session_with_provider,
+    generate_node_info_message_with_provider,
     revise_ai_draft_session_with_provider,
 )
 
@@ -77,6 +78,33 @@ def _general_mills_chunk():
         "text": "General Mills makes Cheerios cereal.",
         "source_ref": GENERAL_MILLS_REF,
     }
+
+
+def test_node_info_message_answers_without_draft_contract():
+    provider = FixtureDocMapAIProvider(
+        response_text="This node is a concise overview of breakfast cereals and its immediate context."
+    )
+
+    message = generate_node_info_message_with_provider(
+        _graph(),
+        prompt="What does this node mean?",
+        scope={"type": "node", "node_id": "root"},
+        message_history=[
+            {
+                "prompt": "Summarize this node.",
+                "answer": "It frames breakfast cereal categories.",
+            }
+        ],
+        provider=provider,
+    )
+
+    assert message["answer"].startswith("This node is a concise overview")
+    assert message["scope"] == {"type": "node", "node_id": "root"}
+    assert message["selected_model"]
+    assert message["metadata"]["history_messages"] == 1
+    assert provider.requests[0].response_schema is None
+    assert provider.requests[0].metadata["feature"] == "node_info_message"
+    assert "Recent node Q&A" in provider.requests[0].input[0]["content"]
 
 
 def _cereal_response(request):
