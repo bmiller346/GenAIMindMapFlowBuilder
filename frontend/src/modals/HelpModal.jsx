@@ -9,8 +9,9 @@ const HELP_ARTICLES = [
         summary: 'Ask in plain language. TraceSpace drafts first, then you accept what belongs in the graph.',
         sections: [
             'Use the question box for normal requests like “turn this commissioning plan into tasks” or “map the RFI workflow.”',
-            'Visual Auto lets AI choose a useful shape such as checklist, table, flowchart, outline, or graph draft.',
-            'Accepted drafts are the only things that change the workspace graph.'
+            'Visual Auto lets AI choose a useful shape such as checklist, table, flowchart, outline, knowledge graph, Kanban board, executive output, or news article.',
+            'Use a specific visual when you know the target view. Ask AI can supplement missing process steps, relationship edges, task fields, table columns, or executive findings so a sparse workspace can support that view.',
+            'Accepted drafts are the only things that change the workspace graph. Unsourced or inferred items stay marked for review.'
         ]
     },
     {
@@ -18,9 +19,19 @@ const HELP_ARTICLES = [
         title: 'Visual Auto',
         summary: 'Auto is a routing mode, not a mind-map default.',
         sections: [
-            'Auto reads the intent first. “How do I...” tends to become a checklist; comparisons tend to become tables.',
+            'Auto reads the intent first. “How do I...” tends to become a checklist or flowchart; comparisons tend to become tables; dependencies and ownership tend to become Connections.',
             'Pick a visual manually when you already know the output you want.',
             'Use No visual for an answer or review note that should not create visual structure.'
+        ]
+    },
+    {
+        id: 'workspace-model',
+        title: 'Workspace Model',
+        summary: 'Views are different work surfaces over the same accepted model.',
+        sections: [
+            'TraceSpace stores accepted work as typed nodes, relationship edges, review states, source references, confidence, rationale, assumptions, and export metadata.',
+            'Mind maps, Connections, flowcharts, Kanban, tables, executive outputs, and publishable articles read from that model instead of becoming unrelated copies.',
+            'When a view looks empty or thin, ask AI to supplement the missing layer rather than starting over. For example: add relationship edges for Connections, process steps for Flowchart, task metadata for Kanban, or findings and risks for Executive view.'
         ]
     },
     {
@@ -28,9 +39,10 @@ const HELP_ARTICLES = [
         title: 'Views And Filters',
         summary: 'Views change the canvas lens. Filters narrow what is visible.',
         sections: [
-            'TraceSpace Map, Tasks, Table, Outline, and Connections are views over the accepted workspace.',
+            'TraceSpace Map, Connections, Flowchart, Kanban, Table, Tasks, Outline, and Executive are views over the accepted workspace.',
             'Node filters like Needs review or Missing source hide nodes on the canvas until cleared.',
-            'Create / Review opens draft outputs that still need accept or reject.'
+            'View actions can ask AI to create or prepare the structure that a view needs. Create / Review opens draft outputs that still need accept or reject.',
+            'Reflow and direct dragging are map-oriented behaviors. Structured views use their own layouts and save metadata through accepted nodes and edges.'
         ]
     },
     {
@@ -62,8 +74,29 @@ const HELP_ARTICLES = [
         summary: 'Review semantic relationships without treating the canvas layout as the only source of truth.',
         sections: [
             'Connections shows accepted relationship edges such as risks, dependencies, ownership, approvals, metrics, conflicts, and supporting links.',
-            'The canvas stays useful for exploration: select a node or edge to focus the related branch and dim unrelated context.',
+            'Select two nodes in the knowledge graph view and use Connect to create a typed relationship edge. Then open the edge inspector to set relationship type, confidence, rationale, source signal, and review state.',
+            'The canvas stays useful for exploration: select a node or edge to focus related context and dim unrelated context.',
             'Use Copy review or Download review to create a Markdown relationship packet grouped by relationship family, confidence, review state, source signal, rationale, and source references.'
+        ]
+    },
+    {
+        id: 'flowcharts',
+        title: 'Flowcharts',
+        summary: 'Flowchart view is a structured process surface, not a loose drawing canvas.',
+        sections: [
+            'Flowcharts use typed nodes such as process, decision, and terminator, plus connector metadata such as branch label, condition, and exception path.',
+            'Use the flowchart view actions to add process steps, decisions, and endings. Use the edge inspector to label paths like Approved, Rejected, Retry, or Escalate.',
+            'If a workspace was created as a map or knowledge graph, ask AI to supplement it with process steps and decision paths before relying on the flowchart.'
+        ]
+    },
+    {
+        id: 'structured-views',
+        title: 'Kanban, Table, And Executive',
+        summary: 'Structured views need the right model fields before they feel complete.',
+        sections: [
+            'Kanban works best when accepted nodes include task status, owner cues, priority, due dates, blockers, and dependencies. Use Prepare Kanban when the board is empty or too generic.',
+            'Table view works best when nodes have consistent fields, source-backed rows, and review flags. Use Create table to supplement columns and row candidates.',
+            'Executive view works best when the workspace has key findings, recommended actions, risks, required decisions, confidence, and source-backed appendix entries.'
         ]
     },
     {
@@ -104,6 +137,16 @@ const HELP_ARTICLES = [
             'Use handoff outputs when the graph is ready for monday, Miro, stakeholder review, or implementation planning.',
             'Handoff packages should include scope, ready items, blocked items, assumptions, open SME questions, and source references.',
             'External tools are projections. TraceSpace remains the canonical graph and review record.'
+        ]
+    },
+    {
+        id: 'publishable-outputs',
+        title: 'Publishable Outputs',
+        summary: 'Executive summaries and news articles keep evidence metadata while using audience-friendly language.',
+        sections: [
+            'Executive Summary is a leadership-oriented output with summary, key points, recommended actions, risks, required decisions, source-backed appendix, assumptions, and review state.',
+            'News Article is meant for a broader audience. It should stay readable and less technical, while still carrying headline, dek, lede, sections, fact-check notes, source notes, source references, and assumptions.',
+            'For news-style work, source-backed facts can be published with more confidence; unsupported claims should remain in assumptions or needs-review notes until verified.'
         ]
     },
     {
