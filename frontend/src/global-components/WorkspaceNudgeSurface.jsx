@@ -196,9 +196,11 @@ const WorkspaceNudgeSurface = ({
                             <button
                                 type="button"
                                 className="workspace-nudge-settings"
+                                title="Open guidance settings"
+                                aria-label="Open guidance settings"
                                 onClick={() => pushNode(SettingsModal)}
                             >
-                                Tune
+                                Settings
                             </button>
                             <button
                                 type="button"

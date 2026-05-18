@@ -100,6 +100,9 @@ const nodeConfidenceIssue = (node) => {
 const hasStructuredRows = (projection) =>
     projection.nodes.some((node) => Array.isArray(node.table_rows) && node.table_rows.length > 0);
 
+const contentNodes = (projection) =>
+    projection.nodes.filter((node) => node.react_flow_type !== 'dataSource');
+
 const hasRenderableChart = (projection) =>
     projection.nodes.some((node) => {
         const graph = node.graph;
@@ -180,7 +183,7 @@ const readiness = ({
 });
 
 export const getProjectionReadiness = (projection, workspaceBrief = {}, taskMetadata = {}) => {
-    const nodeCount = projection.nodes.length;
+    const nodeCount = contentNodes(projection).length;
     const tasks = taskNodes(projection);
     const metadataByNodeId = taskMetadataLookup(taskMetadata);
     const missingTaskMetadata = tasks.flatMap((node) =>
@@ -342,6 +345,7 @@ const createNudge = ({
 });
 
 const sourceCoverageNudges = ({ projection, sourceProjection, validationIssues = [] }) => {
+    const hasContentNodes = contentNodes(projection).length > 0;
     const validationMissingSourceNodeIds = new Set(
         validationIssues
             .filter((issue) =>
@@ -420,24 +424,26 @@ const sourceCoverageNudges = ({ projection, sourceProjection, validationIssues =
         );
     }
 
-    uncitedSources.forEach((source) => {
-        nudges.push(
-            createNudge({
-                id: `source-coverage-uncited-source-${stableKey(source.id)}`,
-                category: NUDGE_CATEGORIES.SOURCE_COVERAGE,
-                severity: 'low',
-                title: 'Source is not cited yet',
-                detail: `${source.title} is available but not connected to any graph node.`,
-                actionLabel: 'Review source coverage',
-                action: {
-                    type: 'open_view',
-                    view: 'sources',
-                    source_id: source.id
-                },
-                targetSourceIds: [source.id]
-            })
-        );
-    });
+    if (hasContentNodes) {
+        uncitedSources.forEach((source) => {
+            nudges.push(
+                createNudge({
+                    id: `source-coverage-uncited-source-${stableKey(source.id)}`,
+                    category: NUDGE_CATEGORIES.SOURCE_COVERAGE,
+                    severity: 'low',
+                    title: 'Source is not cited yet',
+                    detail: `${source.title} is available but not connected to any graph node.`,
+                    actionLabel: 'Review source coverage',
+                    action: {
+                        type: 'open_view',
+                        view: 'sources',
+                        source_id: source.id
+                    },
+                    targetSourceIds: [source.id]
+                })
+            );
+        });
+    }
 
     return nudges;
 };
@@ -513,8 +519,12 @@ const readinessKeyForOutput = (output) =>
         knowledge_connections: 'knowledge_graph'
     })[output] || output;
 
-const readinessNudges = (readinessByView, workspaceBrief = {}) =>
-    (workspaceBrief.desired_outputs || [])
+const readinessNudges = (readinessByView, workspaceBrief = {}, projection) => {
+    if (contentNodes(projection).length === 0) {
+        return [];
+    }
+
+    return (workspaceBrief.desired_outputs || [])
         .map((output) => readinessByView[readinessKeyForOutput(output)])
         .filter((result) => result && !result.ready)
         .map((result) =>
@@ -538,6 +548,7 @@ const readinessNudges = (readinessByView, workspaceBrief = {}) =>
                     }
             })
         );
+};
 
 const reviewQualityNudges = (projection) => {
     const reviewNodes = projection.nodes.filter(
@@ -639,7 +650,7 @@ export const buildWorkspaceNudgeProjection = ({
         ...taskReadinessNudges(projection, taskMetadata),
         ...connectionNudges(projection),
         ...reviewQualityNudges(projection),
-        ...readinessNudges(readinessByView, workspaceBrief),
+        ...readinessNudges(readinessByView, workspaceBrief, projection),
         ...integrationNudges({ integrationMetadata, projection })
     ];
 

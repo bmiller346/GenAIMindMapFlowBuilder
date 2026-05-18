@@ -21,6 +21,34 @@ const node = (id, data = {}) => ({
     }
 });
 
+const dataSourceNode = (id, data = {}) => ({
+    id,
+    type: 'dataSource',
+    data: {
+        label: id,
+        ...data
+    }
+});
+
+test('empty workspaces do not show enrichment or citation nudges before content exists', () => {
+    const empty = buildWorkspaceNudgeProjection({
+        nodes: [],
+        edges: [],
+        sourceLibrary: [{ id: 'source-1', title: 'Source one' }],
+        workspaceBrief: { desired_outputs: ['mind_map', 'knowledge_graph'] }
+    });
+    const sourceOnly = buildWorkspaceNextSteps({
+        nodes: [dataSourceNode('source-node-1')],
+        edges: [],
+        sourceLibrary: [{ id: 'source-1', title: 'Source one' }],
+        workspaceBrief: { desired_outputs: ['mind_map'] }
+    });
+
+    assert.equal(empty.nudges.length, 0);
+    assert.equal(empty.readiness.mind_map.ready, false);
+    assert.equal(sourceOnly.steps.length, 0);
+});
+
 test('nudge projection reports missing source coverage as an actionable nudge', () => {
     const result = buildWorkspaceNudgeProjection({
         nodes: [node('claim-1', { node_type: 'requirement' })],

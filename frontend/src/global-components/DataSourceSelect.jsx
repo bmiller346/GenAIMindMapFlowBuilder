@@ -27,10 +27,10 @@ const WORKSPACE_SOURCES = [
 
 const DOCUMENT_SOURCES = [
 	{ img: DRAWERSvg, content: "Review folder / file set", name: "source_set", mode: "Multi-source", detail: "Batch upload PDF, DOCX, Markdown, and TXT with paths preserved." },
-	{ img: PDFSvg, content: "Upload PDF", name: "pdf", mode: "Single source", detail: "One file at a time with cited document sections." },
-	{ img: DOCXSvg, content: "Upload DOCX", name: "docx", mode: "Single source", detail: "One file at a time with cited document sections." },
-	{ img: MDSvg, content: "Upload Markdown", name: "md", mode: "Single source", detail: "One file at a time with cited document sections." },
-	{ img: TXTSvg, content: "Upload TXT", name: "txt", mode: "Single source", detail: "One file at a time with cited document sections." },
+	{ img: PDFSvg, content: "Upload one PDF", name: "pdf", mode: "Single source", detail: "For multiple PDFs, use source set above." },
+	{ img: DOCXSvg, content: "Upload one DOCX", name: "docx", mode: "Single source", detail: "For multiple DOCX files, use source set above." },
+	{ img: MDSvg, content: "Upload one Markdown", name: "md", mode: "Single source", detail: "For multiple Markdown files, use source set above." },
+	{ img: TXTSvg, content: "Upload one TXT", name: "txt", mode: "Single source", detail: "For multiple TXT files, use source set above." },
 	{ img: PPTXSvg, content: "Upload PPTX", name: "pptx", mode: "AI draft", detail: "Single upload; creates a reviewable draft, not section citations." },
 	{ img: HTMLSvg, content: "Upload HTML", name: "html", mode: "AI draft", detail: "Single upload; creates a reviewable draft, not section citations." },
 ];
