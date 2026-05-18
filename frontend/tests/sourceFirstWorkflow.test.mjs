@@ -11,6 +11,7 @@ test('source-first presets declare accept intent for draft diff preview', () => 
     assert.equal(intentByPreset.source_to_mind_map, 'supplement');
     assert.equal(intentByPreset.source_to_table, 'supplement');
     assert.equal(intentByPreset.source_entities_connections, 'supplement');
+    assert.equal(intentByPreset.source_aec_sow_deliverables, 'supplement');
     assert.equal(intentByPreset.source_to_tasks, 'supplement');
     assert.equal(intentByPreset.source_summary, 'compare');
     assert.equal(intentByPreset.source_compare_workspace, 'compare');

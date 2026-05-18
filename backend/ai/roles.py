@@ -13,7 +13,29 @@ SOURCE_INTAKE_ROLE_LABELS = {
     "document-structure-extractor": "Document Structure Extractor",
     "source-librarian": "Source Librarian",
     "strategic-advisor": "Strategic Advisor",
+    "aec-sow-deliverables": "AEC SOW Deliverables Planner",
     "custom": "Custom Intake Prompt",
+}
+
+SOURCE_INTAKE_ROLE_GUIDANCE = {
+    "document-structure-extractor": (
+        "Preserve headings, sections, tables, lists, hierarchy, definitions, and source boundaries."
+    ),
+    "source-librarian": (
+        "Prioritize source refs, citation coverage, quote snippets, evidence gaps, and traceability."
+    ),
+    "strategic-advisor": (
+        "Extract decisions, risks, tradeoffs, recommendations, owners, and action-oriented themes."
+    ),
+    "aec-sow-deliverables": (
+        "Review AEC scope and deliverable material for disciplines, roles, phase or timeline references, "
+        "predecessor/successor dependencies, missing owner decisions, unclear assumptions, risk chains, "
+        "coordination gaps, deliverable acceptance criteria, and handoff readiness for Miro, monday.com, "
+        "or implementation planning."
+    ),
+    "custom": (
+        "Use the user intake brief as the primary lens while preserving source-grounding and review state."
+    ),
 }
 
 
@@ -72,6 +94,37 @@ PROMPT_PROFILE_REGISTRY: dict[str, dict[str, Any]] = {
         ],
         "system_instructions": "Create a source-aware roadmap that separates facts, assumptions, decisions, risks, dependencies, milestones, and owner placeholders.",
         "default_output_shape": "outline",
+        "source_strictness": "prefer_source_refs",
+        "default_review_status": "needs_review_when_unsourced",
+    },
+    "aec_sow_deliverables": {
+        "role_id": "aec_sow_deliverables",
+        "label": "AEC SOW Deliverables Planner",
+        "group": "TraceSpace AEC",
+        "description": (
+            "Turns AEC scopes of work, proposals, standards, and meeting context into disciplines, "
+            "deliverables, dependencies, timelines, risks, missing information, owner decisions, and "
+            "handoff-ready work packages."
+        ),
+        "supported_scopes": ["node", "branch", "workspace", "source"],
+        "supported_actions": [
+            "expand_this_node",
+            "generate_child_nodes",
+            "create_team_roadmap",
+            "generate_tasks",
+            "generate_checklist",
+            "find_gaps",
+            "create_sme_questions",
+            "custom_prompt",
+        ],
+        "system_instructions": (
+            "Analyze AEC scope, SOW, proposal, BIM/VDC, design, construction, and delivery context. "
+            "Separate source-backed facts from assumptions. Organize work by discipline, deliverable, "
+            "phase, dependency, milestone, risk, missing information, owner decision, and downstream "
+            "Miro or monday.com handoff readiness. Mark unresolved assumptions and owner placeholders "
+            "as needs_review; do not invent citations, dates, costs, owners, or commitments."
+        ),
+        "default_output_shape": "knowledge_graph",
         "source_strictness": "prefer_source_refs",
         "default_review_status": "needs_review_when_unsourced",
     },
@@ -357,11 +410,24 @@ def resolve_source_intake_role_label(intake_role: str | None = None) -> str:
     raise UnknownSourceIntakeRole(role)
 
 
+def resolve_source_intake_role_guidance(intake_role: str | None = None) -> str:
+    role = clean_source_intake_value(intake_role, 160)
+    if not role:
+        return ""
+    if role in SOURCE_INTAKE_ROLE_GUIDANCE:
+        return SOURCE_INTAKE_ROLE_GUIDANCE[role]
+    for key, label in SOURCE_INTAKE_ROLE_LABELS.items():
+        if label == role:
+            return SOURCE_INTAKE_ROLE_GUIDANCE.get(key, "")
+    raise UnknownSourceIntakeRole(role)
+
+
 def build_source_intake_instruction(
     intake_role: str | None = None,
     intake_prompt: str | None = None,
 ) -> str:
     role = resolve_source_intake_role_label(intake_role)
+    guidance = resolve_source_intake_role_guidance(intake_role) if role else ""
     prompt = clean_source_intake_value(intake_prompt)
     if not role and not prompt:
         return ""
@@ -372,6 +438,8 @@ def build_source_intake_instruction(
     ]
     if role:
         lines.append(f"Selected intake role: {role}.")
+    if guidance:
+        lines.append(f"Role guidance: {guidance}")
     if prompt:
         lines.append(f"User intake brief: {prompt}.")
     return "\n\n" + "\n".join(lines)

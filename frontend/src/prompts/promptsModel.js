@@ -118,6 +118,17 @@ export const sourceFirstActionPresets = [
         availability: 'always'
     },
     {
+        id: 'source_aec_sow_deliverables',
+        label: 'AEC SOW plan',
+        description: 'Extract disciplines, deliverables, dependencies, risks, decisions, and handoff tasks.',
+        prompt: 'Extract an AEC SOW delivery plan from the selected source sections. Include disciplines, deliverables, phases or milestones, dependencies, timeline cues, risks, missing information, owner decisions, only supplied source references, assumptions, and Miro or monday.com handoff notes.',
+        visual: 'knowledge_graph',
+        roleId: 'aec-sow-deliverables',
+        actionId: 'custom_prompt',
+        changeIntent: 'supplement',
+        availability: 'always'
+    },
+    {
         id: 'source_to_tasks',
         label: 'Create tasks',
         description: 'Turn requirements and decisions into reviewable work items.',
@@ -235,6 +246,16 @@ export const starterTransformations = [
         roleId: 'integration-readiness-reviewer',
         actionId: 'custom_prompt',
         scopes: ['branch', 'workspace']
+    },
+    {
+        id: 'aec_sow_to_delivery_graph',
+        label: 'AEC SOW plan',
+        description: 'Map scope into disciplines, deliverables, dependencies, risks, and handoff tasks.',
+        prompt: 'Create an AEC SOW delivery plan with disciplines, deliverables, phase or timeline cues, dependencies, risks, missing information, owner decisions, source references, assumptions, and Miro or monday.com handoff notes.',
+        visual: 'knowledge_graph',
+        roleId: 'aec-sow-deliverables',
+        actionId: 'custom_prompt',
+        scopes: ['branch', 'workspace', 'source']
     },
     {
         id: 'process_to_flowchart',
@@ -466,6 +487,24 @@ export const TraceSpacePromptProfiles = [
             'custom_prompt'
         ],
         preferredActions: ['create_team_roadmap', 'generate_tasks']
+    },
+    {
+        id: 'aec-sow-deliverables',
+        label: 'AEC SOW Deliverables Planner',
+        group: 'TraceSpace AEC',
+        description: 'Turn AEC scopes, proposals, standards, and meeting context into delivery maps, risks, decisions, and handoff-ready work.',
+        scopes: ['node', 'branch', 'workspace', 'source'],
+        supportedActions: [
+            'expand_this_node',
+            'generate_child_nodes',
+            'create_team_roadmap',
+            'generate_tasks',
+            'generate_checklist',
+            'find_gaps',
+            'create_sme_questions',
+            'custom_prompt'
+        ],
+        preferredActions: ['custom_prompt', 'generate_tasks', 'find_gaps', 'create_team_roadmap']
     },
     {
         id: 'workflow-mapper',

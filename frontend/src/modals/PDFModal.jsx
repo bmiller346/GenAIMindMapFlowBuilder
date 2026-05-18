@@ -98,6 +98,14 @@ const PDF_INTAKE_PROFILES = [
         avoidWhen: 'You need faithful section structure or citation coverage first.'
     },
     {
+        id: 'aec-sow-deliverables',
+        label: 'AEC SOW Deliverables Planner',
+        description: 'Extract disciplines, deliverables, dependencies, timeline cues, risks, missing info, and owner decisions.',
+        bestFor: 'AEC SOWs, proposals, BIM/VDC plans, deliverable PDFs, project timelines, and handoff packages',
+        changes: 'Builds a delivery-oriented structure with handoff-ready tasks and review flags for monday.com or Miro.',
+        avoidWhen: 'You only need faithful document hierarchy or generic citation coverage.'
+    },
+    {
         id: 'custom',
         label: 'Custom Intake Prompt',
         description: 'Use your optional brief as the intake instructions for this PDF.',
@@ -124,6 +132,9 @@ const recommendPdfIntakeRole = ({ isAskAIContextMode = false, fileName = '', bri
     const text = `${fileName} ${brief}`.toLowerCase();
     if (brief.trim()) {
         return 'custom';
+    }
+    if (/\b(aec|architecture|engineering|construction|sow|scope of work|proposal|deliverables?|bim|vdc|revit|discipline|disciplines|coordination|submittal|rfi|milestone|phase|timeline|dependencies|dependency|owner decision|miro|monday)\b/.test(text)) {
+        return 'aec-sow-deliverables';
     }
     if (
         isAskAIContextMode ||

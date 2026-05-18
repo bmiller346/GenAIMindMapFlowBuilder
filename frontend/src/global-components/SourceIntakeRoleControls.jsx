@@ -34,6 +34,14 @@ export const SOURCE_INTAKE_PROFILES = [
         avoidWhen: 'You need faithful section structure or citation coverage first.'
     },
     {
+        id: 'aec-sow-deliverables',
+        label: 'AEC SOW Deliverables Planner',
+        description: 'Map AEC scopes into disciplines, deliverables, dependencies, risks, and owner decisions.',
+        bestFor: 'SOWs, proposals, BIM/VDC plans, deliverable lists, project handoffs, and AEC timelines',
+        changes: 'Builds a delivery-oriented structure with missing information, review flags, and Miro or monday.com handoff cues.',
+        avoidWhen: 'You only need faithful section structure or generic citation coverage.'
+    },
+    {
         id: 'custom',
         label: 'Custom Intake Prompt',
         description: 'Use your optional brief as the intake instructions.',
@@ -44,12 +52,16 @@ export const SOURCE_INTAKE_PROFILES = [
 ];
 
 const keywordMatches = (text, pattern) => pattern.test(text);
+const AEC_SOW_PATTERN = /\b(aec|architecture|engineering|construction|sow|scope of work|proposal|deliverables?|bim|vdc|revit|discipline|disciplines|coordination|submittal|rfi|milestone|phase|timeline|dependencies|dependency|owner decision|miro|monday)\b/;
 
 export const recommendSourceIntakeRole = ({ fileName = '', brief = '', sourceType = '' } = {}) => {
     const text = `${sourceType} ${fileName} ${brief}`.toLowerCase();
 
     if (brief.trim()) {
         return 'custom';
+    }
+    if (keywordMatches(text, AEC_SOW_PATTERN)) {
+        return 'aec-sow-deliverables';
     }
     if (
         keywordMatches(

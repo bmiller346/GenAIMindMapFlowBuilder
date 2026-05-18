@@ -1125,7 +1125,7 @@ test('follow-up intent preserves supplement and compare prompts over update word
 test('starter transformation catalog includes operational prompt defaults', () => {
     const ids = new Set(starterTransformations.map((starter) => starter.id));
 
-    assert.equal(starterTransformations.length, 24);
+    assert.equal(starterTransformations.length, 25);
     assert.ok(ids.has('sop_to_checklist'));
     assert.ok(ids.has('pdf_to_training_outline'));
     assert.ok(ids.has('requirements_to_tasks'));
@@ -1134,6 +1134,7 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.ok(ids.has('complex_issue_team_roadmap'));
     assert.ok(ids.has('sme_review_packet'));
     assert.ok(ids.has('implementation_handoff_package'));
+    assert.ok(ids.has('aec_sow_to_delivery_graph'));
     assert.ok(ids.has('executive_summary'));
     assert.ok(ids.has('news_article'));
     assert.ok(ids.has('reconcile_source_with_workspace'));
@@ -1179,6 +1180,14 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.equal(newsArticle.visual, 'news_article');
     assert.equal(newsArticle.roleId, 'research-assistant');
     assert.equal(newsArticle.actionId, 'custom_prompt');
+
+    const aecSowPlan = starterTransformations.find(
+        (starter) => starter.id === 'aec_sow_to_delivery_graph'
+    );
+    assert.equal(aecSowPlan.visual, 'knowledge_graph');
+    assert.equal(aecSowPlan.roleId, 'aec-sow-deliverables');
+    assert.match(aecSowPlan.prompt, /disciplines/i);
+    assert.match(aecSowPlan.prompt, /monday\.com/i);
 });
 
 test('publishable draft artifacts normalize executive summary preview fields', () => {
@@ -1284,8 +1293,20 @@ test('intent prompt profiles include standards review and roadmap actions', () =
     const profiles = getPromptProfilesForScope('workspace');
     const standardsProfile = profiles.find((profile) => profile.id === 'standards-completeness-reviewer');
     const roadmapProfile = profiles.find((profile) => profile.id === 'roadmap-planner');
+    const aecProfile = profiles.find((profile) => profile.id === 'aec-sow-deliverables');
 
     assert.equal(standardsProfile.group, 'TraceSpace');
+    assert.equal(aecProfile.group, 'TraceSpace AEC');
+    assert.deepEqual(
+        getActionsForProfileAndScope(aecProfile, 'workspace').map((action) => action.id),
+        [
+            'create_team_roadmap',
+            'create_sme_questions',
+            'generate_tasks',
+            'generate_checklist',
+            'custom_prompt'
+        ]
+    );
     assert.deepEqual(
         getActionsForProfileAndScope(standardsProfile, 'workspace').map((action) => action.id),
         [
@@ -1315,6 +1336,7 @@ test('source-first action presets cover source-only and graph-aware routing', ()
         'source_to_tasks'
     ]);
     assert.ok(sourceFirstActionPresets.some((preset) => preset.id === 'source_entities_connections'));
+    assert.ok(sourceFirstActionPresets.some((preset) => preset.id === 'source_aec_sow_deliverables'));
     assert.ok(sourceFirstActionPresets.some((preset) => preset.id === 'source_summary'));
     assert.deepEqual(graphIds, [
         'source_compare_workspace',

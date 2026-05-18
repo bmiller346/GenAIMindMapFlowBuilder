@@ -43,6 +43,36 @@ def test_docx_intake_accepts_explicit_strategic_advisor():
     assert "Do not let role guidance override source-grounding" in instruction
 
 
+def test_source_intake_accepts_aec_sow_deliverables_role_and_guidance():
+    assert app.resolve_source_intake_role("aec-sow-deliverables") == "AEC SOW Deliverables Planner"
+    assert app.resolve_source_intake_role("AEC SOW Deliverables Planner") == "AEC SOW Deliverables Planner"
+
+    instruction = app.build_source_intake_instruction(
+        "aec-sow-deliverables",
+        "Watch discipline handoffs before monday export.",
+    )
+
+    assert "Selected intake role: AEC SOW Deliverables Planner." in instruction
+    assert "Role guidance:" in instruction
+    assert "disciplines" in instruction
+    assert "dependencies" in instruction
+    assert "Miro" in instruction
+    assert "monday.com" in instruction
+    assert "User intake brief: Watch discipline handoffs before monday export." in instruction
+
+
+def test_prompt_profiles_include_aec_sow_deliverables_planner():
+    profiles = {profile["role_id"]: profile for profile in app.list_prompt_profiles()}
+
+    profile = profiles["aec_sow_deliverables"]
+    assert profile["label"] == "AEC SOW Deliverables Planner"
+    assert profile["default_output_shape"] == "knowledge_graph"
+    assert "source" in profile["supported_scopes"]
+    assert "generate_tasks" in profile["supported_actions"]
+    assert "custom_prompt" in profile["supported_actions"]
+    assert "Miro or monday.com handoff readiness" in profile["system_instructions"]
+
+
 def test_docx_intake_rejects_unknown_role():
     with pytest.raises(HTTPException) as exc_info:
         app.resolve_source_intake_role("mystery-persona")
