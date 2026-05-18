@@ -146,7 +146,8 @@ const HELP_ARTICLES = [
         sections: [
             'Executive Summary is a leadership-oriented output with summary, key points, recommended actions, risks, required decisions, source-backed appendix, assumptions, and review state.',
             'News Article is meant for a broader audience. It should stay readable and less technical, while still carrying headline, dek, lede, sections, fact-check notes, source notes, source references, and assumptions.',
-            'For news-style work, source-backed facts can be published with more confidence; unsupported claims should remain in assumptions or needs-review notes until verified.'
+            'For news-style work, source-backed facts can be published with more confidence; unsupported claims should remain in assumptions or needs-review notes until verified.',
+            'Publishable exports prefer accepted AI artifacts first, then the latest generated artifact, then a graph-derived fallback. Markdown keeps the audience-friendly article plus evidence summary and appendix; use the workspace review state for full metadata detail.'
         ]
     },
     {
