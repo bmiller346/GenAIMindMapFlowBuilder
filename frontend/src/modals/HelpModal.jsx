@@ -34,6 +34,16 @@ const HELP_ARTICLES = [
         ]
     },
     {
+        id: 'connections',
+        title: 'Connections',
+        summary: 'Review semantic relationships without treating the canvas layout as the only source of truth.',
+        sections: [
+            'Connections shows accepted relationship edges such as risks, dependencies, ownership, approvals, metrics, conflicts, and supporting links.',
+            'The canvas stays useful for exploration: select a node or edge to focus the related branch and dim unrelated context.',
+            'Use Copy review or Download review to create a Markdown relationship packet grouped by relationship family, confidence, review state, source signal, rationale, and source references.'
+        ]
+    },
+    {
         id: 'source-reconcile',
         title: 'Source Reconciliation',
         summary: 'Compare a selected source against the accepted graph before changing anything.',

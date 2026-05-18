@@ -1,4 +1,9 @@
 import { getWorkspaceNodeData } from '../utils/manualNodes.js';
+import {
+    KG_RELATIONSHIP_FAMILY_OPTIONS,
+    KG_RELATIONSHIP_FAMILIES,
+    getKgRelationshipSummary
+} from '../utils/kgRelationshipFilters.js';
 
 const TASK_CAPABLE_TYPES = new Set([
     'task',
@@ -261,6 +266,7 @@ const HIERARCHY_RELATIONSHIP_TYPES = new Set([
     'section',
     'subtopic',
     'branch',
+    'step',
     'smoothstep'
 ]);
 
@@ -270,6 +276,8 @@ const isHierarchyRelationship = (relationship = '') =>
             .trim()
             .toLowerCase()
     );
+
+const isHierarchyEdge = (edge = {}) => isHierarchyRelationship(relationshipTypeForEdge(edge));
 
 const numericConfidence = (value) => {
     if (value === undefined || value === null || value === '') {
@@ -1837,8 +1845,9 @@ export const collectBranchIds = (rootId, childrenByParent) => {
 export const buildGraphProjection = (nodes, edges, branchId) => {
     const nodeLookup = new Map(nodes.map((node) => [node.id, normalizeGraphNode(node)]));
     const childrenByParent = new Map();
+    const hierarchyEdges = edges.filter(isHierarchyEdge);
 
-    edges.forEach((edge) => {
+    hierarchyEdges.forEach((edge) => {
         if (!edge.source || !edge.target) {
             return;
         }
@@ -1857,7 +1866,8 @@ export const buildGraphProjection = (nodes, edges, branchId) => {
     const visibleEdges = edges.filter(
         (edge) => branchIds.has(edge.source) && branchIds.has(edge.target)
     );
-    const visibleTargetedIds = new Set(visibleEdges.map((edge) => edge.target));
+    const visibleHierarchyEdges = visibleEdges.filter(isHierarchyEdge);
+    const visibleTargetedIds = new Set(visibleHierarchyEdges.map((edge) => edge.target));
     const roots = visibleNodes.filter((node) => !visibleTargetedIds.has(node.id));
     const selectedRoot = branchId ? nodeLookup.get(branchId) : undefined;
 
@@ -1929,7 +1939,7 @@ const nodeMatchesFilter = (node, filterId) => {
 };
 
 const rootsForFilteredGraph = (nodes, edges) => {
-    const targetedIds = new Set(edges.map((edge) => edge.target));
+    const targetedIds = new Set(edges.filter(isHierarchyEdge).map((edge) => edge.target));
     return nodes.filter((node) => !targetedIds.has(node.id));
 };
 
@@ -1949,7 +1959,7 @@ export const applyGraphFilters = (projection, filters = []) => {
         (edge) => visibleIds.has(edge.source) && visibleIds.has(edge.target)
     );
     const nodeLookup = new Map(nodes.map((node) => [node.id, node]));
-    const childrenByParent = edges.reduce((children, edge) => {
+    const childrenByParent = edges.filter(isHierarchyEdge).reduce((children, edge) => {
         const nextChildren = children.get(edge.source) || [];
         nextChildren.push(edge.target);
         children.set(edge.source, nextChildren);
@@ -2038,6 +2048,162 @@ export const getConnectionRows = (projection) =>
 
 export const getCrossLinkConnectionRows = (projection) =>
     getConnectionRows(projection).filter((row) => row.connection_kind === 'Cross-link');
+
+const RELATIONSHIP_FAMILY_ORDER = Object.fromEntries(
+    KG_RELATIONSHIP_FAMILY_OPTIONS.map((option, index) => [option.id, index])
+);
+
+const relationshipReviewConfidence = (value) => {
+    if (value === undefined || value === null || value === '') {
+        return '';
+    }
+    const numeric = Number(String(value).replace('%', ''));
+    if (!Number.isFinite(numeric)) {
+        return String(value);
+    }
+    const normalized = String(value).includes('%') || numeric > 1 ? numeric : numeric * 100;
+    return `${Math.round(normalized)}%`;
+};
+
+export const getRelationshipFamilyReviewGroups = (projection) => {
+    const rows = getConnectionRows(projection)
+        .map((row) => {
+            const summary = getKgRelationshipSummary(row.raw_edge);
+            if (
+                summary.is_hierarchy ||
+                summary.family === KG_RELATIONSHIP_FAMILIES.HIERARCHY
+            ) {
+                return null;
+            }
+            return {
+                ...row,
+                family: summary.family,
+                family_label: summary.family_label,
+                family_short_label: summary.family_short_label,
+                relationship: summary.relationship_label || row.relationship,
+                confidence: relationshipReviewConfidence(row.confidence),
+                review_state: row.review_state || 'Needs review',
+                source_signal: row.source_signal || 'AI inferred'
+            };
+        })
+        .filter(Boolean)
+        .sort(
+            (left, right) =>
+                (RELATIONSHIP_FAMILY_ORDER[left.family] ?? 99) -
+                    (RELATIONSHIP_FAMILY_ORDER[right.family] ?? 99) ||
+                left.source.title.localeCompare(right.source.title) ||
+                left.target.title.localeCompare(right.target.title)
+        );
+
+    const groupsByFamily = rows.reduce((groups, row) => {
+        if (!groups.has(row.family)) {
+            groups.set(row.family, {
+                id: row.family,
+                label: row.family_label,
+                short_label: row.family_short_label,
+                rows: []
+            });
+        }
+        groups.get(row.family).rows.push(row);
+        return groups;
+    }, new Map());
+
+    return KG_RELATIONSHIP_FAMILY_OPTIONS
+        .map((option) => groupsByFamily.get(option.id))
+        .filter(Boolean);
+};
+
+const markdownText = (value, fallback = 'Not set') => {
+    if (value === undefined || value === null || value === '') {
+        return fallback;
+    }
+    return String(value).replace(/\s+/g, ' ').trim() || fallback;
+};
+
+const markdownListValue = (value, fallback = 'Not set') =>
+    markdownText(value, fallback).replace(/\|/g, '\\|');
+
+const sourceRefLabel = (sourceRef = {}, index = 0) => {
+    const title =
+        sourceRef.title ||
+        sourceRef.document_title ||
+        sourceRef.filename ||
+        sourceRef.document_id ||
+        sourceRef.source_id ||
+        sourceRef.chunk_id ||
+        `Source ${index + 1}`;
+    const location = [
+        sourceRef.page ? `p. ${sourceRef.page}` : '',
+        sourceRef.section || sourceRef.heading || ''
+    ]
+        .filter(Boolean)
+        .join(', ');
+    const snippet =
+        sourceRef.quote_snippet ||
+        sourceRef.snippet ||
+        sourceRef.text ||
+        sourceRef.summary ||
+        '';
+
+    return [markdownText(title), location, snippet ? `"${markdownText(snippet)}"` : '']
+        .filter(Boolean)
+        .join(' - ');
+};
+
+export const buildRelationshipReviewMarkdown = ({
+    projection,
+    title = 'Relationship Review',
+    scopeLabel = 'Workspace',
+    generatedAt = new Date().toISOString()
+} = {}) => {
+    const safeProjection = projection?.nodeLookup
+        ? projection
+        : buildGraphProjection(projection?.nodes || [], projection?.edges || []);
+    const groups = getRelationshipFamilyReviewGroups(safeProjection);
+    const rows = groups.flatMap((group) => group.rows);
+    const lines = [
+        `# ${markdownText(title, 'Relationship Review')}`,
+        '',
+        `- Scope: ${markdownText(scopeLabel, 'Workspace')}`,
+        `- Generated: ${markdownText(generatedAt)}`,
+        `- Reviewable relationships: ${rows.length}`,
+        ''
+    ];
+
+    if (rows.length === 0) {
+        lines.push('No accepted semantic relationship edges found for this scope.');
+        return lines.join('\n');
+    }
+
+    groups.forEach((group) => {
+        lines.push(`## ${markdownText(group.label)} (${group.rows.length})`, '');
+        group.rows.forEach((row, index) => {
+            const sourceRefs = Array.isArray(row.source_refs) ? row.source_refs : [];
+            lines.push(`### ${index + 1}. ${markdownText(row.source?.title)} -> ${markdownText(row.target?.title)}`);
+            lines.push(`- Relationship: ${markdownListValue(row.relationship)}`);
+            lines.push(`- Family: ${markdownListValue(row.family_label)}`);
+            lines.push(`- Confidence: ${markdownListValue(row.confidence)}`);
+            lines.push(`- Review state: ${markdownListValue(row.review_state)}`);
+            lines.push(`- Source signal: ${markdownListValue(row.source_signal)}`);
+            lines.push(`- Rationale: ${markdownListValue(row.rationale)}`);
+            lines.push(`- Edge id: ${markdownListValue(row.id)}`);
+            if (sourceRefs.length > 0) {
+                lines.push('- Source refs:');
+                sourceRefs.slice(0, 5).forEach((sourceRef, sourceIndex) => {
+                    lines.push(`  - ${sourceRefLabel(sourceRef, sourceIndex)}`);
+                });
+                if (sourceRefs.length > 5) {
+                    lines.push(`  - ${sourceRefs.length - 5} more source reference(s)`);
+                }
+            } else {
+                lines.push('- Source refs: None attached');
+            }
+            lines.push('');
+        });
+    });
+
+    return lines.join('\n').trimEnd();
+};
 
 const flowchartNodeKind = (node = {}) => {
     if (DECISION_TYPES.has(node.node_type)) {
@@ -3017,10 +3183,12 @@ export const getTaskCandidateRows = (projection) => {
 };
 
 export const getChecklistPreviewRows = (projection) => {
-    const childCountByNode = projection.edges.reduce((counts, edge) => {
-        counts.set(edge.source, (counts.get(edge.source) || 0) + 1);
-        return counts;
-    }, new Map());
+    const childCountByNode = projection.edges
+        .filter(isHierarchyEdge)
+        .reduce((counts, edge) => {
+            counts.set(edge.source, (counts.get(edge.source) || 0) + 1);
+            return counts;
+        }, new Map());
 
     return projection.nodes
         .filter((node) => node.node_type !== 'reference')
@@ -3140,7 +3308,7 @@ export const getSmeQuestionPreviewRows = (projection) =>
     );
 
 const getParentByChild = (edges) =>
-    edges.reduce((parents, edge) => {
+    edges.filter(isHierarchyEdge).reduce((parents, edge) => {
         if (edge.source && edge.target && !parents.has(edge.target)) {
             parents.set(edge.target, edge.source);
         }
@@ -3149,8 +3317,13 @@ const getParentByChild = (edges) =>
 
 const nearestAncestorSource = (node, projection, parentByChild) => {
     let currentId = parentByChild.get(node.id);
+    const visitedIds = new Set([node.id]);
 
     while (currentId) {
+        if (visitedIds.has(currentId)) {
+            return undefined;
+        }
+        visitedIds.add(currentId);
         const parent = projection.nodeLookup.get(currentId);
         if (hasSourceDocument(parent?.source_ref)) {
             return {

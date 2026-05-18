@@ -7,12 +7,14 @@ import DataSourceSelect from '../global-components/DataSourceSelect';
 import PromptModal from '../modals/PromptModal';
 import WorkspaceBriefModal from '../modals/WorkspaceBriefModal';
 import {
+    buildRelationshipReviewMarkdown,
     buildFilteredGraphProjection,
     getConnectionRows,
     getCrossLinkConnectionRows,
     getExecutiveOutputProjection,
     getGraphConfidenceSummary,
     getKnowledgeGraphRows,
+    getRelationshipFamilyReviewGroups,
     getTaskPreviewRows,
     getTaskRows
 } from './graphProjection';
@@ -146,6 +148,12 @@ const HANDOFF_VIEWS = [
     { id: 'mondayInput', label: 'Implementation package' },
     { id: 'mondayStatus', label: 'Status review' }
 ];
+
+const safeDownloadSlug = (value = 'workspace') =>
+    String(value || 'workspace')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'workspace';
 
 const WORKSPACE_OUTPUT_GROUPS = [
     { label: 'Explore', views: AI_OUTPUT_VIEWS.filter((view) => ['connections'].includes(view.id)) },
@@ -526,6 +534,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const [viewMenuOpen, setViewMenuOpen] = useState(false);
     const [nodeViewMenuOpen, setNodeViewMenuOpen] = useState(false);
     const [followUpActionsOpen, setFollowUpActionsOpen] = useState(false);
+    const [relationshipExportStatus, setRelationshipExportStatus] = useState('');
     const panelRef = useRef(null);
     const addActivity = useActivityStore((s) => s.addActivity);
     const recordActivity = useActivityStore((s) => s.recordActivity);
@@ -550,6 +559,14 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
     const knowledgeGraphRows = useMemo(() => getKnowledgeGraphRows(projection), [projection]);
     const connectionRows = useMemo(() => getConnectionRows(projection), [projection]);
     const crossLinkRows = useMemo(() => getCrossLinkConnectionRows(projection), [projection]);
+    const relationshipReviewGroups = useMemo(
+        () => getRelationshipFamilyReviewGroups(projection),
+        [projection]
+    );
+    const relationshipReviewRows = useMemo(
+        () => relationshipReviewGroups.flatMap((group) => group.rows),
+        [relationshipReviewGroups]
+    );
     const graphConfidence = useMemo(() => getGraphConfidenceSummary(projection), [projection]);
     const executiveOutput = useMemo(
         () => getExecutiveOutputProjection(projection, { title: 'Executive Output' }),
@@ -815,6 +832,64 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
 
     const openAiPreset = (presetKey) => {
         openWorkspaceAskAi(AI_ACTION_PRESETS[presetKey]);
+    };
+
+    const buildCurrentRelationshipReviewMarkdown = () =>
+        buildRelationshipReviewMarkdown({
+            projection,
+            scopeLabel: selectedBranchId
+                ? `Selected branch: ${selectedBranchTitle || selectedBranchId}`
+                : 'Whole workspace'
+        });
+
+    const recordRelationshipReviewExport = (method) => {
+        recordActivity({
+            type: 'relationship_review_exported',
+            title: 'Relationship review exported',
+            summary: `Exported ${relationshipReviewRows.length} reviewable relationship${
+                relationshipReviewRows.length === 1 ? '' : 's'
+            } as markdown.`,
+            metadata: {
+                method,
+                relationship_count: relationshipReviewRows.length,
+                scope: selectedBranchId ? 'branch' : 'workspace'
+            }
+        });
+    };
+
+    const copyRelationshipReviewMarkdown = async () => {
+        if (relationshipReviewRows.length === 0) {
+            return;
+        }
+        const markdown = buildCurrentRelationshipReviewMarkdown();
+        try {
+            await navigator.clipboard.writeText(markdown);
+            setRelationshipExportStatus('Copied relationship review markdown.');
+            recordRelationshipReviewExport('clipboard');
+        } catch {
+            setRelationshipExportStatus('Copy unavailable. Download the markdown review instead.');
+        }
+    };
+
+    const downloadRelationshipReviewMarkdown = () => {
+        if (relationshipReviewRows.length === 0) {
+            return;
+        }
+        const markdown = buildCurrentRelationshipReviewMarkdown();
+        const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        const scopeSlug = selectedBranchId
+            ? safeDownloadSlug(selectedBranchTitle || selectedBranchId)
+            : 'workspace';
+        anchor.href = url;
+        anchor.download = `${scopeSlug}-relationship-review.md`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+        setRelationshipExportStatus('Downloaded relationship review markdown.');
+        recordRelationshipReviewExport('download');
     };
 
     const openFollowUpAction = (action) => {
@@ -1641,36 +1716,86 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                                 >
                                     Create mind map from connections
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={copyRelationshipReviewMarkdown}
+                                    disabled={relationshipReviewRows.length === 0}
+                                >
+                                    Copy review
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={downloadRelationshipReviewMarkdown}
+                                    disabled={relationshipReviewRows.length === 0}
+                                >
+                                    Download review
+                                </button>
+                                {relationshipExportStatus ? (
+                                    <small className="local-export-status">
+                                        {relationshipExportStatus}
+                                    </small>
+                                ) : null}
                             </div>
                         </div>
                         <div className="local-connection-stats">
                             <span>{connectionRows.length} accepted link{connectionRows.length === 1 ? '' : 's'}</span>
                             <span>{crossLinkRows.length} cross-branch link{crossLinkRows.length === 1 ? '' : 's'}</span>
+                            <span>{relationshipReviewRows.length} reviewable relationship{relationshipReviewRows.length === 1 ? '' : 's'}</span>
                             <span>{graphConfidence.score}% confidence</span>
                         </div>
                     </div>
+                    {relationshipReviewGroups.length > 0 ? (
+                        <div className="local-relationship-groups" aria-label="Relationship groups">
+                            {relationshipReviewGroups.map((group) => (
+                                <section key={group.id} className="local-relationship-group">
+                                    <div>
+                                        <strong>{group.label}</strong>
+                                        <span>
+                                            {group.rows.length} relationship
+                                            {group.rows.length === 1 ? '' : 's'}
+                                        </span>
+                                    </div>
+                                    <ol>
+                                        {group.rows.slice(0, 3).map((row) => (
+                                            <li key={row.id}>
+                                                <button type="button" onClick={() => onSelectEdge?.(row.id)}>
+                                                    {row.source.title}
+                                                    <span>{row.relationship}</span>
+                                                    {row.target.title}
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ol>
+                                </section>
+                            ))}
+                        </div>
+                    ) : null}
                     <table className="local-projection-table">
                         <thead>
                             <tr>
                                 <th>From</th>
                                 <th>Relationship</th>
                                 <th>To</th>
-                                <th>Kind</th>
+                                <th>Family</th>
                                 <th>Confidence</th>
                                 <th>Review state</th>
+                                <th>Signal</th>
                                 <th>Details</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {connectionRows.map((row) => (
+                            {relationshipReviewRows.map((row) => (
                                 <tr key={row.id}>
                                     <td>{row.source.title}</td>
                                     <td>{row.relationship}</td>
                                     <td>{row.target.title}</td>
-                                    <td>{row.connection_kind}</td>
+                                    <td>{row.family_label}</td>
                                     <td>{row.confidence || 'Not set'}</td>
                                     <td>
                                         <OutputStatePill state={row.review_state || 'Locally projected'} />
+                                    </td>
+                                    <td title={row.rationale || row.source_signal}>
+                                        {row.source_signal || 'Not set'}
                                     </td>
                                     <td>
                                         <button type="button" onClick={() => onSelectEdge?.(row.id)}>
@@ -1681,7 +1806,7 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
                             ))}
                         </tbody>
                     </table>
-                    {connectionRows.length === 0 ? (
+                    {relationshipReviewRows.length === 0 ? (
                         <div className="local-table-empty local-empty-actions">
                             <strong>No relationship edges in this scope.</strong>
                             <span>

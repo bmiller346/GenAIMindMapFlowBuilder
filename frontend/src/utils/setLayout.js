@@ -16,6 +16,18 @@ const FLOW_NODE_TYPES = new Set([
 	'handoff',
 	'exception'
 ]);
+const HIERARCHY_RELATIONSHIP_TYPES = new Set([
+	'',
+	'contains',
+	'parent_child',
+	'parent-child',
+	'child',
+	'section',
+	'subtopic',
+	'branch',
+	'step',
+	'smoothstep'
+]);
 
 const getNodeWidth = (node) => node.measured?.width || node.width || FALLBACK_NODE_WIDTH;
 const getNodeHeight = (node) => node.measured?.height || node.height || FALLBACK_NODE_HEIGHT;
@@ -49,6 +61,20 @@ const edgeText = (edge) => {
 		data.rationale
 	).toLowerCase();
 };
+
+const edgeRelationshipType = (edge) => {
+	const data = edge?.data && typeof edge.data === 'object' ? edge.data : {};
+	const metadata = edge?.metadata && typeof edge.metadata === 'object' ? edge.metadata : {};
+	return textValue(
+		edge?.relationship_type,
+		data.relationship_type,
+		data.relationshipType,
+		metadata.relationship_type,
+		edge?.type
+	).toLowerCase();
+};
+
+const isHierarchyEdge = (edge) => HIERARCHY_RELATIONSHIP_TYPES.has(edgeRelationshipType(edge));
 
 const isDecisionNode = (node) => {
 	const kind = nodeKind(node);
@@ -221,10 +247,14 @@ const layoutFlowchartElements = (nodes, edges) => {
 	};
 };
 
-const layoutWithDagre = (nodes, edges) => {
+const layoutWithDagre = (nodes, edges, options = {}) => {
 	const graphDirection = 'LR'; // horizontal
 	const dagreGraph = new dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-	dagreGraph.setGraph({ rankdir: graphDirection, ranksep: 110, nodesep: 52 });
+	dagreGraph.setGraph({
+		rankdir: graphDirection,
+		ranksep: options.ranksep || 110,
+		nodesep: options.nodesep || 52
+	});
 
 	nodes.forEach((node) => {
 		dagreGraph.setNode(node.id, {
@@ -258,7 +288,34 @@ const layoutWithDagre = (nodes, edges) => {
 	};
 };
 
-const getLayoutedElements = (nodes, edges) => {
+const layoutKnowledgeGraphElements = (nodes, edges) => {
+	const hierarchyEdges = edges.filter(isHierarchyEdge);
+	const layoutEdges = hierarchyEdges.length ? hierarchyEdges : edges;
+	const layouted = layoutWithDagre(nodes, layoutEdges, {
+		ranksep: 160,
+		nodesep: 74
+	});
+	return {
+		nodes: layouted.nodes,
+		edges: edges.map((edge) =>
+			isHierarchyEdge(edge)
+				? edge
+				: {
+					...edge,
+					type: edge.type || 'semantic',
+					data: {
+						...(edge.data || {}),
+						layoutRole: 'semantic_overlay'
+					}
+				}
+		)
+	};
+};
+
+const getLayoutedElements = (nodes, edges, options = {}) => {
+	if (options.mode === 'knowledgeGraph') {
+		return layoutKnowledgeGraphElements(nodes, edges);
+	}
 	if (shouldUseFlowchartLayout(nodes, edges)) {
 		return layoutFlowchartElements(nodes, edges);
 	}

@@ -10,6 +10,9 @@ export const SETTINGS_KEYS = {
     nudgePreferences: 'docmap.nudgePreferences',
     dismissedNudges: 'docmap.dismissedNudges',
     lastUsedGraphFilters: 'docmap.lastUsedGraphFilters',
+    lastCanvasView: 'docmap.lastCanvasView',
+    lastKgRelationshipMode: 'docmap.lastKgRelationshipMode',
+    savedTableViews: 'docmap.savedTableViews',
     developerMode: 'docmap:developerMode'
 };
 
@@ -253,6 +256,91 @@ export const getLastUsedGraphFilters = () =>
 export const saveLastUsedGraphFilters = (filters) => {
     const normalized = normalizeGraphFilters(filters);
     setJsonLocalSetting(SETTINGS_KEYS.lastUsedGraphFilters, normalized);
+    return normalized;
+};
+
+const CANVAS_VIEW_IDS = new Set([
+    'mindmap',
+    'knowledgeGraph',
+    'flowchart',
+    'outline',
+    'executive',
+    'tasks',
+    'kanban',
+    'table'
+]);
+
+export const normalizeCanvasView = (view = '') =>
+    CANVAS_VIEW_IDS.has(view) ? view : 'mindmap';
+
+export const getLastCanvasView = () =>
+    normalizeCanvasView(getLocalSetting(SETTINGS_KEYS.lastCanvasView));
+
+export const saveLastCanvasView = (view) => {
+    const normalized = normalizeCanvasView(view);
+    setLocalSetting(SETTINGS_KEYS.lastCanvasView, normalized);
+    return normalized;
+};
+
+const KG_RELATIONSHIP_MODE_IDS = new Set([
+    'insights',
+    'execution',
+    'risks',
+    'dependencies',
+    'ownership',
+    'metrics',
+    'approvals',
+    'evidence',
+    'related',
+    'all'
+]);
+
+export const normalizeKgRelationshipMode = (mode = '') =>
+    KG_RELATIONSHIP_MODE_IDS.has(mode) ? mode : 'insights';
+
+export const getLastKgRelationshipMode = () =>
+    normalizeKgRelationshipMode(getLocalSetting(SETTINGS_KEYS.lastKgRelationshipMode));
+
+export const saveLastKgRelationshipMode = (mode) => {
+    const normalized = normalizeKgRelationshipMode(mode);
+    setLocalSetting(SETTINGS_KEYS.lastKgRelationshipMode, normalized);
+    return normalized;
+};
+
+const normalizeSavedTableView = (view = {}) => {
+    if (!view || typeof view !== 'object') {
+        return null;
+    }
+    const name = String(view.name || '').trim();
+    if (!name) {
+        return null;
+    }
+    return {
+        id: String(view.id || `table-view-${Date.now()}`),
+        name,
+        mode: String(view.mode || 'breakdown'),
+        branchId: String(view.branchId || ''),
+        filters: normalizeGraphFilters(view.filters || []),
+        createdAt: String(view.createdAt || new Date().toISOString())
+    };
+};
+
+const normalizeSavedTableViews = (views = []) => {
+    if (!Array.isArray(views)) {
+        return [];
+    }
+    return views
+        .map(normalizeSavedTableView)
+        .filter(Boolean)
+        .slice(0, 12);
+};
+
+export const getSavedTableViews = () =>
+    normalizeSavedTableViews(getJsonLocalSetting(SETTINGS_KEYS.savedTableViews, []));
+
+export const saveSavedTableViews = (views = []) => {
+    const normalized = normalizeSavedTableViews(views);
+    setJsonLocalSetting(SETTINGS_KEYS.savedTableViews, normalized);
     return normalized;
 };
 

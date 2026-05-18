@@ -1,6 +1,18 @@
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/shallow';
 import useStore from '../stores/store';
+import flowStore from '../stores/flowStore';
+import useActivityStore from '../stores/activityStore';
+import {
+    createWorkspaceEdge,
+    createWorkspaceNode,
+    getChildPosition,
+    getRootPosition
+} from '../utils/manualNodes';
+import {
+    KG_RELATIONSHIP_FAMILIES,
+    getKgRelationshipSummary
+} from '../utils/kgRelationshipFilters';
 
 const HIERARCHY_EDGE_TYPES = new Set([
     '',
@@ -48,6 +60,9 @@ const formatConfidence = (confidence) => {
     return String(confidence);
 };
 
+const confidenceForEdge = (edge = {}) =>
+    edge.confidence || edge.data?.confidence || edge.metadata?.confidence;
+
 const nodeTitle = (node) =>
     firstText(
         node?.data?.title,
@@ -93,6 +108,77 @@ const rationaleForEdge = (edge = {}) =>
 const sourceSignalForEdge = (edge = {}) =>
     firstText(edge.source_signal, edge.data?.source_signal, edge.metadata?.source_signal);
 
+const reviewStateForEdge = (edge = {}) =>
+    firstText(edge.review_state, edge.data?.review_state, edge.metadata?.review_state);
+
+const supportStatusForEdge = ({ sourceRefs = [], sourceSignal = '', isHierarchy = false }) => {
+    if (isHierarchy) {
+        return {
+            tone: 'structure',
+            label: 'Structure',
+            detail: 'This edge defines map hierarchy.'
+        };
+    }
+    if (sourceRefs.length) {
+        return {
+            tone: 'source-backed',
+            label: 'Source-backed',
+            detail: `${sourceRefs.length} source reference${sourceRefs.length === 1 ? '' : 's'} attached.`
+        };
+    }
+    if (/ai|inferred|prompt|generated/i.test(sourceSignal)) {
+        return {
+            tone: 'inferred',
+            label: 'AI inferred',
+            detail: 'Review before treating this relationship as canonical.'
+        };
+    }
+    return {
+        tone: 'needs-source',
+        label: 'Needs source support',
+        detail: 'No source references or source signal are attached.'
+    };
+};
+
+const reviewActionForFamily = (family) => {
+    if (family === KG_RELATIONSHIP_FAMILIES.RISKS) {
+        return {
+            nodeType: 'risk',
+            label: 'Create risk',
+            titlePrefix: 'Review risk',
+            status: 'needs_review'
+        };
+    }
+    if (
+        family === KG_RELATIONSHIP_FAMILIES.DEPENDENCIES ||
+        family === KG_RELATIONSHIP_FAMILIES.APPROVALS
+    ) {
+        return {
+            nodeType: 'task',
+            label: family === KG_RELATIONSHIP_FAMILIES.APPROVALS ? 'Create approval task' : 'Create task',
+            titlePrefix:
+                family === KG_RELATIONSHIP_FAMILIES.APPROVALS
+                    ? 'Confirm approval'
+                    : 'Confirm dependency',
+            status: 'needs_review'
+        };
+    }
+    if (family === KG_RELATIONSHIP_FAMILIES.METRICS) {
+        return {
+            nodeType: 'KPI',
+            label: 'Create metric check',
+            titlePrefix: 'Validate metric',
+            status: 'needs_review'
+        };
+    }
+    return {
+        nodeType: 'decision',
+        label: 'Create decision',
+        titlePrefix: 'Review relationship',
+        status: 'needs_review'
+    };
+};
+
 const Detail = ({ label, value }) => (
     <div className="edge-inspector-detail">
         <span>{label}</span>
@@ -125,9 +211,15 @@ const SourceRef = ({ sourceRef }) => {
 const EdgeInspector = ({ selectedEdgeId, onClose }) => {
     const selector = (state) => ({
         nodes: state.nodes,
-        edges: state.edges
+        edges: state.edges,
+        setNodes: state.setNodes,
+        setEdges: state.setEdges,
+        setInspectorNodeId: state.setInspectorNodeId
     });
-    const { nodes, edges } = useStore(useShallow(selector));
+    const { nodes, edges, setNodes, setEdges, setInspectorNodeId } = useStore(useShallow(selector));
+    const flowId = flowStore((state) => state.flow_id);
+    const setSaveStatus = flowStore((state) => state.setSaveStatus);
+    const recordActivity = useActivityStore((state) => state.recordActivity);
     const selectedEdge = useMemo(
         () => edges.find((edge) => edge.id === selectedEdgeId),
         [edges, selectedEdgeId]
@@ -143,16 +235,120 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
     const targetNode = nodes.find((node) => node.id === targetId);
     const relationship = relationshipForEdge(selectedEdge);
     const isHierarchy = HIERARCHY_EDGE_TYPES.has(relationship);
+    const relationshipSummary = getKgRelationshipSummary(selectedEdge);
     const sourceRefs = sourceRefsForEdge(selectedEdge);
     const rationale = rationaleForEdge(selectedEdge);
     const sourceSignal = sourceSignalForEdge(selectedEdge);
+    const reviewState = reviewStateForEdge(selectedEdge);
+    const supportStatus = supportStatusForEdge({ sourceRefs, sourceSignal, isHierarchy });
+    const reviewAction = reviewActionForFamily(relationshipSummary.family);
+    const canCreateReviewItem = !isHierarchy && sourceNode && targetNode;
+
+    const markReviewed = () => {
+        setEdges(
+            edges.map((edge) =>
+                edge.id === selectedEdge.id
+                    ? {
+                          ...edge,
+                          review_state: 'reviewed',
+                          data: {
+                              ...(edge.data || {}),
+                              review_state: 'reviewed'
+                          },
+                          metadata: {
+                              ...(edge.metadata || {}),
+                              review_state: 'reviewed',
+                              reviewed_at: new Date().toISOString()
+                          }
+                      }
+                    : edge
+            )
+        );
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        recordActivity({
+            type: 'relationship_reviewed',
+            title: 'Relationship marked reviewed',
+            summary: `${humanize(relationship)} between ${nodeTitle(sourceNode)} and ${nodeTitle(targetNode)} was marked reviewed.`,
+            node_ids: [sourceId, targetId].filter(Boolean),
+            metadata: {
+                edge_id: selectedEdge.id,
+                relationship_type: relationship
+            },
+            status: 'completed'
+        });
+    };
+
+    const createReviewItem = () => {
+        if (!canCreateReviewItem) {
+            return;
+        }
+        const title = `${reviewAction.titlePrefix}: ${nodeTitle(sourceNode)} -> ${nodeTitle(targetNode)}`;
+        const body = [
+            `${nodeTitle(sourceNode)} ${humanize(relationship).toLowerCase()} ${nodeTitle(targetNode)}.`,
+            rationale ? `Rationale: ${rationale}` : '',
+            sourceSignal ? `Source signal: ${sourceSignal}` : '',
+            sourceRefs.length ? '' : 'Source refs are empty; validate before final use.'
+        ]
+            .filter(Boolean)
+            .join('\n\n');
+        const reviewNode = createWorkspaceNode({
+            title,
+            nodeType: reviewAction.nodeType,
+            status: reviewAction.status,
+            body,
+            sourceRefs,
+            reviewState: 'needs_review',
+            position:
+                sourceId && sourceNode
+                    ? getChildPosition(nodes, edges, sourceId)
+                    : getRootPosition(nodes),
+            metadata: {
+                source_edge_id: selectedEdge.id,
+                relationship_type: relationship,
+                relationship_family: relationshipSummary.family,
+                source_node_id: sourceId,
+                target_node_id: targetId,
+                source_signal: sourceSignal,
+                rationale
+            }
+        });
+        const nextEdge = {
+            ...createWorkspaceEdge(sourceId, reviewNode.id),
+            relationship_type: 'contains',
+            data: { relationship_type: 'contains' }
+        };
+        setNodes([...nodes, reviewNode]);
+        setEdges([...edges, nextEdge]);
+        if (flowId) {
+            setSaveStatus('dirty');
+        }
+        recordActivity({
+            type: 'relationship_review_item_created',
+            title: reviewAction.label,
+            summary: `${title} was created from a relationship edge.`,
+            node_ids: [sourceId, targetId, reviewNode.id].filter(Boolean),
+            metadata: {
+                edge_id: selectedEdge.id,
+                relationship_type: relationship,
+                review_node_type: reviewAction.nodeType
+            },
+            status: 'completed'
+        });
+        setInspectorNodeId(reviewNode.id);
+    };
 
     return (
         <aside className="node-inspector edge-inspector">
             <div className="node-inspector-header">
                 <div>
                     <p className="node-inspector-kicker">Graph relationship</p>
-                    <h2>{humanize(relationship)}</h2>
+                    <h2>{relationshipSummary.relationship_label || humanize(relationship)}</h2>
+                    <div className="edge-inspector-badges">
+                        <span>{relationshipSummary.family_label}</span>
+                        <span className={`is-${supportStatus.tone}`}>{supportStatus.label}</span>
+                    </div>
                 </div>
                 <button
                     type="button"
@@ -169,22 +365,12 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
                     <Detail label="From" value={nodeTitle(sourceNode)} />
                     <Detail label="To" value={nodeTitle(targetNode)} />
                     <Detail label="Kind" value={isHierarchy ? 'Hierarchy / structure' : 'Relationship'} />
+                    <Detail label="Family" value={relationshipSummary.family_label} />
                     <Detail
                         label="Confidence"
-                        value={formatConfidence(
-                            selectedEdge.confidence ||
-                                selectedEdge.data?.confidence ||
-                                selectedEdge.metadata?.confidence
-                        )}
+                        value={formatConfidence(confidenceForEdge(selectedEdge))}
                     />
-                    <Detail
-                        label="Review state"
-                        value={firstText(
-                            selectedEdge.review_state,
-                            selectedEdge.data?.review_state,
-                            selectedEdge.metadata?.review_state
-                        )}
-                    />
+                    <Detail label="Review state" value={reviewState} />
                 </div>
 
                 {rationale || sourceSignal ? (
@@ -194,6 +380,29 @@ const EdgeInspector = ({ selectedEdgeId, onClose }) => {
                         {sourceSignal && sourceSignal !== rationale ? <small>{sourceSignal}</small> : null}
                     </div>
                 ) : null}
+
+                <div className="node-inspector-section edge-inspector-support-card">
+                    <strong>{supportStatus.label}</strong>
+                    <p>{supportStatus.detail}</p>
+                    {!isHierarchy ? (
+                        <div className="edge-inspector-actions">
+                            <button
+                                type="button"
+                                onClick={markReviewed}
+                                disabled={reviewState === 'reviewed'}
+                            >
+                                Mark reviewed
+                            </button>
+                            <button
+                                type="button"
+                                onClick={createReviewItem}
+                                disabled={!canCreateReviewItem}
+                            >
+                                {reviewAction.label}
+                            </button>
+                        </div>
+                    ) : null}
+                </div>
 
                 <div className="node-inspector-section">
                     <strong>Source refs</strong>

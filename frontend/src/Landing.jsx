@@ -29,7 +29,7 @@ const howItWorks = [
     },
     {
         title: 'Connect',
-        text: 'Build a source-cited workspace that links ideas, requirements, gaps, decisions, and tasks.',
+        text: 'Build a source-cited workspace that links ideas, requirements, gaps, decisions, tasks, and reviewable relationships.',
         icon: FiGitBranch
     },
     {
@@ -59,7 +59,8 @@ const differentiators = [
     'Preview changes before they apply',
     'One accepted workspace, many views',
     'Maps, tables, tasks, checklists, flowcharts, and knowledge graphs',
-    'Confidence, citation, and review states',
+    'Confidence, citation, rationale, and review states',
+    'Relationship review exports for stakeholder handoff',
     'Built for reviewable handoff'
 ];
 
@@ -71,7 +72,8 @@ const useCases = [
     'Requirements doc to implementation plan',
     'Excel tracker to task/status map',
     'Source coverage and gap report',
-    'Knowledge graph for related ideas and dependencies',
+    'Knowledge graph for risks, dependencies, ownership, metrics, and approvals',
+    'Relationship review packet for stakeholder signoff',
     'Implementation handoff package'
 ];
 

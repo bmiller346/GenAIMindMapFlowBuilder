@@ -8,6 +8,7 @@ import {
     ReactFlow,
     getBezierPath,
     getSmoothStepPath,
+    getStraightPath,
     useNodesInitialized,
     useOnSelectionChange,
     useReactFlow
@@ -45,12 +46,24 @@ import SourceDraftReviewPanel from './global-components/SourceDraftReviewPanel.j
 import WorkspaceNudgeSurface from './global-components/WorkspaceNudgeSurface.jsx';
 import DataSourceSelect from './global-components/DataSourceSelect.jsx';
 import PromptModal from './modals/PromptModal.jsx';
-import { getLocalSetting, setLocalSetting, SETTINGS_KEYS } from './config/localSettings';
+import {
+    getLastKgRelationshipMode,
+    getLocalSetting,
+    saveLastKgRelationshipMode,
+    setLocalSetting,
+    SETTINGS_KEYS
+} from './config/localSettings';
 import { parseFlowSnapshot, stringifyFlowSnapshot } from './utils/flowSnapshots';
 import { rememberWorkspace, selectStartupWorkspace } from './utils/workspaceSession';
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from './utils/askAiGenerationProgress';
 import { buildWorkspaceNextSteps } from './utils/workspaceNudges';
 import { reflowSiblingSubtrees } from './utils/manualNodes';
+import {
+    KG_RELATIONSHIP_MODE_OPTIONS,
+    KG_RELATIONSHIP_MODES,
+    getKgRelationshipSummary,
+    shouldShowKgSemanticEdge
+} from './utils/kgRelationshipFilters';
 import useActivityStore from './stores/activityStore';
 import useAutomationStore from './stores/automationStore';
 
@@ -222,6 +235,7 @@ const edgeSemanticTone = (relationshipType = '') => {
 const edgeSemanticInfo = (edge = {}) => {
     const relationshipType = edgeRelationshipType(edge);
     const isHierarchy = HIERARCHY_EDGE_TYPES.has(relationshipType);
+    const kgSummary = getKgRelationshipSummary(edge);
     const confidence = formatEdgeConfidence(
         edge.confidence || edge.data?.confidence || edge.metadata?.confidence
     );
@@ -233,10 +247,12 @@ const edgeSemanticInfo = (edge = {}) => {
         '';
     const label = isHierarchy
         ? 'Structure'
-        : [humanizeRelationship(relationshipType), confidence].filter(Boolean).join(' / ');
+        : [kgSummary.relationship_label || humanizeRelationship(relationshipType), confidence].filter(Boolean).join(' / ');
     return {
         relationship_type: relationshipType || 'contains',
         kind: isHierarchy ? 'hierarchy' : 'relationship',
+        family: kgSummary.family,
+        familyLabel: kgSummary.family_label,
         tone: isHierarchy ? 'hierarchy' : edgeSemanticTone(relationshipType),
         label,
         confidence,
@@ -276,13 +292,14 @@ const SemanticEdge = ({
     const [edgePath, labelX, labelY] =
         semantic.kind === 'hierarchy'
             ? getSmoothStepPath(pathArgs)
-            : getBezierPath(pathArgs);
+            : getStraightPath(pathArgs);
     const labelClassName = [
         'semantic-edge-label',
         semantic.kind === 'hierarchy'
             ? 'semantic-edge-label--hierarchy'
             : 'semantic-edge-label--relationship',
-        semantic.tone ? `semantic-edge-label--${semantic.tone}` : ''
+        semantic.tone ? `semantic-edge-label--${semantic.tone}` : '',
+        semantic.kgMuted ? 'kg-edge-muted' : ''
     ]
         .filter(Boolean)
         .join(' ');
@@ -306,25 +323,29 @@ const SemanticEdge = ({
                     <title>{semantic.tooltip || semantic.label || 'Graph edge'}</title>
                 </path>
             </g>
-            <EdgeLabelRenderer>
-                <div
-                    className={labelClassName}
-                    style={{
-                        transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`
-                    }}
-                    title={semantic.tooltip || semantic.label || 'Graph edge'}
-                    role="button"
-                    tabIndex={0}
-                    onClick={openInspector}
-                    onKeyDown={handleLabelKeyDown}
-                    aria-label={`Open ${semantic.label || 'relationship'} edge details`}
-                >
-                    {semantic.label || 'Relationship'}
-                </div>
-            </EdgeLabelRenderer>
+            {semantic.kind === 'hierarchy' ? null : (
+                <EdgeLabelRenderer>
+                    <div
+                        className={labelClassName}
+                        style={{
+                            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`
+                        }}
+                        title={semantic.tooltip || semantic.label || 'Graph edge'}
+                        role="button"
+                        tabIndex={0}
+                        onClick={openInspector}
+                        onKeyDown={handleLabelKeyDown}
+                        aria-label={`Open ${semantic.label || 'relationship'} edge details`}
+                    >
+                        {semantic.label || 'Relationship'}
+                    </div>
+                </EdgeLabelRenderer>
+            )}
         </>
     );
 };
+
+const edgeTypes = { semantic: SemanticEdge };
 
 const nodeMatchesCanvasLens = (node, activeCanvasView) => {
     const data = nodeData(node);
@@ -385,12 +406,14 @@ const collectVisibleBranchIds = (nodes, edges, selectedBranchId) => {
         return new Set(nodes.map((node) => node.id));
     }
 
-    const childrenByParent = edges.reduce((children, edge) => {
-        const next = children.get(edge.source) || [];
-        next.push(edge.target);
-        children.set(edge.source, next);
-        return children;
-    }, new Map());
+    const childrenByParent = edges
+        .filter((edge) => HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge)))
+        .reduce((children, edge) => {
+            const next = children.get(edge.source) || [];
+            next.push(edge.target);
+            children.set(edge.source, next);
+            return children;
+        }, new Map());
     const visibleIds = new Set([selectedBranchId]);
     const queue = [selectedBranchId];
     while (queue.length > 0) {
@@ -414,6 +437,104 @@ const formatUsageNumber = (value) => {
         return '0';
     }
     return count.toLocaleString();
+};
+
+const REVIEWABLE_DRAFT_STATUSES = new Set(['', 'draft', 'drafting', 'previewed', 'generated', 'needs_review']);
+
+const isReviewableDraftSessionSummary = (session = {}) =>
+    Boolean(
+        session?.session_id &&
+            REVIEWABLE_DRAFT_STATUSES.has(String(session.status || '').toLowerCase())
+    );
+
+const sortByNewestCreatedAt = (left = {}, right = {}) =>
+    Date.parse(right.created_at || '') - Date.parse(left.created_at || '');
+
+const truncateInsightText = (value = '', maxLength = 132) => {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (text.length <= maxLength) {
+        return text;
+    }
+    return `${text.slice(0, maxLength - 1).trim()}...`;
+};
+
+const kgNodeTitle = (node = {}) => {
+    const data = nodeData(node);
+    return (
+        data.title ||
+        data.label ||
+        data.content ||
+        data.body ||
+        data.summary ||
+        data.data?.title ||
+        data.data?.summ ||
+        node.id ||
+        'Untitled'
+    );
+};
+
+const numericEdgeConfidence = (edge = {}) => {
+    const value = edge.confidence || edge.data?.confidence || edge.metadata?.confidence;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const KG_INSIGHT_FAMILY_PRIORITY = {
+    risks: 0,
+    dependencies: 1,
+    approvals: 2,
+    ownership: 3,
+    metrics: 4,
+    evidence: 5,
+    related: 6
+};
+
+const buildKgRelationshipModeCounts = (edges = []) =>
+    Object.fromEntries(
+        KG_RELATIONSHIP_MODE_OPTIONS.map((option) => [
+            option.id,
+            edges.filter((edge) =>
+                shouldShowKgSemanticEdge(edge, option.id, { includeHierarchy: false })
+            ).length
+        ])
+    );
+
+const buildKgTopInsights = ({ nodes = [], edges = [], mode = KG_RELATIONSHIP_MODES.INSIGHTS, limit = 4 } = {}) => {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    return edges
+        .filter((edge) =>
+            shouldShowKgSemanticEdge(edge, mode, { includeHierarchy: false })
+        )
+        .filter((edge) => edge.id && nodeById.has(edge.source) && nodeById.has(edge.target))
+        .map((edge) => {
+            const summary = getKgRelationshipSummary(edge);
+            const sourceTitle = kgNodeTitle(nodeById.get(edge.source));
+            const targetTitle = kgNodeTitle(nodeById.get(edge.target));
+            const rationale =
+                edge.data?.rationale ||
+                edge.metadata?.rationale ||
+                edge.rationale ||
+                edge.data?.source_signal ||
+                '';
+            return {
+                id: edge.id,
+                family: summary.family,
+                familyLabel: summary.family_short_label || summary.family_label,
+                relationship: summary.relationship_label,
+                sourceTitle,
+                targetTitle,
+                confidence: numericEdgeConfidence(edge),
+                rationale: truncateInsightText(rationale)
+            };
+        })
+        .sort(
+            (left, right) =>
+                (KG_INSIGHT_FAMILY_PRIORITY[left.family] ?? 9) -
+                    (KG_INSIGHT_FAMILY_PRIORITY[right.family] ?? 9) ||
+                right.confidence - left.confidence ||
+                left.sourceTitle.localeCompare(right.sourceTitle)
+        )
+        .slice(0, limit);
 };
 
 const scopedClassName = (className = '', scopeClass, isActive) => {
@@ -462,17 +583,71 @@ const canvasEdgeClassName = ({
     return classes.join(' ') || undefined;
 };
 
+const edgeMatchesCanvasLens = (edge, activeCanvasView) => {
+    const relationshipType = edgeRelationshipType(edge);
+    const isHierarchy = HIERARCHY_EDGE_TYPES.has(relationshipType);
+
+    if (activeCanvasView === 'mindmap') {
+        return isHierarchy;
+    }
+    if (activeCanvasView === 'knowledgeGraph') {
+        return true;
+    }
+    if (activeCanvasView === 'flowchart') {
+        return (
+            isHierarchy ||
+            /depend|requires|prerequisite|blocked_by|blocks|handoff|process|sequence|next|precedes|decision/.test(
+                relationshipType
+            )
+        );
+    }
+
+    return isHierarchy;
+};
+
+const buildKgFocusNodeIds = (edges = [], focusNodeIds = []) => {
+    const originalFocusIds = new Set(focusNodeIds.filter(Boolean));
+    const visibleIds = new Set(originalFocusIds);
+    if (originalFocusIds.size === 0) {
+        return visibleIds;
+    }
+
+    edges.forEach((edge) => {
+        if (originalFocusIds.has(edge.source)) {
+            visibleIds.add(edge.target);
+        }
+        if (originalFocusIds.has(edge.target)) {
+            visibleIds.add(edge.source);
+        }
+    });
+    return visibleIds;
+};
+
 const projectCanvasGraph = ({
     nodes,
     edges,
     activeCanvasView,
     activeGraphFilters,
     selectedBranchId,
-    canvasNodeDensity
+    canvasNodeDensity,
+    kgRelationshipMode = KG_RELATIONSHIP_MODES.INSIGHTS,
+    kgFocusNodeIds = []
 }) => {
     const hasBranchScope = Boolean(selectedBranchId);
     const branchIds = collectVisibleBranchIds(nodes, edges, selectedBranchId);
     const filters = Array.isArray(activeGraphFilters) ? activeGraphFilters : [];
+    const isKnowledgeGraph = activeCanvasView === 'knowledgeGraph';
+    const visibleEdges = edges
+        .filter((edge) => edgeMatchesCanvasLens(edge, activeCanvasView))
+        .filter((edge) =>
+            isKnowledgeGraph
+                ? shouldShowKgSemanticEdge(edge, kgRelationshipMode, { includeHierarchy: true })
+                : true
+        );
+    const kgFocusIds = isKnowledgeGraph
+        ? buildKgFocusNodeIds(visibleEdges, kgFocusNodeIds)
+        : new Set();
+    const hasKgFocus = isKnowledgeGraph && kgFocusIds.size > 0;
     const projectedIds = new Set(
         nodes
             .filter((node) => nodeMatchesCanvasLens(node, activeCanvasView))
@@ -492,29 +667,38 @@ const projectCanvasGraph = ({
                 CANVAS_OUT_OF_SCOPE_NODE_CLASS,
                 isProjected && isOutOfScope
             );
+            const kgMutedClass = hasKgFocus && isProjected && !kgFocusIds.has(node.id)
+                ? 'kg-node-muted'
+                : '';
             return {
                 ...node,
                 hidden: !isProjected,
-                className: [nextClassName, densityClass].filter(Boolean).join(' ')
+                className: [nextClassName, densityClass, kgMutedClass].filter(Boolean).join(' ')
             };
         }),
-        edges: edges.map((edge) => {
+        edges: visibleEdges.map((edge) => {
             const isProjected = projectedIds.has(edge.source) && projectedIds.has(edge.target);
             const isOutOfScope =
                 hasBranchScope && (!branchIds.has(edge.source) || !branchIds.has(edge.target));
             const semantic = edgeSemanticInfo(edge);
-            const isKnowledgeGraph = activeCanvasView === 'knowledgeGraph';
+            const isKgMuted =
+                hasKgFocus && !kgFocusIds.has(edge.source) && !kgFocusIds.has(edge.target);
             return {
                 ...edge,
                 type: isKnowledgeGraph ? 'semantic' : edge.type,
                 label: isKnowledgeGraph ? semantic.label : edge.label,
                 data: {
                     ...(edge.data || {}),
-                    semantic_edge: isKnowledgeGraph ? semantic : undefined
+                    semantic_edge: isKnowledgeGraph
+                        ? {
+                              ...semantic,
+                              kgMuted: isKgMuted
+                          }
+                        : undefined
                 },
                 hidden: !isProjected,
                 className: canvasEdgeClassName({
-                    className: edge.className,
+                    className: [edge.className, isKgMuted ? 'kg-edge-muted' : ''].filter(Boolean).join(' '),
                     isOutOfScope: isProjected && isOutOfScope,
                     semantic,
                     activeCanvasView
@@ -538,7 +722,6 @@ const isEditableEventTarget = (target) => {
 
 const App = () => {
     const nodeType = useMemo(() => nodeTypes, []);
-    const edgeType = useMemo(() => ({ semantic: SemanticEdge }), []);
     const selector = (state) => ({
         trigger: state.trigger,
         nodes: state.nodes,
@@ -550,6 +733,7 @@ const App = () => {
         activeView: state.activeView,
         activeCanvasView: state.activeCanvasView,
         activeGraphFilters: state.activeGraphFilters,
+        setActiveGraphFilters: state.setActiveGraphFilters,
         canvasNodeDensity: state.canvasNodeDensity,
         selectedBranchId: state.selectedBranchId,
         workspaceBrief: state.workspaceBrief,
@@ -577,6 +761,7 @@ const App = () => {
         activeView,
         activeCanvasView,
         activeGraphFilters,
+        setActiveGraphFilters,
         canvasNodeDensity,
         selectedBranchId,
         workspaceBrief,
@@ -610,15 +795,37 @@ const App = () => {
     const [validationReport, setValidationReport] = useState();
     const [workspaceDockTab, setWorkspaceDockTab] = useState('sources');
     const [workspaceDockCollapsed, setWorkspaceDockCollapsed] = useState(false);
-    const [workspaceDockOffset, setWorkspaceDockOffset] = useState({ x: 0, y: 0 });
+    const [workspaceDockOffset, setWorkspaceDockOffset] = useState({ x: 16, y: -16 });
     const [workspaceDockWidth, setWorkspaceDockWidth] = useState(17.65);
     const [aiUsage, setAIUsage] = useState();
     const [aiUsageStatus, setAIUsageStatus] = useState('');
     const [aiUsageReviewStatus, setAIUsageReviewStatus] = useState('');
     const [nextStepsOpenToken, setNextStepsOpenToken] = useState(0);
+    const [kgRelationshipTrayCollapsed, setKgRelationshipTrayCollapsed] = useState(false);
+    const [kgRelationshipTrayOffset, setKgRelationshipTrayOffset] = useState({ x: 0, y: 0 });
+    const [kgRelationshipMode, setKgRelationshipMode] = useState(() =>
+        getLastKgRelationshipMode()
+    );
+    const kgRelationshipModeCounts = useMemo(
+        () => buildKgRelationshipModeCounts(edges),
+        [edges]
+    );
+    const kgTopInsights = useMemo(
+        () =>
+            buildKgTopInsights({
+                nodes,
+                edges,
+                mode: kgRelationshipMode
+            }),
+        [edges, kgRelationshipMode, nodes]
+    );
     const reactFlow = useReactFlow();
     const { fitView } = useReactFlow();
     const popNode = modalStore((s) => s.popNode);
+
+    const selectKgRelationshipMode = (mode) => {
+        setKgRelationshipMode(saveLastKgRelationshipMode(mode));
+    };
     const pushNode = modalStore((s) => s.pushNode);
     const [flowList, setFlowList] = useState([]);
     const [isSourcesOpen, setIsSourcesOpen] = useState(false);
@@ -650,6 +857,12 @@ const App = () => {
             refreshAIUsage();
         }
     }, [refreshAIUsage, workspaceDockTab]);
+
+    useEffect(() => {
+        if (flow_id && nodes.length === 0) {
+            refreshAIUsage();
+        }
+    }, [flow_id, nodes.length, refreshAIUsage]);
 
     useEffect(() => {
         const handleAskAiGenerationProgress = (event) => {
@@ -697,7 +910,7 @@ const App = () => {
             const nextY = startOffset.y + moveEvent.clientY - startY;
             setWorkspaceDockOffset({
                 x: Math.max(0, Math.min(nextX, window.innerWidth - 120)),
-                y: Math.max(-48, Math.min(nextY, window.innerHeight - 180))
+                y: Math.max(-(window.innerHeight - 180), Math.min(nextY, 0))
             });
         };
 
@@ -735,6 +948,35 @@ const App = () => {
         window.addEventListener('pointerup', stopResize);
     }, [workspaceDockWidth]);
 
+    const startKgRelationshipTrayDrag = useCallback((event) => {
+        if (event.button !== 0) {
+            return;
+        }
+        event.preventDefault();
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const startOffset = kgRelationshipTrayOffset;
+
+        const handlePointerMove = (moveEvent) => {
+            const nextX = startOffset.x + moveEvent.clientX - startX;
+            const nextY = startOffset.y + moveEvent.clientY - startY;
+            setKgRelationshipTrayOffset({
+                x: Math.max(-(window.innerWidth / 2 - 160), Math.min(nextX, window.innerWidth / 2 - 160)),
+                y: Math.max(-72, Math.min(nextY, window.innerHeight - 240))
+            });
+        };
+
+        const stopDrag = () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', stopDrag);
+            window.removeEventListener('pointercancel', stopDrag);
+        };
+
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', stopDrag);
+        window.addEventListener('pointercancel', stopDrag);
+    }, [kgRelationshipTrayOffset]);
+
     const openUsageDraftSession = useCallback(
         async (session) => {
             if (!flow_id || !session?.session_id) {
@@ -756,6 +998,22 @@ const App = () => {
         [flow_id, setActiveAIDraftSession, setInspectorEdgeId, setInspectorNodeId]
     );
 
+    const latestReviewableDraftSession = useMemo(
+        () =>
+            (Array.isArray(aiUsage?.sessions) ? aiUsage.sessions : [])
+                .filter(isReviewableDraftSessionSummary)
+                .sort(sortByNewestCreatedAt)[0],
+        [aiUsage?.sessions]
+    );
+
+    const openLatestReviewableDraftSession = useCallback(() => {
+        if (latestReviewableDraftSession) {
+            openUsageDraftSession(latestReviewableDraftSession);
+            return;
+        }
+        refreshAIUsage();
+    }, [latestReviewableDraftSession, openUsageDraftSession, refreshAIUsage]);
+
     const selectedNodeIssues = useMemo(() => {
         if (!inspectorNodeId || !validationReport?.issues) {
             return [];
@@ -773,9 +1031,20 @@ const App = () => {
                 activeCanvasView,
                 activeGraphFilters,
                 selectedBranchId,
-                canvasNodeDensity
+                canvasNodeDensity,
+                kgRelationshipMode,
+                kgFocusNodeIds: selectedCanvasNodes.map((node) => node.id)
             }),
-        [activeCanvasView, activeGraphFilters, canvasNodeDensity, edges, nodes, selectedBranchId]
+        [
+            activeCanvasView,
+            activeGraphFilters,
+            canvasNodeDensity,
+            edges,
+            kgRelationshipMode,
+            nodes,
+            selectedBranchId,
+            selectedCanvasNodes
+        ]
     );
     const isStructuredCanvasView = STRUCTURED_CANVAS_VIEWS.has(activeCanvasView);
     const renderedCanvasGraph = useMemo(() => {
@@ -783,8 +1052,8 @@ const App = () => {
             return canvasGraph;
         }
         return {
-            nodes: canvasGraph.nodes.map((node) => ({ ...node, hidden: true })),
-            edges: canvasGraph.edges.map((edge) => ({ ...edge, hidden: true }))
+            nodes: [],
+            edges: []
         };
     }, [canvasGraph, isStructuredCanvasView]);
     const selectedVisibleNodes = useMemo(() => {
@@ -1063,6 +1332,14 @@ const App = () => {
         setWorkspaceDockTab('build');
     }, []);
 
+    const focusStructuredNodeInMap = useCallback(
+        (nodeId) => {
+            setActiveView('mindmap');
+            window.setTimeout(() => focusNodeForReview(nodeId), 0);
+        },
+        [focusNodeForReview, setActiveView]
+    );
+
     const fitSelectedNodes = useCallback(() => {
         const selectedIds = new Set(selectedVisibleNodes.map((node) => node.id));
         if (selectedIds.size === 0) {
@@ -1089,13 +1366,14 @@ const App = () => {
         const graphEdges = reactFlow.getEdges();
         const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
             graphNodes,
-            graphEdges
+            graphEdges,
+            { mode: activeCanvasView }
         );
         setNodes(layoutedNodes);
         setEdges(layoutedEdges);
         setSaveStatus('dirty');
         window.setTimeout(() => fitView({ nodes: layoutedNodes, maxZoom: 1 }), 50);
-    }, [fitView, reactFlow, setEdges, setNodes, setSaveStatus]);
+    }, [activeCanvasView, fitView, reactFlow, setEdges, setNodes, setSaveStatus]);
 
     useEffect(() => {
         window.addEventListener('docmap:reflow-canvas', reflowCanvasGraph);
@@ -1371,7 +1649,7 @@ const App = () => {
             <AutomationsPanel validationReport={validationReport} />
             <ReactFlow
                 nodeTypes={nodeType}
-                edgeTypes={edgeType}
+                edgeTypes={edgeTypes}
                 nodes={renderedCanvasGraph.nodes}
                 edges={renderedCanvasGraph.edges}
                 onNodesChange={onNodesChange}
@@ -1384,6 +1662,11 @@ const App = () => {
                 fitViewOptions={{ maxZoom: 1 }}
                 proOptions={{ hideAttribution: true }}
                 onInit={setRfInstance}
+                className={
+                    activeCanvasView === 'knowledgeGraph' && selectedCanvasNodes.length > 0
+                        ? 'kg-focus-active'
+                        : ''
+                }
                 minZoom={0.2}
                 maxZoom={2.5}
                 multiSelectionKeyCode={['Control', 'Meta']}
@@ -1475,6 +1758,11 @@ const App = () => {
                                             <span>Start your think space</span>
                                             <p>Add sources, ask AI, or create the first node manually.</p>
                                             <div>
+                                                {latestReviewableDraftSession ? (
+                                                    <button type="button" onClick={openLatestReviewableDraftSession}>
+                                                        Resume draft
+                                                    </button>
+                                                ) : null}
                                                 <button type="button" onClick={openEmptyCanvasSources}>
                                                     Add sources
                                                 </button>
@@ -1500,6 +1788,9 @@ const App = () => {
                         activeGraphFilters={activeGraphFilters}
                         selectedBranchId={selectedBranchId}
                         onOpenNode={focusNodeForReview}
+                        onSelectBranch={setSelectedBranchId}
+                        onFocusInMap={focusStructuredNodeInMap}
+                        onApplyFilters={setActiveGraphFilters}
                         onOpenSources={openEmptyCanvasSources}
                         onAskAi={openEmptyCanvasAskAi}
                         onBackToMap={() => setActiveView('mindmap')}
@@ -1509,7 +1800,7 @@ const App = () => {
                     />
                 ) : null}
                 <Panel
-                    position="top-left"
+                    position="bottom-left"
                     style={{
                         display: 'block',
                         transform: `translate(${workspaceDockOffset.x}px, ${workspaceDockOffset.y}px)`
@@ -1743,6 +2034,89 @@ const App = () => {
                         onSelectEdge={setInspectorEdgeId}
                     />
                 </Panel>
+                {activeCanvasView === 'knowledgeGraph' && nodes.length > 0 ? (
+                    <Panel
+                        position="top-center"
+                        style={{
+                            display: 'block',
+                            transform: `translate(${kgRelationshipTrayOffset.x}px, ${kgRelationshipTrayOffset.y}px)`
+                        }}
+                    >
+                        <section
+                            className={`kg-relationship-controls ${kgRelationshipTrayCollapsed ? 'kg-relationship-controls--collapsed' : ''}`}
+                            aria-label="Knowledge graph relationship focus"
+                        >
+                            <div className="kg-relationship-header">
+                                <button
+                                    type="button"
+                                    className="kg-relationship-icon-button"
+                                    title="Move relationship tray"
+                                    aria-label="Move relationship tray"
+                                    onPointerDown={startKgRelationshipTrayDrag}
+                                >
+                                    <FiMove />
+                                </button>
+                                <div>
+                                    <span>KG focus</span>
+                                    <strong>
+                                        {KG_RELATIONSHIP_MODE_OPTIONS.find((option) => option.id === kgRelationshipMode)?.label ||
+                                            'Insight Focus'}
+                                    </strong>
+                                </div>
+                                <button
+                                    type="button"
+                                    className="kg-relationship-icon-button"
+                                    title={kgRelationshipTrayCollapsed ? 'Expand relationship tray' : 'Collapse relationship tray'}
+                                    aria-label={kgRelationshipTrayCollapsed ? 'Expand relationship tray' : 'Collapse relationship tray'}
+                                    onClick={() => setKgRelationshipTrayCollapsed((current) => !current)}
+                                >
+                                    {kgRelationshipTrayCollapsed ? <FiChevronRight /> : <FiChevronLeft />}
+                                </button>
+                            </div>
+                            <div className="kg-relationship-mode-buttons">
+                                {KG_RELATIONSHIP_MODE_OPTIONS.map((option) => (
+                                    <button
+                                        key={option.id}
+                                        type="button"
+                                        className={kgRelationshipMode === option.id ? 'active' : ''}
+                                        title={option.description}
+                                        onClick={() => selectKgRelationshipMode(option.id)}
+                                    >
+                                        <span>{option.shortLabel || option.label}</span>
+                                        <small>{kgRelationshipModeCounts[option.id] || 0}</small>
+                                    </button>
+                                ))}
+                            </div>
+                            {!kgRelationshipTrayCollapsed ? (
+                                <>
+                                    <div className="kg-top-insights" aria-label="Knowledge graph top insights">
+                                        {kgTopInsights.length ? (
+                                            kgTopInsights.map((insight) => (
+                                                <button
+                                                    key={insight.id}
+                                                    type="button"
+                                                    title={insight.rationale || `${insight.sourceTitle} ${insight.relationship} ${insight.targetTitle}`}
+                                                    onClick={() => setInspectorEdgeId(insight.id)}
+                                                >
+                                                    <span>{insight.familyLabel}</span>
+                                                    <strong>{insight.sourceTitle}</strong>
+                                                    <small>
+                                                        {insight.relationship} {insight.targetTitle}
+                                                    </small>
+                                                </button>
+                                            ))
+                                        ) : (
+                                            <p>No accepted relationships in this focus yet.</p>
+                                        )}
+                                    </div>
+                                    <p className="kg-relationship-hint">
+                                        Use Outputs / Connections for the review table and copy or download export.
+                                    </p>
+                                </>
+                            ) : null}
+                        </section>
+                    </Panel>
+                ) : null}
                 <Panel
                     position="bottom-right"
                     style={{ display: 'block' }}

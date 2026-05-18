@@ -23,6 +23,32 @@ const POSITION_EPSILON = 16;
 const NODE_COLLISION_SPACING = { x: 340, y: 88 };
 const NODE_LAYOUT_BOUNDS = { width: 340, height: 88, gapY: 64 };
 const DEFAULT_GRAPH_DATA = {};
+const HIERARCHY_EDGE_TYPES = new Set([
+    '',
+    'contains',
+    'parent_child',
+    'parent-child',
+    'child',
+    'section',
+    'subtopic',
+    'branch',
+    'step',
+    'smoothstep'
+]);
+
+const edgeRelationshipType = (edge = {}) =>
+    String(
+        edge.relationship_type ||
+            edge.data?.relationship_type ||
+            edge.data?.relationshipType ||
+            edge.metadata?.relationship_type ||
+            edge.type ||
+            ''
+    )
+        .trim()
+        .toLowerCase();
+
+const isHierarchyEdge = (edge = {}) => HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge));
 
 export const getNodeTitle = (node) =>
     node?.data?.title ||
@@ -89,11 +115,11 @@ const firstOpenPosition = ({
 
 export const getDirectChildIds = (edges = [], parentId) =>
     edges
-        .filter((edge) => edge.source === parentId && edge.target)
+        .filter((edge) => edge.source === parentId && edge.target && isHierarchyEdge(edge))
         .map((edge) => edge.target);
 
 export const getParentId = (edges = [], nodeId) =>
-    edges.find((edge) => edge.target === nodeId)?.source || '';
+    edges.find((edge) => edge.target === nodeId && isHierarchyEdge(edge))?.source || '';
 
 export const collectBranchNodeIds = (edges = [], rootId = '') => {
     const root = String(rootId || '').trim();
@@ -102,7 +128,7 @@ export const collectBranchNodeIds = (edges = [], rootId = '') => {
     }
     const childrenByParent = new Map();
     edges.forEach((edge) => {
-        if (!edge?.source || !edge?.target) {
+        if (!edge?.source || !edge?.target || !isHierarchyEdge(edge)) {
             return;
         }
         childrenByParent.set(edge.source, [...(childrenByParent.get(edge.source) || []), edge.target]);

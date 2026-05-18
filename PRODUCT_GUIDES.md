@@ -22,6 +22,9 @@ and how future validation should prove the capability.
   developer handoff.
 - `PRODUCT_GUIDE_SOFTWARE_INVENTORY.md` - software inventory overlap and
   rationalization.
+- `PRODUCT_GUIDE_KNOWLEDGE_GRAPH_RELATIONSHIPS.md` - semantic relationship
+  edges, Connections review, knowledge graph lenses, and relationship review
+  exports.
 - `PRODUCT_GUIDE_SPLITS.md` - guide-versus-roadmap boundaries.
 
 ## Guide Rule

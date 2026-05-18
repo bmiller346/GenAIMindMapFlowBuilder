@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     buildCompletenessReviewProjection,
     buildGraphProjection,
+    buildRelationshipReviewMarkdown,
     getExecutiveOutputProjection,
     getChecklistPreviewRows,
     getConnectionRows,
@@ -12,6 +13,7 @@ import {
     getFlowchartProjection,
     getGraphConfidenceSummary,
     getKanbanColumns,
+    getRelationshipFamilyReviewGroups,
     getSourceRepairPreviewRows,
     getTeamRoadmapProjection,
     getTaskCandidateRows,
@@ -98,6 +100,149 @@ test('connection rows surface nested edge relationship details', () => {
     assert.equal(rows[0].confidence, 0.74);
     assert.equal(rows[0].review_state, 'needs_review');
     assert.equal(rows[0].source_refs[0].document_id, 'doc-edge');
+});
+
+test('relationship review groups semantic edges by knowledge graph family', () => {
+    const projection = buildGraphProjection(
+        [
+            supportedNode('data', 'system', { title: 'Data source inventory' }),
+            supportedNode('control', 'control', { title: 'Access controls' }),
+            supportedNode('risk', 'risk', { title: 'Leakage risk' }),
+            supportedNode('sponsor', 'role', { title: 'Executive sponsor' })
+        ],
+        [
+            {
+                id: 'edge-structure',
+                source: 'data',
+                target: 'control',
+                relationship_type: 'contains'
+            },
+            {
+                id: 'edge-depends',
+                source: 'data',
+                target: 'control',
+                relationship_type: 'depends_on',
+                confidence: 0.81,
+                review_state: 'needs_review'
+            },
+            {
+                id: 'edge-risk',
+                source: 'risk',
+                target: 'data',
+                relationship_type: 'creates_risk_for',
+                data: {
+                    source_signal: 'ai_inferred'
+                }
+            },
+            {
+                id: 'edge-owner',
+                source: 'sponsor',
+                target: 'risk',
+                relationship_type: 'owns'
+            }
+        ]
+    );
+
+    const groups = getRelationshipFamilyReviewGroups(projection);
+
+    assert.deepEqual(groups.map((group) => group.id), [
+        'risks',
+        'dependencies',
+        'ownership'
+    ]);
+    assert.equal(groups.flatMap((group) => group.rows).length, 3);
+    assert.equal(groups[0].rows[0].relationship, 'Creates Risk For');
+    assert.equal(groups[1].rows[0].confidence, '81%');
+    assert.equal(groups[1].rows[0].review_state, 'needs_review');
+    assert.equal(groups[2].rows[0].source.title, 'Executive sponsor');
+});
+
+test('relationship review markdown exports semantic review handoff', () => {
+    const projection = buildGraphProjection(
+        [
+            supportedNode('data', 'system', { title: 'Data source inventory' }),
+            supportedNode('risk', 'risk', { title: 'Leakage risk' }),
+            supportedNode('control', 'control', { title: 'Access controls' })
+        ],
+        [
+            {
+                id: 'edge-structure',
+                source: 'data',
+                target: 'control',
+                relationship_type: 'contains'
+            },
+            {
+                id: 'edge-risk',
+                source: 'risk',
+                target: 'data',
+                relationship_type: 'creates_risk_for',
+                confidence: 0.8,
+                review_state: 'needs_review',
+                rationale: 'Sensitive repositories can create cross-client exposure.',
+                source_refs: [
+                    {
+                        document_id: 'policy-1',
+                        page: 3,
+                        section: 'Data access',
+                        quote_snippet: 'Access to sensitive repositories requires approval.'
+                    }
+                ],
+                data: {
+                    source_signal: 'ai_inferred'
+                }
+            }
+        ]
+    );
+
+    const markdown = buildRelationshipReviewMarkdown({
+        projection,
+        scopeLabel: 'AI assistant launch',
+        generatedAt: '2026-05-17T21:45:00.000Z'
+    });
+
+    assert(markdown.includes('# Relationship Review'));
+    assert(markdown.includes('- Scope: AI assistant launch'));
+    assert(markdown.includes('## Risks (1)'));
+    assert(markdown.includes('Leakage risk -> Data source inventory'));
+    assert(markdown.includes('- Relationship: Creates Risk For'));
+    assert(markdown.includes('- Confidence: 80%'));
+    assert(markdown.includes('policy-1 - p. 3, Data access'));
+    assert(!markdown.includes('Contains'));
+});
+
+test('source repair projection ignores relationship back-links when walking ancestors', () => {
+    const projection = buildGraphProjection(
+        [
+            node('root', 'strategy', 'Launch plan'),
+            node('governance', 'section', 'Governance'),
+            node('risk', 'risk', 'Confidentiality risk')
+        ],
+        [
+            {
+                id: 'root-governance',
+                source: 'root',
+                target: 'governance',
+                relationship_type: 'contains'
+            },
+            {
+                id: 'governance-risk',
+                source: 'governance',
+                target: 'risk',
+                relationship_type: 'contains'
+            },
+            {
+                id: 'risk-backlink',
+                source: 'risk',
+                target: 'root',
+                relationship_type: 'creates_risk_for'
+            }
+        ]
+    );
+
+    const rows = getSourceRepairPreviewRows(projection);
+
+    assert.equal(rows.length, 3);
+    assert.deepEqual(projection.roots.map((item) => item.id), ['root']);
 });
 
 test('accepted task projections become confirmed task rows', () => {
