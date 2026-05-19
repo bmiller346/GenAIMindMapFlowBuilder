@@ -20,6 +20,7 @@ const HELP_ARTICLES = [
         summary: 'Auto is a routing mode, not a mind-map default.',
         sections: [
             'Auto reads the intent first. “How do I...” tends to become a checklist or flowchart; comparisons tend to become tables; dependencies and ownership tend to become Connections.',
+            'Available shapes include mind map, knowledge graph, flowchart, chart, Kanban, table, executive summary, news article, SME questions, software overlap, and handoff-style outputs.',
             'Pick a visual manually when you already know the output you want.',
             'Use No visual for an answer or review note that should not create visual structure.'
         ]
@@ -46,6 +47,16 @@ const HELP_ARTICLES = [
         ]
     },
     {
+        id: 'evidence-review',
+        title: 'Evidence And Review',
+        summary: 'Source support and review state travel with the model.',
+        sections: [
+            'Nodes, relationships, and generated artifacts can carry source references, confidence, rationale, assumptions, source signals, and review state.',
+            'Source-backed means the item has a concrete source reference. Inferred or uncited content stays needs-review until a reviewer accepts it, cites it, or rewrites it.',
+            'Use Missing source, Needs review, Source repair, and relationship review packets to find weak spots before publishing or handing work to another tool.'
+        ]
+    },
+    {
         id: 'printable-maps',
         title: 'Printable Mind Maps',
         summary: 'Use map style and node emphasis to make exported maps easier to scan.',
@@ -53,7 +64,7 @@ const HELP_ARTICLES = [
             'Open Build / Map style to choose Clean, Print, or Sketchbook. Print uses a high-contrast light canvas; Sketchbook gives workshop-style cards and dashed connectors.',
             'Select a node, open Node metadata, and set Map emphasis to Key idea, Critical, Supporting, Evidence, or Action. Use Apply to branch when an entire section needs the same visual role.',
             'Make printable applies the print theme, depth hierarchy, emphasis badges, and auto-styles nodes in one step. Auto-style map only updates node emphasis. Reset styling clears emphasis and returns the map style to the default.',
-            'Export PDF for handouts, PNG for slides, or SVG when the map needs editing in another graphics tool.'
+            'Export PDF for handouts, PNG for slides, or SVG when the map needs editing in another graphics tool. Use structured exports such as JSON, Markdown, CSV, OPML, Mermaid, MMD JSON, Miro, or monday.com when another system needs the model.'
         ]
     },
     {
@@ -105,8 +116,9 @@ const HELP_ARTICLES = [
         summary: 'Compare a selected source against the accepted graph before changing anything.',
         sections: [
             'Open Sources / Media, select one or more sources, then choose Reconcile with workspace.',
-            'TraceSpace prepares citation repairs for matching graph nodes and separately flags source-only sections that may need placement.',
-            'Use the Source repair preview to accept useful repairs, supplement the graph, replace a branch, or keep both versions for comparison.'
+            'TraceSpace prepares citation repairs for matching graph nodes and separately flags source-only sections that may need placement. Multi-source selections and source sets can be used when the workspace needs broader reconciliation.',
+            'Use the Source repair preview to accept useful repairs, supplement the graph, replace a branch, or keep both versions for comparison.',
+            'Selected sources can also guide Ask AI so new drafts copy only allowed source references and keep unsupported claims in review.'
         ]
     },
     {
@@ -126,6 +138,7 @@ const HELP_ARTICLES = [
         sections: [
             'Review generated items in the draft panel before accepting.',
             'Items without sources stay marked for review.',
+            'Accept modes let you supplement the current graph, replace a scope, update matching nodes, accept selected items, accept cited-only items, or keep the draft as preview-only.',
             'Discard closes the draft without changing the workspace.'
         ]
     },
@@ -141,9 +154,10 @@ const HELP_ARTICLES = [
     },
     {
         id: 'publishable-outputs',
-        title: 'Publishable Outputs',
+        title: 'Exports And Deliverables',
         summary: 'Executive summaries and news articles keep evidence metadata while using audience-friendly language.',
         sections: [
+            'Standard exports include JSON, Markdown, CSV, OPML, MMD JSON, Mermaid, PNG, SVG, and PDF. Handoff projections can prepare model data for Miro, monday.com, stakeholder review, or implementation planning.',
             'Executive Summary is a leadership-oriented output with summary, key points, recommended actions, risks, required decisions, source-backed appendix, assumptions, and review state.',
             'News Article is meant for a broader audience. It should stay readable and less technical, while still carrying headline, dek, lede, sections, fact-check notes, source notes, source references, and assumptions.',
             'For news-style work, source-backed facts can be published with more confidence; unsupported claims should remain in assumptions or needs-review notes until verified.',
