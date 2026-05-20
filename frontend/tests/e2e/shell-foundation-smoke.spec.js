@@ -26,6 +26,12 @@ const flowJson = JSON.stringify({
 });
 
 const mockBackend = async (page, { shellEnabled = true } = {}) => {
+    const state = {
+        savedFlowName: 'Shell Foundation Smoke',
+        savedFlowJson: flowJson
+    };
+    const savedRequests = [];
+
     await page.addInitScript(({ shellEnabledFlag }) => {
         window.localStorage.clear();
         if (!shellEnabledFlag) {
@@ -33,13 +39,13 @@ const mockBackend = async (page, { shellEnabled = true } = {}) => {
         }
     }, { shellEnabledFlag: shellEnabled });
 
-    const flowRecord = {
+    const flowRecord = () => ({
         flow_id: flowId,
-        flow_name: 'Shell Foundation Smoke',
-        flow_json: flowJson,
+        flow_name: state.savedFlowName,
+        flow_json: state.savedFlowJson,
         flow_type: 'manual',
         summary: 'Flow is saved'
-    };
+    });
 
     await page.route(/http:\/\/localhost:8000\/.*/, async (route) => {
         await route.fulfill({
@@ -53,7 +59,22 @@ const mockBackend = async (page, { shellEnabled = true } = {}) => {
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify([flowRecord])
+            body: JSON.stringify([flowRecord()])
+        });
+    });
+
+    await page.route(/http:\/\/localhost:8000\/flow-update\/?$/, async (route) => {
+        const requestBody = route.request().postDataJSON();
+        state.savedFlowName = requestBody.flow_name;
+        state.savedFlowJson = requestBody.flow_json;
+        savedRequests.push(requestBody);
+        await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+                flow_id: flowId,
+                message: 'Flow updated successfully'
+            })
         });
     });
 
@@ -61,7 +82,7 @@ const mockBackend = async (page, { shellEnabled = true } = {}) => {
         await route.fulfill({
             status: 200,
             contentType: 'application/json',
-            body: JSON.stringify(flowRecord)
+            body: JSON.stringify(flowRecord())
         });
     });
 
@@ -72,6 +93,8 @@ const mockBackend = async (page, { shellEnabled = true } = {}) => {
             body: JSON.stringify({ sessions: [] })
         });
     });
+
+    return { savedRequests, state };
 };
 
 test('default shell renders wrapper slots without legacy primary floating docks', async ({ page }) => {
@@ -114,7 +137,7 @@ test('default shell renders wrapper slots without legacy primary floating docks'
 });
 
 test('shell can be disabled and legacy floating docks still work', async ({ page }) => {
-    await mockBackend(page, { shellEnabled: false });
+    const { savedRequests, state } = await mockBackend(page, { shellEnabled: false });
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/#/');
@@ -131,6 +154,27 @@ test('shell can be disabled and legacy floating docks still work', async ({ page
     await page.getByRole('button', { name: 'Node settings' }).click();
     await expect(page.locator('[data-dock-id="metadataInspector"]')).toBeVisible();
     await expect(page.locator('.metadata-inspector-floating-dock')).toContainText('Shell smoke root');
+
+    const inspector = page.locator('.metadata-inspector-floating-dock');
+    await inspector.getByLabel('Title').fill('Rollback Saved Root');
+    await inspector.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(page.getByText('Applied locally')).toBeVisible();
+    await page.getByRole('button', { name: 'Unsaved changes' }).click();
+
+    await expect
+        .poll(() => {
+            const latest = savedRequests.at(-1);
+            if (!latest?.flow_json) {
+                return false;
+            }
+            const snapshot = JSON.parse(latest.flow_json);
+            return snapshot.nodes?.some((item) => item.data?.title === 'Rollback Saved Root');
+        })
+        .toBe(true);
+
+    await page.getByAltText('Open workspaces').click();
+    await page.locator('.flow-row-main').filter({ hasText: state.savedFlowName }).click();
+    await expect(page.locator('.node-response').filter({ hasText: 'Rollback Saved Root' })).toBeVisible();
 });
 
 test('default shell keeps predictable slots at a narrow viewport', async ({ page }) => {
