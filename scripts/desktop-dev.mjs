@@ -10,6 +10,7 @@ const repoRoot = path.resolve(__dirname, '..');
 const frontendHost = '127.0.0.1';
 const frontendPort = 5173;
 const backendPort = 8000;
+const mongoPort = 27017;
 const execFileAsync = promisify(execFile);
 
 const electronBin = process.platform === 'win32'
@@ -17,6 +18,7 @@ const electronBin = process.platform === 'win32'
   : path.join(repoRoot, 'node_modules', '.bin', 'electron');
 
 const children = [];
+const portOwnerProbeTimeoutMs = 3000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -28,7 +30,8 @@ function getPortOwnerPids(port) {
   }
 
   const fromNetstat = execFileAsync('netstat.exe', ['-ano', '-p', 'tcp'], {
-    windowsHide: true
+    windowsHide: true,
+    timeout: portOwnerProbeTimeoutMs
   })
     .then(({ stdout }) => stdout
       .split(/\r?\n/)
@@ -48,7 +51,10 @@ function getPortOwnerPids(port) {
       '-Command',
       `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess`
     ],
-    { windowsHide: true }
+    {
+      windowsHide: true,
+      timeout: portOwnerProbeTimeoutMs
+    }
   )
     .then(({ stdout }) => stdout
       .split(/\r?\n/)
@@ -125,6 +131,61 @@ async function canReachUrl(url, timeoutMs = 3000) {
   }
 }
 
+async function canConnectToPort(port, host = frontendHost, timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host, port });
+    const finish = (reachable) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(reachable);
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+  });
+}
+
+async function ensureLocalMongo() {
+  if (await canConnectToPort(mongoPort)) {
+    return;
+  }
+
+  if (process.platform !== 'win32') {
+    console.warn(`[dev] MongoDB is not listening on ${frontendHost}:${mongoPort}. Start MongoDB before using document source uploads.`);
+    return;
+  }
+
+  console.log('[dev] MongoDB is not listening; starting local MongoDB fallback...');
+  try {
+    await execFileAsync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        path.join(repoRoot, 'scripts', 'start-local-mongo.ps1')
+      ],
+      {
+        cwd: repoRoot,
+        windowsHide: true,
+        timeout: 30000
+      }
+    );
+    console.log(`[dev] MongoDB is listening on ${frontendHost}:${mongoPort}.`);
+  } catch (error) {
+    console.warn('[dev] Could not start local MongoDB fallback. Document source uploads will be unavailable until MongoDB is running.');
+    if (error.stdout?.trim()) {
+      console.warn(error.stdout.trim());
+    }
+    if (error.stderr?.trim()) {
+      console.warn(error.stderr.trim());
+    }
+  }
+}
+
 function terminateChild(child) {
   if (child.killed || child.exitCode !== null) {
     return;
@@ -182,8 +243,14 @@ process.on('SIGTERM', () => {
 });
 
 async function main() {
+  await ensureLocalMongo();
   await stopPortOwners(frontendPort);
-  await stopPortOwners(backendPort);
+
+  const reuseExistingBackend = await canReachUrl(`http://${frontendHost}:${backendPort}/flows`);
+
+  if (!reuseExistingBackend) {
+    await stopPortOwners(backendPort);
+  }
 
   const portReady = await waitForPort(frontendPort, frontendHost, true);
   const backendReady = await waitForPort(backendPort, frontendHost, true);
@@ -192,9 +259,6 @@ async function main() {
     console.error(`[dev] port ${frontendPort} is still in use after cleanup; refusing to start on the wrong app.`);
     process.exit(1);
   }
-
-  const reuseExistingBackend =
-    !backendReady && await canReachUrl(`http://${frontendHost}:${backendPort}/flows`);
 
   if (!backendReady && !reuseExistingBackend) {
     console.error(`[dev] port ${backendPort} is still in use after cleanup and does not look like a TraceSpace backend.`);

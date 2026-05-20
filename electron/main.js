@@ -495,6 +495,124 @@ async function waitForBackend(timeoutMs = 90000) {
   return waitForUrl(`${BACKEND_URL}/flows`, timeoutMs);
 }
 
+function loadingPageHtml() {
+  return `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>TraceSpace</title>
+        <style>
+          :root {
+            color-scheme: dark;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #101418;
+            color: #f4f7f8;
+          }
+
+          * {
+            box-sizing: border-box;
+          }
+
+          body {
+            min-height: 100vh;
+            margin: 0;
+            display: grid;
+            place-items: center;
+            background:
+              linear-gradient(135deg, rgba(21, 148, 150, 0.22), transparent 42%),
+              linear-gradient(315deg, rgba(232, 190, 96, 0.16), transparent 38%),
+              #101418;
+          }
+
+          main {
+            width: min(460px, calc(100vw - 48px));
+            display: grid;
+            gap: 22px;
+          }
+
+          .brand {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+          }
+
+          .mark {
+            width: 44px;
+            height: 44px;
+            display: grid;
+            place-items: center;
+            border-radius: 8px;
+            background: #169fa1;
+            color: white;
+            font-size: 25px;
+            font-weight: 800;
+            line-height: 1;
+          }
+
+          h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 720;
+            letter-spacing: 0;
+          }
+
+          p {
+            margin: 0;
+            color: #b8c4c7;
+            font-size: 15px;
+            line-height: 1.6;
+          }
+
+          .bar {
+            position: relative;
+            height: 4px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.12);
+          }
+
+          .bar::after {
+            content: "";
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 38%;
+            border-radius: inherit;
+            background: linear-gradient(90deg, #169fa1, #e8be60);
+            animation: slide 1.25s ease-in-out infinite;
+          }
+
+          @keyframes slide {
+            0% {
+              transform: translateX(-110%);
+            }
+            100% {
+              transform: translateX(270%);
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <main aria-live="polite">
+          <div class="brand">
+            <div class="mark" aria-hidden="true">T</div>
+            <h1>TraceSpace</h1>
+          </div>
+          <p>Starting the local workspace engine. First launch can take a moment while Python imports the backend and checks local services.</p>
+          <div class="bar" aria-hidden="true"></div>
+        </main>
+      </body>
+    </html>
+  `;
+}
+
+async function showLoadingPage() {
+  await mainWindow.loadURL(
+    `data:text/html;charset=utf-8,${encodeURIComponent(loadingPageHtml())}`
+  );
+}
+
 async function canReachMongo(timeoutMs = 1000) {
   return new Promise((resolve) => {
     const socket = net.createConnection({ host: MONGO_HOST, port: MONGO_PORT });
@@ -543,6 +661,8 @@ async function createWindow() {
     safeLog(`[docmap-renderer:${level}] ${message} (${sourceId}:${line})`);
   });
 
+  await showLoadingPage();
+
   const backendReady = await waitForBackend();
   if (!backendReady) {
     await dialog.showMessageBox(mainWindow, {
@@ -558,7 +678,7 @@ async function createWindow() {
       type: 'warning',
       title: 'MongoDB is not running',
       message: 'TraceSpace can open workspaces, but document source uploads need MongoDB.',
-      detail: 'Start Docker Desktop, then run `npm run infra:mongo:up` from the repo root. Restart the desktop app after MongoDB is listening on 127.0.0.1:27017.'
+      detail: 'Run `npm run infra:mongo:local` from the repo root to use the installed local MongoDB fallback. If Docker is available instead, run `npm run infra:mongo:up`. Restart the desktop app after MongoDB is listening on 127.0.0.1:27017.'
     });
   }
 

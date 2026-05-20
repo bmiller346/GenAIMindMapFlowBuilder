@@ -6,13 +6,30 @@ $mongoRoot = Join-Path $repoRoot ".local\mongo"
 $dbPath = Join-Path $mongoRoot "db"
 $logPath = Join-Path $mongoRoot "mongod.log"
 
+function Test-MongoPort {
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $connect = $client.BeginConnect("127.0.0.1", 27017, $null, $null)
+        if (-not $connect.AsyncWaitHandle.WaitOne(1000)) {
+            $client.Close()
+            return $false
+        }
+
+        $client.EndConnect($connect)
+        $client.Close()
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 if (-not (Test-Path $mongoExe)) {
     throw "mongod.exe was not found at $mongoExe. Install MongoDB Community Server or update this script."
 }
 
 New-Item -ItemType Directory -Force -Path $dbPath | Out-Null
 
-$existing = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 27017 -State Listen -ErrorAction SilentlyContinue
+$existing = Test-MongoPort
 if ($existing) {
     Write-Host "MongoDB is already listening on 127.0.0.1:27017."
     exit 0
@@ -26,7 +43,7 @@ Start-Process `
 $deadline = (Get-Date).AddSeconds(20)
 do {
     Start-Sleep -Milliseconds 500
-    $listener = Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 27017 -State Listen -ErrorAction SilentlyContinue
+    $listener = Test-MongoPort
     if ($listener) {
         Write-Host "MongoDB started on 127.0.0.1:27017."
         Write-Host "Data: $dbPath"
