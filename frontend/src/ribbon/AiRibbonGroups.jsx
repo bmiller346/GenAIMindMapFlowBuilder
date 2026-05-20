@@ -1,7 +1,30 @@
 /* eslint-disable react/prop-types */
+import {
+    FiActivity,
+    FiAlertTriangle,
+    FiBookOpen,
+    FiCheckSquare,
+    FiClipboard,
+    FiColumns,
+    FiCompass,
+    FiFileText,
+    FiFolder,
+    FiGitMerge,
+    FiGrid,
+    FiLink,
+    FiList,
+    FiMap,
+    FiMessageSquare,
+    FiPlusCircle,
+    FiSearch,
+    FiShield,
+    FiTool,
+    FiUploadCloud
+} from 'react-icons/fi';
 
-const RibbonButton = ({ title, detail, disabled, onClick }) => (
+const RibbonButton = ({ title, detail, disabled, icon: Icon, onClick }) => (
     <button type="button" className="shell-ribbon-command" disabled={disabled} onClick={onClick}>
+        {Icon ? <Icon aria-hidden="true" /> : null}
         <strong>{title}</strong>
         <span>{detail}</span>
     </button>
@@ -20,12 +43,14 @@ export const AiRibbonGroups = ({
             <RibbonButton
                 title="Find connections"
                 detail="Propose relationship edges for review"
+                icon={FiLink}
                 disabled={!canUseWorkspace}
                 onClick={onFindConnections}
             />
             <RibbonButton
                 title="Find software overlap"
                 detail="Surface duplicate or overlapping tools"
+                icon={FiGitMerge}
                 disabled={!canUseWorkspace}
                 onClick={onFindSoftwareOverlap}
             />
@@ -35,12 +60,14 @@ export const AiRibbonGroups = ({
             <RibbonButton
                 title="Create table"
                 detail="Draft structured rows and fields"
+                icon={FiGrid}
                 disabled={!canUseWorkspace}
                 onClick={onCreateStructuredTable}
             />
             <RibbonButton
                 title="Generate tasks"
                 detail="Draft task candidates first"
+                icon={FiClipboard}
                 disabled={!canUseWorkspace}
                 onClick={onGenerateTasks}
             />
@@ -67,17 +94,20 @@ export const HomeRibbonGroups = ({
             <RibbonButton
                 title="Map"
                 detail="Return to the main canvas"
+                icon={FiMap}
                 onClick={onOpenMap}
             />
             <RibbonButton
                 title="Outline"
                 detail="Review hierarchy as a structured view"
+                icon={FiList}
                 disabled={!canUseWorkspace}
                 onClick={onOpenOutline}
             />
             <RibbonButton
                 title="Tasks"
                 detail="Open confirmed task work"
+                icon={FiCheckSquare}
                 disabled={!canUseWorkspace}
                 onClick={onOpenTasks}
             />
@@ -87,16 +117,19 @@ export const HomeRibbonGroups = ({
             <RibbonButton
                 title="Workspace"
                 detail="Open workspace browser"
+                icon={FiFolder}
                 onClick={onOpenWorkspace}
             />
             <RibbonButton
                 title="Activity"
                 detail="Open recent workspace activity"
+                icon={FiActivity}
                 onClick={onOpenActivity}
             />
             <RibbonButton
                 title="Health"
                 detail="Open validation and readiness"
+                icon={FiShield}
                 disabled={!canUseWorkspace}
                 onClick={onOpenHealth}
             />
@@ -106,23 +139,27 @@ export const HomeRibbonGroups = ({
             <RibbonButton
                 title="Add sources"
                 detail="Open source intake"
+                icon={FiUploadCloud}
                 onClick={onAddSource}
             />
             <RibbonButton
                 title="Ask AI"
                 detail="Start a preview-first draft"
+                icon={FiMessageSquare}
                 disabled={!canUseWorkspace}
                 onClick={onAskAi}
             />
             <RibbonButton
                 title="Start node"
                 detail="Create a manual root"
+                icon={FiPlusCircle}
                 disabled={!canUseWorkspace}
                 onClick={onStartManual}
             />
             <RibbonButton
                 title="Next steps"
                 detail="Open guided workspace actions"
+                icon={FiCompass}
                 disabled={!canUseWorkspace}
                 onClick={onOpenNextSteps}
             />
@@ -145,16 +182,19 @@ export const SourcesRibbonGroups = ({
             <RibbonButton
                 title="Library"
                 detail="Open embedded source browser"
+                icon={FiBookOpen}
                 onClick={onOpenLibrary}
             />
             <RibbonButton
                 title="Add sources"
                 detail="Upload or connect source material"
+                icon={FiUploadCloud}
                 onClick={onAddSource}
             />
             <RibbonButton
                 title="Source health"
                 detail="Open source readiness"
+                icon={FiShield}
                 disabled={!canUseWorkspace}
                 onClick={onOpenSourceHealth}
             />
@@ -164,12 +204,14 @@ export const SourcesRibbonGroups = ({
             <RibbonButton
                 title="Review support"
                 detail="Open source support tray"
+                icon={FiSearch}
                 disabled={!canUseWorkspace}
                 onClick={onReviewSources}
             />
             <RibbonButton
                 title="Repair sources"
                 detail="Ask AI for missing support"
+                icon={FiTool}
                 disabled={!canUseWorkspace || !hasSources}
                 onClick={onRepairSources}
             />
@@ -190,24 +232,28 @@ export const ReviewRibbonGroups = ({
             <RibbonButton
                 title="Connections"
                 detail="Review accepted/proposed relationship work"
+                icon={FiLink}
                 disabled={!canReview}
                 onClick={onOpenConnections}
             />
             <RibbonButton
                 title="Tasks"
                 detail="Review task candidates"
+                icon={FiClipboard}
                 disabled={!canReview}
                 onClick={onOpenTaskPreview}
             />
             <RibbonButton
                 title="Issues"
                 detail="Review gaps and weak areas"
+                icon={FiAlertTriangle}
                 disabled={!canReview}
                 onClick={onOpenIssues}
             />
             <RibbonButton
                 title="Sources"
                 detail="Review source support and repairs"
+                icon={FiBookOpen}
                 disabled={!canReview}
                 onClick={onOpenSources}
             />
@@ -232,18 +278,21 @@ export const OutputsRibbonGroups = ({
             <RibbonButton
                 title="Table"
                 detail="View structured workspace rows"
+                icon={FiGrid}
                 disabled={!canOpenOutputs}
                 onClick={onOpenTable}
             />
             <RibbonButton
                 title="Executive"
                 detail="Package summary and evidence"
+                icon={FiFileText}
                 disabled={!canOpenOutputs}
                 onClick={onOpenExecutive}
             />
             <RibbonButton
                 title="Flowchart"
                 detail="View accepted process structure"
+                icon={FiGitMerge}
                 disabled={!canOpenOutputs}
                 onClick={onOpenFlowchart}
             />
@@ -253,12 +302,14 @@ export const OutputsRibbonGroups = ({
             <RibbonButton
                 title="Tasks"
                 detail="Open confirmed task rows"
+                icon={FiClipboard}
                 disabled={!canOpenOutputs}
                 onClick={onOpenTasks}
             />
             <RibbonButton
                 title="Kanban"
                 detail="Project accepted tasks as a board"
+                icon={FiColumns}
                 disabled={!canOpenOutputs}
                 onClick={onOpenKanban}
             />
@@ -268,6 +319,7 @@ export const OutputsRibbonGroups = ({
             <RibbonButton
                 title="Checklist Preview"
                 detail="Review checklist candidates"
+                icon={FiCheckSquare}
                 disabled={!canOpenOutputs}
                 onClick={onOpenChecklist}
             />
@@ -277,12 +329,14 @@ export const OutputsRibbonGroups = ({
             <RibbonButton
                 title="Implementation"
                 detail="Review handoff package"
+                icon={FiTool}
                 disabled={!canOpenOutputs}
                 onClick={onOpenImplementationPackage}
             />
             <RibbonButton
                 title="Status"
                 detail="Review handoff status input"
+                icon={FiActivity}
                 disabled={!canOpenOutputs}
                 onClick={onOpenStatusReview}
             />

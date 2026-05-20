@@ -1521,6 +1521,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.34rem;
   min-width: 4.75rem;
   max-width: 8rem;
   min-height: 2.1rem;
@@ -1533,9 +1534,20 @@
   text-align: center;
 }
 
+.shell-ribbon-command svg {
+  flex: 0 0 auto;
+  width: 0.92rem;
+  height: 0.92rem;
+  color: var(--input-color);
+}
+
 .shell-ribbon-command:hover:not(:disabled) {
   border-color: var(--workspace-shell-border);
   background-color: color-mix(in srgb, var(--drawer-flow-hover) 82%, transparent);
+}
+
+.shell-ribbon-command:hover:not(:disabled) svg {
+  color: var(--font-color);
 }
 
 .shell-ribbon-command:disabled {
