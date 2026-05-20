@@ -59,6 +59,149 @@ Known active QA gaps:
 - Full `selection-shell-regression.spec.js` has 2 intentional `fixme` skips; active coverage is passing.
 - Legacy floating panel overlap in the old layout is documented as a `fixme`; the shell migration is the intended long-term fix.
 
+### Current Open Items / Agent Split
+
+Use this section when splitting the remaining shell work across parallel agents.
+Before any agent starts, check `git status --short`; active work may exist in
+`frontend/src/global-components/NodeInspector.jsx` and
+`frontend/tests/e2e/selection-shell-regression.spec.js` from the
+NodeInspector cleanup lane.
+
+#### Agent A: NodeInspector / Metadata Purity
+
+Primary goal: make shell-mode node metadata a pure right-rail metadata surface
+while preserving the shell-off legacy compatibility path.
+
+Owns:
+
+- `frontend/src/global-components/NodeInspector.jsx`
+- focused shell metadata tests in
+  `frontend/tests/e2e/selection-shell-regression.spec.js`
+- any small adapter code needed for `metadataOnly`
+
+Work:
+
+- Strip AI proposal, AI draft, and action-creation UI from shell metadata mode.
+- Keep legacy/floating NodeInspector behavior intact while the shell remains
+  feature-flagged.
+- Verify AI draft/proposal review continues to route through the Review Tray,
+  not the right rail.
+
+Avoid:
+
+- Review Tray visual redesign.
+- Source/branch panel field expansion.
+- FloatingDock retirement.
+
+#### Agent B: Ribbon / Outputs
+
+Primary goal: make the top ribbon feel like a real command surface instead of a
+set of placeholders.
+
+Owns:
+
+- `frontend/src/ribbon/*`
+- `frontend/src/views/LocalViewsPanel.jsx`
+- `frontend/src/views/OutputPanel.jsx`
+- relevant App ribbon wiring in `frontend/src/App.jsx`
+
+Work:
+
+- Add stable Home and Sources ribbon command groups.
+- Move table, executive, handoff, and other non-review outputs into intentional
+  shell output surfaces.
+- Keep ribbon commands thin: route through shell/router actions and existing
+  workflow controllers instead of owning workflow state.
+
+Avoid:
+
+- Accepted `tasks` becoming tray-only.
+- Review Tray candidate acceptance behavior.
+- Right-rail metadata editing.
+
+#### Agent C: Review Tray UX
+
+Primary goal: make all reviewable/generated work feel like one coherent
+preview-first system.
+
+Owns:
+
+- `frontend/src/review/*`
+- `frontend/src/shell/ShellReviewTrayHost.jsx`
+- `frontend/tests/e2e/review-tray-regression.spec.js`
+
+Work:
+
+- Polish tab labels, empty states, close behavior, and scope messaging.
+- Keep Connections, Tasks Preview, Checklist Preview, Sources, and Issues
+  consistent.
+- Add direct tray tests when new direct surfaces replace legacy/full-panel
+  compatibility routes.
+
+Avoid:
+
+- Accepted/canonical `tasks` routing into the tray.
+- Metadata editing in the tray.
+- Large output surfaces that are not review/accept flows.
+
+#### Agent D: Left Navigator / Project Browser
+
+Primary goal: mature the left rail into the workspace/project browser.
+
+Owns:
+
+- `frontend/src/global-components/WorkspaceDock.jsx`
+- `frontend/src/global-components/workspaceDock/*`
+- `frontend/src/shell/ShellWorkspaceNavigatorHost.jsx`
+- `frontend/src/shell/ShellLeftNavigatorHost.jsx`
+- source-library shell-left integration points
+
+Work:
+
+- Improve Sources, Outline, Activity, Health, and Build left-rail surfaces.
+- Keep source-library navigation in the left rail for shell mode.
+- Add desktop/narrow QA for left rail resize, collapse, and interaction with
+  right rail, status bar, and review tray.
+
+Avoid:
+
+- Right-rail source metadata save semantics beyond routing/opening.
+- Ribbon command ownership.
+- Review Tray candidate flows.
+
+#### Agent E: QA / Default Shell Readiness
+
+Primary goal: convert known gaps into reliable automated or manual release
+checks before default-shell rollout.
+
+Owns:
+
+- `frontend/tests/e2e/selection-shell-regression.spec.js`
+- `frontend/tests/e2e/shell-foundation-smoke.spec.js`
+- `frontend/tests/e2e/review-tray-regression.spec.js`
+- `frontend/tests/e2e/UI_SHELL_REGRESSION_CHECKLIST.md`
+
+Work:
+
+- Convert the two `fixme` tests when selectors and behavior are stable:
+  shift additive selection/lasso and major panel overlap.
+- Add screenshot or bounding-box coverage for ribbon, left rail, right rail,
+  status bar, and review tray at desktop and narrow widths.
+- Maintain separate shell-on and shell-off regression coverage.
+- Define the final blockers before flipping the shell on by default.
+
+Avoid:
+
+- Feature implementation unless it is a tiny testability fix.
+- Retiring FloatingDock before the owning feature lanes are complete.
+
+#### Deferred Integration: FloatingDock Retirement
+
+Do not assign this as a standalone implementation lane yet. Retire
+`FloatingDock` only after Ribbon, Properties, Review Tray, Left Navigator, and
+QA all mark their shell paths ready. Until then, FloatingDock remains the
+compatibility shell-off path and a guardrail against breaking existing users.
+
 ### Agent 1: Shell/Foundation
 
 Status: MVP scaffold complete behind the shell flag; more foundation work remains before the shell can become the default path.
@@ -594,10 +737,10 @@ This section is the source of truth for agent handoffs. Do not treat a slot, pan
 - `isSourcesOpen` remains for the default legacy source library path only.
 - `isAiHelpersOpen` remains for the default legacy AI Helpers path only; shell-path helpers use `shellStore.rightPanel.kind === 'guide'`.
 - `inspectorNodeId`, `inspectorEdgeId`, `activeAIDraftSession`, and `activeAIActionPreview` still drive live legacy surfaces.
-- `NodeInspector` still hosts metadata and AI preview/draft content together.
+- `NodeInspector` still hosts metadata and AI preview/draft content together for the legacy shell-off path; shell node properties pass `metadataOnly` and omit AI proposal/draft review plus action-creation controls.
 - Bottom tray state and host exist; AI draft sessions, source draft review, and workspace health validation have routed tray hosts.
 - Find connections, task preview, checklist preview, source repair, and gaps/SME Issues are directly mounted in the shell tray. Accepted/canonical tasks remain in the structured canvas `Tasks` view.
-- Right rail state and host exist for node/edge metadata plus editable source/branch properties, but richer source/branch semantics and `NodeInspector` AI-review extraction remain future work.
+- Right rail state and host exist for node/edge metadata plus editable source/branch properties, with shell node metadata kept metadata-only. Richer source/branch semantics remain future work.
 - WorkspaceDock is controlled and shell-mounted behind the flag, and the source library has a shell-left route. Deeper left-nav IA and source internals remain future work.
 - QA should validate the current compatibility behavior and shell-store unit rules now. Full shell screenshots should wait until the relevant visible slot migrations land.
 - Full `selection-shell-regression.spec.js` active coverage is green: 8 passed and 2 intentional `fixme` skips.
@@ -1066,7 +1209,7 @@ Suggested owner: Ribbon/LocalViews Agent.
 
 Purpose: make metadata predictable.
 
-Status: partially complete. Node and edge metadata plus editable source/branch details are in the shell right rail behind the feature flag; richer source/branch fields and AI-review cleanup remain.
+Status: shell path complete for current metadata ownership. Node and edge metadata plus editable source/branch details are in the shell right rail behind the feature flag; shell node metadata omits AI review/proposal controls via `metadataOnly`. Richer source/branch fields remain.
 
 Migrate:
 
@@ -1553,7 +1696,7 @@ Dependencies:
 
 Agent: Properties Panel Agent
 
-Status: partially complete on 2026-05-19. Node/edge properties rail is implemented behind the shell flag; broader properties cleanup remains.
+Status: shell path complete for current metadata ownership on 2026-05-19. Node/edge properties rail is implemented behind the shell flag, and node metadata stays metadata-only there; broader default-rollout cleanup remains.
 
 Scope:
 
@@ -1576,7 +1719,7 @@ Files changed:
 Blocking/dependent work:
 
 - `shellStore.rightPanel` is authoritative for shell-path node, edge, source, branch, and guide routes; later cleanup can remove legacy inspector-id compatibility after the default/floating path is retired.
-- Review Tray must own AI draft/session/proposal review before `NodeInspector` can be simplified into pure metadata editing.
+- Review Tray owns shell-path AI draft/session/proposal review. `NodeInspector` can only be simplified into pure metadata globally after the shell-off legacy path is retired.
 - Source-library ownership and save semantics must be defined before source properties move beyond focused library metadata fields.
 - Ribbon/LocalViews must settle branch lens/branch selection interactions before branch properties move beyond the explicit branch-root metadata action.
 - CSS/Layout Systems and QA should verify right-rail scrolling, width, and narrow viewport behavior before the shell flag becomes default.
@@ -1654,7 +1797,7 @@ Mitigation:
 
 Cause:
 
-- AI previews are currently hosted through `NodeInspector` and `AiHelpersPanel`.
+- AI previews are still hosted through `NodeInspector` and `AiHelpersPanel` in legacy/compatibility paths; shell node properties suppress those controls.
 
 Mitigation:
 

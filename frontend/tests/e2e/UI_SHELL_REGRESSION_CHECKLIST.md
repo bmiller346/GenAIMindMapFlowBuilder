@@ -13,6 +13,7 @@ Scope: selection, relationship lenses, metadata editing, AI preview-first flows,
   - Branch root and out-of-scope node highlighting.
   - Relationship edge metadata editing through `EdgeInspector`.
   - Shell-flag right properties rail node metadata editing and local apply behavior.
+  - Shell-flag right properties rail node metadata omits AI proposal/draft accept/reject and action-creation controls.
   - Shell-flag right properties rail relationship metadata editing and persisted save.
   - Shell-flag right properties rail editable branch properties from the active branch lens.
   - Shell-flag right properties rail editable source properties from the source library.
@@ -24,6 +25,10 @@ Scope: selection, relationship lenses, metadata editing, AI preview-first flows,
   - Shell-only left navigator Workspace tab restoration after Outline/Activity and event-driven Workspace tab restoration while Activity is mounted.
   - Basic no-overlap assertion across current major floating panels.
 
+- `review-tray-regression.spec.js`
+  - Shell review tray Drafts, Sources/source draft, Issues, Connections, Tasks preview, Checklist Preview, and source repair routes.
+  - Shell slot bounding-box coverage for ribbon, left rail, right rail, bottom review tray, and status bar at desktop and narrow widths.
+
 - `shellStore.test.mjs`
   - Shell panel exclusivity rules.
   - Source and branch metadata routes opening the right panel and clearing review trays.
@@ -33,6 +38,9 @@ Scope: selection, relationship lenses, metadata editing, AI preview-first flows,
 - `shellComponents.test.mjs`
   - Shell slot and ribbon server-render contract coverage.
   - Read-only branch/source properties summary rendering.
+
+- `shell-foundation-smoke.spec.js`
+  - Shell wrapper slot mounting, slot-state attributes, closed right rail policy, and narrow viewport shell bounds.
 
 Existing related coverage:
 
@@ -126,10 +134,23 @@ Existing related coverage:
 
 ## Current Gaps
 
-- Automated lasso coverage is browser-real but may need selector adjustment after the shell migration replaces floating docks.
 - No screenshot diff baseline exists yet for panel overlap; current automated check is bounding-box only.
 - Find connections full accept/reject is indirectly covered through nudges and graph projection tests, but not yet as a dedicated e2e for connection candidate accept/reject.
 - Shell left navigator manual resize is unit-covered through shell state and manually listed above; browser-level drag automation needs a reliable pointer strategy before enabling.
 - Shell Outline mode is read-only. Full branch management and saved-view navigation are not implemented yet.
 - Shell Activity mode embeds the existing activity history surface. A redesigned timeline/notification model is not implemented yet.
-- Mobile/narrow layout overlap is manual-only until stable shell slots replace floating docks.
+- Legacy floating panel no-overlap remains a `test.fixme`; shell slot overlap now has bounding-box coverage, but no pixel screenshot diff baseline.
+
+## Final Blockers Before Default Shell
+
+Do not flip `docmap.uiShellRibbon.enabled` or `VITE_ENABLE_UI_SHELL_RIBBON` on by default until all items below are true. FloatingDock retirement is explicitly deferred; this gate blocks duplicate primary surfaces, broken routing, persistence regressions, and shell layout failures while the shell is enabled.
+
+- `selection-shell-regression.spec.js`, `review-tray-regression.spec.js`, `shell-foundation-smoke.spec.js`, `shellStore.test.mjs`, `shellLayoutState.test.mjs`, and `shellComponents.test.mjs` pass.
+- Shell-critical `test.fixme` coverage is either fixed or explicitly waived with a manual screenshot gate.
+- Manual screenshot pass is complete at 1600x1000, 1440x900, and 390x844 with shell disabled and enabled.
+- With shell enabled, WorkspaceDock, source library, Activity, AI Helpers, metadata properties, and review workflows route to shell slots without duplicate primary floating chrome.
+- Right rail node, edge, branch, and source property edits apply and persist where expected; metadata-only right rail does not expose AI draft accept/reject or action-creation controls.
+- Bottom review tray hosts Drafts, Sources/source repair, Issues, Connections, Tasks preview, and Checklist Preview without opening legacy local-output bridge surfaces.
+- Quick Ask AI remains lightweight and separate from review workflows.
+- Disabling the shell flag restores the legacy layout and existing workspace data remains intact.
+- FloatingDock retirement remains a post-default cleanup item. Legacy FloatingDock code may remain if it is not mounted as duplicate primary chrome under the shell default.

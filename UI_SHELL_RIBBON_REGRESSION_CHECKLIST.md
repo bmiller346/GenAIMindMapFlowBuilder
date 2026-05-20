@@ -7,6 +7,7 @@ Use this checklist while migrating surfaces behind `VITE_ENABLE_UI_SHELL_RIBBON`
 ## Automated Coverage
 
 - `frontend/tests/e2e/selection-shell-regression.spec.js`
+  - shift-click additive selection and shift-drag/lasso additive selection
   - quick Ask AI request scope and result display
   - branch scope highlighting
   - selected node highlighting from seeded selected-node state
@@ -16,13 +17,16 @@ Use this checklist while migrating surfaces behind `VITE_ENABLE_UI_SHELL_RIBBON`
   - shell AI Helpers opens in the right rail instead of a React Flow canvas overlay
   - shell review tray Drafts path from tracked AI draft session review
   - shell right rail node metadata edit/apply local behavior
+  - shell right rail node metadata omits AI proposal/draft accept/reject and action-creation controls
   - shell right rail relationship metadata edit/apply/save
-  - placeholders for shift-click additive selection, lasso additive selection, and major panel overlap
+  - shell right rail branch and source properties editing routes
+  - placeholder for legacy major floating panel overlap
 - `frontend/tests/e2e/review-tray-regression.spec.js`
   - shell review tray Sources path for generated source draft review before accept
   - shell review tray Issues path from the left-rail Health action
   - direct shell review tray routes for Connections, Tasks preview, Checklist, Sources/source repair, and Issues without the old local output bridge
   - source draft accept applies the generated graph and source library
+  - shell slot bounding-box coverage for ribbon, left rail, right rail, review tray, and status bar at desktop and narrow widths
 - `frontend/tests/shellStore.test.mjs`
   - right panel and bottom tray exclusivity
   - workspace navigator state
@@ -56,15 +60,30 @@ Run once with the shell disabled, then once with the shell enabled.
 - Top ribbon remains visible and does not hide canvas controls.
 - Left navigator replaces the WorkspaceDock floating placement only when the shell flag is enabled.
 - Node and edge selection open one right properties surface, not both a right panel and floating metadata dock.
+- Shell node metadata is metadata-only: no AI proposal preview, draft accept/reject, or action-creation controls appear in the right rail.
 - AI Helpers / Next steps open in the shell right rail, not in a bottom-right canvas overlay.
 - AI draft sessions and Find connections open in the bottom tray as they migrate, not over the canvas.
 - Quick Ask AI remains separate from large review workflows.
 - Disabling the shell flag restores the legacy layout without losing persisted workspace data.
 
+## Final Blockers Before Default Shell
+
+Do not flip `docmap.uiShellRibbon.enabled` or `VITE_ENABLE_UI_SHELL_RIBBON` on by default until all items below are true. FloatingDock retirement is explicitly deferred; this gate blocks duplicate primary surfaces, broken routing, persistence regressions, and shell layout failures while the shell is enabled.
+
+- `selection-shell-regression.spec.js`, `review-tray-regression.spec.js`, `shell-foundation-smoke.spec.js`, `shellStore.test.mjs`, `shellLayoutState.test.mjs`, and `shellComponents.test.mjs` pass.
+- Shell-critical `test.fixme` coverage is either fixed or explicitly waived with a manual screenshot gate.
+- Manual screenshot pass is complete at 1600x1000, 1440x900, and 390x844 with shell disabled and enabled.
+- With shell enabled, WorkspaceDock, source library, Activity, AI Helpers, metadata properties, and review workflows route to shell slots without duplicate primary floating chrome.
+- Right rail node, edge, branch, and source property edits apply and persist where expected; metadata-only right rail does not expose AI draft accept/reject or action-creation controls.
+- Bottom review tray hosts Drafts, Sources/source repair, Issues, Connections, Tasks preview, and Checklist Preview without opening legacy local-output bridge surfaces.
+- Quick Ask AI remains lightweight and separate from review workflows.
+- Disabling the shell flag restores the legacy layout and existing workspace data remains intact.
+- FloatingDock retirement remains a post-default cleanup item. Legacy FloatingDock code may remain if it is not mounted as duplicate primary chrome under the shell default.
+
 ## Current Gaps
 
 - Bottom review tray has active Drafts, Sources, Issues, Connections, Tasks preview, Checklist Preview, and source repair Playwright coverage. Accepted/canonical tasks intentionally remain in the structured canvas `Tasks` view.
-- Right properties panel has shell-enabled node apply and edge metadata persistence tests; node persisted-save proof, source properties, and branch properties still need coverage after those routes/fixtures exist.
+- Right properties panel has shell-enabled node apply, edge metadata persistence, source properties, and branch properties coverage.
 - Relationship lens-in-ribbon behavior still needs screenshot QA after LocalViewsPanel controls are mounted in the ribbon.
-- Shift-click/lasso and visual overlap assertions are tracked as `test.fixme` in `selection-shell-regression.spec.js`; keep them in the manual pass until the interaction selectors are stable enough to activate.
-- Full visual overlap assertions are currently limited to placeholders; shell slot overlap should be added once all slots are populated.
+- Legacy visual overlap remains tracked as `test.fixme` in `selection-shell-regression.spec.js`; keep it in the manual pass until the compatibility layout is intentionally fixed or waived.
+- Full visual overlap assertions are currently bounding-box only; no screenshot diff baseline exists yet.

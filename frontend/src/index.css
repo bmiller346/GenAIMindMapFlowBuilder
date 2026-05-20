@@ -2808,16 +2808,28 @@ h5 {
 
 .shell-left-navigator__modebar {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.35rem;
   border-bottom: 1px solid var(--workspace-shell-border);
   background-color: color-mix(in srgb, var(--workspace-shell-surface) 94%, var(--main-color));
   padding: 0.45rem;
 }
 
-.shell-left-navigator__modebar button {
+.shell-left-navigator__mode-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.shell-left-navigator__modebar button,
+.shell-left-navigator__mode-buttons button {
   min-width: 0;
   min-height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
   overflow: hidden;
   border: 1px solid transparent;
   border-radius: 0.45rem;
@@ -2830,8 +2842,24 @@ h5 {
   white-space: nowrap;
 }
 
+.shell-left-navigator__modebar button svg,
+.shell-left-navigator__mode-buttons button svg {
+  flex: 0 0 auto;
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.shell-left-navigator__modebar button span,
+.shell-left-navigator__mode-buttons button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .shell-left-navigator__modebar button:hover,
-.shell-left-navigator__modebar button.active {
+.shell-left-navigator__modebar button.active,
+.shell-left-navigator__mode-buttons button:hover,
+.shell-left-navigator__mode-buttons button.active {
   border-color: var(--question-border);
   background-color: var(--data-source-hover);
 }
@@ -2879,6 +2907,24 @@ h5 {
 .shell-left-navigator__resize-handle svg {
   width: 0.75rem;
   height: 0.75rem;
+}
+
+.shell-left-navigator--collapsed .shell-left-navigator__modebar {
+  grid-template-columns: 1fr;
+}
+
+.shell-left-navigator--collapsed .shell-left-navigator__mode-buttons {
+  grid-template-columns: 1fr;
+}
+
+.shell-left-navigator--collapsed .shell-left-navigator__modebar button span,
+.shell-left-navigator--collapsed .shell-left-navigator__mode-buttons button span {
+  display: none;
+}
+
+.shell-left-navigator--collapsed .shell-left-navigator__modebar .shell-left-navigator__icon-button {
+  width: auto;
+  min-width: 0;
 }
 
 .shell-left-outline {
@@ -10567,6 +10613,25 @@ img:hover {
   overflow: hidden;
 }
 
+.shell-output-surface-panel {
+  inset: 0.85rem 1rem 1rem 1rem !important;
+  pointer-events: none;
+}
+
+.local-views-panel-shell-output {
+  width: min(72rem, calc(100vw - var(--workspace-shell-left-width, 20rem) - 4rem));
+  max-height: calc(100vh - var(--workspace-shell-ribbon-height, 5rem) - 6rem);
+  margin: 0;
+  pointer-events: auto;
+}
+
+.local-views-panel-shell-output .local-view-content-surface {
+  flex: 1;
+  max-height: none;
+  margin-top: 0;
+  min-height: 0;
+}
+
 .local-views-panel-compact {
   width: auto;
   max-width: min(46rem, calc(100vw - 2rem));
@@ -14441,7 +14506,7 @@ img:hover {
 .review-tray__header {
   display: flex;
   grid-column: 1 / -1;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
   border-bottom: 1px solid var(--question-border);
@@ -14456,6 +14521,35 @@ img:hover {
 
 .review-tray__close {
   flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  padding: 0;
+}
+
+.review-tray__heading {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.review-tray__heading > div:first-child {
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+}
+
+.review-tray__heading strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.86rem;
+}
+
+.review-tray__heading span {
+  color: color-mix(in srgb, var(--font-color) 68%, transparent);
+  font-size: 0.76rem;
+  line-height: 1.35;
 }
 
 .review-tray__tabs {
@@ -14480,9 +14574,16 @@ img:hover {
 }
 
 .review-tray__empty {
+  display: grid;
+  gap: 0.25rem;
   margin: 0;
   color: color-mix(in srgb, var(--font-color) 62%, transparent);
   font-size: 0.82rem;
+}
+
+.review-tray__empty strong {
+  color: var(--font-color);
+  font-size: 0.88rem;
 }
 
 .review-tray .source-draft-review-panel {

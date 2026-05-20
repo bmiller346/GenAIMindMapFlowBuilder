@@ -114,7 +114,10 @@ Valid panel subjects:
 - Guide.
 
 It should preserve editing behavior and source traceability, but it should not
-host large AI draft review flows.
+host AI proposal review, draft-session accept/reject controls, or action
+creation controls. In shell mode, node properties are metadata-only; generated
+or reviewable work belongs in the Review Tray before it mutates the accepted
+workspace.
 
 ### Bottom Review Tray
 

@@ -28,3 +28,8 @@ Next Steps uses `rightPanel.kind === 'guide'`; it is a guide surface, not a
 metadata or review surface. Legacy graph inspector ids are still supported as
 compatibility inputs, but they should not be the rendered source of truth for
 the shell right rail.
+
+Shell node properties pass `metadataOnly` to `NodeInspector`. The shell right
+rail may edit node metadata and show evidence facts, but AI proposal review,
+draft-session accept/reject, and action-creating controls belong in the bottom
+Review Tray or the shell-off legacy inspector path.
