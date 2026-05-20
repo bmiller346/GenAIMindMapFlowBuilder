@@ -51,6 +51,10 @@ make the available commands clearer, not create another competing panel.
 
 The left navigator owns orientation.
 
+It should read like a docked project browser, not a second ribbon. Mode
+selection may use a compact icon rail or a browser header, while commands for
+creating, reviewing, exporting, or running AI stay in the top ribbon.
+
 It may contain:
 
 - Workspace outline.

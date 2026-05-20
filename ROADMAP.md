@@ -560,6 +560,48 @@ Priority work:
   source supplement, source compare, confidence repair action, and source-first
   action routing.
 
+### Sankey Flow Lens
+
+See `PRODUCT_GUIDE_SANKEY_FLOW_LENS.md` for product intent and review rules.
+
+Goal: add an optional Sankey lens for directional weighted data so users can
+query evidence flow, handoffs, dependencies, ownership/status movement, and
+structured query results without creating a separate diagram state.
+
+Target experience:
+
+```text
+eligible graph or structured data
+-> detect source / target / value paths
+-> show Sankey lens or preview
+-> click flow path to inspect/filter source-backed rows
+-> export reviewable flow rows with metric and source refs
+```
+
+Priority work:
+
+- [x] Register Sankey as a supported chart/lens contract without making it a
+  default canvas tab.
+- [x] Detect structured data columns that can produce Sankey rows: source,
+  target, value/count, group, status, owner, risk, confidence, and source refs.
+- [x] Extend chart artifacts to support `chart_spec.chart_type = "sankey"`,
+  preserving query id, result hash, selected metric, and source refs.
+- [x] Render structured-data Sankey previews with existing Plotly dependencies.
+- [ ] Add click-to-filter behavior from Sankey node/band to represented table
+  rows and source context.
+- [x] Add a first workspace Sankey projection helper for accepted structured
+  evidence source/target/value paths.
+- [ ] Expand workspace Sankey projection to source-to-node, node-to-output,
+  handoff, dependency, owner/status, and evidence-flow paths.
+- [ ] Keep inferred paths preview-first and mark unsupported generated weights
+  as `needs_review`.
+- [ ] Add Markdown/JSON export of Sankey flow rows, selected metric, review
+  state, unsupported paths, and source refs.
+- [x] Add focused tests for structured-data eligibility, Plotly Sankey spec
+  generation, and source/ref preservation.
+- [ ] Add tests for workspace projection purity, click filtering, and export
+  shape.
+
 ### Node AI Actions And Prompt Profiles
 
 See `NODE_AI_ACTIONS_ROADMAP.md` for the implementation source of truth,

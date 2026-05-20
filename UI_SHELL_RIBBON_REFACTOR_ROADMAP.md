@@ -56,8 +56,9 @@ Ready for agents to build on:
 - Outputs ribbon commands now distinguish accepted workspace views, execution projections, checklist preview, and handoff outputs for Table, Executive, Flowchart, Tasks, Kanban, Checklist Preview, Implementation, and Status.
 - Shell Review Tray labels now distinguish task/checklist previews from accepted task views.
 - Left navigator now has first-class Workspace, Sources, Outline, Activity,
-  Health, and Build modes, and shell mode renders WorkspaceDock content without
-  a nested inner tab strip.
+  Health, and Build modes, renders WorkspaceDock content without a nested inner
+  tab strip, and uses a dock-style vertical mode rail so it reads as a project
+  browser rather than a second top ribbon.
 - Shell Ask AI entry points route to shell-owned surfaces: general Ask AI opens
   the right-rail guide, while reviewable AI commands such as Find Connections
   open the bottom Review Tray.
@@ -113,14 +114,14 @@ is dead in both shell-on and shell-off paths.
 | --- | --- | --- | --- | --- | --- |
 | Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Default shell feels crowded or hides controls at common desktop/narrow sizes | Run shell e2e geometry coverage plus manual screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Automated narrow/header/ribbon/tray/status progress coverage passing; manual screenshot signoff still open | Yes |
 | Accepted output surfaces need verification | Outputs ribbon and accepted workspace views | Accepted Table/Executive/Flowchart/Tasks/Kanban commands route to an invisible surface or wrong tray workflow | Verify Table, Executive, Flowchart, Tasks, and Kanban open accepted canvas/output surfaces; verify Checklist Preview opens the Review Tray | E2E route coverage passing for Table, Executive, Flowchart, Tasks, Kanban, Implementation, Status, and Checklist Preview | Yes |
-| Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Preview candidates become canonical work before acceptance, or accepted artifacts remain trapped in preview UI | E2E or component coverage for Table/Kanban not opening tray, Checklist Preview opening tray, accepted tasks staying in structured canvas, and checklist artifact persistence | Route split covered; accepted checklist artifact persistence still open | Yes |
+| Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Preview candidates become canonical work before acceptance, or accepted artifacts remain trapped in preview UI | E2E or component coverage for Table/Kanban not opening tray, Checklist Preview opening tray, accepted tasks staying in structured canvas, and checklist artifact persistence | Route split covered; accepted checklist artifact persistence covered by review-tray save/reopen regression | Yes |
 | Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 25 serialized shell e2e passed, 1 intentional skip | Yes |
 | Map readability and relationship lenses are visually verified | Map ribbon, branch scope, relationship labels | Branch focus, selected nodes, and relationship labels compete visually or confuse review | Visual QA plus coverage that mind map relationship labels default off and can be toggled on intentionally | Default-off / toggle-on e2e, branch-lens e2e, and projection unit coverage passing; manual visual QA still open | Yes |
 | Preview-first graph mutation remains safe | Connections review and generated previews | Find Connections or related candidate acceptance mutates canonical graph without review | Verify generated connection candidates enter Review Tray first and accept/reject preserves existing mutation behavior | Shell AI ribbon Find Connections now routes to the Review Tray instead of `PromptModal`; acceptance mutation behavior still needs deeper candidate accept/reject QA | Yes |
 | Legacy overlap `fixme` has disposition | Shell-off FloatingDock compatibility layout | Known overlap remains ambiguous when shell becomes default and rollback is needed | Either keep skipped with explicit shell-off waiver/manual screenshot gate, narrow to shell-only geometry, or replace with stable bounding-box coverage | Disposition documented: skipped as shell-off compatibility territory while shell slot geometry guards default readiness | Yes |
 | Shell-off compatibility remains covered | Feature flag rollback path | Default-on rollout cannot be safely disabled or corrupts existing workspace data | Run shell-off smoke/manual pass and confirm legacy FloatingDock surfaces still open, edit, save, and reopen existing workspace data | Shell-off smoke now covers legacy workspace and metadata FloatingDock mount, edit, save, and reopen behavior | Yes |
 | Right rail metadata stays metadata-only and persistent | Node, edge, branch, source properties | AI review/action UI leaks into properties rail, or property edits are lost | Run selection shell regression for node/edge/branch/source properties and metadata-only NodeInspector assertions | Covered by selection shell regression for node, edge, branch, source, and metadata-only NodeInspector behavior | Yes |
-| Review Tray remains authoritative for reviewable generated work | Bottom tray | AI drafts, source drafts, issues, connections, tasks preview, or checklist preview fall back to legacy/full-panel routes | Run review tray regression for direct tray routes and close behavior | Covered for direct tray routes and close behavior; source-library Ask AI uses the right-rail guide; advanced prompt-builder flows remain open | Yes |
+| Review Tray remains authoritative for reviewable generated work | Bottom tray | AI drafts, source drafts, issues, connections, tasks preview, or checklist preview fall back to legacy/full-panel routes | Run review tray regression for direct tray routes and close behavior | Covered for direct tray routes, close behavior, and accepted checklist save/reopen; source-library Ask AI uses the right-rail guide; advanced prompt-builder flows remain open | Yes |
 | FloatingDock removal | Legacy floating layout | Removing compatibility chrome breaks shell-off rollback | Keep audit-only until default shell and output cleanup are complete | Deferred | No |
 | Richer source/branch metadata | Right rail properties | Default properties are useful but not fully product-complete | Product follow-up with field expansion and persistence tests | Deferred | No |
 | Full map projection helper extraction | Mind map projection/lens internals | Lens work remains harder to evolve but current behavior can ship | Refactor plan after branch/lens styling stabilizes | First extraction landed in `frontend/src/utils/canvasProjection.js` with focused unit coverage; broader density/lens rules deferred | No |
@@ -198,8 +199,9 @@ Avoid:
 
 #### Landed Agent B: FloatingDock Retirement Audit
 
-Status: landed for render-time `FloatingDock` mounts. A follow-up must inventory
-non-`FloatingDock` floating React Flow panels before any retirement work starts.
+Status: landed for render-time `FloatingDock` mounts and followed by a
+non-`FloatingDock` floating surface inventory. `FloatingDock` retirement remains
+blocked until rollback compatibility and shell-owned alternatives are complete.
 
 Owns:
 
@@ -214,12 +216,26 @@ Remaining validation:
 
 - Keep `FloatingDock` removal blocked until default-on, rollback coverage, and
   metadata/output/map QA are complete.
-- Track non-`FloatingDock` panels separately from `FloatingDock` retirement.
+- Track non-`FloatingDock` panels separately from `FloatingDock` retirement and
+  classify them before moving any surface into shell overlay state.
 
 Avoid:
 
 - Removing `FloatingDock` broadly.
 - Changing shell default behavior.
+
+Non-`FloatingDock` floating surface inventory:
+
+| Surface | Current classification | Disposition |
+| --- | --- | --- |
+| Legacy modal host and upload/settings/help dialogs | Modal by design | Keep while shell settles; individual upload flows can stay modal unless a shell-specific route is designed. |
+| Advanced Ask AI / prompt-builder modal | Migration candidate | Highest prompt-routing gap. It still owns role/action inference, model/evidence/citation controls, progress handoff, and draft-session metadata. |
+| Shell output surface React Flow panel for chart/monday views | Migration candidate | Not a shell slot yet; audit before moving execution/handoff outputs into shell-owned surfaces. |
+| Shell-off AI generation progress dock | Shell-off compatibility | Keep until rollback path is retired; shell-on progress is already in the status bar. |
+| Empty-canvas start panel | Canvas affordance | Ask AI is shell-aware; Guided starts still opens the prompt modal and is the smallest next routing cleanup. |
+| Branch lens banner, selection action bar, legacy AI Helpers panel, and source draft review panel | Shell-off compatibility | Keep as rollback surfaces while default shell matures. |
+| Anchored popovers from local views and node controls | Canvas affordance | Accept as small menus for now; document separately from modal/panel retirement. |
+| Shell overlay host | Shell-owned placeholder | Store state and slot exist, but `ShellOverlayHost` renders no real overlay content yet. |
 
 #### Landed Agent C: Map Readability And Lenses
 
@@ -279,6 +295,10 @@ Remaining validation:
 
 #### Next Agent E: Checklist And Accepted Output Continuation
 
+Status: first persistence checkpoint landed. Review-tray e2e now accepts a
+Checklist Preview item, saves through the mocked workspace endpoint, reopens the
+workspace, and confirms the accepted checklist projection remains persisted.
+
 Primary goal: keep preview/accepted output boundaries crisp.
 
 Owns:
@@ -293,7 +313,8 @@ Work:
   - Checklist Preview: Review Tray.
   - Checklist View / Checklist Artifact: accepted workspace/output layer.
   - Tasks: structured canvas view after acceptance.
-- Continue persistent checklist artifact planning or implementation.
+- Continue accepted checklist artifact product planning beyond the persisted
+  node-level projection now covered by e2e.
 - Align Outputs ribbon grouping with accepted views, execution projections, and
   handoff surfaces.
 
@@ -320,15 +341,18 @@ Recommended operating model:
 
 Next sequence:
 
-1. Add accepted checklist artifact persistence coverage or explicitly defer it
-   as a post-default artifact concern.
-2. Add a non-`FloatingDock` floating surface inventory and decide which are
-   shell overlays, temporary canvas affordances, or retirement candidates.
-3. Complete manual screenshot signoff for shell on/off at desktop and narrow
+1. Complete manual screenshot signoff for shell on/off at desktop and narrow
    widths.
-4. Rerun build, shell units, shell e2e, and review tray e2e as the final
+2. Deepen connection candidate accept/reject QA so Review Tray routing and
+   canonical graph mutation behavior are covered together.
+3. Normalize the smallest remaining prompt-builder route: make empty-canvas
+   Guided starts shell-aware before attempting the full advanced builder
+   migration.
+4. Continue non-`FloatingDock` floating surface disposition and decide which are
+   shell overlays, temporary canvas affordances, or retirement candidates.
+5. Rerun build, shell units, shell e2e, and review tray e2e as the final
    pre-default verification bundle.
-5. Only after those pass, decide whether to flip the shell default flag. Keep
+6. Only after those pass, decide whether to flip the shell default flag. Keep
    `FloatingDock` retirement as a post-default cleanup track.
 
 #### Deferred Integration: FloatingDock Retirement

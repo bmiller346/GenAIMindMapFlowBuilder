@@ -27,9 +27,16 @@ and how future validation should prove the capability.
   exports.
 - `PRODUCT_GUIDE_MAP_READABILITY_AND_LENSES.md` - mind map readability,
   selected branch clarity, relationship-label lenses, and branch color language.
+- `PRODUCT_GUIDE_SANKEY_FLOW_LENS.md` - directional weighted flow views for
+  evidence flow, handoffs, dependencies, ownership, and structured query data.
 - `PRODUCT_GUIDE_WORKSPACE_SHELL.md` - controlled workspace shell, top ribbon,
   left navigator, right properties panel, and bottom review tray.
 - `PRODUCT_GUIDE_SPLITS.md` - guide-versus-roadmap boundaries.
+
+## User Help Articles
+
+- `HELP_SANKEY_FLOW_LENS.md` - test path, query examples, and troubleshooting
+  for the Sankey flow lens.
 
 ## Guide Rule
 
