@@ -44,9 +44,9 @@ TraceSpace's product lanes are documented in
 [`PRODUCT_GUIDES.md`](PRODUCT_GUIDES.md). Software inventory overlap is one
 lane, but not the center of the product; source-set review, Ask AI draft
 sessions, structured work outputs, enterprise operating graphs, code
-intelligence, knowledge graph relationship review, and Miro/monday handoff all
-have product guides so future work keeps the same source-grounded, review-first
-intent.
+intelligence, knowledge graph relationship review, workspace shell/ribbon
+layout, and Miro/monday handoff all have product guides so future work keeps the
+same source-grounded, review-first intent.
 
 The source picker is organized by intake mode rather than by old/new status: workspace brief, documents, web, media, and data. PDF, DOCX, Markdown, and TXT are the strict source-traceable MVP document paths today; image, audio, video, and web now use OpenAI-backed default paths instead of Gemini, AWS upload, or crawler-first execution. Local video samples frames and extracts/transcribes local audio with the bundled desktop `ffmpeg` binary, `DOCMAP_FFMPEG_PATH`, or a PATH-provided `ffmpeg` before graph generation. YouTube, PPTX, HTML, CSV, and SQL remain useful AI intake paths whose provenance contracts should be hardened as they graduate into the same traceability model.
 

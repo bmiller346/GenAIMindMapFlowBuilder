@@ -93,6 +93,7 @@ Views are different ways to see the same accepted graph.
 - Outline
 - Table
 - Tasks
+- Checklist
 
 Changing a view should not imply AI generated anything new.
 
@@ -178,6 +179,9 @@ Examples:
   for missing owners, due dates, categories, or confidence.
 - A task view can project from task-like nodes, but it may need AI enrichment
   when nodes are concepts with no owner/status/due date.
+- A checklist view can project from accepted checklist metadata, task-like
+  review checks, SOP controls, or leaf nodes with evidence expectations, but it
+  may need AI enrichment when the graph only contains prose or broad concepts.
 - A flow chart needs explicit process, decision, sequence, and dependency
   relationships. If those relationships are missing, offer "Create flow chart"
   instead of pretending filters can infer it.
@@ -189,6 +193,43 @@ Examples:
 
 Do not make filters feel seamless by hiding uncertainty. Make the uncertainty
 visible and actionable.
+
+## Checklist First-Class Treatment
+
+Checklist should be promoted inside this roadmap rather than split into a
+separate roadmap. It is an execution and review output that overlaps with
+Tasks, Kanban, SOPs, and implementation handoff packages, but it should not be
+treated as a synonym for any of them.
+
+Use these product distinctions:
+
+- Checklist View: a projected view over accepted graph data. It shows accepted
+  checklist-capable nodes, evidence expectations, owners, due dates, priority,
+  review state, and source support when those fields exist.
+- Checklist Preview: a preview-first review surface for generated checklist
+  candidates. It lets the user accept, reject, or narrow checklist mutations
+  before canonical graph data changes.
+- Checklist Artifact: a durable accepted work product with scope, provenance,
+  item order, labels, notes, pass/fail or evidence intent, exceptions, review
+  flags, source refs, and export metadata.
+
+Checklist aligns with Kanban when accepted checklist items become actionable
+work or handoff candidates. Kanban remains a board/status view over task
+metadata; checklist remains an evidence and verification view over checklist
+metadata. Checklist aligns with news/article outputs only at the artifact layer:
+both can be generated, reviewed, accepted, and exported, but news/article is
+copy-oriented while checklist is execution/review-oriented.
+
+Checklist UX should therefore expose:
+
+- A stable Checklist entry point after acceptance, not only a one-time preview.
+- Clear empty states for project-now, enrich missing fields, and generate
+  checklist candidates.
+- A visible difference between locally projected checklist rows and AI-generated
+  checklist candidates.
+- Acceptance that writes checklist metadata back to canonical nodes or accepted
+  artifact records.
+- Markdown/CSV export and implementation handoff eligibility after review.
 
 ## Additional Guardrails
 
@@ -926,6 +967,21 @@ Agent E QA notes:
 - PASS: Empty-state source/SME/task/checklist paths now include direct next
   actions to ask AI for the matching preview or route to adjacent gap/source
   review, without requiring backend artifact contract changes.
+
+### Phase 8: Checklist Promotion
+
+- [ ] Promote Checklist from preview-only output action to persistent output
+  surface after acceptance.
+- [ ] Keep Checklist View, Checklist Preview, and Checklist Artifact labels
+  distinct in navigation, activity history, empty states, and exports.
+- [ ] Verify accepted checklist metadata survives save/reopen and can be
+  projected without regenerating AI output.
+- [ ] Add checklist export coverage for Markdown and CSV, including source refs,
+  evidence expectations, review flags, owners, due dates, and exceptions.
+- [ ] Confirm monday handoff candidates can distinguish checklist items from
+  tasks while sharing owner, due date, priority, status, and source metadata.
+- [ ] Add browser coverage for branch-to-checklist preview, accept, reopen,
+  export, and handoff-readiness flows.
 
 ## Evaluation Fixtures
 

@@ -50,6 +50,12 @@ TraceSpace should support:
   evidence.
 - Checklists should include pass/fail intent, evidence expectations, owners,
   and exceptions when available.
+- Checklists should be first-class structured outputs with three distinct
+  states: projected Checklist View, generated Checklist Preview, and accepted
+  Checklist Artifact. The UI should not collapse these into one ambiguous tab.
+- Accepted checklist items should remain tied to canonical graph nodes or
+  accepted artifact records so they can feed Markdown/CSV export, monday
+  handoff candidates, and implementation packages.
 - Training guides should include audience, goals, modules, practice activities,
   examples, and checks for understanding.
 - Executive summaries should read like leadership decision memos: decision
@@ -82,6 +88,8 @@ SOP to checklist:
 - Exceptions.
 - Owner placeholders.
 - Review flags.
+- Source refs or explicit assumptions.
+- Export-ready Markdown/CSV rows after acceptance.
 
 Training outline:
 
@@ -125,10 +133,16 @@ Validate that structured outputs:
 6. Do not invent owners, approvals, or dates without marking assumptions.
 7. Preserve evidence mode, citation policy, cited refs, assumptions, and review
    state in preview, copied Markdown, accepted artifacts, and exported Markdown.
+8. Keep checklist projection, checklist preview, and accepted checklist artifact
+   semantics separate in UI labels, activity history, exports, and handoff
+   readiness.
 
 ## Future Roadmap
 
 - Add stronger artifact-specific UI for roadmap, SOP, and training outputs.
+- Promote checklist to a persistent output surface after acceptance, aligned
+  with Tasks and Kanban but preserving checklist-specific evidence and review
+  metadata.
 - Add presentation-section export for roadmap packages.
 - Add checklist and SOP export snapshots.
 - Add templates for enterprise handoff packets.

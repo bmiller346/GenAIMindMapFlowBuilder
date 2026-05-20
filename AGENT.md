@@ -64,6 +64,21 @@ When working as an agent in this repo:
 7. Prefer adding a small targeted test over running broad suites while still
    exploring.
 
+## Parallel Agent Default
+When a task has independent investigation, implementation, or verification
+lanes, assume parallel subagents are allowed and useful. Spawn them proactively
+for bounded sidecar work while keeping the immediate blocking task local.
+
+Use this default especially for the UI shell/ribbon refactor, where lanes are
+already split by shell/foundation, state/router, ribbon, left navigator,
+properties, review tray, and QA. Give every subagent a narrow file or behavior
+scope, tell it not to refactor outside that ownership, and require a handoff
+with files touched, tests run, dependencies, and remaining risks.
+
+Do not spawn agents for work that is tightly coupled to the next local edit, or
+when delegation would duplicate the same file changes. Prefer explorers for
+read-only dependency discovery and workers for disjoint implementation slices.
+
 ## Fast Context Intake
 Use this routing map to keep context use low:
 
@@ -96,6 +111,11 @@ its explicitly referenced owners/tests:
 - `WORKSPACE_CONTEXT_ROADMAP.md`
 - `UX_NUDGES_AND_OUTPUTS_ROADMAP.md`
 - `NODE_AUTHORING_UX_ROADMAP.md`
+- `UI_SHELL_RIBBON_REFACTOR_ROADMAP.md`
+
+For workspace shell, ribbon, dock, inspector, map lens, or AI review surface
+changes, also read `PRODUCT_GUIDE_WORKSPACE_SHELL.md`. Treat it as the product
+intent and the roadmap as the implementation sequence.
 
 ## Architecture North Star
 ### Source-of-truth model

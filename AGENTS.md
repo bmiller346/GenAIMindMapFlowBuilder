@@ -17,3 +17,16 @@ Read [`AGENT.md`](./AGENT.md) first.
 3. Preserve source references and reviewability wherever feasible.
 4. Prefer incremental modernization over risky rewrites.
 5. Treat Miro exports as collaboration artifacts and monday exports as execution artifacts.
+
+## Active UI Shell Refactor
+- For workspace shell, ribbon, panel, inspector, AI review, or map lens work,
+  read `PRODUCT_GUIDE_WORKSPACE_SHELL.md` and
+  `UI_SHELL_RIBBON_REFACTOR_ROADMAP.md` before editing.
+- Preserve the direction: top ribbon for commands, left navigator for
+  orientation, right panel for metadata, bottom tray for reviewable AI/output
+  work, and canvas overlays kept lightweight.
+- Keep graph/source/AI data contracts separate from shell layout state.
+- Prefer feature-flagged, incremental migration over replacing multiple
+  surfaces in one pass.
+- When parallel agents are active, keep ownership narrow and list every touched
+  file in the final handoff.
