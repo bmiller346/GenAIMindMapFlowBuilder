@@ -25,10 +25,13 @@ const flowJson = JSON.stringify({
     automations: []
 });
 
-const mockBackend = async (page) => {
-    await page.addInitScript(() => {
+const mockBackend = async (page, { shellEnabled = true } = {}) => {
+    await page.addInitScript(({ shellEnabledFlag }) => {
         window.localStorage.clear();
-    });
+        if (!shellEnabledFlag) {
+            window.localStorage.setItem('docmap.uiShellRibbon.enabled', 'false');
+        }
+    }, { shellEnabledFlag: shellEnabled });
 
     const flowRecord = {
         flow_id: flowId,
@@ -108,6 +111,26 @@ test('default shell renders wrapper slots without legacy primary floating docks'
         'shell-ribbon-tab-map'
     );
     await expect(page.getByTestId('shell-ribbon-content')).toContainText('Map lens');
+});
+
+test('shell can be disabled and legacy floating docks still work', async ({ page }) => {
+    await mockBackend(page, { shellEnabled: false });
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/#/');
+
+    await expect(page.getByRole('textbox', { name: 'Workspace name' })).toHaveValue(
+        'Shell Foundation Smoke'
+    );
+    await expect(page.getByTestId('workspace-shell')).toHaveCount(0);
+    await expect(page.locator('[data-dock-id="workspaceTools"]')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Workspace tools', exact: true })).toBeVisible();
+
+    const node = page.locator('.node-response').filter({ hasText: 'Shell smoke root' });
+    await node.locator('[title="Node actions"]').click();
+    await page.getByRole('button', { name: 'Node settings' }).click();
+    await expect(page.locator('[data-dock-id="metadataInspector"]')).toBeVisible();
+    await expect(page.locator('.metadata-inspector-floating-dock')).toContainText('Shell smoke root');
 });
 
 test('default shell keeps predictable slots at a narrow viewport', async ({ page }) => {
