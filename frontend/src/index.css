@@ -2792,6 +2792,11 @@ h5 {
   padding-right: 0.25rem;
 }
 
+.data-source-selector--tray {
+  width: 100%;
+  max-height: none;
+  padding-right: 0;
+}
 @media (max-width: 680px) {
   .data-source-select-container {
     grid-template-columns: 1fr;

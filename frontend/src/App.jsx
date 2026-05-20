@@ -1462,9 +1462,17 @@ const App = () => {
     }, [shellActions, workspaceDockWidth]);
 
     const openEmptyCanvasSources = useCallback(() => {
+        if (useWorkspaceShell) {
+            shellActions.setRibbonTab('sources', 'sourceIntake');
+            shellActions.openBottomTray('sources', {
+                id: 'source-intake',
+                context: 'sourceIntake'
+            });
+            return;
+        }
         openWorkspaceDockTab('sources');
         pushNode(DataSourceSelect);
-    }, [openWorkspaceDockTab, pushNode]);
+    }, [openWorkspaceDockTab, pushNode, shellActions, useWorkspaceShell]);
 
     const openEmptyCanvasAskAi = useCallback((options = {}) => {
         setSelectedBranchId(undefined);

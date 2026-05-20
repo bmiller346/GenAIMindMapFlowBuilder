@@ -1,4 +1,5 @@
 import GraphValidationPanel from '../global-components/GraphValidationPanel.jsx';
+import DataSourceSelect from '../global-components/DataSourceSelect.jsx';
 import SourceDraftReviewPanel from '../global-components/SourceDraftReviewPanel.jsx';
 import ConnectionsReviewSurface from '../review/ConnectionsReviewSurface.jsx';
 import IssuesReviewSurface from '../review/IssuesReviewSurface.jsx';
@@ -139,6 +140,21 @@ const ShellReviewTrayHost = ({
                 {bottomTray.kind === 'sources' ? (
                     <SourceDraftReviewPanel variant="tray" />
                 ) : null}
+            </ReviewTray>
+        );
+    }
+
+    if (bottomTray?.context === 'sourceIntake' && bottomTray?.kind === 'sources') {
+        return (
+            <ReviewTray
+                activeTab="sources"
+                availableTabs={['sources']}
+                title="Source Intake"
+                description="Add source material without leaving the shell. Generated source maps still return here for review before they update the workspace."
+                onTabChange={() => onOpenBottomTray('sources', { context: 'sourceIntake' })}
+                onClose={onCloseTray}
+            >
+                <DataSourceSelect variant="tray" onClose={onCloseTray} />
             </ReviewTray>
         );
     }

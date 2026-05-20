@@ -57,6 +57,8 @@ const DEVELOPER_SOURCES = [
 
 const DataSourceSelect = ({
 	mode = "workspace_intake",
+	variant = "modal",
+	onClose,
 	returnModal,
 	returnProps = {},
 	selectedSourceIds = [],
@@ -142,7 +144,11 @@ const DataSourceSelect = ({
 
 	const returnToAskAI = () => {
 		if (!returnModal) {
-			popNode();
+			if (onClose) {
+				onClose();
+			} else {
+				popNode();
+			}
 			return;
 		}
 		pushNode(returnModal, {
@@ -153,14 +159,14 @@ const DataSourceSelect = ({
 	};
 
 	return (
-		< div className="data-source-selector" >
+		< div className={`data-source-selector data-source-selector--${variant}`} >
 			<div className="data-source-selector-header">
 				<h5>{isAskAIContext ? "SOURCE CONTEXT" : "CHOOSE A STARTING POINT"}</h5>
 				<button
 					type="button"
 					className="icon-button"
 					aria-label="Close source picker"
-					onClick={() => (isAskAIContext ? returnToAskAI() : popNode())}
+					onClick={() => (isAskAIContext ? returnToAskAI() : onClose ? onClose() : popNode())}
 				>
 					<img src={CROSSSvg} alt="" />
 				</button>

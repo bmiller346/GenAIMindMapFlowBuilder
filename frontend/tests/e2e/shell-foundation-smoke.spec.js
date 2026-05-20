@@ -203,6 +203,25 @@ test('shell routes AI generation progress through status bar instead of canvas d
     await expect(page.locator('.ai-generation-progress-dock')).toHaveCount(0);
 });
 
+test('shell routes source intake into the bottom review tray', async ({ page }) => {
+    await mockBackend(page);
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/#/');
+
+    await expect(page.getByTestId('workspace-shell')).toBeVisible();
+    await page.getByRole('tab', { name: 'Home', exact: true }).click();
+    await page.getByRole('button', { name: /Add sources/i }).click();
+
+    const bottomSlot = page.getByTestId('workspace-shell-bottom-slot');
+    await expect(bottomSlot).toBeVisible();
+    await expect(bottomSlot).toContainText('Source Intake');
+    await expect(bottomSlot).toContainText('CHOOSE A STARTING POINT');
+    await expect(bottomSlot.locator('.data-source-selector--tray')).toBeVisible();
+    await expect(page.getByTestId('workspace-shell')).toHaveAttribute('data-has-bottom-tray', 'true');
+    await expect(page.locator('[data-dock-id="workspaceTools"]')).toHaveCount(0);
+});
+
 const expectMountedSlotAttributesMatch = async (page) => {
     const mountedSlots = await page.evaluate(() => {
         const shell = document.querySelector('[data-testid="workspace-shell"]');

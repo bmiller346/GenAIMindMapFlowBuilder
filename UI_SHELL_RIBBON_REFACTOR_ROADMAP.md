@@ -61,6 +61,8 @@ Ready for agents to build on:
 - Shell Ask AI entry points route to shell-owned surfaces: general Ask AI opens
   the right-rail guide, while reviewable AI commands such as Find Connections
   open the bottom Review Tray.
+- Shell source intake entry points open the bottom Review Tray source intake
+  surface instead of the legacy source-picker modal.
 - AI generation progress appears in the shell status bar instead of a React Flow
   canvas progress dock.
 - Shift additive click/lasso selection has active shell regression coverage.
@@ -76,7 +78,8 @@ Not ready for broad QA or cleanup:
   canvas view. Source and branch properties now have editable shell right-rail
   MVPs. Output command grouping is improving, but accepted output surfaces,
   source intake routing, and advanced prompt-builder routing still need visual QA
-  and product polish.
+  and product polish. Source intake has a shell tray route; deeper upload
+  dialogs are still modal by design until the intake flow is redesigned.
 - Do not treat the legacy rollback layout as the primary product path. It is
   compatibility scaffolding while the shell settles.
 - Do not run full visual regression against the shell without checking the lane readiness notes below; several surfaces are scaffolded but not product-complete.
@@ -85,8 +88,8 @@ Current verification:
 
 - `npm run build` from `frontend/`: passing.
 - `node --test tests/shellComponents.test.mjs tests/shellStore.test.mjs tests/shellLayoutState.test.mjs tests/uiShellFeatureFlag.test.mjs tests/canvasProjection.test.mjs` from `frontend/`: passing, 41 tests.
-- `npx playwright test tests/e2e/shell-foundation-smoke.spec.js` from `frontend/`: passing, includes shell status-bar progress routing coverage.
-- `npx playwright test tests/e2e/selection-shell-regression.spec.js tests/e2e/review-tray-regression.spec.js tests/e2e/shell-foundation-smoke.spec.js --workers=1` from `frontend/`: passing, 22 passed and 1 intentional `fixme` skip after the status-progress routing slice.
+- `npx playwright test tests/e2e/shell-foundation-smoke.spec.js` from `frontend/`: passing, includes shell status-bar progress and source-intake tray routing coverage.
+- `npx playwright test tests/e2e/selection-shell-regression.spec.js tests/e2e/review-tray-regression.spec.js tests/e2e/shell-foundation-smoke.spec.js --workers=1` from `frontend/`: passing, 23 passed and 1 intentional `fixme` skip after the source-intake tray routing slice.
 
 Known active QA gaps:
 
@@ -107,13 +110,13 @@ is dead in both shell-on and shell-off paths.
 | Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Default shell feels crowded or hides controls at common desktop/narrow sizes | Run shell e2e geometry coverage plus manual screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Automated narrow/header/ribbon/tray/status progress coverage passing; manual screenshot signoff still open | Yes |
 | Accepted output surfaces need verification | Outputs ribbon and accepted workspace views | Accepted Table/Executive/Flowchart/Tasks/Kanban commands route to an invisible surface or wrong tray workflow | Verify Table, Executive, Flowchart, Tasks, and Kanban open accepted canvas/output surfaces; verify Checklist Preview opens the Review Tray | E2E route coverage passing for Table, Executive, Flowchart, Tasks, Kanban, Implementation, Status, and Checklist Preview | Yes |
 | Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Preview candidates become canonical work before acceptance, or accepted artifacts remain trapped in preview UI | E2E or component coverage for Table/Kanban not opening tray, Checklist Preview opening tray, accepted tasks staying in structured canvas, and checklist artifact persistence | Route split covered; accepted checklist artifact persistence still open | Yes |
-| Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 22 serialized shell e2e passed, 1 intentional skip | Yes |
+| Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 23 serialized shell e2e passed, 1 intentional skip | Yes |
 | Map readability and relationship lenses are visually verified | Map ribbon, branch scope, relationship labels | Branch focus, selected nodes, and relationship labels compete visually or confuse review | Visual QA plus coverage that mind map relationship labels default off and can be toggled on intentionally | Default-off / toggle-on e2e and projection unit coverage passing; manual visual QA still open | Yes |
 | Preview-first graph mutation remains safe | Connections review and generated previews | Find Connections or related candidate acceptance mutates canonical graph without review | Verify generated connection candidates enter Review Tray first and accept/reject preserves existing mutation behavior | Shell AI ribbon Find Connections now routes to the Review Tray instead of `PromptModal`; acceptance mutation behavior still needs deeper candidate accept/reject QA | Yes |
 | Legacy overlap `fixme` has disposition | Shell-off FloatingDock compatibility layout | Known overlap remains ambiguous when shell becomes default and rollback is needed | Either keep skipped with explicit shell-off waiver/manual screenshot gate, narrow to shell-only geometry, or replace with stable bounding-box coverage | Disposition documented: skipped as shell-off compatibility territory while shell slot geometry guards default readiness | Yes |
 | Shell-off compatibility remains covered | Feature flag rollback path | Default-on rollout cannot be safely disabled or corrupts existing workspace data | Run shell-off smoke/manual pass and confirm legacy FloatingDock surfaces still open, edit, save, and reopen existing workspace data | Open | Yes |
 | Right rail metadata stays metadata-only and persistent | Node, edge, branch, source properties | AI review/action UI leaks into properties rail, or property edits are lost | Run selection shell regression for node/edge/branch/source properties and metadata-only NodeInspector assertions | Mostly covered; rerun after active test edits land | Yes |
-| Review Tray remains authoritative for reviewable generated work | Bottom tray | AI drafts, source drafts, issues, connections, tasks preview, or checklist preview fall back to legacy/full-panel routes | Run review tray regression for direct tray routes and close behavior | Mostly covered and rerun after shell AI action routing; source intake and advanced prompt-builder flows remain open | Yes |
+| Review Tray remains authoritative for reviewable generated work | Bottom tray | AI drafts, source drafts, issues, connections, tasks preview, or checklist preview fall back to legacy/full-panel routes | Run review tray regression for direct tray routes and close behavior | Mostly covered and rerun after shell AI/source-intake routing; advanced prompt-builder flows remain open | Yes |
 | FloatingDock removal | Legacy floating layout | Removing compatibility chrome breaks shell-off rollback | Keep audit-only until default shell and output cleanup are complete | Deferred | No |
 | Richer source/branch metadata | Right rail properties | Default properties are useful but not fully product-complete | Product follow-up with field expansion and persistence tests | Deferred | No |
 | Full map projection helper extraction | Mind map projection/lens internals | Lens work remains harder to evolve but current behavior can ship | Refactor plan after branch/lens styling stabilizes | First extraction landed in `frontend/src/utils/canvasProjection.js` with focused unit coverage; broader density/lens rules deferred | No |
@@ -151,6 +154,9 @@ Before any agent starts, check `git status --short`; active work may exist in
   advanced builder flows.
 - Status Bar Progress: shell-mode AI generation progress is now hosted in the
   bottom status bar instead of a React Flow canvas dock.
+- Source Intake: shell Home/Sources `Add sources` now opens a source intake
+  surface in the bottom Review Tray; shell-off still uses the legacy picker
+  modal, and individual upload dialogs remain modal for now.
 - QA / Default Readiness: shell slot bounding-box coverage exists for ribbon,
   left rail, right rail, review tray, status bar, and narrow Outputs ribbon
   command groups. Shift additive selection/lasso coverage is active. One legacy
