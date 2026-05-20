@@ -65,7 +65,7 @@ export const SHELL_OVERLAY_KINDS = Object.freeze([
 
 export const DEFAULT_SHELL_LAYOUT = Object.freeze({
     ribbon: {
-        activeTab: 'home',
+        activeTab: 'map',
         context: null
     },
     leftPanel: null,

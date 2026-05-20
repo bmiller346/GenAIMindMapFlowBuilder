@@ -3,7 +3,7 @@ import test from 'node:test';
 import { deriveShellLayoutState } from '../src/shell/useShellLayoutState.js';
 
 const baseShellState = {
-    activeRibbonTab: 'home',
+    activeRibbonTab: 'map',
     leftPanel: null,
     bottomTray: null,
     rightPanel: { kind: null, id: null },
@@ -21,7 +21,7 @@ const pickLayoutFields = (state) => ({
 
 test('deriveShellLayoutState returns documented default workspace dock layout', () => {
     assert.deepEqual(pickLayoutFields(deriveShellLayoutState(baseShellState)), {
-        activeRibbonTab: 'home',
+        activeRibbonTab: 'map',
         leftPanelKind: 'workspace',
         workspaceDockActiveTab: 'guidance',
         workspaceDockCollapsed: false,
@@ -45,7 +45,7 @@ test('deriveShellLayoutState clamps oversized persisted left rail widths', () =>
             })
         ),
         {
-            activeRibbonTab: 'home',
+            activeRibbonTab: 'map',
             leftPanelKind: 'workspace',
             workspaceDockActiveTab: 'sources',
             workspaceDockCollapsed: false,
@@ -70,7 +70,7 @@ test('deriveShellLayoutState clamps undersized persisted left rail widths', () =
             })
         ),
         {
-            activeRibbonTab: 'home',
+            activeRibbonTab: 'map',
             leftPanelKind: 'workspace',
             workspaceDockActiveTab: 'health',
             workspaceDockCollapsed: false,
@@ -95,7 +95,7 @@ test('deriveShellLayoutState uses collapsed shell width without losing stored do
             })
         ),
         {
-            activeRibbonTab: 'home',
+            activeRibbonTab: 'map',
             leftPanelKind: 'workspace',
             workspaceDockActiveTab: 'build',
             workspaceDockCollapsed: true,
@@ -120,7 +120,7 @@ test('deriveShellLayoutState preserves the left panel kind for shell navigator m
             })
         ),
         {
-            activeRibbonTab: 'home',
+            activeRibbonTab: 'map',
             leftPanelKind: 'sources',
             workspaceDockActiveTab: 'sources',
             workspaceDockCollapsed: false,
@@ -143,7 +143,7 @@ test('deriveShellLayoutState preserves the left panel kind for shell navigator m
             })
         ),
         {
-            activeRibbonTab: 'home',
+            activeRibbonTab: 'map',
             leftPanelKind: 'health',
             workspaceDockActiveTab: 'health',
             workspaceDockCollapsed: false,
@@ -166,7 +166,7 @@ test('deriveShellLayoutState preserves the left panel kind for shell navigator m
             })
         ),
         {
-            activeRibbonTab: 'home',
+            activeRibbonTab: 'map',
             leftPanelKind: 'build',
             workspaceDockActiveTab: 'build',
             workspaceDockCollapsed: false,

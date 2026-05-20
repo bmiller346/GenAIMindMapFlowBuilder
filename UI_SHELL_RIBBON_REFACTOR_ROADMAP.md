@@ -8,7 +8,14 @@ This refactor is being worked by multiple lanes. Do not treat a partially migrat
 
 ### Coordination Checkpoint: 2026-05-20
 
-Current global status: the shell refactor is a real opt-in MVP, not a default product rollout. The review-tray compatibility bridge has been removed, AI Helpers / Next Steps now route through the shell right-rail guide route, node/edge/source/branch metadata use shell right-panel authority, and shell-mode `NodeInspector` is metadata-only. Home/Sources ribbon commands, first Outputs command groups, left navigator Health/Build modes, review-tray UX labels, bottom status bar, and default-readiness gates have all landed behind the feature flag.
+Current global status: the shell refactor is now the default workspace path, with
+an explicit legacy rollback escape hatch. The review-tray compatibility bridge
+has been removed, AI Helpers / Next Steps now route through the shell right-rail
+guide route, node/edge/source/branch metadata use shell right-panel authority,
+and shell-mode `NodeInspector` is metadata-only. Home/Sources ribbon commands,
+first Outputs command groups, left navigator Health/Build modes, review-tray UX
+labels, bottom status bar, and default-readiness gates have all landed in the
+shell path.
 
 Working-tree caution:
 
@@ -16,10 +23,12 @@ Working-tree caution:
 
 Feature flag:
 
-- Environment flag: `VITE_ENABLE_UI_SHELL_RIBBON`
-- Local storage flag: `docmap.uiShellRibbon.enabled`
-- Default behavior: unchanged legacy/floating layout.
-- Shell behavior: opt-in shell with left rail, right properties rail, direct bottom review tray routes, and compatibility preserved only for the default non-shell layout.
+- Environment rollback flag: `VITE_ENABLE_UI_SHELL_RIBBON=false`
+- Local storage rollback flag: `docmap.uiShellRibbon.enabled=false` or `legacy`
+- Default behavior: shell with left rail, right properties rail, direct bottom
+  review tray routes, status bar, and top ribbon.
+- Legacy behavior: explicit rollback path using the old floating layout while
+  compatibility is still supported.
 
 Ready for agents to build on:
 
@@ -48,7 +57,8 @@ Not ready for broad QA or cleanup:
 - Do not QA the shell as a finished layout.
 - Do not retire `FloatingDock` yet.
 - Do not expect all output/review surfaces to be final. Connections, task preview, checklist preview, source repair, and Issues review outputs now have direct shell tray routes; accepted/canonical `tasks` remains a structured canvas view. Source and branch properties now have editable shell right-rail MVPs. Output command grouping is improving, but accepted output surfaces still need visual QA and product polish.
-- Do not treat default legacy layout as a failure. The shell is intentionally flag-gated.
+- Do not treat the legacy rollback layout as the primary product path. It is
+  compatibility scaffolding while the shell settles.
 - Do not run full visual regression against the shell without checking the lane readiness notes below; several surfaces are scaffolded but not product-complete.
 
 Current verification:
@@ -64,11 +74,11 @@ Known active QA gaps:
 - Manual visual QA is still needed for ribbon/tray/right-rail density, especially with map lens controls active.
 - Branch highlighting and relationship-label lenses are documented and have e2e coverage for default-off / toggle-on label behavior plus projection-level unit coverage for structural-only traversal and semantic edge exclusion from strong branch emphasis. Manual visual QA is still needed before default-shell rollout.
 
-### Default Shell Go/No-Go
+### Default Shell Follow-Up Gate
 
-Current decision: **no-go for default-on** until every pre-default row below is
-green or explicitly waived with a dated owner note. This gate is about making
-the shell the default workspace UI, not about retiring legacy code.
+Current decision: **default shell is on** so users see the refactor. The gate
+below now tracks the remaining work before removing rollback compatibility and
+calling the Revit-like shell visually complete.
 `FloatingDock` removal remains deferred unless a separate audit proves a surface
 is dead in both shell-on and shell-off paths.
 

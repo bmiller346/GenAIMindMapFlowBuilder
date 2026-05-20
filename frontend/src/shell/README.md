@@ -1,6 +1,9 @@
 # UI Shell Contract
 
-The shell is an opt-in compatibility scaffold behind `VITE_ENABLE_UI_SHELL_RIBBON` or localStorage `docmap.uiShellRibbon.enabled`.
+The shell is the default workspace scaffold. Set
+`VITE_ENABLE_UI_SHELL_RIBBON=false` or localStorage
+`docmap.uiShellRibbon.enabled=false` / `legacy` to use the legacy floating-dock
+rollback path.
 
 ## Slots
 
@@ -37,8 +40,8 @@ Review Tray or the shell-off legacy inspector path.
 ## FloatingDock Retirement Audit
 
 Current status: `FloatingDock` is still a shell-off compatibility system. Do
-not remove it broadly while the shell remains feature-flagged and while default
-rollout checks are still open.
+not remove it broadly while the rollback path remains supported and default
+shell visual checks are still open.
 
 Remaining render-time `FloatingDock` surfaces in `frontend/src/App.jsx`:
 
@@ -66,7 +69,7 @@ Supporting dependencies:
 
 The audit above covers only `FloatingDock` mounts. Several other floating or
 canvas-anchored surfaces still exist and need their own overlay/slot decision
-before a default-shell rollout:
+before the rollback path can be retired:
 
 | Surface | Current purpose | Shell direction | Retirement or ownership note |
 | --- | --- | --- | --- |
@@ -79,12 +82,12 @@ before a default-shell rollout:
 
 Safe retirement path:
 
-1. Keep all `!useWorkspaceShell` FloatingDock branches intact until the shell is
-   ready to become default and a rollback path is explicitly defined.
+1. Keep all `!useWorkspaceShell` FloatingDock branches intact while the
+   rollback path is explicitly supported.
 2. Finish shell QA for Map ribbon/lens controls and accepted output surfaces.
-3. Verify shell-off regression coverage still passes after shell default
-   readiness work, because those tests are the compatibility guardrail.
-4. After default-on ships and the rollback window closes, remove one dock family
+3. Verify shell-off regression coverage still passes while the rollback path is
+   available, because those tests are the compatibility guardrail.
+4. After the rollback window closes, remove one dock family
    at a time: relationship docks, canvas/output docks, workspace tools, then
    metadata inspector last.
 5. Remove `FloatingDock.jsx`, `floatingDocks` localSetting persistence, and

@@ -2,7 +2,9 @@
 
 Last updated: 2026-05-20
 
-Use this checklist while migrating surfaces behind `VITE_ENABLE_UI_SHELL_RIBBON` or `docmap.uiShellRibbon.enabled`.
+Use this checklist while validating the default shell path and the explicit
+legacy rollback path controlled by `VITE_ENABLE_UI_SHELL_RIBBON=false` or
+`docmap.uiShellRibbon.enabled=false` / `legacy`.
 
 ## Automated Coverage
 
@@ -40,7 +42,8 @@ Use this checklist while migrating surfaces behind `VITE_ENABLE_UI_SHELL_RIBBON`
 
 ## Manual Screenshot Pass
 
-Run once with the shell disabled, then once with the shell enabled.
+Run once with the default shell enabled, then once with the shell disabled via
+the explicit rollback flag.
 
 1. Open a saved workspace with at least three nodes, two relationship types, and one source.
 2. Verify shift-click adds selected nodes without clearing the previous selection.
@@ -58,7 +61,7 @@ Run once with the shell disabled, then once with the shell enabled.
 ## Shell-Specific Checks
 
 - Top ribbon remains visible and does not hide canvas controls.
-- Left navigator replaces the WorkspaceDock floating placement only when the shell flag is enabled.
+- Left navigator replaces the WorkspaceDock floating placement in the default shell path.
 - Node and edge selection open one right properties surface, not both a right panel and floating metadata dock.
 - Shell node metadata is metadata-only: no AI proposal preview, draft accept/reject, or action-creation controls appear in the right rail.
 - AI Helpers / Next steps open in the shell right rail, not in a bottom-right canvas overlay.
@@ -66,15 +69,17 @@ Run once with the shell disabled, then once with the shell enabled.
 - Quick Ask AI remains separate from large review workflows.
 - Disabling the shell flag restores the legacy layout without losing persisted workspace data.
 
-## Final Blockers Before Default Shell
+## Final Blockers Before Rollback Retirement
 
-Do not flip `docmap.uiShellRibbon.enabled` or `VITE_ENABLE_UI_SHELL_RIBBON` on by default until all items below are true. FloatingDock retirement is explicitly deferred; this gate blocks duplicate primary surfaces, broken routing, persistence regressions, and shell layout failures while the shell is enabled.
+The shell is now default-on so the refactor is visible in normal use.
+FloatingDock retirement is explicitly deferred; this gate blocks duplicate
+primary surfaces, broken routing, persistence regressions, and shell layout
+failures while the rollback path is still available.
 
-### Default Shell Go/No-Go
+### Default Shell Follow-Up Gate
 
-Current recommendation: **no-go** until all pre-default rows are green or
-explicitly waived. Post-default rows may remain open if the shell-on and
-shell-off runtime paths are both verified.
+Current recommendation: **default shell on, rollback retained**. Open rows must
+be resolved before retiring the shell-off compatibility path.
 
 | Blocker | Surface | Risk | Required verification | Status | Pre-default required? |
 | --- | --- | --- | --- | --- | --- |

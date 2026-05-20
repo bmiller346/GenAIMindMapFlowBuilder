@@ -28,7 +28,6 @@ const flowJson = JSON.stringify({
 const mockBackend = async (page) => {
     await page.addInitScript(() => {
         window.localStorage.clear();
-        window.localStorage.setItem('docmap.uiShellRibbon.enabled', 'true');
     });
 
     const flowRecord = {
@@ -72,7 +71,7 @@ const mockBackend = async (page) => {
     });
 };
 
-test('feature-flagged shell renders wrapper slots without legacy primary floating docks', async ({ page }) => {
+test('default shell renders wrapper slots without legacy primary floating docks', async ({ page }) => {
     await mockBackend(page);
 
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -111,7 +110,7 @@ test('feature-flagged shell renders wrapper slots without legacy primary floatin
     await expect(page.getByTestId('shell-ribbon-content')).toContainText('Map lens');
 });
 
-test('feature-flagged shell keeps predictable slots at a narrow viewport', async ({ page }) => {
+test('default shell keeps predictable slots at a narrow viewport', async ({ page }) => {
     await mockBackend(page);
 
     await page.setViewportSize({ width: 390, height: 844 });

@@ -119,7 +119,7 @@ Existing related coverage:
   - Confirm the canvas remains usable with active review/metadata surfaces.
 
 - Shell left navigator:
-  - Enable `docmap.uiShellRibbon.enabled`.
+  - Use the default shell path, or explicitly set `docmap.uiShellRibbon.enabled=true`.
   - Confirm WorkspaceDock appears in the fixed left rail and not as `workspaceTools` floating chrome.
   - Switch Sources, Health, Guide, and Build tabs.
   - From the Workspace Sources tab, click Library and confirm the full source library opens inside the fixed rail, not as floating source panel chrome.
@@ -141,15 +141,17 @@ Existing related coverage:
 - Shell Activity mode embeds the existing activity history surface. A redesigned timeline/notification model is not implemented yet.
 - Legacy floating panel no-overlap remains a `test.fixme`; shell slot overlap now has bounding-box coverage, but no pixel screenshot diff baseline.
 
-## Final Blockers Before Default Shell
+## Final Blockers Before Rollback Retirement
 
-Do not flip `docmap.uiShellRibbon.enabled` or `VITE_ENABLE_UI_SHELL_RIBBON` on by default until all items below are true. FloatingDock retirement is explicitly deferred; this gate blocks duplicate primary surfaces, broken routing, persistence regressions, and shell layout failures while the shell is enabled.
+The shell is now default-on so the refactor is visible in normal use.
+FloatingDock retirement is explicitly deferred; this gate blocks duplicate
+primary surfaces, broken routing, persistence regressions, and shell layout
+failures while the rollback path is still available.
 
-### Default Shell Go/No-Go
+### Default Shell Follow-Up Gate
 
-Current recommendation: **no-go** until all pre-default rows are green or
-explicitly waived. Post-default rows may remain open if they do not create
-duplicate shell chrome, broken routing, or rollback risk.
+Current recommendation: **default shell on, rollback retained**. Open rows must
+be resolved before retiring the shell-off compatibility path.
 
 | Blocker | Surface | Risk | Required verification | Status | Pre-default required? |
 | --- | --- | --- | --- | --- | --- |

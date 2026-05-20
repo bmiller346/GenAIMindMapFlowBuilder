@@ -492,7 +492,7 @@ test('quick Ask AI and branch lens stay stable', async ({
     await expect(page.getByRole('region', { name: 'Active canvas scope' })).toHaveCount(0);
 });
 
-test('shell flag mounts ribbon, navigator, and canvas slots without legacy workspace dock chrome', async ({ page }) => {
+test('default shell mounts ribbon, navigator, and canvas slots without legacy workspace dock chrome', async ({ page }) => {
     await setupMockBackend(page, { enableShell: true });
 
     await page.setViewportSize({ width: 1600, height: 1000 });
@@ -503,7 +503,7 @@ test('shell flag mounts ribbon, navigator, and canvas slots without legacy works
     await expect(page.getByTestId('workspace-shell-ribbon-slot')).toBeVisible();
     await expect(page.getByTestId('workspace-shell-left-slot')).toBeVisible();
     await expect(page.getByTestId('workspace-shell-canvas-slot')).toBeVisible();
-    await expect(page.getByTestId('shell-ribbon')).toHaveAttribute('data-active-tab', 'home');
+    await expect(page.getByTestId('shell-ribbon')).toHaveAttribute('data-active-tab', 'map');
     await expect(page.locator('.workspace-dock--shell-left')).toBeVisible();
     await expect(page.locator('.workspace-tools-floating-dock')).toHaveCount(0);
 

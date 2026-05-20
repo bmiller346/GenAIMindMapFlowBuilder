@@ -24,10 +24,10 @@ const withLocalStorageValue = (value, callback) => {
     }
 };
 
-test('UI shell feature flag is disabled without browser storage or env flag', () => {
+test('UI shell feature flag is enabled by default without browser storage or env flag', () => {
     delete globalThis.window;
 
-    assert.equal(isUiShellRibbonEnabled(), false);
+    assert.equal(isUiShellRibbonEnabled(), true);
 });
 
 test('UI shell feature flag accepts documented localStorage truthy values', () => {
@@ -38,8 +38,13 @@ test('UI shell feature flag accepts documented localStorage truthy values', () =
     }
 });
 
-test('UI shell feature flag rejects missing and falsey localStorage values', () => {
-    for (const value of [null, '', '0', 'false', 'disabled', 'no']) {
+test('UI shell feature flag uses default for missing storage and accepts falsey localStorage rollback values', () => {
+    for (const value of [null, '']) {
+        withLocalStorageValue(value, () => {
+            assert.equal(isUiShellRibbonEnabled(), true);
+        });
+    }
+    for (const value of ['0', 'false', 'disabled', 'no', 'off', 'legacy']) {
         withLocalStorageValue(value, () => {
             assert.equal(isUiShellRibbonEnabled(), false);
         });

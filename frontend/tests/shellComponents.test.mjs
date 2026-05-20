@@ -1,19 +1,27 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import reactPlugin from '@vitejs/plugin-react';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 
 let viteServer;
+const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const getViteServer = async () => {
     if (!viteServer) {
         viteServer = await createServer({
             configFile: false,
+            root: frontendRoot,
             logLevel: 'error',
             plugins: [reactPlugin()],
+            optimizeDeps: {
+                disabled: true
+            },
             server: {
+                hmr: false,
                 middlewareMode: true
             }
         });
