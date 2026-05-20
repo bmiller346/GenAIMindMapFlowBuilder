@@ -40,6 +40,20 @@ const structuredNodeData = {
                 columns: ['category', 'count'],
                 query_id: 'query-1'
             }
+        },
+        {
+            id: 'artifact-chart-1',
+            artifact_type: 'chart',
+            data: {
+                chart_spec: {
+                    chart_type: 'sankey',
+                    source_column: 'source',
+                    target_column: 'target',
+                    value_column: 'count'
+                },
+                data_rows: [{ source: 'Policy', target: 'Finding', count: 2 }],
+                query_id: 'query-1'
+            }
         }
     ],
     metadata: {
@@ -65,7 +79,9 @@ test('getStructuredDataArtifactContext extracts table query provenance', () => {
     assert.equal(context.resultHash, 'abc123def456');
     assert.equal(context.rowCount, 2);
     assert.deepEqual(context.columns, ['category', 'count']);
-    assert.deepEqual(context.artifactTypes, ['sql_query', 'data_table']);
+    assert.deepEqual(context.artifactTypes, ['sql_query', 'data_table', 'chart']);
+    assert.equal(context.chartType, 'sankey');
+    assert.deepEqual(context.chartRows, [{ source: 'Policy', target: 'Finding', count: 2 }]);
 });
 
 test('structuredDataAcceptance marks preview evidence as reviewed', () => {

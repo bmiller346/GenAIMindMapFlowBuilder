@@ -88,6 +88,13 @@ export const getStructuredDataArtifactContext = (data = {}) => {
         metadata,
         tableArtifact,
         chartArtifact,
+        chartSpec: chartArtifact?.data?.chart_spec || {},
+        chartType:
+            chartArtifact?.data?.chart_spec?.chart_type ||
+            chartArtifact?.data?.chart_spec?.type ||
+            chartArtifact?.data?.chart_spec?.data?.[0]?.type ||
+            '',
+        chartRows: asArray(chartArtifact?.data?.data_rows || tableArtifact?.data?.rows || rows),
         queryArtifact,
         summaryArtifact,
         accepted: asArray(data.local_preview_acceptances).some(

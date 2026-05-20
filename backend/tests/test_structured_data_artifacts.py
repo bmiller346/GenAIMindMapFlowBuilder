@@ -57,6 +57,55 @@ def test_build_structured_data_artifacts_preserves_query_table_and_chart_refs():
     ]
 
 
+def test_structured_data_artifacts_preserves_sankey_chart_spec():
+    payload = build_structured_data_artifacts(
+        source_type="sql",
+        source_id="component-1",
+        question="Show system to process flow",
+        table_name="system_process_costs",
+        sql="SELECT source_system, target_process, monthly_cost FROM system_process_costs",
+        rows=[
+            {
+                "source_system": "CRM",
+                "target_process": "Sales reporting",
+                "monthly_cost": 12000,
+            }
+        ],
+        chart_json={
+            "chart_type": "sankey",
+            "source_column": "source_system",
+            "target_column": "target_process",
+            "value_column": "monthly_cost",
+        },
+    )
+
+    chart = next(
+        artifact for artifact in payload["generated_artifacts"] if artifact["artifact_type"] == "chart"
+    )
+
+    assert chart["data"]["chart_spec"]["chart_type"] == "sankey"
+    assert chart["data"]["data_rows"] == [
+        {
+            "source_system": "CRM",
+            "target_process": "Sales reporting",
+            "monthly_cost": 12000,
+        }
+    ]
+    assert chart["source_refs"] == payload["source_refs"]
+
+    validated = validate_generated_artifacts(
+        payload["generated_artifacts"],
+        scope={},
+        model_provider="deterministic",
+        model="structured-data",
+        ai_role="data_table_interpreter",
+        prompt_profile="structured_data",
+        input_source_refs=payload["source_refs"],
+    )
+
+    assert "chart" in {artifact["artifact_type"] for artifact in validated}
+
+
 def test_structured_data_artifact_types_are_registered_for_ai_outputs():
     assert normalize_requested_artifact_types(
         ["sql_query", "data_table", "data_summary", "data_insight"]

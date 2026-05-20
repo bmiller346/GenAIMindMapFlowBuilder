@@ -910,8 +910,11 @@ ARTIFACT_REGISTRY: dict[str, dict[str, Any]] = {
     "chart": _artifact_definition(
         "chart",
         requires=["structured_or_extracted_data"],
-        optional=["nodes", "source_refs", "chart_goal"],
-        generated_schema={"chart_spec": "chart type, encodings, labels", "data_rows": "source-backed chart data"},
+        optional=["nodes", "source_refs", "chart_goal", "sankey_source_target_value_columns"],
+        generated_schema={
+            "chart_spec": "chart type, encodings, labels; use chart_type=sankey only when source/target/value rows exist",
+            "data_rows": "source-backed chart data",
+        },
         projection_requirements=["chart_spec and source/extracted data rows are present"],
         supported_views=["chart"],
         preview_component="ChartArtifactPreview",
