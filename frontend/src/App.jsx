@@ -1529,6 +1529,15 @@ const App = () => {
         setInspectorNodeId(undefined);
         setInspectorEdgeId(undefined);
         setIsAiHelpersOpen(false);
+        if (useWorkspaceShell) {
+            openShellAiGuide({
+                source: 'emptyCanvas',
+                action: 'guided_starters',
+                initialVisual: 'auto',
+                summary: 'Opened shell AI guide for guided starts from the empty canvas.'
+            });
+            return;
+        }
         shellActions.setRibbonTab('ai', { source: 'emptyCanvas', action: 'guided_starters' });
         shellActions.setActiveScope({ type: 'workspace' });
         pushNode(PromptModal, {
@@ -1551,13 +1560,15 @@ const App = () => {
             }
         });
     }, [
+        openShellAiGuide,
         pushNode,
         recordActivity,
         setInspectorEdgeId,
         setInspectorNodeId,
         setSelectedBranchId,
         shellActions,
-        sourceLibrary.length
+        sourceLibrary.length,
+        useWorkspaceShell
     ]);
 
     const openManualStart = useCallback(() => {

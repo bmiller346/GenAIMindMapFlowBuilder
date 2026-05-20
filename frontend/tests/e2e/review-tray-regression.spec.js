@@ -181,6 +181,68 @@ const draftSession = () => ({
     metadata: {}
 });
 
+const connectionDraftSession = () => ({
+    ...draftSession(),
+    revisions: [
+        {
+            ...draftSession().revisions[0],
+            draft_items: [
+                {
+                    id: 'review-tray-relationship-candidate',
+                    item_type: 'relationship_candidate',
+                    title: 'Review tray source map supports review tray action plan',
+                    content: 'Relationship candidates should mutate the graph only after tray acceptance.',
+                    source_refs: [{ document_id: sourceId, chunk_id: 'chunk-actions' }],
+                    metadata: {
+                        source_node_id: 'review-tray-source-map-draft',
+                        target_node_id: 'review-tray-action-plan-draft',
+                        relationship_type: 'supports',
+                        relationship_edge_id: 'review-tray-relationship-edge',
+                        confidence: 0.84
+                    }
+                }
+            ],
+            draft_nodes: [
+                {
+                    id: 'review-tray-source-map-draft',
+                    parent_id: '',
+                    title: 'Review tray source map',
+                    summary: 'Connection candidate source node.',
+                    node_type: 'note',
+                    status: 'needs_review',
+                    confidence: 0.82,
+                    source_refs: [{ document_id: sourceId, chunk_id: 'chunk-overview' }]
+                },
+                {
+                    id: 'review-tray-action-plan-draft',
+                    parent_id: '',
+                    title: 'Review tray action plan',
+                    summary: 'Connection candidate target node.',
+                    node_type: 'note',
+                    status: 'needs_review',
+                    confidence: 0.78,
+                    source_refs: [{ document_id: sourceId, chunk_id: 'chunk-actions' }]
+                }
+            ],
+            draft_edges: [],
+            preview_diff: {
+                mode: 'append',
+                added_nodes: 2,
+                added_edges: 1,
+                updated_nodes: 0,
+                review_outputs: 1,
+                needs_review_repairs: 0,
+                accepted_item_ids: [
+                    'review-tray-source-map-draft',
+                    'review-tray-action-plan-draft',
+                    'review-tray-relationship-candidate'
+                ],
+                summary: '+2 nodes, +1 relationship candidate'
+            }
+        }
+    ]
+});
+
 const generatedSourceGraph = () => ({
     nodes: [
         createNode({
@@ -341,7 +403,7 @@ const expectShellSlotsBounded = (rects, { narrow = false, expectRight = false, e
     }
 };
 
-const setupMockBackend = async (page, initialFlowJson = emptyFlowJson()) => {
+const setupMockBackend = async (page, initialFlowJson = emptyFlowJson(), options = {}) => {
     await page.addInitScript(() => {
         window.localStorage.clear();
         window.localStorage.setItem('docmap.uiShellRibbon.enabled', 'true');
@@ -350,8 +412,10 @@ const setupMockBackend = async (page, initialFlowJson = emptyFlowJson()) => {
     const state = {
         savedFlowJson: initialFlowJson
     };
+    const activeDraftSession = options.draftSession || draftSession();
     const docxUploadRequests = [];
     const savedRequests = [];
+    const draftAcceptRequests = [];
 
     await page.route('http://localhost:8000/flows', async (route) => {
         await route.fulfill({
@@ -404,12 +468,14 @@ const setupMockBackend = async (page, initialFlowJson = emptyFlowJson()) => {
                 session_count: 1,
                 sessions: [
                     {
-                        session_id: 'review-tray-draft-session-1',
-                        selected_model: 'gpt-5.4',
+                        session_id: activeDraftSession.session_id,
+                        selected_model: activeDraftSession.selected_model || 'gpt-5.4',
                         total_tokens: 1400,
                         estimated_cost_usd: '$0.0032',
-                        status: 'drafting',
-                        revisions: [{ revision_id: 'review-tray-draft-revision-1' }],
+                        status: activeDraftSession.status || 'drafting',
+                        revisions: activeDraftSession.revisions.map((revision) => ({
+                            revision_id: revision.revision_id
+                        })),
                         created_at: '2026-05-19T18:45:00.000Z'
                     }
                 ]
@@ -423,7 +489,90 @@ const setupMockBackend = async (page, initialFlowJson = emptyFlowJson()) => {
             await route.fulfill({
                 status: 200,
                 contentType: 'application/json',
-                body: JSON.stringify(draftSession())
+                body: JSON.stringify(activeDraftSession)
+            });
+        }
+    );
+
+    await page.route(
+        /http:\/\/localhost:8000\/api\/workspaces\/[^/]+\/ai\/draft-sessions\/[^/]+\/accept$/,
+        async (route) => {
+            const requestBody = route.request().postDataJSON();
+            const revision = activeDraftSession.revisions.at(-1);
+            const selectedIds = requestBody.mode === 'selected' ? requestBody.selected_item_ids || [] : [];
+            const shouldAccept = (id) => selectedIds.length === 0 || selectedIds.includes(id);
+            const snapshot = parseSnapshot(state.savedFlowJson);
+            const existingNodeIds = new Set(snapshot.nodes.map((node) => node.id));
+            const acceptedNodes = (revision.draft_nodes || [])
+                .filter((node) => shouldAccept(node.id) && !existingNodeIds.has(node.id))
+                .map((node, index) => ({
+                    id: node.id,
+                    type: 'response',
+                    position: { x: 240 + index * 320, y: 180 },
+                    data: {
+                        title: node.title,
+                        body: node.summary,
+                        node_type: node.node_type,
+                        status: node.status,
+                        confidence: node.confidence,
+                        source_refs: node.source_refs || [],
+                        metadata: {
+                            ...(node.metadata || {}),
+                            source: 'ai_draft_session',
+                            ai_draft_session_id: activeDraftSession.session_id,
+                            ai_draft_revision_id: revision.revision_id
+                        }
+                    },
+                    targetPosition: 'left',
+                    sourcePosition: 'right',
+                    deletable: true
+                }));
+            const acceptedNodeIds = new Set(acceptedNodes.map((node) => node.id));
+            const acceptedRelationshipEdges = (revision.draft_items || [])
+                .filter((item) => item.item_type === 'relationship_candidate' && shouldAccept(item.id))
+                .filter((item) => acceptedNodeIds.has(item.metadata?.source_node_id) && acceptedNodeIds.has(item.metadata?.target_node_id))
+                .map((item) => ({
+                    id: item.metadata.relationship_edge_id || item.id,
+                    source: item.metadata.source_node_id,
+                    target: item.metadata.target_node_id,
+                    type: 'step',
+                    animated: false,
+                    relationship_type: item.metadata.relationship_type,
+                    data: {
+                        relationship_type: item.metadata.relationship_type,
+                        source_refs: item.source_refs || [],
+                        confidence: item.metadata.confidence,
+                        rationale: item.content
+                    }
+                }));
+            const graph = {
+                ...snapshot,
+                nodes: [...snapshot.nodes, ...acceptedNodes],
+                edges: [...snapshot.edges, ...acceptedRelationshipEdges]
+            };
+            const acceptResult = {
+                session_id: activeDraftSession.session_id,
+                revision_id: revision.revision_id,
+                mode: requestBody.mode || 'append',
+                accepted_node_ids: acceptedNodes.map((node) => node.id),
+                accepted_edge_ids: acceptedRelationshipEdges.map((edge) => edge.id),
+                graph_revision_id: `review-tray-graph-revision-${draftAcceptRequests.length + 1}`,
+                metadata: { undo_snapshot: state.savedFlowJson },
+                canonical_graph_mutated: true
+            };
+            state.savedFlowJson = JSON.stringify(graph);
+            draftAcceptRequests.push({ requestBody, acceptResult });
+            savedRequests.push({
+                flow_id: flowId,
+                flow_name: 'Review Tray Flow',
+                flow_json: state.savedFlowJson,
+                flow_type: 'manual',
+                summary: 'Draft accept persisted by mock backend'
+            });
+            await route.fulfill({
+                status: 200,
+                contentType: 'application/json',
+                body: JSON.stringify({ graph, session: activeDraftSession, accept_result: acceptResult })
             });
         }
     );
@@ -446,7 +595,7 @@ const setupMockBackend = async (page, initialFlowJson = emptyFlowJson()) => {
         });
     });
 
-    return { docxUploadRequests, savedRequests, state };
+    return { docxUploadRequests, draftAcceptRequests, savedRequests, state };
 };
 
 test('shell review tray hosts AI draft sessions in Drafts', async ({ page }) => {
@@ -470,6 +619,84 @@ test('shell review tray hosts AI draft sessions in Drafts', async ({ page }) => 
     await expect(tray.locator('.ai-draft-session-panel')).toContainText('Review tray AI draft');
     await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
     await expect(page.locator('.metadata-inspector-floating-dock')).toHaveCount(0);
+});
+
+test('shell review tray accepts connection candidates before mutating the graph', async ({ page }) => {
+    const { draftAcceptRequests, savedRequests, state } = await setupMockBackend(
+        page,
+        emptyFlowJson(),
+        { draftSession: connectionDraftSession() }
+    );
+    const beforeAccept = parseSnapshot(state.savedFlowJson);
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto('/');
+
+    await page.locator('.shell-left-navigator__modebar').getByRole('button', { name: 'Health', exact: true }).click();
+    await page.locator('.workspace-ai-usage').getByRole('button', { name: 'Refresh' }).click();
+    await page.locator('.workspace-ai-usage').getByText('Details').click();
+    await page.locator('.workspace-ai-usage').getByRole('button', { name: 'Review' }).click();
+
+    const tray = page.locator('.workspace-shell__bottom .review-tray');
+    await expect(tray).toBeVisible();
+    await expect(tray.getByRole('tab', { name: 'Drafts' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tray.locator('.ai-draft-session-panel')).toContainText(
+        'Review tray source map supports review tray action plan'
+    );
+    expect(parseSnapshot(state.savedFlowJson)).toEqual(beforeAccept);
+
+    await tray
+        .locator('.ai-draft-item')
+        .filter({ hasText: 'Review tray source map' })
+        .locator('input[type="checkbox"]')
+        .first()
+        .check();
+    await tray
+        .locator('.ai-draft-item')
+        .filter({ hasText: 'Review tray action plan' })
+        .locator('input[type="checkbox"]')
+        .first()
+        .check();
+    await tray
+        .locator('.ai-draft-item')
+        .filter({ hasText: 'Review tray source map supports review tray action plan' })
+        .locator('input[type="checkbox"]')
+        .first()
+        .check();
+    await expect(tray.locator('.ai-draft-impact')).toContainText('3 checked draft items will be accepted');
+
+    await tray.locator('.ai-draft-accept').getByRole('button', { name: 'Accept selected' }).click();
+
+    await expect
+        .poll(() => {
+            const snapshot = parseSnapshot(state.savedFlowJson);
+            return {
+                acceptedRequests: draftAcceptRequests.length,
+                savedRequests: savedRequests.length,
+                nodeCount: snapshot.nodes.length,
+                hasRelationship: snapshot.edges.some(
+                    (edge) =>
+                        edge.id === 'review-tray-relationship-edge' &&
+                        edge.source === 'review-tray-source-map-draft' &&
+                        edge.target === 'review-tray-action-plan-draft' &&
+                        edge.data?.relationship_type === 'supports'
+                )
+            };
+        })
+        .toEqual({
+            acceptedRequests: 1,
+            savedRequests: 1,
+            nodeCount: 2,
+            hasRelationship: true
+        });
+    expect(draftAcceptRequests[0].requestBody).toMatchObject({
+        mode: 'selected',
+        selected_item_ids: [
+            'review-tray-source-map-draft',
+            'review-tray-action-plan-draft',
+            'review-tray-relationship-candidate'
+        ]
+    });
 });
 
 test('shell review tray hosts generated source draft before applying it', async ({ page }) => {

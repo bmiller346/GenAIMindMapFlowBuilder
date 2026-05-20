@@ -27,6 +27,8 @@ Scope: selection, relationship lenses, metadata editing, AI preview-first flows,
 
 - `review-tray-regression.spec.js`
   - Shell review tray Drafts, Sources/source draft, Issues, Connections, Tasks preview, Checklist Preview, and source repair routes.
+  - Connection candidates remain preview-first in the Review Tray until selected acceptance creates the canonical relationship edge.
+  - Accepted Checklist Preview data persists through save and reopen.
   - Shell slot bounding-box coverage for ribbon, left rail, right rail, bottom review tray, and status bar at desktop and narrow widths.
 
 - `shellStore.test.mjs`
@@ -41,6 +43,10 @@ Scope: selection, relationship lenses, metadata editing, AI preview-first flows,
 
 - `shell-foundation-smoke.spec.js`
   - Shell wrapper slot mounting, slot-state attributes, closed right rail policy, and narrow viewport shell bounds.
+  - Shell-off rollback mounts legacy `FloatingDock` workspace tools and metadata inspector, edits node metadata, saves, and reopens persisted data.
+  - Empty-canvas Guided starts routes to the shell right-rail AI guide instead of the legacy prompt modal.
+  - Shell source intake opens in the bottom Review Tray instead of the legacy picker.
+  - Shell AI generation progress appears in the status bar instead of the canvas dock.
 
 Existing related coverage:
 
@@ -135,7 +141,7 @@ Existing related coverage:
 ## Current Gaps
 
 - No screenshot diff baseline exists yet for panel overlap; current automated check is bounding-box only.
-- Find connections full accept/reject is indirectly covered through nudges and graph projection tests, but not yet as a dedicated e2e for connection candidate accept/reject.
+- Find connections selected acceptance is now directly covered through the shell Review Tray. Broader reject/discard UX polish remains manual/product follow-up.
 - Shell left navigator manual resize is unit-covered through shell state and manually listed above; browser-level drag automation needs a reliable pointer strategy before enabling.
 - Shell Outline mode is read-only. Full branch management and saved-view navigation are not implemented yet.
 - Shell Activity mode embeds the existing activity history surface. A redesigned timeline/notification model is not implemented yet.
@@ -157,14 +163,14 @@ be resolved before retiring the shell-off compatibility path.
 | --- | --- | --- | --- | --- | --- |
 | Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Crowded default UI or hidden controls | Shell geometry e2e plus screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Automated narrow/header/ribbon/tray coverage passing; manual screenshot signoff still open | Yes |
 | Accepted output surfaces need verification | Outputs ribbon and accepted workspace views | Accepted outputs open the wrong surface or no visible surface | Verify accepted Table/Executive/Flowchart/Tasks/Kanban routes do not open the tray; verify Checklist Preview does open the tray | E2E route coverage passing for Table, Executive, Flowchart, Tasks, Kanban, Implementation, Status, and Checklist Preview | Yes |
-| Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Candidate previews become canonical before acceptance | Coverage for accepted tasks in structured canvas, Checklist Preview in tray, and accepted checklist artifact persistence | Route split covered; accepted checklist artifact persistence still open | Yes |
-| Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with stale fixtures or untested routes | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 21 serialized shell e2e passed, 1 intentional skip | Yes |
+| Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Candidate previews become canonical before acceptance | Coverage for accepted tasks in structured canvas, Checklist Preview in tray, and accepted checklist artifact persistence | Route split covered; accepted checklist artifact persistence covered by review-tray save/reopen regression | Yes |
+| Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with stale fixtures or untested routes | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 28 serialized shell e2e passed, 1 intentional skip | Yes |
 | Map readability and relationship lenses are verified | Map ribbon, branch scope, relationship labels | Branch focus, selected nodes, and relationship labels compete visually | Visual QA plus coverage that mind map relationship labels default off and can be toggled on intentionally | Default-off / toggle-on e2e and projection unit coverage passing; manual visual QA still open | Yes |
-| Preview-first graph mutation remains safe | Connections review and generated previews | Candidate acceptance mutates canonical graph without review | Verify generated connection candidates enter Review Tray first and accept/reject preserves existing mutation behavior | Open | Yes |
+| Preview-first graph mutation remains safe | Connections review and generated previews | Candidate acceptance mutates canonical graph without review | Verify generated connection candidates enter Review Tray first and accept/reject preserves existing mutation behavior | Review Tray regression covers connection candidate visibility before mutation and selected accept creating the canonical relationship edge; broader reject/discard UX polish remains follow-up | Yes |
 | Legacy overlap `fixme` has disposition | Shell-off FloatingDock compatibility layout | Known overlap remains unexplained for rollback | Keep skipped with waiver/manual screenshot gate, narrow to shell-only geometry, or replace with stable bounding-box coverage | Disposition documented: skipped as shell-off compatibility territory while shell slot geometry guards default readiness | Yes |
-| Shell-off compatibility remains covered | Feature flag rollback path | Default rollout cannot safely be disabled | Shell-off smoke/manual pass covering legacy FloatingDock edit/save/reopen behavior | Open | Yes |
-| Right rail properties persist and stay metadata-only | Node, edge, branch, source properties | Data loss or AI review controls leak into metadata rail | Selection shell regression for node/edge/branch/source edits and metadata-only NodeInspector assertions | Mostly covered; rerun after active edits land | Yes |
-| Review Tray remains authoritative for generated review workflows | Bottom tray | Drafts/issues/connections/previews fall back to legacy panels | Review tray regression for direct routes and close behavior | Mostly covered; rerun after active edits land | Yes |
+| Shell-off compatibility remains covered | Feature flag rollback path | Default rollout cannot safely be disabled | Shell-off smoke/manual pass covering legacy FloatingDock edit/save/reopen behavior | Shell-off smoke covers legacy workspace and metadata FloatingDock mount, edit, save, and reopen behavior | Yes |
+| Right rail properties persist and stay metadata-only | Node, edge, branch, source properties | Data loss or AI review controls leak into metadata rail | Selection shell regression for node/edge/branch/source edits and metadata-only NodeInspector assertions | Covered by selection shell regression for node, edge, branch, source, and metadata-only NodeInspector behavior | Yes |
+| Review Tray remains authoritative for generated review workflows | Bottom tray | Drafts/issues/connections/previews fall back to legacy panels | Review tray regression for direct routes and close behavior | Covered for direct routes, close behavior, selected connection candidate acceptance, and accepted checklist save/reopen | Yes |
 | FloatingDock removal | Legacy floating layout | Removal breaks shell-off compatibility | Separate retirement audit after default-shell rollout | Deferred | No |
 | Richer source/branch metadata | Right rail properties | Product polish remains shallow | Field expansion and persistence follow-up | Deferred | No |
 | Full map projection helper extraction | Mind map projection/lens internals | Lens internals remain harder to evolve | Refactor follow-up after branch/lens styling stabilizes | First extraction landed in `frontend/src/utils/canvasProjection.js` with focused unit coverage; broader density/lens rules deferred | No |

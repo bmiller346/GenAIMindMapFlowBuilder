@@ -25,10 +25,21 @@ const flowJson = JSON.stringify({
     automations: []
 });
 
-const mockBackend = async (page, { shellEnabled = true } = {}) => {
+const emptyFlowJson = JSON.stringify({
+    nodes: [],
+    edges: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+    workspace_brief: {},
+    source_library: [],
+    activity_events: [],
+    ai_action_runs: [],
+    automations: []
+});
+
+const mockBackend = async (page, { shellEnabled = true, initialFlowJson = flowJson } = {}) => {
     const state = {
         savedFlowName: 'Shell Foundation Smoke',
-        savedFlowJson: flowJson
+        savedFlowJson: initialFlowJson
     };
     const savedRequests = [];
 
@@ -268,6 +279,24 @@ test('shell routes AI generation progress through status bar instead of canvas d
     await expect(progress).toBeVisible();
     await expect(progress).toContainText('Workflow Mapper is drafting');
     await expect(page.locator('.ai-generation-progress-dock')).toHaveCount(0);
+});
+
+test('empty canvas guided starts route to shell AI guide instead of prompt modal', async ({ page }) => {
+    await mockBackend(page, { initialFlowJson: emptyFlowJson });
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/#/');
+
+    await expect(page.getByTestId('workspace-shell')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Empty workspace' })).toBeVisible();
+    await page.getByRole('region', { name: 'Empty workspace' }).getByRole('button', { name: 'Guided starts' }).click();
+
+    const rightRail = page.getByTestId('workspace-shell-right-slot');
+    await expect(rightRail).toBeVisible();
+    await expect(rightRail.locator('.ai-helpers-panel')).toBeVisible();
+    await expect(page.getByTestId('shell-ribbon')).toHaveAttribute('data-active-tab', 'ai');
+    await expect(page.locator('.modal .ai-action-modal')).toHaveCount(0);
+    await expect(page.locator('.react-flow__panel .ai-helpers-panel')).toHaveCount(0);
 });
 
 test('shell routes source intake into the bottom review tray', async ({ page }) => {

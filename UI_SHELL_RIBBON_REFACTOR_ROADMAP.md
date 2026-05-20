@@ -117,7 +117,7 @@ is dead in both shell-on and shell-off paths.
 | Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Preview candidates become canonical work before acceptance, or accepted artifacts remain trapped in preview UI | E2E or component coverage for Table/Kanban not opening tray, Checklist Preview opening tray, accepted tasks staying in structured canvas, and checklist artifact persistence | Route split covered; accepted checklist artifact persistence covered by review-tray save/reopen regression | Yes |
 | Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 25 serialized shell e2e passed, 1 intentional skip | Yes |
 | Map readability and relationship lenses are visually verified | Map ribbon, branch scope, relationship labels | Branch focus, selected nodes, and relationship labels compete visually or confuse review | Visual QA plus coverage that mind map relationship labels default off and can be toggled on intentionally | Default-off / toggle-on e2e, branch-lens e2e, and projection unit coverage passing; manual visual QA still open | Yes |
-| Preview-first graph mutation remains safe | Connections review and generated previews | Find Connections or related candidate acceptance mutates canonical graph without review | Verify generated connection candidates enter Review Tray first and accept/reject preserves existing mutation behavior | Shell AI ribbon Find Connections now routes to the Review Tray instead of `PromptModal`; acceptance mutation behavior still needs deeper candidate accept/reject QA | Yes |
+| Preview-first graph mutation remains safe | Connections review and generated previews | Find Connections or related candidate acceptance mutates canonical graph without review | Verify generated connection candidates enter Review Tray first and accept/reject preserves existing mutation behavior | Review Tray regression now covers connection candidate visibility before mutation and selected accept creating the canonical relationship edge; broader reject/discard UX polish remains follow-up | Yes |
 | Legacy overlap `fixme` has disposition | Shell-off FloatingDock compatibility layout | Known overlap remains ambiguous when shell becomes default and rollback is needed | Either keep skipped with explicit shell-off waiver/manual screenshot gate, narrow to shell-only geometry, or replace with stable bounding-box coverage | Disposition documented: skipped as shell-off compatibility territory while shell slot geometry guards default readiness | Yes |
 | Shell-off compatibility remains covered | Feature flag rollback path | Default-on rollout cannot be safely disabled or corrupts existing workspace data | Run shell-off smoke/manual pass and confirm legacy FloatingDock surfaces still open, edit, save, and reopen existing workspace data | Shell-off smoke now covers legacy workspace and metadata FloatingDock mount, edit, save, and reopen behavior | Yes |
 | Right rail metadata stays metadata-only and persistent | Node, edge, branch, source properties | AI review/action UI leaks into properties rail, or property edits are lost | Run selection shell regression for node/edge/branch/source properties and metadata-only NodeInspector assertions | Covered by selection shell regression for node, edge, branch, source, and metadata-only NodeInspector behavior | Yes |
@@ -155,7 +155,8 @@ Before any agent starts, check `git status --short`; active work may exist in
   owner.
 - Shell AI Routing: header/Home Ask AI now opens the right-rail guide; AI
   review commands such as Find Connections route to the bottom Review Tray; the
-  legacy `PromptModal` remains for the shell-off path and any not-yet-migrated
+  empty-canvas Guided starts button opens the shell right-rail guide; the legacy
+  `PromptModal` remains for the shell-off path and any not-yet-migrated
   advanced builder flows.
 - Status Bar Progress: shell-mode AI generation progress is now hosted in the
   bottom status bar instead of a React Flow canvas dock.
@@ -232,7 +233,7 @@ Non-`FloatingDock` floating surface inventory:
 | Advanced Ask AI / prompt-builder modal | Migration candidate | Highest prompt-routing gap. It still owns role/action inference, model/evidence/citation controls, progress handoff, and draft-session metadata. |
 | Shell output surface React Flow panel for chart/monday views | Migration candidate | Not a shell slot yet; audit before moving execution/handoff outputs into shell-owned surfaces. |
 | Shell-off AI generation progress dock | Shell-off compatibility | Keep until rollback path is retired; shell-on progress is already in the status bar. |
-| Empty-canvas start panel | Canvas affordance | Ask AI is shell-aware; Guided starts still opens the prompt modal and is the smallest next routing cleanup. |
+| Empty-canvas start panel | Canvas affordance | Ask AI and Guided starts are shell-aware; remaining work is product polish for how starter presets appear inside the shell guide. |
 | Branch lens banner, selection action bar, legacy AI Helpers panel, and source draft review panel | Shell-off compatibility | Keep as rollback surfaces while default shell matures. |
 | Anchored popovers from local views and node controls | Canvas affordance | Accept as small menus for now; document separately from modal/panel retirement. |
 | Shell overlay host | Shell-owned placeholder | Store state and slot exist, but `ShellOverlayHost` renders no real overlay content yet. |
@@ -343,16 +344,11 @@ Next sequence:
 
 1. Complete manual screenshot signoff for shell on/off at desktop and narrow
    widths.
-2. Deepen connection candidate accept/reject QA so Review Tray routing and
-   canonical graph mutation behavior are covered together.
-3. Normalize the smallest remaining prompt-builder route: make empty-canvas
-   Guided starts shell-aware before attempting the full advanced builder
-   migration.
-4. Continue non-`FloatingDock` floating surface disposition and decide which are
+2. Continue non-`FloatingDock` floating surface disposition and decide which are
    shell overlays, temporary canvas affordances, or retirement candidates.
-5. Rerun build, shell units, shell e2e, and review tray e2e as the final
+3. Rerun build, shell units, shell e2e, and review tray e2e as the final
    pre-default verification bundle.
-6. Only after those pass, decide whether to flip the shell default flag. Keep
+4. Only after those pass, decide whether to flip the shell default flag. Keep
    `FloatingDock` retirement as a post-default cleanup track.
 
 #### Deferred Integration: FloatingDock Retirement
