@@ -426,12 +426,12 @@ test('shift additive selection and lasso preserve selected nodes', async ({
 
     await shiftClickNode(page, 'Selection root');
     await expect.poll(() => selectedNodeCount(page)).toBe(1);
-    await expect(page.locator('.selection-action-bar')).toContainText('1 selected');
+    await expect(page.locator('.shell-status-bar__item--accent')).toContainText('1');
     await expect(nodeByTitle(page, 'Selection root')).toHaveClass(/selected/);
 
     await shiftClickNode(page, 'Branch A');
     await expect.poll(() => selectedNodeCount(page)).toBe(2);
-    await expect(page.locator('.selection-action-bar')).toContainText('2 selected');
+    await expect(page.locator('.shell-status-bar__item--accent')).toContainText('2');
 
     const branchBBox = await responseNodeByTitle(page, 'Branch B').boundingBox();
     expect(branchBBox).toBeTruthy();
@@ -445,15 +445,15 @@ test('shift additive selection and lasso preserve selected nodes', async ({
     await page.keyboard.up('Shift');
 
     await expect.poll(() => selectedNodeCount(page)).toBe(3);
-    await expect(page.locator('.selection-action-bar')).toContainText('3 selected');
+    await expect(page.locator('.shell-status-bar__item--accent')).toContainText('3');
     await expect(nodeByTitle(page, 'Branch A')).toHaveClass(/selected/);
     await expect(nodeByTitle(page, 'Branch B')).toHaveClass(/selected/);
 });
 
-test('quick Ask AI and branch lens stay stable', async ({
+test('selection status actions and branch lens stay stable', async ({
     page
 }) => {
-    const { nodeMessageRequests } = await setupMockBackend(page, {
+    await setupMockBackend(page, {
         selectedNodeIds: ['root', 'branch-a']
     });
 
@@ -461,35 +461,20 @@ test('quick Ask AI and branch lens stay stable', async ({
     await page.goto('/');
     await openSelectionFixture(page);
     await expect.poll(() => selectedNodeCount(page)).toBe(2);
-    await expect(page.locator('.selection-action-bar')).toContainText('2 selected');
-
-    await page.getByLabel('Ask AI about selected nodes').fill('What ties these nodes together?');
-    await page.locator('.selection-quick-ask').getByRole('button').last().click();
-    await expect(page.locator('.selection-quick-result')).toContainText(
-        'Selection answer uses both selected branches.'
-    );
-    await expect.poll(() => nodeMessageRequests.length).toBe(1);
-    expect(nodeMessageRequests[0].scope).toEqual({
-        type: 'nodes',
-        node_ids: ['root', 'branch-a']
-    });
-    expect(nodeMessageRequests[0].metadata).toMatchObject({
-        preview_mode: 'selection_quick_message',
-        selected_node_count: 2
-    });
+    const statusBar = page.locator('.shell-status-bar');
+    await expect(statusBar.locator('.shell-status-bar__item--accent')).toContainText('2');
+    await expect(statusBar.getByRole('button', { name: 'Ask' })).toBeVisible();
+    await expect(statusBar.getByRole('button', { name: 'Fit' })).toBeVisible();
 
     const relationshipLens = page.locator('.mindmap-relationship-controls');
     await expect(relationshipLens).toBeVisible();
     await relationshipLens.getByRole('button', { name: /Branch A/ }).click();
-    await expect(page.getByRole('region', { name: 'Active canvas scope' })).toContainText('Branch A');
+    await expect(page.getByLabel('Temporary view overrides')).toContainText('Branch: Branch A');
     await expect(nodeByTitle(page, 'Branch A')).toHaveClass(/canvas-node-branch-root/);
     await expect(nodeByTitle(page, 'Branch B')).toHaveClass(/canvas-node-out-of-scope/);
 
-    await page
-        .getByRole('region', { name: 'Active canvas scope' })
-        .getByRole('button', { name: 'Clear', exact: true })
-        .click();
-    await expect(page.getByRole('region', { name: 'Active canvas scope' })).toHaveCount(0);
+    await page.getByLabel('Clear Branch: Branch A').click();
+    await expect(page.getByLabel('Temporary view overrides')).toHaveCount(0);
 });
 
 test('default shell mounts ribbon, navigator, and canvas slots without legacy workspace dock chrome', async ({ page }) => {
@@ -814,11 +799,10 @@ test('shell right rail shows branch properties from the active branch lens', asy
 
     await page.getByRole('tab', { name: 'Map' }).click();
     await page.locator('.mindmap-relationship-controls').getByRole('button', { name: /Branch A/ }).click();
-    const scopeBanner = page.getByRole('region', { name: 'Active canvas scope' });
-    await expect(scopeBanner).toContainText('Branch A');
+    await expect(page.getByLabel('Temporary view overrides')).toContainText('Branch: Branch A');
     await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
 
-    await scopeBanner.getByRole('button', { name: 'Properties' }).click();
+    await page.locator('.shell-status-bar').getByRole('button', { name: 'Branch properties' }).click();
 
     const rightRail = page.locator('.workspace-shell__right');
     await expect(rightRail).toBeVisible();
@@ -847,7 +831,7 @@ test('shell right rail shows branch properties from the active branch lens', asy
     expect(savedRequests.length).toBeGreaterThan(0);
 
     await rightRail.getByRole('button', { name: 'Clear lens' }).click();
-    await expect(page.getByRole('region', { name: 'Active canvas scope' })).toHaveCount(0);
+    await expect(page.getByLabel('Temporary view overrides')).toHaveCount(0);
     await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
 });
 

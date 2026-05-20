@@ -1,8 +1,9 @@
-const ShellStatusBar = ({ items = [], overrides = [] }) => {
+const ShellStatusBar = ({ actions = [], items = [], overrides = [] }) => {
+    const visibleActions = actions.filter((action) => action?.label && action?.onClick);
     const visibleItems = items.filter((item) => item?.label || item?.value);
     const visibleOverrides = overrides.filter((override) => override?.label);
 
-    if (!visibleItems.length && !visibleOverrides.length) {
+    if (!visibleItems.length && !visibleOverrides.length && !visibleActions.length) {
         return null;
     }
 
@@ -37,6 +38,21 @@ const ShellStatusBar = ({ items = [], overrides = [] }) => {
                                 </button>
                             ) : null}
                         </span>
+                    ))}
+                </div>
+            ) : null}
+            {visibleActions.length ? (
+                <div className="shell-status-bar__actions" aria-label="Selection actions">
+                    {visibleActions.map((action) => (
+                        <button
+                            key={action.id || action.label}
+                            type="button"
+                            className={action.tone ? `shell-status-bar__action shell-status-bar__action--${action.tone}` : 'shell-status-bar__action'}
+                            onClick={action.onClick}
+                        >
+                            {action.icon ? <span aria-hidden="true">{action.icon}</span> : null}
+                            {action.label}
+                        </button>
                     ))}
                 </div>
             ) : null}

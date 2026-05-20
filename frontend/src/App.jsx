@@ -817,6 +817,7 @@ const App = () => {
             if (useWorkspaceShell) {
                 setInspectorNodeId(undefined);
                 shellActions.openRightPanel({ kind: 'node', id: nodeId });
+                shellActions.setRibbonTab('map', { inspect: 'node' });
             } else {
                 setInspectorNodeId(nodeId);
             }
@@ -1992,8 +1993,71 @@ const App = () => {
         setActiveGraphFilters
     ]);
 
+    const shellSelectionActions = useMemo(() => {
+        if (isStructuredCanvasView) {
+            return [];
+        }
+        const actions = [];
+        if (selectedBranchId) {
+            actions.push({
+                id: 'branch-properties',
+                label: 'Branch properties',
+                onClick: () => shellActions.openBranchMetadata(selectedBranchId)
+            });
+        }
+        if (!selectedVisibleNodes.length) {
+            return actions;
+        }
+        if (activeCanvasView === 'knowledgeGraph' && selectedVisibleNodes.length === 2) {
+            actions.push({
+                id: 'connect',
+                label: 'Connect',
+                onClick: createKgRelationshipFromSelection
+            });
+        }
+        actions.push(
+            {
+                id: 'ask',
+                label: 'Ask',
+                icon: <FiMessageSquare />,
+                onClick: askAiAboutSelection
+            },
+            {
+                id: 'fit',
+                label: 'Fit',
+                icon: <FiMaximize2 />,
+                onClick: fitSelectedNodes
+            },
+            {
+                id: 'delete',
+                label: 'Delete',
+                icon: <FiTrash2 />,
+                tone: 'danger',
+                onClick: deleteSelectedNodes
+            },
+            {
+                id: 'clear',
+                label: 'Clear',
+                onClick: clearNodeSelection
+            }
+        );
+        return actions;
+    }, [
+        activeCanvasView,
+        askAiAboutSelection,
+        clearNodeSelection,
+        createKgRelationshipFromSelection,
+        deleteSelectedNodes,
+        fitSelectedNodes,
+        isStructuredCanvasView,
+        selectedBranchId,
+        shellActions,
+        selectedVisibleNodes.length
+    ]);
+
     const shellStatusBar = useWorkspaceShell ? (
         <ShellStatusBar
+            actions={shellSelectionActions}
             items={shellStatusItems}
             overrides={shellTemporaryOverrides}
         />
@@ -2501,7 +2565,7 @@ const App = () => {
                         {workspaceNavigator}
                     </FloatingDock>
                 ) : null}
-                {selectedBranchId && !isStructuredCanvasView && !isFocusPanelOpen ? (
+                {!useWorkspaceShell && selectedBranchId && !isStructuredCanvasView && !isFocusPanelOpen ? (
                     <Panel position="top-left" style={{ display: 'block' }}>
                         <section className="canvas-scope-banner" aria-label="Active canvas scope">
                             <span>Branch lens</span>
@@ -2523,7 +2587,7 @@ const App = () => {
                         </section>
                     </Panel>
                 ) : null}
-                {selectedVisibleNodes.length && !isStructuredCanvasView && !isFocusPanelOpen ? (
+                {!useWorkspaceShell && selectedVisibleNodes.length && !isStructuredCanvasView && !isFocusPanelOpen ? (
                     <Panel position="bottom-center" style={{ display: 'block' }}>
                         <section className="selection-action-bar" aria-label="Selected node actions">
                             <div className="selection-action-main">

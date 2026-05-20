@@ -1258,7 +1258,8 @@
 }
 
 .shell-status-bar__items,
-.shell-status-bar__overrides {
+.shell-status-bar__overrides,
+.shell-status-bar__actions {
   min-width: 0;
   display: flex;
   align-items: center;
@@ -1273,6 +1274,11 @@
   flex: 1;
   justify-content: flex-end;
   overflow-x: auto;
+}
+
+.shell-status-bar__actions {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .shell-status-bar__item,
@@ -1323,6 +1329,32 @@
   font-size: 0.65rem;
   line-height: 1;
   cursor: pointer;
+}
+
+.shell-status-bar__action {
+  min-height: 1.45rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid color-mix(in srgb, var(--workspace-shell-border) 85%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--input-bar-color) 86%, transparent);
+  color: var(--font-color);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 850;
+  padding: 0.12rem 0.48rem;
+  white-space: nowrap;
+}
+
+.shell-status-bar__action:hover,
+.shell-status-bar__action:focus-visible {
+  border-color: color-mix(in srgb, #6ed6c5 52%, var(--workspace-shell-border));
+  background: color-mix(in srgb, #2aa198 18%, var(--input-bar-color));
+}
+
+.shell-status-bar__action--danger {
+  color: #f87171;
 }
 
 .workspace-shell__canvas .react-flow {
