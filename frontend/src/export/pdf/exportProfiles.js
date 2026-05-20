@@ -59,6 +59,19 @@ export const PDF_EXPORT_PROFILES = {
             { type: 'tasks', title: 'Tasks' },
             { type: 'review', title: 'Open Review Items' }
         ]
+    },
+    newsletter: {
+        id: 'newsletter',
+        label: 'Newsletter',
+        description: 'A broad-audience update brief with optional workspace visuals and review notes.',
+        defaultPageSizeId: 'letter',
+        defaultOrientation: 'portrait',
+        sections: [
+            { type: 'title', title: 'Newsletter' },
+            { type: 'newsletter', title: 'Newsletter Brief' },
+            { type: 'diagram', title: 'Workspace Snapshot' },
+            { type: 'review', title: 'Editor Review Notes' }
+        ]
     }
 };
 

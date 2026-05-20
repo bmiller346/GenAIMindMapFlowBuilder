@@ -823,7 +823,30 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 artifact_type: artifact.artifactType,
                 title: artifact.title,
                 label: artifact.label,
-                review_state: artifact.reviewState
+                review_state: artifact.reviewState,
+                data: {
+                    title: artifact.title,
+                    headline: artifact.title,
+                    dek: artifact.dek,
+                    lede: artifact.lede,
+                    issue_label: artifact.issueLabel,
+                    cadence: artifact.cadence,
+                    audience: artifact.audience,
+                    opening_note: artifact.openingNote,
+                    body: artifact.body,
+                    summary: artifact.summary,
+                    sections: artifact.sections,
+                    highlights: artifact.newsletterHighlights,
+                    upcoming: artifact.newsletterUpcoming,
+                    risks: artifact.newsletterRisks,
+                    decisions_needed: artifact.newsletterDecisions,
+                    visual_blocks: artifact.visualBlocks,
+                    source_backed_appendix: artifact.sourceBackedAppendix,
+                    assumptions: artifact.assumptions,
+                    source_refs: artifact.sourceRefs,
+                    review_state: artifact.reviewState,
+                    confidence: artifact.confidence
+                }
             })
         );
         if (mode === 'selected' && effectiveSelectedIds.length === 0) {
@@ -1421,8 +1444,8 @@ const PublishableArtifactPreviews = ({ artifacts, copiedArtifactId, onCopy }) =>
                             ) : null}
                             {artifact.provenance?.sourceRefCount ? (
                                 <span>
-                                    {artifact.provenance.sourceRefCount} cited{' '}
-                                    {artifact.provenance.sourceRefCount === 1 ? 'ref' : 'refs'}
+                                    {artifact.provenance.sourceRefCount} source{' '}
+                                    {artifact.provenance.sourceRefCount === 1 ? 'reference' : 'references'}
                                 </span>
                             ) : null}
                         </div>

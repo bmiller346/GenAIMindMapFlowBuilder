@@ -19,7 +19,9 @@ const COLORS = {
     review: '#b45309',
     reviewSoft: '#fef3c7',
     source: '#4f46e5',
-    sourceSoft: '#e0e7ff'
+    sourceSoft: '#e0e7ff',
+    newsletter: '#0f766e',
+    newsletterSoft: '#ccfbf1'
 };
 
 const MARGINS = { top: 54, right: 46, bottom: 48, left: 46 };
@@ -92,6 +94,8 @@ const sectionTitle = (doc, title, y = MARGINS.top) => {
 };
 
 const wrapped = (doc, text, width) => doc.splitTextToSize(cleanText(text), width);
+
+const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 
 const todayLabel = () => new Date().toLocaleDateString();
 
@@ -696,6 +700,7 @@ const drawTitle = (doc, context) => {
         ['Edges', data.stats.edgeCount],
         ['Tasks', data.stats.taskCount],
         ['Review items', data.stats.reviewCount],
+        ['Newsletters', data.stats.newsletterCount],
         ['Source-backed', data.stats.sourceBackedCount]
     ].forEach(([label, value]) => {
         const width = 110;
@@ -712,6 +717,141 @@ const drawTitle = (doc, context) => {
         doc.text(label, MARGINS.left + 12, y + 42);
         y += 66;
     });
+};
+
+const drawSectionList = (doc, context, title, sections = [], y) => {
+    if (!sections.length) {
+        return y;
+    }
+    const width = context.pageSize.width - MARGINS.left - MARGINS.right;
+    y = ensureTableSpace(doc, context, y, 36, 'Newsletter Brief');
+    setColor(doc, 'setTextColor', COLORS.newsletter);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text(title, MARGINS.left, y);
+    y += 18;
+    sections.forEach((section) => {
+        const titleLines = wrapped(doc, section.title, width).slice(0, 2);
+        const bodyLines = wrapped(doc, section.body, width).slice(0, 4);
+        const bulletLines = asArray(section.bullets)
+            .flatMap((point) => wrapped(doc, `- ${point}`, width - 14).slice(0, 2))
+            .slice(0, 8);
+        const needed = Math.max(30, titleLines.length * 11 + bodyLines.length * 10 + bulletLines.length * 9 + 16);
+        y = ensureTableSpace(doc, context, y, needed, 'Newsletter Brief');
+        setColor(doc, 'setTextColor', COLORS.ink);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.text(titleLines, MARGINS.left, y);
+        y += titleLines.length * 11 + 2;
+        if (bodyLines.length) {
+            setColor(doc, 'setTextColor', COLORS.muted);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8.5);
+            doc.text(bodyLines, MARGINS.left, y);
+            y += bodyLines.length * 10 + 4;
+        }
+        if (bulletLines.length) {
+            setColor(doc, 'setTextColor', COLORS.ink);
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(8);
+            doc.text(bulletLines, MARGINS.left + 8, y);
+            y += bulletLines.length * 9 + 8;
+        } else {
+            y += 8;
+        }
+    });
+    return y + 4;
+};
+
+const fallbackNewsletterArtifact = (context) => ({
+    title: context.data.flowName,
+    issueLabel: context.options.revision || 'Draft',
+    cadence: '',
+    audience: context.options.preparedFor || context.data.workspaceBrief?.audience || 'Broad audience',
+    openingNote:
+        context.data.workspaceBrief?.goal ||
+        'Review this update brief against the accepted workspace map before publishing.',
+    highlights: context.data.outlineRows.slice(0, 3).map((row) => ({
+        title: row.title,
+        body: row.summary,
+        bullets: []
+    })),
+    sections: context.data.outlineRows.slice(3, 8).map((row) => ({
+        title: row.title,
+        body: row.summary,
+        bullets: []
+    })),
+    upcoming: context.data.taskRows.slice(0, 4).map((row) => ({
+        title: row.title,
+        body: [row.owner ? `Owner: ${row.owner}` : '', row.dueDate ? `Due: ${row.dueDate}` : '', row.summary].filter(Boolean).join(' | '),
+        bullets: []
+    })),
+    risks: context.data.reviewRows.slice(0, 4).map((row) => ({
+        title: row.title,
+        body: row.reasons?.join(', ') || row.summary,
+        bullets: row.summary ? [row.summary] : []
+    })),
+    decisions: [],
+    visualBlocks: context.data.nodes.length
+        ? [{
+              title: 'Workspace snapshot',
+              body: 'Include the workspace map as a visual reference for this newsletter.',
+              bullets: [`${context.data.stats.nodeCount} nodes`, `${context.data.stats.edgeCount} relationships`]
+          }]
+        : []
+});
+
+const drawNewsletter = (doc, context, section) => {
+    addPage(doc, context);
+    let y = sectionTitle(doc, section.title || 'Newsletter Brief');
+    const artifact = context.data.newsletterArtifacts[0] || fallbackNewsletterArtifact(context);
+    const width = context.pageSize.width - MARGINS.left - MARGINS.right;
+
+    setColor(doc, 'setFillColor', COLORS.newsletterSoft);
+    setColor(doc, 'setDrawColor', COLORS.newsletterSoft);
+    doc.roundedRect(MARGINS.left, y - 8, width, 58, 6, 6, 'FD');
+    setColor(doc, 'setTextColor', COLORS.newsletter);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(17);
+    doc.text(wrapped(doc, artifact.title || context.data.flowName, width - 24).slice(0, 2), MARGINS.left + 12, y + 12);
+    setColor(doc, 'setTextColor', COLORS.muted);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.text(
+        [
+            artifact.issueLabel ? `Issue: ${artifact.issueLabel}` : '',
+            artifact.cadence ? `Cadence: ${artifact.cadence}` : '',
+            artifact.audience ? `Audience: ${artifact.audience}` : ''
+        ].filter(Boolean).join(' | ') || 'Draft newsletter',
+        MARGINS.left + 12,
+        y + 42
+    );
+    y += 78;
+
+    const openingLines = wrapped(doc, artifact.openingNote || artifact.lede || artifact.body, width).slice(0, 8);
+    if (openingLines.length) {
+        setColor(doc, 'setTextColor', COLORS.ink);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        doc.text(openingLines, MARGINS.left, y);
+        y += openingLines.length * 12 + 18;
+    }
+
+    y = drawSectionList(doc, context, 'Top highlights', artifact.highlights, y);
+    y = drawSectionList(doc, context, 'In this issue', artifact.sections, y);
+    y = drawSectionList(doc, context, 'Upcoming work', artifact.upcoming, y);
+    y = drawSectionList(doc, context, 'Risks and watch items', artifact.risks, y);
+    y = drawSectionList(doc, context, 'Decisions needed', artifact.decisions, y);
+    y = drawSectionList(doc, context, 'Visual inserts', artifact.visualBlocks, y);
+
+    const appendix = artifact.sourceBackedAppendix?.length
+        ? artifact.sourceBackedAppendix
+        : asArray(artifact.sourceRefs).map((source) => ({
+              title: cleanText(source.title || source.document_id || source.source_id || source.id || 'Source'),
+              body: cleanText(source.section || source.quote || source.summary || ''),
+              bullets: []
+          }));
+    drawSectionList(doc, context, 'Source-backed appendix', appendix.slice(0, 8), y);
 };
 
 const ensureTableSpace = (doc, context, y, needed = 28, title = '') => {
@@ -846,6 +986,7 @@ const drawLegend = (doc, context, section) => {
 const SECTION_RENDERERS = {
     title: drawTitle,
     diagram: drawDiagram,
+    newsletter: drawNewsletter,
     outline: drawOutline,
     tasks: drawTasks,
     review: drawReview,
@@ -894,6 +1035,19 @@ const estimateSectionPages = ({ section, data, pageSize }) => {
     if (section.type === 'review') {
         return Math.max(1, Math.ceil(data.reviewRows.length / estimateRowsPerPage(pageSize)));
     }
+    if (section.type === 'newsletter') {
+        const artifact = data.newsletterArtifacts[0];
+        const count = artifact
+            ? 2 +
+              asArray(artifact.highlights).length +
+              asArray(artifact.sections).length +
+              asArray(artifact.upcoming).length +
+              asArray(artifact.risks).length +
+              asArray(artifact.decisions).length +
+              asArray(artifact.visualBlocks).length
+            : Math.max(4, Math.min(12, data.outlineRows.length + data.taskRows.length));
+        return Math.max(1, Math.ceil(count / 8));
+    }
     return 1;
 };
 
@@ -906,10 +1060,11 @@ export const getPdfExportPreview = ({
     flowName = '',
     mapStyle = '',
     workspaceBrief = {},
+    acceptedArtifacts = [],
     options = {}
 } = {}) => {
     const profile = getPdfExportProfile(profileId);
-    const data = projectPdfExportData({ nodes, edges, flowName, mapStyle, workspaceBrief });
+    const data = projectPdfExportData({ nodes, edges, flowName, mapStyle, workspaceBrief, acceptedArtifacts });
     const pageSize = resolvePageSize({ pageSizeId, orientation, profile, data, options });
     const diagramScale = estimateDiagramScale(data.nodes, pageSize, { data, profile, options });
     const pageCount = profile.sections.reduce(
@@ -936,10 +1091,11 @@ export const buildPdfExportDocument = async ({
     flowName = '',
     mapStyle = '',
     workspaceBrief = {},
+    acceptedArtifacts = [],
     options = {}
 } = {}) => {
     const profile = getPdfExportProfile(profileId);
-    const data = projectPdfExportData({ nodes, edges, flowName, mapStyle, workspaceBrief });
+    const data = projectPdfExportData({ nodes, edges, flowName, mapStyle, workspaceBrief, acceptedArtifacts });
     const pageSize = resolvePageSize({ pageSizeId, orientation, profile, data, options });
     const { jsPDF } = await import('jspdf');
     const doc = new jsPDF({

@@ -321,8 +321,18 @@ export const starterTransformations = [
         id: 'news_article',
         label: 'News article',
         description: 'Draft an article-style update with evidence and attribution.',
-        prompt: 'Draft a news article from this context with a headline, lede, concise body sections, attributed facts, source notes, and a clear separation between verified facts and assumptions.',
+        prompt: 'Draft a reader-friendly news article, intranet update, announcement, release note, or stakeholder update from this context. Include a headline, dek, lede, concise body sections, attributed quotes or source notes, fact-check notes, source notes, source-backed appendix, assumptions, and a clear review state. Keep claims audience-friendly and separate verified facts from anything that needs confirmation.',
         visual: 'news_article',
+        roleId: 'research-assistant',
+        actionId: 'custom_prompt',
+        scopes: ['branch', 'workspace', 'source']
+    },
+    {
+        id: 'newsletter',
+        label: 'Newsletter',
+        description: 'Create a recurring update brief with optional visual inserts.',
+        prompt: 'Draft a source-backed newsletter or update brief from this context. Include a title, issue label, audience, cadence, opening note, top highlights, issue sections, upcoming work, risks, decisions needed, optional visual blocks for map/flow/table/status snapshots, source-backed appendix, assumptions, and clear review state. Keep it reader-friendly and reserve evidence details for editor notes and appendices.',
+        visual: 'newsletter',
         roleId: 'research-assistant',
         actionId: 'custom_prompt',
         scopes: ['branch', 'workspace', 'source']

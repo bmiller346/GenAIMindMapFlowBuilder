@@ -935,6 +935,16 @@ test('inferAIDraftEvidencePreferences maps source intent to evidence gates', () 
     );
     assert.deepEqual(
         inferAIDraftEvidencePreferences({
+            prompt: 'Draft an intranet update and stakeholder announcement from the release notes.',
+            scope: { type: 'workspace' }
+        }),
+        {
+            evidenceMode: 'sharepoint',
+            citationPolicy: 'required'
+        }
+    );
+    assert.deepEqual(
+        inferAIDraftEvidencePreferences({
             prompt: 'Draft this from general knowledge with no citations.',
             scope: { type: 'node', node_id: 'root' }
         }),
@@ -1125,7 +1135,7 @@ test('follow-up intent preserves supplement and compare prompts over update word
 test('starter transformation catalog includes operational prompt defaults', () => {
     const ids = new Set(starterTransformations.map((starter) => starter.id));
 
-    assert.equal(starterTransformations.length, 25);
+    assert.equal(starterTransformations.length, 26);
     assert.ok(ids.has('sop_to_checklist'));
     assert.ok(ids.has('pdf_to_training_outline'));
     assert.ok(ids.has('requirements_to_tasks'));
@@ -1137,6 +1147,7 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.ok(ids.has('aec_sow_to_delivery_graph'));
     assert.ok(ids.has('executive_summary'));
     assert.ok(ids.has('news_article'));
+    assert.ok(ids.has('newsletter'));
     assert.ok(ids.has('reconcile_source_with_workspace'));
     assert.ok(ids.has('specialize_branch'));
     assert.ok(ids.has('find_process_bottlenecks'));
@@ -1180,6 +1191,17 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.equal(newsArticle.visual, 'news_article');
     assert.equal(newsArticle.roleId, 'research-assistant');
     assert.equal(newsArticle.actionId, 'custom_prompt');
+    assert.match(newsArticle.prompt, /headline, dek, lede/i);
+    assert.match(newsArticle.prompt, /fact-check notes/i);
+    assert.match(newsArticle.prompt, /source-backed appendix/i);
+    assert.match(newsArticle.prompt, /intranet update/i);
+
+    const newsletter = starterTransformations.find((starter) => starter.id === 'newsletter');
+    assert.equal(newsletter.visual, 'newsletter');
+    assert.equal(newsletter.roleId, 'research-assistant');
+    assert.equal(newsletter.actionId, 'custom_prompt');
+    assert.match(newsletter.prompt, /visual blocks/i);
+    assert.match(newsletter.prompt, /map\/flow\/table\/status/i);
 
     const aecSowPlan = starterTransformations.find(
         (starter) => starter.id === 'aec_sow_to_delivery_graph'
@@ -1240,7 +1262,7 @@ test('publishable draft artifacts normalize executive summary preview fields', (
     assert.equal(previews[0].provenance.tone, 'good');
     assert.equal(
         previews[0].provenance.summary,
-        'Uploaded sources | Citations required | 1 cited ref | 1 assumption'
+        'Uploaded sources, Citations required, 1 source reference, 1 assumption'
     );
     const markdown = draftArtifactPreviewToMarkdown(previews[0]);
     assert.match(markdown, /## Summary\n\nSource review needs a governed operating cadence\./);
@@ -1261,6 +1283,7 @@ test('publishable draft artifacts normalize news article payloads and copy markd
                 data: {
                     title: 'TraceSpace pilots monthly source reviews',
                     subhead: 'Teams get a faster way to keep workspace knowledge current.',
+                    lede: 'TraceSpace is piloting a monthly source-review workflow for internal teams.',
                     highlights: ['New review queue', 'SME questions stay visible'],
                     body: 'The pilot helps teams review loaded source material before publishing.',
                     article_sections: [
@@ -1269,6 +1292,30 @@ test('publishable draft artifacts normalize news article payloads and copy markd
                             content: 'Source reviews can now be packaged for internal updates.'
                         }
                     ],
+                    quotes: [
+                        {
+                            source: 'Program notes',
+                            quote_snippet: 'SME questions stay visible during review.'
+                        }
+                    ],
+                    fact_checks: [
+                        {
+                            claim: 'Monthly source reviews are in pilot',
+                            status: 'supported',
+                            note: 'Backed by the source-review program note.'
+                        }
+                    ],
+                    source_refs: [
+                        {
+                            document_id: 'program-note',
+                            page: 2,
+                            section: 'Pilot',
+                            quote_snippet: 'monthly source reviews'
+                        }
+                    ],
+                    assumptions: ['Pilot timing should be confirmed with the rollout owner.'],
+                    review_state: 'ready_for_editor',
+                    confidence: 'medium',
                     channel: 'Intranet'
                 }
             }
@@ -1277,16 +1324,100 @@ test('publishable draft artifacts normalize news article payloads and copy markd
 
     assert.equal(preview.label, 'News article');
     assert.equal(preview.title, 'TraceSpace pilots monthly source reviews');
+    assert.equal(preview.lede, 'TraceSpace is piloting a monthly source-review workflow for internal teams.');
     assert.deepEqual(preview.keyPoints, ['New review queue', 'SME questions stay visible']);
-    assert.equal(preview.provenance.tone, 'warn');
+    assert.deepEqual(preview.factChecks, [
+        'Monthly source reviews are in pilot - supported - Backed by the source-review program note.'
+    ]);
+    assert.deepEqual(preview.sourceNotes, [
+        'Program notes: SME questions stay visible during review.'
+    ]);
+    assert.equal(preview.sourceRefs.length, 1);
+    assert.equal(preview.reviewState, 'ready_for_editor');
+    assert.equal(preview.confidence, 'medium');
+    assert.equal(preview.provenance.tone, 'good');
+    assert.equal(
+        preview.provenance.summary,
+        'SharePoint/internal, Citations required, 1 source reference, 1 assumption'
+    );
 
     const markdown = draftArtifactPreviewToMarkdown(preview);
     assert.match(markdown, /^# TraceSpace pilots monthly source reviews/);
     assert.match(markdown, /_Teams get a faster way to keep workspace knowledge current\._/);
     assert.match(markdown, /Channel: Intranet/);
-    assert.match(markdown, /Evidence: SharePoint\/internal \| Citations required \| No cited refs/);
-    assert.match(markdown, /## Key points\n- New review queue\n- SME questions stay visible/);
+    assert.match(markdown, /Evidence: SharePoint\/internal, Citations required, 1 source reference, 1 assumption/);
+    assert.match(markdown, /TraceSpace is piloting a monthly source-review workflow for internal teams\./);
     assert.match(markdown, /## What changed/);
+    assert.match(markdown, /## Fact-check notes\n- Monthly source reviews are in pilot - supported - Backed by the source-review program note\./);
+    assert.match(markdown, /## Source notes\n- Program notes: SME questions stay visible during review\./);
+    assert.match(markdown, /## Source-backed appendix\n- program-note \| p\. 2 \| Pilot: monthly source reviews/);
+    assert.match(markdown, /## Assumptions\n- Pilot timing should be confirmed with the rollout owner\./);
+    assert.ok(markdown.indexOf('## Fact-check notes') < markdown.indexOf('## Source notes'));
+    assert.ok(markdown.indexOf('## Source notes') < markdown.indexOf('## Source-backed appendix'));
+    assert.ok(markdown.indexOf('## Source-backed appendix') < markdown.indexOf('## Assumptions'));
+});
+
+test('publishable draft artifacts normalize newsletter payloads with visual blocks', () => {
+    const [preview] = normalizePublishableDraftArtifacts({
+        generated_artifacts: [
+            {
+                artifact_type: 'newsletter',
+                data: {
+                    title: 'Operations Monthly Update',
+                    issue_label: 'May 2026',
+                    audience: 'Operations leaders',
+                    cadence: 'Monthly',
+                    opening_note: 'This issue highlights source-backed launch readiness.',
+                    highlights: [
+                        {
+                            title: 'Launch checklist is ready',
+                            description: 'The launch checklist is ready for review.'
+                        }
+                    ],
+                    sections: [
+                        {
+                            title: 'What changed',
+                            description: 'The team added an approval gate.'
+                        }
+                    ],
+                    upcoming: [{ title: 'Next review', description: 'Confirm owner assignments.' }],
+                    risks: [{ title: 'Unowned approvals', description: 'Approvals need named owners.' }],
+                    decisions_needed: [{ title: 'Approve rollout', description: 'Confirm the publish window.' }],
+                    visual_blocks: [
+                        {
+                            title: 'Approval flow',
+                            description: 'Insert a flowchart showing approval and publish steps.'
+                        }
+                    ],
+                    source_refs: [{ document_id: 'doc-news', quote_snippet: 'launch checklist' }],
+                    assumptions: ['Publish date needs confirmation.'],
+                    metadata: {
+                        evidence_mode: 'uploaded_sources',
+                        citation_policy: 'required'
+                    }
+                },
+                source_refs: [{ document_id: 'doc-news', quote_snippet: 'launch checklist' }],
+                assumptions: ['Publish date needs confirmation.']
+            }
+        ]
+    });
+
+    assert.equal(preview.label, 'Newsletter');
+    assert.equal(preview.title, 'Operations Monthly Update');
+    assert.equal(preview.issueLabel, 'May 2026');
+    assert.equal(preview.cadence, 'Monthly');
+    assert.equal(preview.newsletterHighlights[0].title, 'Launch checklist is ready');
+    assert.equal(preview.visualBlocks[0].title, 'Approval flow');
+    assert.equal(preview.provenance.sourceRefCount, 1);
+
+    const markdown = draftArtifactPreviewToMarkdown(preview);
+    assert.match(markdown, /^# Operations Monthly Update/);
+    assert.match(markdown, /Issue: May 2026 \| Cadence: Monthly \| Audience: Operations leaders/);
+    assert.match(markdown, /## Top highlights/);
+    assert.match(markdown, /## Visual blocks/);
+    assert.match(markdown, /Approval flow/);
+    assert.match(markdown, /## Source-backed appendix/);
+    assert.match(markdown, /## Assumptions\n- Publish date needs confirmation\./);
 });
 
 test('intent prompt profiles include standards review and roadmap actions', () => {

@@ -93,7 +93,7 @@ export const inferAIDraftEvidencePreferences = ({
     );
     if (/\b(web|online|internet|current news|latest news|news article|urls?|links?|public sources?)\b/.test(text)) {
         evidenceMode = 'web_sources';
-    } else if (/\b(sharepoint|internal article|intranet|monthly update|monthly news)\b/.test(text)) {
+    } else if (/\b(sharepoint|internal article|intranet|intranet update|announcement|internal comms?|internal communications?|release notes?|stakeholder updates?|monthly update|monthly news)\b/.test(text)) {
         evidenceMode = 'sharepoint';
     } else if (/\b(general knowledge|brainstorm|from your knowledge|model knowledge|no sources|uncited|assume)\b/.test(text)) {
         evidenceMode = 'general_knowledge';
@@ -967,7 +967,8 @@ const isSoftwareOverlapArtifact = (item = {}) => {
 const publishableArtifactTypes = new Set([
     'executive_summary',
     'executive_output',
-    'news_article'
+    'news_article',
+    'newsletter'
 ]);
 
 const artifactPayload = (artifact = {}) =>
@@ -976,14 +977,18 @@ const artifactPayload = (artifact = {}) =>
         : artifact;
 
 const collectTextList = (...values) =>
-    values
-        .flatMap((value) => asArray(value))
-        .map((value) =>
-            typeof value === 'string'
-                ? value.trim()
-                : firstText(value?.text, value?.content, value?.summary, value?.title, value?.label)
+    [
+        ...new Set(
+            values
+                .flatMap((value) => asArray(value))
+                .map((value) =>
+                    typeof value === 'string'
+                        ? value.trim()
+                        : firstText(value?.text, value?.content, value?.summary, value?.title, value?.label)
+                )
+                .filter(Boolean)
         )
-        .filter(Boolean);
+    ];
 
 const normalizeArtifactSection = (section = {}, index = 0) => {
     if (typeof section === 'string') {
@@ -1013,6 +1018,9 @@ const publishableArtifactType = (artifact = {}) => {
     if (type.includes('news') || type.includes('article')) {
         return 'news_article';
     }
+    if (type.includes('newsletter') || type.includes('update_brief')) {
+        return 'newsletter';
+    }
     return '';
 };
 
@@ -1021,7 +1029,10 @@ const artifactSourceRefs = (payload = {}) =>
         mergeSourceRefs(asArray(payload.source_refs), asArray(payload.sourceRefs)),
         mergeSourceRefs(
             asArray(payload.data?.source_refs),
-            asArray(payload.provenance?.input_source_refs)
+            mergeSourceRefs(
+                asArray(payload.provenance?.input_source_refs),
+                asArray(payload.metadata?.source_refs)
+            )
         )
     );
 
@@ -1032,6 +1043,40 @@ const artifactAssumptions = (payload = {}) =>
         payload.provenance?.assumptions,
         payload.metadata?.assumptions
     );
+
+const normalizeSourceNote = (note = {}, index = 0) => {
+    if (typeof note === 'string') {
+        return note.trim();
+    }
+    const sourceLabel = firstText(note.source, note.document_id, note.documentId, note.source_id);
+    const detail = firstText(note.note, note.text, note.content, note.summary, note.quote_snippet, note.snippet);
+    return [sourceLabel, detail].filter(Boolean).join(': ') || `Source note ${index + 1}`;
+};
+
+const normalizeFactCheckNote = (note = {}, index = 0) => {
+    if (typeof note === 'string') {
+        return note.trim();
+    }
+    const claim = firstText(note.claim, note.title, note.label, `Check ${index + 1}`);
+    const status = firstText(note.status, note.review_state, note.reviewState);
+    const detail = firstText(note.note, note.result, note.finding, note.text, note.content, note.summary);
+    return [claim, status, detail].filter(Boolean).join(' - ');
+};
+
+const normalizeSourceRefLabel = (ref = {}, index = 0) => {
+    if (typeof ref === 'string') {
+        return ref.trim();
+    }
+    const source = firstText(ref.document_id, ref.documentId, ref.source_id, ref.sourceId, ref.title, ref.label);
+    const locator = [
+        ref.page || ref.page_number ? `p. ${ref.page || ref.page_number}` : '',
+        firstText(ref.section, ref.heading),
+        firstText(ref.chunk_id, ref.chunkId)
+    ].filter(Boolean).join(' | ');
+    const quote = firstText(ref.quote_snippet, ref.snippet, ref.text);
+    const prefix = [source || `Source ${index + 1}`, locator].filter(Boolean).join(' | ');
+    return quote ? `${prefix}: ${quote}` : prefix;
+};
 
 const normalizePublishableArtifactProvenance = (payload = {}, revision = {}) => {
     const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
@@ -1072,8 +1117,8 @@ const normalizePublishableArtifactProvenance = (payload = {}, revision = {}) => 
         aiDraftEvidenceModeLabel(evidenceMode),
         aiDraftCitationPolicyLabel(citationPolicy),
         sourceRefs.length
-            ? `${sourceRefs.length} cited ${sourceRefs.length === 1 ? 'ref' : 'refs'}`
-            : 'No cited refs',
+            ? `${sourceRefs.length} source ${sourceRefs.length === 1 ? 'reference' : 'references'}`
+            : 'No source references yet',
         assumptions.length
             ? `${assumptions.length} ${assumptions.length === 1 ? 'assumption' : 'assumptions'}`
             : ''
@@ -1093,7 +1138,7 @@ const normalizePublishableArtifactProvenance = (payload = {}, revision = {}) => 
                 : sourceRefs.length
                   ? 'good'
                   : 'neutral',
-        summary: parts.join(' | ')
+        summary: parts.join(', ')
     };
 };
 
@@ -1115,8 +1160,14 @@ export const normalizePublishableDraftArtifacts = (revision = {}) => {
             const sections = [
                 ...asArray(payload.sections),
                 ...asArray(payload.body_sections),
-                ...asArray(payload.article_sections)
+                ...asArray(payload.article_sections),
+                ...asArray(payload.issue_sections)
             ].map(normalizeArtifactSection);
+            const newsletterHighlights = asArray(payload.highlights).map(normalizeArtifactSection);
+            const newsletterUpcoming = asArray(payload.upcoming).map(normalizeArtifactSection);
+            const newsletterRisks = asArray(payload.risks).map(normalizeArtifactSection);
+            const newsletterDecisions = asArray(payload.decisions_needed || payload.required_decisions).map(normalizeArtifactSection);
+            const visualBlocks = asArray(payload.visual_blocks || payload.visualBlocks).map(normalizeArtifactSection);
             const keyPoints = collectTextList(
                 payload.key_points,
                 payload.key_takeaways,
@@ -1134,20 +1185,46 @@ export const normalizePublishableDraftArtifacts = (revision = {}) => {
             const sourceBackedAppendix = collectTextList(
                 payload.source_backed_appendix,
                 payload.source_appendix,
-                payload.appendix
+                payload.appendix,
+                payload.source_backed_facts,
+                payload.verified_facts
             );
             const assumptions = artifactAssumptions(payload);
+            const sourceRefs = artifactSourceRefs(payload);
+            const factChecks = [
+                ...asArray(payload.fact_checks),
+                ...asArray(payload.fact_check_notes),
+                ...asArray(payload.factcheck_notes),
+                ...asArray(payload.metadata?.fact_checks)
+            ]
+                .map(normalizeFactCheckNote)
+                .filter(Boolean);
+            const sourceNotes = [
+                ...asArray(payload.source_notes),
+                ...asArray(payload.sourceNotes),
+                ...asArray(payload.quote_notes),
+                ...asArray(payload.quotes),
+                ...asArray(payload.attribution_notes),
+                ...asArray(payload.metadata?.source_notes)
+            ]
+                .map(normalizeSourceNote)
+                .filter(Boolean);
             return {
                 id: firstText(payload.id, payload.artifact_id, `draft-artifact-${index + 1}`),
                 artifactType: type,
-                label: type === 'news_article' ? 'News article' : 'Executive summary',
+                label: type === 'newsletter' ? 'Newsletter' : type === 'news_article' ? 'News article' : 'Executive summary',
                 title: firstText(
                     payload.headline,
                     payload.title,
                     payload.label,
+                    type === 'newsletter' ? 'Draft newsletter' : '',
                     type === 'news_article' ? 'Draft news article' : 'Draft executive summary'
                 ),
                 dek: firstText(payload.dek, payload.subhead, payload.subtitle, payload.summary),
+                lede: firstText(payload.lede, payload.lead, payload.intro, payload.opening),
+                issueLabel: firstText(payload.issue_label, payload.issueLabel, payload.issue, payload.date_label),
+                cadence: firstText(payload.cadence, payload.frequency),
+                openingNote: firstText(payload.opening_note, payload.openingNote, payload.editor_note, payload.intro),
                 body: firstText(payload.body, payload.content, payload.text, payload.narrative),
                 keyPoints,
                 sections,
@@ -1161,14 +1238,30 @@ export const normalizePublishableDraftArtifacts = (revision = {}) => {
                 summary: firstText(payload.summary, payload.abstract),
                 reviewState: firstText(
                     payload.review_state,
+                    payload.reviewState,
                     payload.review_status,
                     payload.status,
+                    payload.metadata?.reviewState,
                     payload.metadata?.review_state,
                     'needs_review'
+                ),
+                confidence: firstText(
+                    payload.confidence,
+                    payload.confidence_summary,
+                    payload.metadata?.confidence,
+                    payload.provenance?.confidence
                 ),
                 recommendedActions,
                 risks,
                 sourceBackedAppendix,
+                factChecks,
+                sourceNotes,
+                sourceRefs,
+                newsletterHighlights,
+                newsletterUpcoming,
+                newsletterRisks,
+                newsletterDecisions,
+                visualBlocks,
                 assumptions,
                 provenance
             };
@@ -1183,6 +1276,103 @@ export const draftArtifactPreviewToMarkdown = (artifact = {}) => {
     }
     if (artifact.dek) {
         lines.push('', `_${artifact.dek}_`);
+    }
+    if (artifact.artifactType === 'news_article') {
+        if (artifact.lede) {
+            lines.push('', artifact.lede);
+        }
+        if (artifact.body) {
+            lines.push('', artifact.body);
+        }
+        asArray(artifact.sections).forEach((section) => {
+            lines.push('', `## ${section.title}`);
+            if (section.body) {
+                lines.push('', section.body);
+            }
+            if (section.bullets?.length) {
+                lines.push('', ...section.bullets.map((point) => `- ${point}`));
+            }
+        });
+        if (artifact.audience || artifact.publishTarget || artifact.provenance?.summary) {
+            lines.push('', '## Editorial notes');
+            if (artifact.audience || artifact.publishTarget) {
+                lines.push(
+                    [artifact.audience ? `Audience: ${artifact.audience}` : '', artifact.publishTarget ? `Channel: ${artifact.publishTarget}` : '']
+                        .filter(Boolean)
+                        .join(' | ')
+                );
+            }
+            if (artifact.provenance?.summary) {
+                lines.push(`Evidence: ${artifact.provenance.summary}`);
+            }
+        }
+        if (artifact.factChecks?.length) {
+            lines.push('', '## Fact-check notes', ...artifact.factChecks.map((point) => `- ${point}`));
+        }
+        if (artifact.sourceNotes?.length) {
+            lines.push('', '## Source notes', ...artifact.sourceNotes.map((point) => `- ${point}`));
+        }
+        const appendix = artifact.sourceBackedAppendix?.length
+            ? artifact.sourceBackedAppendix
+            : asArray(artifact.sourceRefs).map(normalizeSourceRefLabel).filter(Boolean);
+        if (appendix.length) {
+            lines.push('', '## Source-backed appendix', ...appendix.map((point) => `- ${point}`));
+        }
+        if (artifact.assumptions?.length) {
+            lines.push('', '## Assumptions', ...artifact.assumptions.map((point) => `- ${point}`));
+        }
+        return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    }
+    if (artifact.artifactType === 'newsletter') {
+        if (artifact.issueLabel || artifact.cadence || artifact.audience) {
+            lines.push(
+                '',
+                [
+                    artifact.issueLabel ? `Issue: ${artifact.issueLabel}` : '',
+                    artifact.cadence ? `Cadence: ${artifact.cadence}` : '',
+                    artifact.audience ? `Audience: ${artifact.audience}` : ''
+                ]
+                    .filter(Boolean)
+                    .join(' | ')
+            );
+        }
+        if (artifact.openingNote || artifact.lede || artifact.body) {
+            lines.push('', artifact.openingNote || artifact.lede || artifact.body);
+        }
+        const renderSections = (heading, sections) => {
+            if (!sections?.length) {
+                return;
+            }
+            lines.push('', `## ${heading}`);
+            sections.forEach((section) => {
+                lines.push('', `### ${section.title}`);
+                if (section.body) {
+                    lines.push(section.body);
+                }
+                if (section.bullets?.length) {
+                    lines.push(...section.bullets.map((point) => `- ${point}`));
+                }
+            });
+        };
+        renderSections('Top highlights', artifact.newsletterHighlights);
+        renderSections('In this issue', artifact.sections);
+        renderSections('Upcoming', artifact.newsletterUpcoming);
+        renderSections('Risks and watch items', artifact.newsletterRisks);
+        renderSections('Decisions needed', artifact.newsletterDecisions);
+        renderSections('Visual blocks', artifact.visualBlocks);
+        if (artifact.provenance?.summary) {
+            lines.push('', '## Editor notes', `Evidence: ${artifact.provenance.summary}`);
+        }
+        const appendix = artifact.sourceBackedAppendix?.length
+            ? artifact.sourceBackedAppendix
+            : asArray(artifact.sourceRefs).map(normalizeSourceRefLabel).filter(Boolean);
+        if (appendix.length) {
+            lines.push('', '## Source-backed appendix', ...appendix.map((point) => `- ${point}`));
+        }
+        if (artifact.assumptions?.length) {
+            lines.push('', '## Assumptions', ...artifact.assumptions.map((point) => `- ${point}`));
+        }
+        return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
     }
     if (artifact.audience || artifact.publishTarget) {
         lines.push(

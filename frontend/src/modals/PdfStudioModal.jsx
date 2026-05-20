@@ -16,7 +16,8 @@ const profileSectionLabels = {
     outline: 'Outline',
     tasks: 'Tasks',
     review: 'Review',
-    legend: 'Legend'
+    legend: 'Legend',
+    newsletter: 'Newsletter'
 };
 
 const diagramDensityOptions = [
@@ -66,6 +67,14 @@ const profileDefaults = {
         includeOutlinePanel: false,
         includeNotesPanel: false,
         diagramDensity: 'balanced'
+    },
+    newsletter: {
+        pageSizeId: 'letter',
+        orientation: 'portrait',
+        includeTitleBlock: true,
+        includeOutlinePanel: false,
+        includeNotesPanel: false,
+        diagramDensity: 'compact'
     }
 };
 
@@ -75,6 +84,7 @@ const PdfStudioModal = ({
     flowName = '',
     mapStyle = '',
     workspaceBrief = {},
+    acceptedArtifacts = [],
     initialProfileId = 'map-outline',
     initialPageSizeId = AUTO_PAGE_SIZE_ID,
     initialOrientation = 'landscape',
@@ -124,9 +134,10 @@ const PdfStudioModal = ({
                 edges,
                 flowName,
                 mapStyle,
-                workspaceBrief
+                workspaceBrief,
+                acceptedArtifacts
             }),
-        [edges, flowName, mapStyle, nodes, workspaceBrief]
+        [acceptedArtifacts, edges, flowName, mapStyle, nodes, workspaceBrief]
     );
     const exportPreview = useMemo(
         () =>
@@ -139,6 +150,7 @@ const PdfStudioModal = ({
                 flowName,
                 mapStyle,
                 workspaceBrief,
+                acceptedArtifacts,
                 options: pdfOptions
             }),
         [
@@ -150,6 +162,7 @@ const PdfStudioModal = ({
             pageSizeId,
             pdfOptions,
             profileId,
+            acceptedArtifacts,
             workspaceBrief
         ]
     );
@@ -181,6 +194,7 @@ const PdfStudioModal = ({
                 flowName,
                 mapStyle,
                 workspaceBrief,
+                acceptedArtifacts,
                 options: {
                     ...pdfOptions
                 }
@@ -224,6 +238,10 @@ const PdfStudioModal = ({
                 <div>
                     <strong>{exportData.stats.reviewCount}</strong>
                     <span>Review items</span>
+                </div>
+                <div>
+                    <strong>{exportData.stats.newsletterCount}</strong>
+                    <span>Newsletters</span>
                 </div>
             </div>
 
@@ -398,7 +416,7 @@ const PdfStudioModal = ({
                 <button
                     type="button"
                     className="create-btn"
-                    disabled={isExporting || exportData.stats.nodeCount === 0}
+                    disabled={isExporting || (exportData.stats.nodeCount === 0 && exportData.stats.artifactCount === 0)}
                     onClick={exportPdf}
                 >
                     {isExporting ? 'Exporting...' : 'Export PDF'}

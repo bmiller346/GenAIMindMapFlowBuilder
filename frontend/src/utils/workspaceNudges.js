@@ -269,6 +269,13 @@ export const getProjectionReadiness = (projection, workspaceBrief = {}, taskMeta
                     : [{ field: 'structured_or_extracted_data' }],
             enrichmentLabel: 'Create structured table',
             generationLabel: 'Create chart'
+        }),
+        newsletter: readiness({
+            view: 'newsletter',
+            ready: false,
+            partiallyReady: nodeCount > 0,
+            missing: [{ field: 'accepted_newsletter_artifact' }],
+            generationLabel: 'Create newsletter'
         })
     };
 };

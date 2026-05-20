@@ -95,6 +95,12 @@ const publishableArtifactFlowJson = JSON.stringify({
                         artifact_type: 'news_article',
                         title: 'Monthly Update',
                         review_state: 'needs_review'
+                    },
+                    {
+                        id: 'artifact-newsletter',
+                        artifact_type: 'newsletter',
+                        title: 'Stakeholder Newsletter',
+                        review_state: 'needs_review'
                     }
                 ]
             }
@@ -121,6 +127,7 @@ const setupMockBackend = async (
     const draftSessionRequests = [];
     const draftRevisionRequests = [];
     const draftAcceptRequests = [];
+    const exportRequests = [];
     const draftSessions = new Map();
 
     await page.route('http://localhost:8000/create-flow', async (route) => {
@@ -184,6 +191,49 @@ const setupMockBackend = async (
             )
         });
     });
+
+    await page.route(
+        new RegExp(`http://localhost:8000/api/workspaces/${flowId}/exports/(.+)$`),
+        async (route) => {
+            const format = new URL(route.request().url()).pathname.split('/').at(-1);
+            exportRequests.push({
+                format,
+                snapshot: parseSnapshot(state.savedFlowJson)
+            });
+            const isArticle = format === 'news-article.md';
+            const isNewsletter = format === 'newsletter.md';
+            await route.fulfill({
+                status: 200,
+                contentType: format.endsWith('.md') || format === 'markdown' ? 'text/markdown' : 'application/json',
+                body: isArticle
+                    ? [
+                          '# Monthly Update',
+                          '',
+                          '_Reader-friendly summary._',
+                          '',
+                          'Teams should review the latest accepted article.',
+                          '',
+                          '## Source Notes',
+                          '',
+                          '- doc-news: accepted source note'
+                      ].join('\n')
+                    : isNewsletter
+                      ? [
+                            '# Stakeholder Newsletter',
+                            '',
+                            'Issue: May 2026 | Audience: Project leadership',
+                            '',
+                            'Teams should review the latest accepted newsletter.',
+                            '',
+                            '## Visual blocks',
+                            '',
+                            '### Workspace map',
+                            'Use the accepted map as the issue overview visual.'
+                        ].join('\n')
+                    : state.savedFlowJson
+            });
+        }
+    );
 
     await page.route(
         /http:\/\/localhost:8000\/api\/workspaces\/[^/]+\/ai\/actions\/(node|branch|workspace)(\/[^/]+)?\/preview/,
@@ -615,6 +665,7 @@ const setupMockBackend = async (
         draftSessionRequests,
         draftRevisionRequests,
         draftAcceptRequests,
+        exportRequests,
         savedRequests,
         state
     };
@@ -745,8 +796,67 @@ test('export menu exposes publishable workspace outputs', async ({ page }) => {
     await expect(page.locator('.export-menu')).toContainText('Publishable outputs');
     await expect(page.getByRole('button', { name: 'Executive Summary - Ready' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'News Article - Ready' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Newsletter - Ready' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Team Roadmap' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Completeness Review' })).toBeVisible();
+});
+
+test('export menu downloads accepted news article markdown', async ({ page }) => {
+    const { exportRequests, savedRequests } = await setupMockBackend(page, {
+        initialFlowJson: publishableArtifactFlowJson
+    });
+    await openExistingFlow(page);
+
+    const saveCountBeforeExport = savedRequests.length;
+    await page.getByRole('button', { name: 'Export' }).click();
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'News Article - Ready' }).click();
+    const download = await downloadPromise;
+
+    expect(download.suggestedFilename()).toBe('AI Action QA-news-article.md');
+    await expect
+        .poll(() => exportRequests.some((request) => request.format === 'news-article.md'))
+        .toBe(true);
+    expect(savedRequests.length).toBeGreaterThan(saveCountBeforeExport);
+    const articleExport = exportRequests.find((request) => request.format === 'news-article.md');
+    const activityEvents = articleExport.snapshot.activity_events || articleExport.snapshot.activityEvents || [];
+    expect(activityEvents.flatMap((event) => event.metadata?.accepted_artifacts || [])).toEqual(
+        expect.arrayContaining([
+            expect.objectContaining({
+                artifact_type: 'news_article',
+                title: 'Monthly Update'
+            })
+        ])
+    );
+});
+
+test('export menu downloads accepted newsletter markdown', async ({ page }) => {
+    const { exportRequests, savedRequests } = await setupMockBackend(page, {
+        initialFlowJson: publishableArtifactFlowJson
+    });
+    await openExistingFlow(page);
+
+    const saveCountBeforeExport = savedRequests.length;
+    await page.getByRole('button', { name: 'Export' }).click();
+    const downloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Newsletter - Ready' }).click();
+    const download = await downloadPromise;
+
+    expect(download.suggestedFilename()).toBe('AI Action QA-newsletter.md');
+    await expect
+        .poll(() => exportRequests.some((request) => request.format === 'newsletter.md'))
+        .toBe(true);
+    expect(savedRequests.length).toBeGreaterThan(saveCountBeforeExport);
+    const newsletterExport = exportRequests.find((request) => request.format === 'newsletter.md');
+    const activityEvents = newsletterExport.snapshot.activity_events || newsletterExport.snapshot.activityEvents || [];
+    expect(activityEvents.flatMap((event) => event.metadata?.accepted_artifacts || [])).toEqual(
+        expect.arrayContaining([
+            expect.objectContaining({
+                artifact_type: 'newsletter',
+                title: 'Stakeholder Newsletter'
+            })
+        ])
+    );
 });
 
 test('workspace dock can collapse back to a compact canvas rail', async ({ page }) => {

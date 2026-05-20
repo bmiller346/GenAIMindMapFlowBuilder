@@ -57,6 +57,24 @@ const normalizeTextList = (value) => {
     return [];
 };
 
+const normalizeArtifactSections = (value) =>
+    asArray(value)
+        .map((item) => {
+            if (typeof item === 'string') {
+                return { title: item, body: '', bullets: [] };
+            }
+            if (!item || typeof item !== 'object') {
+                return null;
+            }
+            return {
+                title: textValue(item.title, item.heading, item.label, item.name, item.summary, 'Untitled'),
+                body: textValue(item.body, item.summary, item.description, item.text, item.content, item.rationale),
+                bullets: normalizeTextList(item.bullets || item.points || item.items || item.takeaways),
+                sourceRefs: asArray(item.source_refs || item.sourceRefs)
+            };
+        })
+        .filter(Boolean);
+
 const numericValue = (...values) => {
     for (const value of values) {
         const number = Number(value);
@@ -335,23 +353,76 @@ export const projectReviewRows = (workspaceData = {}) => {
         .filter((row) => row.reasons.length > 0);
 };
 
+export const normalizePdfExportArtifact = (artifact = {}, index = 0) => {
+    const data = artifact.data && typeof artifact.data === 'object' ? artifact.data : artifact;
+    const artifactType = textValue(data.artifact_type, data.artifactType, artifact.artifact_type, artifact.artifactType);
+    const title = textValue(
+        data.headline,
+        data.title,
+        data.label,
+        artifact.title,
+        artifact.label,
+        `Artifact ${index + 1}`
+    );
+    return {
+        id: textValue(data.id, data.artifact_id, artifact.id, `artifact-${index + 1}`),
+        artifactType,
+        title,
+        label: textValue(data.label, artifact.label, artifactType),
+        dek: textValue(data.dek, data.subhead, data.subtitle, data.summary),
+        lede: textValue(data.lede, data.lead, data.intro, data.opening),
+        issueLabel: textValue(data.issue_label, data.issueLabel, data.issue, data.date_label),
+        cadence: textValue(data.cadence, data.frequency),
+        audience: textValue(data.audience, data.metadata?.audience),
+        openingNote: textValue(data.opening_note, data.openingNote, data.editor_note, data.intro, data.body),
+        body: textValue(data.body, data.content, data.text, data.narrative),
+        reviewState: textValue(data.review_state, data.reviewState, data.status, data.metadata?.review_state),
+        confidence: textValue(data.confidence, data.metadata?.confidence),
+        highlights: normalizeArtifactSections(data.highlights),
+        sections: normalizeArtifactSections(data.sections || data.issue_sections || data.body_sections),
+        upcoming: normalizeArtifactSections(data.upcoming),
+        risks: normalizeArtifactSections(data.risks || data.risk_items),
+        decisions: normalizeArtifactSections(data.decisions_needed || data.required_decisions),
+        visualBlocks: normalizeArtifactSections(data.visual_blocks || data.visualBlocks),
+        sourceBackedAppendix: normalizeArtifactSections(
+            data.source_backed_appendix ||
+                data.source_appendix ||
+                data.appendix ||
+                data.source_backed_facts ||
+                data.verified_facts
+        ),
+        assumptions: normalizeTextList(data.assumptions || data.editor_notes),
+        sourceRefs: asArray(data.source_refs || data.sourceRefs)
+    };
+};
+
+export const projectAcceptedArtifacts = (artifacts = []) =>
+    asArray(artifacts)
+        .map(normalizePdfExportArtifact)
+        .filter((artifact) => artifact.artifactType);
+
 export const projectPdfExportData = ({
     nodes = [],
     edges = [],
     flowName = '',
     mapStyle = '',
-    workspaceBrief = {}
+    workspaceBrief = {},
+    acceptedArtifacts = []
 } = {}) => {
     const graph = projectVisibleGraph({ nodes, edges });
     const outlineTree = buildHierarchyOutlineTree({ nodes, edges });
     const outlineRows = flattenOutlineTree(outlineTree);
     const taskRows = projectTaskRows({ nodes, edges });
     const reviewRows = projectReviewRows({ nodes, edges });
+    const artifacts = projectAcceptedArtifacts(acceptedArtifacts);
+    const newsletterArtifacts = artifacts.filter((artifact) => artifact.artifactType === 'newsletter');
 
     return {
         flowName: flowName || workspaceBrief?.goal || 'Mind map export',
         mapStyle: String(mapStyle || ''),
         workspaceBrief: workspaceBrief || {},
+        acceptedArtifacts: artifacts,
+        newsletterArtifacts,
         nodes: graph.nodes,
         edges: graph.edges,
         nodeLookup: graph.nodeLookup,
@@ -364,6 +435,8 @@ export const projectPdfExportData = ({
             edgeCount: graph.edges.length,
             taskCount: taskRows.length,
             reviewCount: reviewRows.length,
+            artifactCount: artifacts.length,
+            newsletterCount: newsletterArtifacts.length,
             sourceBackedCount: graph.nodes.filter((node) => node.sourceRefs.length > 0).length
         }
     };

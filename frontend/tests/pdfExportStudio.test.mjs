@@ -200,6 +200,76 @@ test('PDF Studio diagram density changes the export fit calculation', () => {
     assert.ok(compactPreview.diagramScale >= roomyPreview.diagramScale);
 });
 
+const newsletterArtifact = {
+    id: 'artifact-newsletter',
+    artifact_type: 'newsletter',
+    title: 'Stakeholder Update',
+    data: {
+        artifact_type: 'newsletter',
+        title: 'Stakeholder Update',
+        issue_label: 'May 2026',
+        cadence: 'Monthly',
+        audience: 'Project leadership',
+        opening_note: 'The rollout is moving from planning into coordinated team execution.',
+        highlights: [
+            {
+                title: 'Launch checklist is ready',
+                body: 'Owners have confirmed the initial rollout sequence.',
+                bullets: ['Training content approved', 'Pilot users identified']
+            }
+        ],
+        sections: [
+            {
+                title: 'Implementation focus',
+                body: 'The next phase centers on source-backed team handoff and adoption tracking.'
+            }
+        ],
+        upcoming: [
+            {
+                title: 'Pilot kickoff',
+                body: 'The first pilot cohort starts review next week.'
+            }
+        ],
+        risks: [
+            {
+                title: 'Support coverage',
+                body: 'Support ownership needs confirmation before wider release.'
+            }
+        ],
+        decisions_needed: [
+            {
+                title: 'Publish channel',
+                body: 'Confirm whether this goes to the project team or a broader internal audience.'
+            }
+        ],
+        visual_blocks: [
+            {
+                title: 'Workspace map',
+                body: 'Use the accepted map as the issue overview visual.'
+            }
+        ],
+        source_backed_appendix: [
+            {
+                title: 'Rollout plan',
+                body: 'Source-backed rollout timing and owner notes.'
+            }
+        ],
+        source_refs: [{ document_id: 'doc-rollout', section: 'Plan' }]
+    }
+};
+
+test('PDF export projection includes accepted newsletter artifacts', () => {
+    const data = projectPdfExportData({
+        ...baseOptions,
+        acceptedArtifacts: [newsletterArtifact]
+    });
+
+    assert.equal(data.stats.artifactCount, 1);
+    assert.equal(data.stats.newsletterCount, 1);
+    assert.equal(data.newsletterArtifacts[0].title, 'Stakeholder Update');
+    assert.equal(data.newsletterArtifacts[0].highlights[0].title, 'Launch checklist is ready');
+});
+
 test('PDF renderer builds non-empty vector PDF documents for studio profiles', async () => {
     for (const profile of listPdfExportProfiles()) {
         const result = await buildPdfExportDocument({
@@ -224,4 +294,44 @@ test('PDF renderer builds non-empty vector PDF documents for studio profiles', a
         assert.ok(bytes.byteLength > 4000);
         assert.match(result.filename, /\.pdf$/);
     }
+});
+
+test('PDF renderer builds newsletter profile from accepted artifact content', async () => {
+    const preview = getPdfExportPreview({
+        ...baseOptions,
+        profileId: 'newsletter',
+        pageSizeId: AUTO_PAGE_SIZE_ID,
+        orientation: 'portrait',
+        acceptedArtifacts: [newsletterArtifact],
+        options: {
+            includeTitleBlock: true,
+            includeOutlinePanel: false,
+            includeNotesPanel: false,
+            diagramDensity: 'compact'
+        }
+    });
+    const result = await buildPdfExportDocument({
+        ...baseOptions,
+        profileId: 'newsletter',
+        pageSizeId: AUTO_PAGE_SIZE_ID,
+        orientation: 'portrait',
+        acceptedArtifacts: [newsletterArtifact],
+        options: {
+            includeTitleBlock: true,
+            includeOutlinePanel: false,
+            includeNotesPanel: false,
+            diagramDensity: 'compact',
+            projectName: 'Stakeholder Update',
+            preparedFor: 'Project leadership',
+            revision: 'May 2026'
+        }
+    });
+    const bytes = result.doc.output('arraybuffer');
+
+    assert.equal(preview.profile.id, 'newsletter');
+    assert.equal(preview.data.stats.newsletterCount, 1);
+    assert.equal(result.profile.id, 'newsletter');
+    assert.ok(result.pageCount >= 1);
+    assert.ok(bytes.byteLength > 4000);
+    assert.match(result.filename, /newsletter\.pdf$/);
 });
