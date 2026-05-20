@@ -1524,6 +1524,42 @@ const App = () => {
         useWorkspaceShell
     ]);
 
+    const openEmptyCanvasStarterGuide = useCallback(() => {
+        setSelectedBranchId(undefined);
+        setInspectorNodeId(undefined);
+        setInspectorEdgeId(undefined);
+        setIsAiHelpersOpen(false);
+        shellActions.setRibbonTab('ai', { source: 'emptyCanvas', action: 'guided_starters' });
+        shellActions.setActiveScope({ type: 'workspace' });
+        pushNode(PromptModal, {
+            scope: 'workspace',
+            initialVisual: 'auto',
+            initialEvidenceMode: sourceLibrary.length ? 'uploaded_sources' : 'workspace',
+            initialCitationPolicy: sourceLibrary.length ? 'required' : 'preferred',
+            initialPromptPlaceholder:
+                'Choose a guided start below, or describe what you want TraceSpace to build first.'
+        });
+        recordActivity({
+            type: 'ai_action_picker_opened',
+            title: 'Guided starts opened',
+            summary: 'Opened the guided-start catalog from the empty canvas.',
+            metadata: {
+                scope: 'workspace',
+                action: 'guided_starters',
+                initial_visual: 'auto',
+                source_count: sourceLibrary.length
+            }
+        });
+    }, [
+        pushNode,
+        recordActivity,
+        setInspectorEdgeId,
+        setInspectorNodeId,
+        setSelectedBranchId,
+        shellActions,
+        sourceLibrary.length
+    ]);
+
     const openManualStart = useCallback(() => {
         openWorkspaceDockTab('build');
     }, [openWorkspaceDockTab]);
@@ -2684,6 +2720,9 @@ const App = () => {
                                                 </button>
                                                 <button type="button" onClick={openEmptyCanvasAskAi}>
                                                     Ask AI
+                                                </button>
+                                                <button type="button" onClick={openEmptyCanvasStarterGuide}>
+                                                    Guided starts
                                                 </button>
                                                 <button type="button" onClick={openManualStart}>
                                                     Start with node

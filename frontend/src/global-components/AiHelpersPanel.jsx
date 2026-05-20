@@ -12,13 +12,15 @@ import {
     buildFilteredGraphProjection,
     getChecklistPreviewRows,
     getMissingInfoPreviewRows,
+    getSankeyFlowProjection,
     getSmeQuestionPreviewRows,
     getSourceRepairPreviewRows,
     getTaskPreviewRows
 } from '../views/graphProjection';
 import { buildWorkspaceNextSteps } from '../utils/workspaceNudges';
+import { SANKEY_FLOW_LENS_PROMPT } from '../prompts/promptsModel';
 
-const helperAction = (id, label, view, count, detail, helperId, previewAction, previewKey) => ({
+const helperAction = (id, label, view, count, detail, helperId, previewAction, previewKey, options = {}) => ({
     id,
     label,
     view,
@@ -26,7 +28,8 @@ const helperAction = (id, label, view, count, detail, helperId, previewAction, p
     detail,
     helperId,
     previewAction,
-    previewKey
+    previewKey,
+    ...options
 });
 
 const SCOPE_OPTIONS = [
@@ -66,6 +69,12 @@ const OUTPUT_PROMPT_DEFAULTS = {
     'extract-chart-data': {
         role: 'data-table-interpreter',
         action: 'interpret_table_data'
+    },
+    'create-sankey-flow-lens': {
+        role: 'data-table-interpreter',
+        action: 'interpret_table_data',
+        visual: 'chart',
+        prompt: SANKEY_FLOW_LENS_PROMPT
     }
 };
 
@@ -196,6 +205,7 @@ const AiHelpersPanel = ({
             sourceRepairs: getSourceRepairPreviewRows(projection).length,
             missingInfo: getMissingInfoPreviewRows(projection).length,
             smeQuestions: getSmeQuestionPreviewRows(projection).length,
+            sankeyPaths: getSankeyFlowProjection(projection).path_count,
             mondayReady: projection.nodes.filter(
                 (node) =>
                     node.node_type === 'task' ||
@@ -340,6 +350,17 @@ const AiHelpersPanel = ({
                     'chartData',
                     projection.nodes.filter((node) => node.table_rows?.length).length,
                     'Prepared structured table generation target.'
+                ),
+                helperAction(
+                    'create-sankey-flow-lens',
+                    'Sankey flow lens',
+                    'table',
+                    helperCounts.sankeyPaths,
+                    'Prepared Sankey flow lens prompt.',
+                    undefined,
+                    undefined,
+                    undefined,
+                    { allowEmptyWorkspace: true }
                 )
             ]
         },
@@ -781,7 +802,10 @@ const AiHelpersPanel = ({
                                             activeView === action.view ? 'active' : ''
                                         }
                                         onClick={() => openHelperAction(role, action)}
-                                        disabled={nodes.length === 0 || Boolean(runningActionId)}
+                                        disabled={
+                                            (!action.allowEmptyWorkspace && nodes.length === 0) ||
+                                            Boolean(runningActionId)
+                                        }
                                     >
                                         <span>
                                             {runningActionId === action.id

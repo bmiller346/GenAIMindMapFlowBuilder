@@ -9,20 +9,33 @@ const HELP_ARTICLES = [
         summary: 'Ask in plain language. TraceSpace drafts first, then you accept what belongs in the graph.',
         sections: [
             'Use the question box for normal requests like “turn this commissioning plan into tasks” or “map the RFI workflow.”',
-            'Visual Auto lets AI choose a useful shape such as checklist, table, flowchart, outline, knowledge graph, Kanban board, executive output, or news article.',
-            'Use a specific visual when you know the target view. Ask AI can supplement missing process steps, relationship edges, task fields, table columns, or executive findings so a sparse workspace can support that view.',
+            'Guided starts are recipes. They prefill Ask AI, choose a target output, and still draft into the same review-first workspace model.',
+            'Target output Auto lets AI choose a useful shape such as checklist, table, flowchart, outline, knowledge graph, Kanban board, chart rows, executive output, or news article.',
+            'Use a specific target output when you know the surface you want. Ask AI can supplement missing process steps, relationship edges, task fields, table columns, chart rows, or executive findings so a sparse workspace can support that view.',
             'Accepted drafts are the only things that change the workspace graph. Unsourced or inferred items stay marked for review.'
         ]
     },
     {
         id: 'visual-auto',
-        title: 'Visual Auto',
-        summary: 'Auto is a routing mode, not a mind-map default.',
+        title: 'Target Output Auto',
+        summary: 'Auto is a routing choice, not a mind-map default.',
         sections: [
             'Auto reads the intent first. “How do I...” tends to become a checklist or flowchart; comparisons tend to become tables; dependencies and ownership tend to become Connections.',
             'Available shapes include mind map, knowledge graph, flowchart, chart, Kanban, table, executive summary, news article, SME questions, software overlap, and handoff-style outputs.',
-            'Pick a visual manually when you already know the output you want.',
+            'Pick a target output manually when you already know what you want TraceSpace to draft.',
             'Use No visual for an answer or review note that should not create visual structure.'
+        ]
+    },
+    {
+        id: 'sankey-flow-lens',
+        title: 'Sankey Flow Lens',
+        summary: 'Use source, target, and value rows to see evidence, handoffs, effort, or dependencies as weighted flow paths.',
+        sections: [
+            'From a new workspace, choose Guided starts on the empty canvas, or open Ask AI and choose the Sankey flow lens starter. The prompt asks for source, target, value, metric, review state, confidence, and source references.',
+            'A useful Sankey request sounds like: “Show owner-to-status task flow,” “show source document to accepted finding flow,” “show system-to-process dependency flow,” or “turn this CSV/query result into source, target, value rows.”',
+            'After AI drafts the result, review the draft first. Accept the structured evidence or chart artifact, then open Outputs / Table. The Flow lens appears when accepted rows have source, target, and a countable or numeric value.',
+            'If the diagram does not appear, the missing shape is usually one of three fields: source, target, or value. Ask AI to normalize the rows into those columns, or add a value metric such as count, effort, cost, risk score, or confidence.',
+            'Width means the selected metric, not truth. Inferred or prompt-only paths should stay needs-review until a reviewer confirms the data or source support.'
         ]
     },
     {
@@ -30,6 +43,7 @@ const HELP_ARTICLES = [
         title: 'Workspace Model',
         summary: 'Views are different work surfaces over the same accepted model.',
         sections: [
+            'TraceSpace has 8 core workspace views: Map, Connections, Flowchart, Outline, Executive, Table, Tasks, and Kanban.',
             'TraceSpace stores accepted work as typed nodes, relationship edges, review states, source references, confidence, rationale, assumptions, and export metadata.',
             'Mind maps, Connections, flowcharts, Kanban, tables, executive outputs, and publishable articles read from that model instead of becoming unrelated copies.',
             'When a view looks empty or thin, ask AI to supplement the missing layer rather than starting over. For example: add relationship edges for Connections, process steps for Flowchart, task metadata for Kanban, or findings and risks for Executive view.'

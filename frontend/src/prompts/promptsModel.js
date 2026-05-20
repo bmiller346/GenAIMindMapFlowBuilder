@@ -186,6 +186,9 @@ export const sourceFirstActionPresets = [
     }
 ];
 
+export const SANKEY_FLOW_LENS_PROMPT =
+    'Create a source-backed Sankey flow lens from this workspace or source context. Return structured rows with source, target, value, metric, stage or group, notes, confidence, review_state, and source_refs. Use a count metric when no explicit numeric value exists, and mark inferred or prompt-only paths needs_review. Also include a Plotly-compatible chart artifact with chart_type=sankey when source/target/value rows exist. Focus the answer on what is flowing from where to where, which paths carry the most weight, and which paths need review before acceptance.';
+
 export const starterTransformations = [
     {
         id: 'sop_to_checklist',
@@ -276,6 +279,16 @@ export const starterTransformations = [
         roleId: 'data-table-interpreter',
         actionId: 'interpret_table_data',
         scopes: ['node', 'branch', 'workspace']
+    },
+    {
+        id: 'sankey_flow_lens',
+        label: 'Sankey flow lens',
+        description: 'Map source, target, and value paths for flow review.',
+        prompt: SANKEY_FLOW_LENS_PROMPT,
+        visual: 'chart',
+        roleId: 'data-table-interpreter',
+        actionId: 'interpret_table_data',
+        scopes: ['node', 'branch', 'workspace', 'source']
     },
     {
         id: 'risk_gap_review',

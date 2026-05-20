@@ -79,6 +79,103 @@ const VISUAL_OPTIONS = [
 const visualLabel = (visualId) =>
     VISUAL_OPTIONS.find((option) => option.id === visualId)?.label || visualId;
 
+const WORKSPACE_VIEW_OUTPUTS = new Set([
+    'mind_map',
+    'knowledge_graph',
+    'flow_chart',
+    'outline',
+    'executive_summary',
+    'tasks',
+    'kanban',
+    'table'
+]);
+const CHART_DATA_OUTPUTS = new Set(['chart']);
+const REVIEW_PACKET_OUTPUTS = new Set([
+    'checklist',
+    'source_coverage',
+    'review_annotations',
+    'sme_questions',
+    'software_overlap_report',
+    'missing_info_report'
+]);
+const HANDOFF_OUTPUTS = new Set(['implementation_handoff_package']);
+const PUBLISHABLE_OUTPUTS = new Set(['news_article', 'newsletter']);
+const SPECIALIZED_STARTER_IDS = new Set([
+    'aec_sow_to_delivery_graph',
+    'standards_completeness_review',
+    'complex_issue_team_roadmap',
+    'specialize_branch',
+    'find_process_bottlenecks',
+    'find_duplicate_tools',
+    'find_ownership_gaps',
+    'find_unsupported_business_critical_systems',
+    'create_30_60_90_day_improvement_plan'
+]);
+
+const STARTER_GROUPS = [
+    {
+        id: 'workspace_views',
+        label: 'Workspace views',
+        detail: 'Build data for Map, Connections, Flowchart, Outline, Executive, Table, Tasks, or Kanban.'
+    },
+    {
+        id: 'charts_data',
+        label: 'Charts and data',
+        detail: 'Create structured rows, tables, chart artifacts, and query-style views.'
+    },
+    {
+        id: 'review_packets',
+        label: 'Review packets',
+        detail: 'Find gaps, weak evidence, source repairs, SME questions, and overlap signals.'
+    },
+    {
+        id: 'handoff_publish',
+        label: 'Handoff and publishing',
+        detail: 'Package accepted structure for implementation, stakeholder review, or readable updates.'
+    },
+    {
+        id: 'specialized_work',
+        label: 'Specialized work',
+        detail: 'Use domain-specific recipes for AEC, standards, enterprise operations, and branch specialization.'
+    }
+];
+
+const starterGroupId = (starter = {}) => {
+    if (SPECIALIZED_STARTER_IDS.has(starter.id)) {
+        return 'specialized_work';
+    }
+    if (CHART_DATA_OUTPUTS.has(starter.visual)) {
+        return 'charts_data';
+    }
+    if (HANDOFF_OUTPUTS.has(starter.visual) || PUBLISHABLE_OUTPUTS.has(starter.visual)) {
+        return 'handoff_publish';
+    }
+    if (REVIEW_PACKET_OUTPUTS.has(starter.visual)) {
+        return 'review_packets';
+    }
+    if (WORKSPACE_VIEW_OUTPUTS.has(starter.visual)) {
+        return 'workspace_views';
+    }
+    return 'review_packets';
+};
+
+const starterSurfaceLabel = (starter = {}) => {
+    const groupId = starterGroupId(starter);
+    if (groupId === 'charts_data') {
+        return 'Chart/data';
+    }
+    if (groupId === 'review_packets') {
+        return 'Review';
+    }
+    if (groupId === 'handoff_publish') {
+        return 'Handoff';
+    }
+    if (groupId === 'specialized_work') {
+        return 'Specialized';
+    }
+    return 'View';
+};
+
 const EXPANSION_TARGET_OPTIONS = [
     {
         id: 'selected_node',
@@ -225,6 +322,9 @@ const inferOutputShape = (prompt, actionId = '') => {
     }
     if (/\b(table|matrix|spreadsheet|rows|columns|compare)\b/.test(text)) {
         return 'table';
+    }
+    if (/\b(sankey|flow lens|source[- ]?target[- ]?value|source to target|source-to-target)\b/.test(text)) {
+        return 'chart';
     }
     if (/\b(chart|graph this|visualize data|plot)\b/.test(text)) {
         return 'chart';
@@ -1001,6 +1101,16 @@ const PromptModal = ({
                 !Array.isArray(starter.scopes) || starter.scopes.includes(promptScope)
             ),
         [promptScope]
+    );
+    const groupedStarterTransformations = useMemo(
+        () =>
+            STARTER_GROUPS.map((group) => ({
+                ...group,
+                starters: scopedStarterTransformations.filter(
+                    (starter) => starterGroupId(starter) === group.id
+                )
+            })).filter((group) => group.starters.length > 0),
+        [scopedStarterTransformations]
     );
     const scopeDisplayLabel =
         scope === 'workspace'
@@ -2038,21 +2148,52 @@ const PromptModal = ({
                 ) : null}
             </div>
             <div className="ai-action-starter-library">
-                <div>
-                    <strong>Starter transformations</strong>
-                    <span>{scopedStarterTransformations.length} ready prompts</span>
+                <div className="ai-action-starter-heading">
+                    <div>
+                        <strong>Guided starts</strong>
+                        <span>{scopedStarterTransformations.length} recipes</span>
+                    </div>
+                    <p>
+                        Recipes prefill Ask AI and target an output. They are not extra app
+                        modes; accepted drafts feed the same workspace model.
+                    </p>
                 </div>
-                <div className="ai-action-starter-grid">
-                    {scopedStarterTransformations.map((starter) => (
-                        <button
-                            type="button"
-                            key={starter.id}
-                            onClick={() => applyStarterTransformation(starter)}
-                            className={customPrompt === starter.prompt ? 'selected' : ''}
-                        >
-                            <strong>{starter.label}</strong>
-                            <small>{starter.description}</small>
-                        </button>
+                <div className="ai-action-surface-map" aria-label="TraceSpace surface model">
+                    <span>
+                        <strong>8</strong>
+                        workspace views
+                    </span>
+                    <span>
+                        <strong>{scopedStarterTransformations.length}</strong>
+                        guided starts
+                    </span>
+                    <span>
+                        <strong>Review</strong>
+                        then accept
+                    </span>
+                </div>
+                <div className="ai-action-starter-groups">
+                    {groupedStarterTransformations.map((group) => (
+                        <section key={group.id} className="ai-action-starter-group">
+                            <div className="ai-action-starter-group-header">
+                                <strong>{group.label}</strong>
+                                <span>{group.detail}</span>
+                            </div>
+                            <div className="ai-action-starter-grid">
+                                {group.starters.map((starter) => (
+                                    <button
+                                        type="button"
+                                        key={starter.id}
+                                        onClick={() => applyStarterTransformation(starter)}
+                                        className={customPrompt === starter.prompt ? 'selected' : ''}
+                                    >
+                                        <span>{starterSurfaceLabel(starter)}</span>
+                                        <strong>{starter.label}</strong>
+                                        <small>{starter.description}</small>
+                                    </button>
+                                ))}
+                            </div>
+                        </section>
                     ))}
                 </div>
             </div>
@@ -2069,7 +2210,7 @@ const PromptModal = ({
                     />
                 </label>
                 <label>
-                    Visual
+                    Target output
                     <select
                         value={selectedVisual}
                         onChange={(event) => setSelectedVisual(event.target.value)}

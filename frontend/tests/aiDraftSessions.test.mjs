@@ -1135,7 +1135,7 @@ test('follow-up intent preserves supplement and compare prompts over update word
 test('starter transformation catalog includes operational prompt defaults', () => {
     const ids = new Set(starterTransformations.map((starter) => starter.id));
 
-    assert.equal(starterTransformations.length, 26);
+    assert.equal(starterTransformations.length, 27);
     assert.ok(ids.has('sop_to_checklist'));
     assert.ok(ids.has('pdf_to_training_outline'));
     assert.ok(ids.has('requirements_to_tasks'));
@@ -1156,6 +1156,7 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.ok(ids.has('find_unsupported_business_critical_systems'));
     assert.ok(ids.has('create_30_60_90_day_improvement_plan'));
     assert.ok(ids.has('create_stakeholder_review_package'));
+    assert.ok(ids.has('sankey_flow_lens'));
     assert.ok(
         starterTransformations.every(
             (starter) =>
@@ -1210,6 +1211,15 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.equal(aecSowPlan.roleId, 'aec-sow-deliverables');
     assert.match(aecSowPlan.prompt, /disciplines/i);
     assert.match(aecSowPlan.prompt, /monday\.com/i);
+
+    const sankeyFlowLens = starterTransformations.find(
+        (starter) => starter.id === 'sankey_flow_lens'
+    );
+    assert.equal(sankeyFlowLens.visual, 'chart');
+    assert.equal(sankeyFlowLens.roleId, 'data-table-interpreter');
+    assert.equal(sankeyFlowLens.actionId, 'interpret_table_data');
+    assert.match(sankeyFlowLens.prompt, /source, target, value/i);
+    assert.match(sankeyFlowLens.prompt, /chart_type=sankey/i);
 });
 
 test('publishable draft artifacts normalize executive summary preview fields', () => {
