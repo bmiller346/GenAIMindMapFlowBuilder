@@ -172,7 +172,7 @@ const ShellLeftNavigatorHost = ({
 
     const startResize = useCallback(
         (event) => {
-            if (event.button !== 0 || usesWorkspaceDock) {
+            if (event.button !== 0) {
                 return;
             }
             event.preventDefault();
@@ -196,7 +196,7 @@ const ShellLeftNavigatorHost = ({
             window.addEventListener('pointerup', stopResize);
             window.addEventListener('pointercancel', stopResize);
         },
-        [onWidthChange, usesWorkspaceDock, width]
+        [onWidthChange, width]
     );
 
     return (
@@ -229,19 +229,17 @@ const ShellLeftNavigatorHost = ({
                         </button>
                     ))}
                 </div>
-                {!usesWorkspaceDock ? (
-                    <button
-                        type="button"
-                        className="shell-left-navigator__icon-button"
-                        title={collapsed ? 'Expand navigator' : 'Collapse navigator'}
-                        aria-label={collapsed ? 'Expand navigator' : 'Collapse navigator'}
-                        onClick={() => onCollapsedChange?.(!collapsed)}
-                    >
-                        {collapsed ? <FiChevronRight /> : <FiChevronLeft />}
-                    </button>
-                ) : null}
+                <button
+                    type="button"
+                    className="shell-left-navigator__icon-button"
+                    title={collapsed ? 'Expand navigator' : 'Collapse navigator'}
+                    aria-label={collapsed ? 'Expand navigator' : 'Collapse navigator'}
+                    onClick={() => onCollapsedChange?.(!collapsed)}
+                >
+                    {collapsed ? <FiChevronRight /> : <FiChevronLeft />}
+                </button>
             </div>
-            {usesWorkspaceDock || !collapsed ? (
+            {!collapsed ? (
                 <div className="shell-left-navigator__body">
                     {isOutline ? (
                         <ShellOutlineNavigator
@@ -259,7 +257,7 @@ const ShellLeftNavigatorHost = ({
                     )}
                 </div>
             ) : null}
-            {!usesWorkspaceDock && !collapsed ? (
+            {!collapsed ? (
                 <button
                     type="button"
                     className="shell-left-navigator__resize-handle"

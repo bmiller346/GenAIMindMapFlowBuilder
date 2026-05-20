@@ -3074,6 +3074,10 @@ h5 {
   background-color: transparent;
 }
 
+.workspace-dock--shell-left.workspace-dock--content-only {
+  grid-template-rows: minmax(0, 1fr);
+}
+
 .workspace-dock--shell-left .workspace-dock-tabs {
   display: flex;
   align-items: center;

@@ -44,7 +44,8 @@ const WorkspaceDock = ({
     onOpenNextSteps,
     hasWorkspaceContentNodes,
     suppressGuidanceNudges = false,
-    dockControls
+    dockControls,
+    contentOnly = false
 }) => {
     const [uncontrolledActiveTab, setUncontrolledActiveTab] = useState('guidance');
     const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState(false);
@@ -150,6 +151,7 @@ const WorkspaceDock = ({
             className={[
                 'workspace-dock',
                 collapsed ? 'workspace-dock--collapsed' : '',
+                contentOnly ? 'workspace-dock--content-only' : '',
                 className
             ]
                 .filter(Boolean)
@@ -157,34 +159,36 @@ const WorkspaceDock = ({
             aria-label="Workspace tools"
             style={{ '--workspace-dock-width': `${width}rem` }}
         >
-            <nav className="workspace-dock-tabs workspace-dock-nav" aria-label="Workspace panel">
-                <div className="workspace-dock-panel-actions">
-                    {dockControls ? (
-                        <div className="workspace-dock-controls-slot">
-                            {dockControls}
-                        </div>
-                    ) : null}
-                    <button
-                        type="button"
-                        className="workspace-dock-icon-button"
-                        title={collapsed ? 'Expand panel' : 'Collapse panel'}
-                        aria-label={collapsed ? 'Expand workspace panel' : 'Collapse workspace panel'}
-                        onClick={() => updateCollapsed(!collapsed)}
-                    >
-                        {collapsed ? <FiChevronRight /> : <FiChevronLeft />}
-                    </button>
-                </div>
-                {WORKSPACE_DOCK_TABS.map(([id, label]) => (
-                    <button
-                        key={id}
-                        type="button"
-                        className={activeTab === id ? 'active' : ''}
-                        onClick={() => updateActiveTab(id)}
-                    >
-                        {label}
-                    </button>
-                ))}
-            </nav>
+            {!contentOnly ? (
+                <nav className="workspace-dock-tabs workspace-dock-nav" aria-label="Workspace panel">
+                    <div className="workspace-dock-panel-actions">
+                        {dockControls ? (
+                            <div className="workspace-dock-controls-slot">
+                                {dockControls}
+                            </div>
+                        ) : null}
+                        <button
+                            type="button"
+                            className="workspace-dock-icon-button"
+                            title={collapsed ? 'Expand panel' : 'Collapse panel'}
+                            aria-label={collapsed ? 'Expand workspace panel' : 'Collapse workspace panel'}
+                            onClick={() => updateCollapsed(!collapsed)}
+                        >
+                            {collapsed ? <FiChevronRight /> : <FiChevronLeft />}
+                        </button>
+                    </div>
+                    {WORKSPACE_DOCK_TABS.map(([id, label]) => (
+                        <button
+                            key={id}
+                            type="button"
+                            className={activeTab === id ? 'active' : ''}
+                            onClick={() => updateActiveTab(id)}
+                        >
+                            {label}
+                        </button>
+                    ))}
+                </nav>
+            ) : null}
             <div className="workspace-dock-content">
                 {activeTab === 'sources' ? (
                     <WorkspaceSourcesTab onOpenSources={onOpenSources} />
@@ -221,7 +225,7 @@ const WorkspaceDock = ({
                     <WorkspaceBuildTab />
                 ) : null}
             </div>
-            {!collapsed ? (
+            {!collapsed && !contentOnly ? (
                 <button
                     type="button"
                     className="workspace-dock-resize-handle"

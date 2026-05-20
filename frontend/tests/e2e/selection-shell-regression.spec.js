@@ -657,22 +657,19 @@ test('shell left navigator tabs, collapse, and open-tab events stay in the left 
     const navigatorModes = leftRail.locator('.shell-left-navigator__modebar');
     await expect(leftRail).toBeVisible();
     await expect(workspaceDock).toBeVisible();
+    await expect(leftRail.locator('.workspace-dock-tabs')).toHaveCount(0);
     await expect(page.locator('.workspace-tools-floating-dock')).toHaveCount(0);
 
-    await workspaceDock.getByRole('button', { name: 'Sources' }).click();
-    await expect(workspaceDock.getByRole('button', { name: 'Sources' })).toHaveClass(/active/);
-    await expect(leftRail).toContainText('Sources');
-    await workspaceDock.getByRole('button', { name: 'Library' }).click();
+    await navigatorModes.getByRole('button', { name: 'Sources', exact: true }).click();
     await expect(navigatorModes.getByRole('button', { name: 'Sources', exact: true })).toHaveClass(/active/);
     await expect(leftRail.locator('.sources-panel--embedded')).toBeVisible();
     await expect(leftRail.locator('.sources-panel--embedded')).toContainText('Source set / Media');
     await expect(page.locator('body > .sources-panel')).toHaveCount(0);
     await leftRail.locator('.sources-panel--embedded').getByRole('button', { name: 'Close' }).click();
     await expect(navigatorModes.getByRole('button', { name: 'Workspace', exact: true })).toHaveClass(/active/);
-    await expect(workspaceDock.getByRole('button', { name: 'Sources' })).toHaveClass(/active/);
 
-    await workspaceDock.getByRole('button', { name: 'Collapse workspace panel' }).click();
-    await expect(workspaceDock).toHaveClass(/workspace-dock--collapsed/);
+    await leftRail.getByRole('button', { name: 'Collapse navigator' }).click();
+    await expect(leftRail.locator('.shell-left-navigator')).toHaveClass(/shell-left-navigator--collapsed/);
     const collapsedWidth = await leftRail.evaluate((element) => element.getBoundingClientRect().width);
     expect(collapsedWidth).toBeLessThan(90);
 
@@ -683,11 +680,11 @@ test('shell left navigator tabs, collapse, and open-tab events stay in the left 
             })
         );
     });
-    await expect(workspaceDock).not.toHaveClass(/workspace-dock--collapsed/);
-    await expect(workspaceDock.getByRole('button', { name: 'Build' })).toHaveClass(/active/);
+    await expect(leftRail.locator('.shell-left-navigator')).not.toHaveClass(/shell-left-navigator--collapsed/);
+    await expect(navigatorModes.getByRole('button', { name: 'Build', exact: true })).toHaveClass(/active/);
     await expect(leftRail).toContainText('TraceSpace setup');
 
-    const resizeHandle = workspaceDock.getByRole('button', { name: 'Resize workspace panel' });
+    const resizeHandle = leftRail.getByRole('button', { name: 'Resize navigator' });
     await expect(resizeHandle).toBeVisible();
 
     await navigatorModes.getByRole('button', { name: 'Outline', exact: true }).click();
@@ -698,7 +695,7 @@ test('shell left navigator tabs, collapse, and open-tab events stay in the left 
 
     await navigatorModes.getByRole('button', { name: 'Workspace', exact: true }).click();
     await expect(workspaceDock).toBeVisible();
-    await expect(workspaceDock.getByRole('button', { name: 'Build' })).toHaveClass(/active/);
+    await expect(workspaceDock).toContainText('Next steps');
 
     await navigatorModes.getByRole('button', { name: 'Activity', exact: true }).click();
     await expect(navigatorModes.getByRole('button', { name: 'Activity', exact: true })).toHaveClass(/active/);
@@ -719,9 +716,8 @@ test('shell left navigator tabs, collapse, and open-tab events stay in the left 
             })
         );
     });
-    await expect(workspaceDock).toBeVisible();
-    await expect(navigatorModes.getByRole('button', { name: 'Workspace', exact: true })).toHaveClass(/active/);
-    await expect(workspaceDock.getByRole('button', { name: 'Sources' })).toHaveClass(/active/);
+    await expect(navigatorModes.getByRole('button', { name: 'Sources', exact: true })).toHaveClass(/active/);
+    await expect(leftRail.locator('.sources-panel--embedded')).toBeVisible();
 });
 
 test('shell routes AI helpers into the right rail instead of a canvas overlay', async ({ page }) => {
@@ -882,8 +878,7 @@ test('shell right rail shows source properties from the source library', async (
     await openSelectionFixture(page);
 
     const leftRail = page.locator('.workspace-shell__left');
-    await leftRail.locator('.workspace-dock-tabs').getByRole('button', { name: 'Sources' }).click();
-    await leftRail.getByRole('button', { name: 'Library' }).click();
+    await leftRail.locator('.shell-left-navigator__modebar').getByRole('button', { name: 'Sources', exact: true }).click();
 
     const sourcePanel = page.locator('.sources-panel');
     await expect(sourcePanel).toBeVisible();
@@ -931,7 +926,7 @@ test('shell routes AI draft review to tray instead of right properties rail', as
     await page.goto('/');
     await openSelectionFixture(page);
 
-    await page.locator('.workspace-dock-tabs').getByRole('button', { name: 'Health' }).click();
+    await page.locator('.shell-left-navigator__modebar').getByRole('button', { name: 'Health', exact: true }).click();
     await page.locator('.workspace-ai-usage').getByRole('button', { name: 'Refresh' }).click();
     await expect(page.locator('.workspace-ai-usage')).toContainText('1 draft sessions tracked');
     await page.locator('.workspace-ai-usage').getByText('Details').click();

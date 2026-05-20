@@ -413,7 +413,7 @@ test('shell review tray hosts AI draft sessions in Drafts', async ({ page }) => 
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto('/');
 
-    await page.locator('.workspace-dock-tabs').getByRole('button', { name: 'Health' }).click();
+    await page.locator('.shell-left-navigator__modebar').getByRole('button', { name: 'Health', exact: true }).click();
     await page.locator('.workspace-ai-usage').getByRole('button', { name: 'Refresh' }).click();
     await expect(page.locator('.workspace-ai-usage')).toContainText('1 draft sessions tracked');
     await page.locator('.workspace-ai-usage').getByText('Details').click();
@@ -486,7 +486,7 @@ test('shell review tray hosts workspace health issues from the left rail', async
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto('/');
 
-    await page.locator('.workspace-dock-tabs').getByRole('button', { name: 'Health' }).click();
+    await page.locator('.shell-left-navigator__modebar').getByRole('button', { name: 'Health', exact: true }).click();
     await expect(page.locator('.workspace-dock-content .graph-validation-panel')).toBeVisible();
     await expect(page.locator('.workspace-dock-content .graph-validation-panel')).toContainText('Workspace health');
 
@@ -557,7 +557,7 @@ test('shell review tray stays bounded with the left rail at desktop and narrow w
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto('/');
 
-    await page.locator('.workspace-dock-tabs').getByRole('button', { name: 'Health' }).click();
+    await page.locator('.shell-left-navigator__modebar').getByRole('button', { name: 'Health', exact: true }).click();
     await page.getByRole('button', { name: 'Review issues in tray' }).click();
     await expect(page.locator('.workspace-shell__bottom .review-tray')).toBeVisible();
 
@@ -576,7 +576,7 @@ test('shell review tray stays bounded with the left rail at desktop and narrow w
 
     await page.getByTestId('workspace-shell-right-slot').getByRole('button', { name: 'Close' }).click();
     await expect(page.getByTestId('workspace-shell-right-slot')).toHaveCount(0);
-    await page.locator('.workspace-dock-tabs').getByRole('button', { name: 'Health' }).click();
+    await page.locator('.shell-left-navigator__modebar').getByRole('button', { name: 'Health', exact: true }).click();
     await page.getByRole('button', { name: 'Review issues in tray' }).click();
     await expect(page.locator('.workspace-shell__bottom .review-tray')).toBeVisible();
     await expect(page.getByTestId('workspace-shell-right-slot')).toHaveCount(0);

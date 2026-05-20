@@ -4,6 +4,7 @@ import { WORKSPACE_DOCK_OPEN_TAB_EVENT } from '../global-components/WorkspaceDoc
 import ShellLeftNavigatorHost from './ShellLeftNavigatorHost.jsx';
 
 const SHELL_NAVIGATOR_TAB_KINDS = new Set(['health', 'build']);
+const SHELL_WORKSPACE_CONTENT_TABS = new Set(['guidance', 'health', 'build']);
 
 const ShellWorkspaceNavigatorHost = ({
     activeTab,
@@ -39,20 +40,26 @@ const ShellWorkspaceNavigatorHost = ({
     sourceNavigator
 }) => {
     const lastWorkspaceTabRef = useRef(
-        WORKSPACE_DOCK_TAB_IDS.has(activeTab) ? activeTab : 'guidance'
+        SHELL_WORKSPACE_CONTENT_TABS.has(activeTab) ? activeTab : 'guidance'
     );
 
     useEffect(() => {
-        if (WORKSPACE_DOCK_TAB_IDS.has(activeTab)) {
+        if (SHELL_WORKSPACE_CONTENT_TABS.has(activeTab)) {
             lastWorkspaceTabRef.current = activeTab;
         }
     }, [activeTab]);
 
     const openWorkspaceNavigator = useCallback(
         (tab = 'workspace') => {
-            const nextTab = WORKSPACE_DOCK_TAB_IDS.has(tab)
+            if (tab === 'sources') {
+                onOpenSources?.();
+                return;
+            }
+            const nextTab = SHELL_WORKSPACE_CONTENT_TABS.has(tab)
                 ? tab
-                : lastWorkspaceTabRef.current;
+                : tab === 'workspace'
+                    ? 'guidance'
+                    : lastWorkspaceTabRef.current;
             const nextKind = SHELL_NAVIGATOR_TAB_KINDS.has(nextTab) ? nextTab : 'workspace';
             onOpenWorkspaceNavigation(nextKind, {
                 tab: nextTab,
@@ -60,7 +67,7 @@ const ShellWorkspaceNavigatorHost = ({
                 width
             });
         },
-        [onOpenWorkspaceNavigation, width]
+        [onOpenSources, onOpenWorkspaceNavigation, width]
     );
 
     const openWorkspaceTab = useCallback(
@@ -126,6 +133,7 @@ const ShellWorkspaceNavigatorHost = ({
             onOpenNextSteps={onOpenNextSteps}
             hasWorkspaceContentNodes={hasWorkspaceContentNodes}
             suppressGuidanceNudges={isStructuredCanvasView || isFocusPanelOpen}
+            contentOnly={enabled}
         />
     );
 
