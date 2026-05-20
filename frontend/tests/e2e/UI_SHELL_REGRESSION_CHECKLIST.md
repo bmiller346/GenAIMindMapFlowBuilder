@@ -14,8 +14,8 @@ Scope: selection, relationship lenses, metadata editing, AI preview-first flows,
   - Relationship edge metadata editing through `EdgeInspector`.
   - Shell-flag right properties rail node metadata editing and local apply behavior.
   - Shell-flag right properties rail relationship metadata editing and persisted save.
-  - Shell-flag right properties rail read-only branch properties from the active branch lens.
-  - Shell-flag right properties rail read-only source properties from the source library.
+  - Shell-flag right properties rail editable branch properties from the active branch lens.
+  - Shell-flag right properties rail editable source properties from the source library.
   - Shell-flag AI draft review routing to the bottom review tray while the right properties rail stays closed.
   - Shell-flag left navigator placement, tab switching, collapse/expand, resize handle visibility, and event-driven workspace tab open.
   - Shell-only left navigator Outline mode rendering the current hierarchy in the fixed left rail.

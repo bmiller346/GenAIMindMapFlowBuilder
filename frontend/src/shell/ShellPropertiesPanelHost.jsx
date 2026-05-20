@@ -7,6 +7,8 @@ import SourcePropertiesPanel from './SourcePropertiesPanel.jsx';
 const ShellPropertiesPanelHost = ({
     edges = [],
     nodes = [],
+    onApplyBranch,
+    onApplySource,
     onClearBranch,
     onCloseBranch,
     onCloseEdge,
@@ -30,6 +32,7 @@ const ShellPropertiesPanelHost = ({
                 branchId={panelId}
                 edges={edges}
                 nodes={nodes}
+                onApplyBranch={onApplyBranch}
                 onClearBranch={onClearBranch}
                 onClose={onCloseBranch}
                 onFocusNode={onFocusBranchNode}
@@ -42,6 +45,7 @@ const ShellPropertiesPanelHost = ({
             <SourcePropertiesPanel
                 edges={edges}
                 nodes={nodes}
+                onApplySource={onApplySource}
                 onClose={onCloseBranch}
                 onSelectNode={onFocusBranchNode}
                 sourceId={panelId}

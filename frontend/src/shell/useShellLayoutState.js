@@ -49,6 +49,7 @@ const useShellLayoutState = () => {
             closeRightPanel: state.closeRightPanel,
             openBranchMetadata: state.openBranchMetadata,
             openSourceMetadata: state.openSourceMetadata,
+            openGuidePanel: state.openGuidePanel,
             openBottomTray: state.openBottomTray,
             closeBottomTray: state.closeBottomTray,
             openDraftReviewTray: state.openDraftReviewTray,

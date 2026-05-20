@@ -32,20 +32,23 @@ const loadShellModules = async () => {
         { default: ShellRibbon },
         { default: BranchPropertiesPanel },
         { default: SourcePropertiesPanel },
-        { default: ShellPropertiesPanelHost }
+        { default: ShellPropertiesPanelHost },
+        { default: ShellStatusBar }
     ] = await Promise.all([
         server.ssrLoadModule('/src/shell/WorkspaceShell.jsx'),
         server.ssrLoadModule('/src/shell/ShellRibbon.jsx'),
         server.ssrLoadModule('/src/shell/BranchPropertiesPanel.jsx'),
         server.ssrLoadModule('/src/shell/SourcePropertiesPanel.jsx'),
-        server.ssrLoadModule('/src/shell/ShellPropertiesPanelHost.jsx')
+        server.ssrLoadModule('/src/shell/ShellPropertiesPanelHost.jsx'),
+        server.ssrLoadModule('/src/shell/ShellStatusBar.jsx')
     ]);
     return {
         WorkspaceShell,
         ShellRibbon,
         BranchPropertiesPanel,
         SourcePropertiesPanel,
-        ShellPropertiesPanelHost
+        ShellPropertiesPanelHost,
+        ShellStatusBar
     };
 };
 
@@ -64,11 +67,34 @@ test('WorkspaceShell renders mounted slot contract attributes', async () => {
     assert.match(html, /data-has-left-panel="true"/);
     assert.match(html, /data-has-right-panel="false"/);
     assert.match(html, /data-has-bottom-tray="true"/);
+    assert.match(html, /data-has-status-bar="false"/);
     assert.match(html, /data-testid="workspace-shell-ribbon-slot"/);
     assert.match(html, /data-testid="workspace-shell-left-slot"/);
     assert.match(html, /data-testid="workspace-shell-canvas-slot"/);
     assert.match(html, /data-testid="workspace-shell-bottom-slot"/);
     assert.doesNotMatch(html, /data-testid="workspace-shell-right-slot"/);
+});
+
+test('WorkspaceShell renders status bar independently from review tray', async () => {
+    const { WorkspaceShell, ShellStatusBar } = await loadShellModules();
+    const html = renderToStaticMarkup(
+        React.createElement(WorkspaceShell, {
+            ribbon: React.createElement('div', null, 'Ribbon'),
+            centerCanvas: React.createElement('div', null, 'Canvas'),
+            statusBar: React.createElement(ShellStatusBar, {
+                items: [{ id: 'view', label: 'View', value: 'Mind map' }],
+                overrides: [{ id: 'branch', label: 'Branch: Pilot' }]
+            })
+        })
+    );
+
+    assert.match(html, /data-has-status-bar="true"/);
+    assert.match(html, /data-has-bottom-tray="false"/);
+    assert.match(html, /data-testid="workspace-shell-status-slot"/);
+    assert.doesNotMatch(html, /data-testid="workspace-shell-bottom-slot"/);
+    assert.match(html, /View/);
+    assert.match(html, /Mind map/);
+    assert.match(html, /Branch: Pilot/);
 });
 
 test('WorkspaceShell renders placeholder-backed optional slots', async () => {
@@ -123,7 +149,7 @@ test('ShellRibbon falls back to the first tab when active tab is unknown', async
     assert.match(html, /Workspace commands/);
 });
 
-test('branch and source properties panels render read-only summaries', async () => {
+test('branch and source properties panels render editable summaries', async () => {
     const { BranchPropertiesPanel, SourcePropertiesPanel } = await loadShellModules();
     const nodes = [
         {

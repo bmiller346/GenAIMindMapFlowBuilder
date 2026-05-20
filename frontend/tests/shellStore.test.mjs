@@ -62,6 +62,20 @@ test('source and branch metadata routes use the right panel and clear review tra
     assert.equal(state.bottomTray, null);
 });
 
+test('AI guide routes use the right panel without becoming metadata', () => {
+    resetShellStore();
+
+    useShellStore.getState().openBottomTray('tasks', { id: 'task-preview-1' });
+    useShellStore.getState().openGuidePanel('nextSteps');
+
+    const state = useShellStore.getState();
+    assert.deepEqual(state.rightPanel, {
+        kind: 'guide',
+        id: 'nextSteps'
+    });
+    assert.equal(state.bottomTray, null);
+});
+
 test('bottom tray routing is exclusive with metadata right panel', () => {
     resetShellStore();
 

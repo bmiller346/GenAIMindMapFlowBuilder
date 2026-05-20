@@ -13,7 +13,8 @@ const WorkspaceShellAdapter = ({
     renderRibbonContent,
     rightPanel,
     rightPanelPlaceholder,
-    rightWidth = '31rem'
+    rightWidth = '31rem',
+    statusBar
 }) => (
     <WorkspaceShell
         style={{
@@ -29,6 +30,7 @@ const WorkspaceShellAdapter = ({
         }
         leftPanel={leftPanel}
         centerCanvas={centerCanvas}
+        statusBar={statusBar}
         rightPanel={rightPanel}
         rightPanelPlaceholder={rightPanelPlaceholder}
         bottomTray={bottomTray}

@@ -1,6 +1,17 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { buildSourceLibraryProjection } from '../views/graphProjection.js';
 import ShellRightPanel from './ShellRightPanel.jsx';
+
+const SOURCE_STATUS_OPTIONS = [
+    'uploaded',
+    'parsed',
+    'chunked',
+    'used in graph',
+    'reviewed',
+    'needs_review',
+    'failed',
+    'brief only'
+];
 
 const formatBytes = (size) => {
     if (!size) {
@@ -28,6 +39,7 @@ const sourceStatusLabel = (status) =>
 const SourcePropertiesPanel = ({
     edges = [],
     nodes = [],
+    onApplySource,
     onClose,
     onSelectNode,
     sourceId,
@@ -39,6 +51,40 @@ const SourcePropertiesPanel = ({
         [edges, nodes, sourceLibrary, workspaceBrief]
     );
     const source = projection.sources.find((item) => item.id === sourceId);
+    const [draft, setDraft] = useState({
+        title: '',
+        status: '',
+        classification: '',
+        version: '',
+        path: ''
+    });
+    const updateDraft = (field, value) => {
+        setDraft((current) => ({
+            ...current,
+            [field]: value
+        }));
+    };
+
+    useEffect(() => {
+        setDraft({
+            title: source?.title || '',
+            status: source?.status || 'uploaded',
+            classification: source?.classification || '',
+            version: source?.version || '',
+            path: source?.path || ''
+        });
+    }, [
+        source?.classification,
+        source?.id,
+        source?.path,
+        source?.status,
+        source?.title,
+        source?.version
+    ]);
+
+    const applySource = () => {
+        onApplySource?.(sourceId, draft);
+    };
 
     return (
         <ShellRightPanel title="Source properties">
@@ -49,6 +95,55 @@ const SourcePropertiesPanel = ({
                             <span>{source.type_label || 'Source'}</span>
                             <h2>{source.title}</h2>
                             <p>{source.id}</p>
+                        </div>
+
+                        <div className="source-properties-panel__form">
+                            <label>
+                                <span>Title</span>
+                                <input
+                                    value={draft.title}
+                                    onChange={(event) => updateDraft('title', event.target.value)}
+                                    aria-label="Source title"
+                                />
+                            </label>
+                            <label>
+                                <span>Status</span>
+                                <select
+                                    value={draft.status}
+                                    onChange={(event) => updateDraft('status', event.target.value)}
+                                    aria-label="Source status"
+                                >
+                                    {SOURCE_STATUS_OPTIONS.map((status) => (
+                                        <option key={status} value={status}>
+                                            {sourceStatusLabel(status)}
+                                        </option>
+                                    ))}
+                                </select>
+                            </label>
+                            <label>
+                                <span>Classification</span>
+                                <input
+                                    value={draft.classification}
+                                    onChange={(event) => updateDraft('classification', event.target.value)}
+                                    aria-label="Source classification"
+                                />
+                            </label>
+                            <label>
+                                <span>Version</span>
+                                <input
+                                    value={draft.version}
+                                    onChange={(event) => updateDraft('version', event.target.value)}
+                                    aria-label="Source version"
+                                />
+                            </label>
+                            <label className="source-properties-panel__wide-field">
+                                <span>Path</span>
+                                <input
+                                    value={draft.path}
+                                    onChange={(event) => updateDraft('path', event.target.value)}
+                                    aria-label="Source path"
+                                />
+                            </label>
                         </div>
 
                         <dl className="source-properties-panel__stats">
@@ -128,6 +223,9 @@ const SourcePropertiesPanel = ({
                     <p className="source-properties-panel__empty">Select a source from the library.</p>
                 )}
                 <div className="source-properties-panel__actions">
+                    <button type="button" onClick={applySource} disabled={!source}>
+                        Apply source
+                    </button>
                     <button type="button" onClick={onClose}>
                         Close
                     </button>

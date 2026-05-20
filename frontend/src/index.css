@@ -1110,6 +1110,7 @@
   --workspace-shell-left-width: 18rem;
   --workspace-shell-right-width: 22rem;
   --workspace-shell-bottom-height: 20rem;
+  --workspace-shell-status-height: 2rem;
   --workspace-shell-border: var(--question-border);
   --workspace-shell-surface: var(--modal-container-color);
   --workspace-shell-z-surface: 12;
@@ -1158,6 +1159,21 @@
     var(--workspace-shell-bottom-height);
 }
 
+.workspace-shell--has-status {
+  grid-template-rows:
+    var(--workspace-shell-ribbon-height)
+    minmax(0, 1fr)
+    var(--workspace-shell-status-height);
+}
+
+.workspace-shell--has-bottom.workspace-shell--has-status {
+  grid-template-rows:
+    var(--workspace-shell-ribbon-height)
+    minmax(0, 1fr)
+    var(--workspace-shell-bottom-height)
+    var(--workspace-shell-status-height);
+}
+
 .workspace-shell__ribbon {
   grid-column: 1 / -1;
   min-width: 0;
@@ -1169,7 +1185,8 @@
 
 .workspace-shell__left,
 .workspace-shell__right,
-.workspace-shell__bottom {
+.workspace-shell__bottom,
+.workspace-shell__status {
   min-width: 0;
   min-height: 0;
   background-color: color-mix(in srgb, var(--workspace-shell-surface) 96%, var(--main-color));
@@ -1196,8 +1213,15 @@
 
 .workspace-shell__bottom {
   grid-column: 1 / -1;
+  grid-row: 3;
+  border-top: 1px solid var(--workspace-shell-border);
+}
+
+.workspace-shell__status {
+  grid-column: 1 / -1;
   grid-row: -2 / -1;
   border-top: 1px solid var(--workspace-shell-border);
+  z-index: var(--workspace-shell-z-surface);
 }
 
 .workspace-shell__canvas {
@@ -1209,8 +1233,91 @@
 
 .workspace-shell--has-bottom .workspace-shell__canvas,
 .workspace-shell--has-bottom .workspace-shell__left,
-.workspace-shell--has-bottom .workspace-shell__right {
+.workspace-shell--has-bottom .workspace-shell__right,
+.workspace-shell--has-status .workspace-shell__canvas,
+.workspace-shell--has-status .workspace-shell__left,
+.workspace-shell--has-status .workspace-shell__right {
   grid-row: 2;
+}
+
+.shell-status-bar {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0 0.75rem;
+  color: var(--font-color);
+  font-size: 0.72rem;
+  overflow: hidden;
+}
+
+.shell-status-bar__items,
+.shell-status-bar__overrides {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.shell-status-bar__items {
+  overflow: hidden;
+}
+
+.shell-status-bar__overrides {
+  flex: 1;
+  justify-content: flex-end;
+  overflow-x: auto;
+}
+
+.shell-status-bar__item,
+.shell-status-bar__override {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  min-height: 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--workspace-shell-border) 80%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--main-color) 72%, transparent);
+  padding: 0.16rem 0.5rem;
+  white-space: nowrap;
+}
+
+.shell-status-bar__item span {
+  color: var(--input-color);
+}
+
+.shell-status-bar__item strong {
+  font-size: 0.72rem;
+}
+
+.shell-status-bar__item--accent {
+  border-color: rgba(42, 161, 152, 0.42);
+  background: rgba(42, 161, 152, 0.12);
+}
+
+.shell-status-bar__item--warning {
+  border-color: rgba(232, 190, 96, 0.42);
+  background: rgba(232, 190, 96, 0.12);
+}
+
+.shell-status-bar__override {
+  border-color: rgba(143, 112, 216, 0.42);
+  background: rgba(143, 112, 216, 0.14);
+}
+
+.shell-status-bar__override button {
+  width: 1rem;
+  height: 1rem;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--font-color);
+  font-size: 0.65rem;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .workspace-shell__canvas .react-flow {
@@ -1467,6 +1574,45 @@
   margin: 0;
 }
 
+.branch-properties-panel__form,
+.source-properties-panel__form {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.branch-properties-panel__form label,
+.source-properties-panel__form label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.branch-properties-panel__form label span,
+.source-properties-panel__form label span {
+  color: var(--input-color);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.branch-properties-panel__form input,
+.branch-properties-panel__form select,
+.branch-properties-panel__form textarea,
+.source-properties-panel__form input,
+.source-properties-panel__form select {
+  width: 100%;
+  border: 1px solid var(--workspace-shell-border);
+  border-radius: 0.4rem;
+  background: var(--input-background);
+  color: var(--font-color);
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.45rem 0.5rem;
+}
+
+.branch-properties-panel__form textarea {
+  min-height: 4.25rem;
+  resize: vertical;
+}
+
 .branch-properties-panel__stats div {
   display: flex;
   align-items: center;
@@ -1658,6 +1804,8 @@
 
 .source-properties-panel__actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 
 .source-properties-panel__actions button {
@@ -1677,6 +1825,7 @@
     --workspace-shell-left-width: min(20rem, 86vw);
     --workspace-shell-right-width: min(24rem, 92vw);
     --workspace-shell-bottom-height: min(18rem, 44vh);
+    --workspace-shell-status-height: 2.25rem;
   }
 
   .workspace-shell,
@@ -1707,6 +1856,16 @@
     bottom: var(--workspace-shell-bottom-height);
   }
 
+  .workspace-shell--has-status .workspace-shell__left,
+  .workspace-shell--has-status .workspace-shell__right {
+    bottom: var(--workspace-shell-status-height);
+  }
+
+  .workspace-shell--has-bottom.workspace-shell--has-status .workspace-shell__left,
+  .workspace-shell--has-bottom.workspace-shell--has-status .workspace-shell__right {
+    bottom: calc(var(--workspace-shell-bottom-height) + var(--workspace-shell-status-height));
+  }
+
   .workspace-shell__left {
     left: 0;
     border-right: 1px solid var(--workspace-shell-border);
@@ -1721,6 +1880,17 @@
   .workspace-shell__bottom {
     max-height: var(--workspace-shell-bottom-height);
     z-index: var(--workspace-shell-z-bottom-tray);
+  }
+
+  .shell-status-bar {
+    align-items: flex-start;
+    padding: 0.25rem 0.5rem;
+    overflow-x: auto;
+  }
+
+  .shell-status-bar__items,
+  .shell-status-bar__overrides {
+    flex: 0 0 auto;
   }
 
   .shell-ribbon {

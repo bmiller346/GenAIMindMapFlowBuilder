@@ -42,6 +42,7 @@ import { WORKSPACE_DOCK_OPEN_TAB_EVENT } from './global-components/WorkspaceDock
 import ShellPropertiesPanelHost from './shell/ShellPropertiesPanelHost.jsx';
 import ShellReviewTrayHost from './shell/ShellReviewTrayHost.jsx';
 import ShellOverlayHost from './shell/ShellOverlayHost.jsx';
+import ShellStatusBar from './shell/ShellStatusBar.jsx';
 import ShellWorkspaceNavigatorHost from './shell/ShellWorkspaceNavigatorHost.jsx';
 import WorkspaceShellAdapter from './shell/WorkspaceShellAdapter.jsx';
 import useShellLayoutState from './shell/useShellLayoutState.js';
@@ -96,6 +97,19 @@ import {
 
 const CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
 const STRUCTURED_CANVAS_VIEWS = new Set(['flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
+const SHELL_METADATA_RIGHT_PANEL_KINDS = new Set(['node', 'edge', 'branch', 'source']);
+const AI_HELPERS_GUIDE_PANEL_ID = 'aiHelpers';
+const NEXT_STEPS_GUIDE_PANEL_ID = 'nextSteps';
+const CANVAS_VIEW_LABELS = {
+    mindmap: 'Mind map',
+    knowledgeGraph: 'Knowledge graph',
+    flowchart: 'Flowchart',
+    outline: 'Outline',
+    executive: 'Executive',
+    tasks: 'Tasks',
+    kanban: 'Kanban',
+    table: 'Table'
+};
 const ASK_AI_STAGE_ID = {
     'Preparing request': 'preparing_request',
     'Selecting source context': 'gathering_context',
@@ -271,6 +285,21 @@ const nodeSourceRefs = (node) => {
         : Array.isArray(data.data?.source_refs)
           ? data.data.source_refs
           : [];
+};
+
+const sourceRecordId = (source = {}) =>
+    source.id || source.source_document_id || source.document_id || source.component_id || '';
+
+const dataSourceNodeId = (node = {}) => {
+    const data = node.data || {};
+    return (
+        data.document_id ||
+        data.source_document_id ||
+        data.source_document?.id ||
+        data.source_document?.document_id ||
+        data.component_id ||
+        node.id
+    );
 };
 
 const draftSessionEndpoint = ({ flowId }) =>
@@ -1497,19 +1526,22 @@ const App = () => {
 
     const shouldRenderRightPropertiesPanel =
         useWorkspaceShell &&
-        Boolean(
-            shellActions.rightPanel?.kind &&
-                shellActions.rightPanel?.id
-        );
+        SHELL_METADATA_RIGHT_PANEL_KINDS.has(shellActions.rightPanel?.kind) &&
+        Boolean(shellActions.rightPanel?.id);
+    const isShellGuidePanelOpen =
+        useWorkspaceShell &&
+        shellActions.rightPanel?.kind === 'guide' &&
+        Boolean(shellActions.rightPanel?.id);
     const shouldRenderShellAiHelpersPanel =
-        useWorkspaceShell && isAiHelpersOpen && !isStructuredCanvasView;
+        isShellGuidePanelOpen && !isStructuredCanvasView;
     const shouldRenderInspectorDock = Boolean(
         (!useWorkspaceShell && (inspectorNodeId || inspectorEdgeId)) ||
             (!useWorkspaceShell && activeAIDraftSession) ||
             (!useWorkspaceShell && activeAIActionPreview)
     );
     const isInspectorOpen = shouldRenderInspectorDock;
-    const isFocusPanelOpen = isAiHelpersOpen || isInspectorOpen;
+    const isFocusPanelOpen =
+        (useWorkspaceShell ? isShellGuidePanelOpen : isAiHelpersOpen) || isInspectorOpen;
     const selectedBranchNode = useMemo(
         () => nodes.find((node) => node.id === selectedBranchId),
         [nodes, selectedBranchId]
@@ -2175,6 +2207,28 @@ const App = () => {
         openWorkspaceDockTab('build');
     }, [openWorkspaceDockTab]);
 
+    const closeAiHelpersPanel = useCallback(() => {
+        if (useWorkspaceShell) {
+            shellActions.closeRightPanel();
+            return;
+        }
+        setIsAiHelpersOpen(false);
+    }, [shellActions, useWorkspaceShell]);
+
+    const openAiHelpersPanel = useCallback(
+        (guideId = AI_HELPERS_GUIDE_PANEL_ID) => {
+            setInspectorNodeId(undefined);
+            setInspectorEdgeId(undefined);
+            if (useWorkspaceShell) {
+                setIsAiHelpersOpen(false);
+                shellActions.openGuidePanel(guideId);
+                return;
+            }
+            setIsAiHelpersOpen(true);
+        },
+        [setInspectorEdgeId, setInspectorNodeId, shellActions, useWorkspaceShell]
+    );
+
     const focusStructuredNodeInMap = useCallback(
         (nodeId) => {
             setActiveView('mindmap');
@@ -2195,24 +2249,14 @@ const App = () => {
     }, [reactFlow, selectedVisibleNodes]);
 
     const openNextStepsAfterDraftAccept = useCallback(() => {
-        setInspectorNodeId(undefined);
-        setInspectorEdgeId(undefined);
-        if (useWorkspaceShell) {
-            shellActions.closeRightPanel();
-        }
-        setIsAiHelpersOpen(true);
         setNextStepsOpenToken((token) => token + 1);
-    }, [setInspectorEdgeId, setInspectorNodeId, shellActions, useWorkspaceShell]);
+        openAiHelpersPanel(NEXT_STEPS_GUIDE_PANEL_ID);
+    }, [openAiHelpersPanel]);
 
     const openNextStepsFromDock = useCallback(() => {
-        setInspectorNodeId(undefined);
-        setInspectorEdgeId(undefined);
-        if (useWorkspaceShell) {
-            shellActions.closeRightPanel();
-        }
-        setIsAiHelpersOpen(true);
         setNextStepsOpenToken((token) => token + 1);
-    }, [setInspectorEdgeId, setInspectorNodeId, shellActions, useWorkspaceShell]);
+        openAiHelpersPanel(NEXT_STEPS_GUIDE_PANEL_ID);
+    }, [openAiHelpersPanel]);
 
     const reflowCanvasGraph = useCallback(() => {
         if (STRUCTURED_CANVAS_VIEWS.has(activeCanvasView)) {
@@ -2485,6 +2529,276 @@ const App = () => {
         shellActions.openValidationIssuesTray(flow_id);
     }, [flow_id, shellActions]);
 
+    const requestWorkspaceSave = useCallback(() => {
+        if (!flow_id) {
+            return;
+        }
+        setSaveStatus('dirty');
+        window.setTimeout(() => {
+            window.dispatchEvent(new Event('docmap:save-workspace-now'));
+        }, 0);
+    }, [flow_id, setSaveStatus]);
+
+    const applyBranchProperties = useCallback(
+        (branchId, draft = {}) => {
+            if (!branchId) {
+                return;
+            }
+            const nextTitle = String(draft.title || '').trim();
+            setNodes(
+                useStore.getState().nodes.map((node) => {
+                    if (node.id !== branchId) {
+                        return node;
+                    }
+                    const data = node.data || {};
+                    return {
+                        ...node,
+                        data: {
+                            ...data,
+                            title: nextTitle || data.title || data.content || data.summ || branchId,
+                            node_type: String(draft.node_type || data.node_type || 'concept').trim(),
+                            status: String(draft.status || data.status || 'reviewed').trim(),
+                            owner_id: String(draft.owner_id || '').trim(),
+                            due_date: String(draft.due_date || '').trim(),
+                            summary: String(draft.summary || '').trim(),
+                            ...(data.manual
+                                ? {
+                                      data: {
+                                          ...(data.data || {}),
+                                          summ: nextTitle || data.data?.summ
+                                      }
+                                  }
+                                : {})
+                        }
+                    };
+                })
+            );
+            requestWorkspaceSave();
+            recordActivity({
+                type: 'branch_metadata_applied',
+                title: 'Branch metadata applied',
+                summary: `Updated branch metadata for ${nextTitle || branchId}.`,
+                node_ids: [branchId],
+                metadata: {
+                    node_type: draft.node_type,
+                    status: draft.status,
+                    owner_id: draft.owner_id,
+                    due_date: draft.due_date
+                },
+                status: 'completed'
+            });
+        },
+        [recordActivity, requestWorkspaceSave, setNodes]
+    );
+
+    const applySourceProperties = useCallback(
+        (sourceId, draft = {}) => {
+            if (!sourceId) {
+                return;
+            }
+            const cleaned = {
+                title: String(draft.title || sourceId).trim() || sourceId,
+                status: String(draft.status || 'uploaded').trim(),
+                classification: String(draft.classification || '').trim(),
+                version: String(draft.version || '').trim(),
+                path: String(draft.path || '').trim()
+            };
+            const hasDocumentList =
+                sourceLibrary &&
+                typeof sourceLibrary === 'object' &&
+                !Array.isArray(sourceLibrary) &&
+                Array.isArray(sourceLibrary.documents);
+            const sourceList = Array.isArray(sourceLibrary)
+                ? sourceLibrary
+                : hasDocumentList
+                  ? sourceLibrary.documents
+                  : [];
+            let matched = false;
+            const nextSourceList = sourceList.map((source) => {
+                if (sourceRecordId(source) !== sourceId) {
+                    return source;
+                }
+                matched = true;
+                return {
+                    ...source,
+                    ...cleaned,
+                    id: source.id || sourceId,
+                    metadata: {
+                        ...(source.metadata || {}),
+                        path: cleaned.path,
+                        version: cleaned.version,
+                        classification: cleaned.classification
+                    }
+                };
+            });
+            if (!matched) {
+                nextSourceList.push({
+                    id: sourceId,
+                    type: '',
+                    type_label: 'Source',
+                    ...cleaned,
+                    metadata: {
+                        path: cleaned.path,
+                        version: cleaned.version,
+                        classification: cleaned.classification
+                    }
+                });
+            }
+            setSourceLibrary(
+                hasDocumentList
+                    ? {
+                          ...sourceLibrary,
+                          documents: nextSourceList
+                      }
+                    : nextSourceList
+            );
+            setNodes(
+                useStore.getState().nodes.map((node) => {
+                    if (node.type !== 'dataSource' || dataSourceNodeId(node) !== sourceId) {
+                        return node;
+                    }
+                    const data = node.data || {};
+                    return {
+                        ...node,
+                        data: {
+                            ...data,
+                            title: cleaned.title,
+                            name: cleaned.title,
+                            status: cleaned.status,
+                            path: cleaned.path,
+                            relative_path: cleaned.path,
+                            source_document: {
+                                ...(data.source_document || {}),
+                                title: cleaned.title,
+                                name: cleaned.title,
+                                status: cleaned.status,
+                                path: cleaned.path,
+                                relative_path: cleaned.path,
+                                version: cleaned.version,
+                                classification: cleaned.classification
+                            }
+                        }
+                    };
+                })
+            );
+            requestWorkspaceSave();
+            recordActivity({
+                type: 'source_metadata_applied',
+                title: 'Source metadata applied',
+                summary: `Updated source metadata for ${cleaned.title}.`,
+                source_ids: [sourceId],
+                metadata: cleaned,
+                status: 'completed'
+            });
+        },
+        [recordActivity, requestWorkspaceSave, setNodes, setSourceLibrary, sourceLibrary]
+    );
+
+    const shellStatusItems = useMemo(() => {
+        const contentNodes = nodes.filter((node) => node.type !== 'dataSource' && !node.hidden);
+        const sourcedCount = contentNodes.filter((node) => nodeSourceRefs(node).length > 0).length;
+        const reviewIssueCount = Array.isArray(validationReport?.issues)
+            ? validationReport.issues.length
+            : 0;
+        const items = [
+            {
+                id: 'view',
+                label: 'View',
+                value: CANVAS_VIEW_LABELS[activeCanvasView] || activeCanvasView || 'Canvas'
+            }
+        ];
+
+        if (selectedVisibleNodes.length > 0) {
+            items.push({
+                id: 'selection',
+                label: 'Selected',
+                value: String(selectedVisibleNodes.length),
+                tone: 'accent'
+            });
+        }
+
+        if (contentNodes.length > 0) {
+            items.push({
+                id: 'sources',
+                label: 'Sources',
+                value: `${sourcedCount}/${contentNodes.length}`
+            });
+        }
+
+        if (reviewIssueCount > 0) {
+            items.push({
+                id: 'review',
+                label: 'Review',
+                value: String(reviewIssueCount),
+                tone: 'warning'
+            });
+        }
+
+        return items;
+    }, [activeCanvasView, nodes, selectedVisibleNodes.length, validationReport]);
+
+    const shellTemporaryOverrides = useMemo(() => {
+        const overrides = [];
+        if (selectedBranchId) {
+            overrides.push({
+                id: 'branch',
+                label: `Branch: ${selectedBranchTitle || 'Selected branch'}`,
+                onClear: clearBranchLens
+            });
+        }
+        if (activeGraphFilters.length > 0) {
+            overrides.push({
+                id: 'filters',
+                label: `${activeGraphFilters.length} active ${activeGraphFilters.length === 1 ? 'filter' : 'filters'}`,
+                onClear: () => setActiveGraphFilters([])
+            });
+        }
+        if (
+            activeCanvasView === 'mindmap' &&
+            mindmapRelationshipMode !== MINDMAP_RELATIONSHIP_MODES.OFF
+        ) {
+            const label =
+                MINDMAP_RELATIONSHIP_MODE_OPTIONS.find((option) => option.id === mindmapRelationshipMode)?.label ||
+                'Relationship labels';
+            overrides.push({
+                id: 'mindmap-relationships',
+                label,
+                onClear: () => setMindmapRelationshipMode(MINDMAP_RELATIONSHIP_MODES.OFF)
+            });
+        }
+        if (
+            activeCanvasView === 'knowledgeGraph' &&
+            kgRelationshipMode !== KG_RELATIONSHIP_MODES.INSIGHTS
+        ) {
+            const label =
+                KG_RELATIONSHIP_MODE_OPTIONS.find((option) => option.id === kgRelationshipMode)?.label ||
+                'Knowledge graph lens';
+            overrides.push({
+                id: 'knowledge-graph-relationships',
+                label,
+                onClear: () => selectKgRelationshipMode(KG_RELATIONSHIP_MODES.INSIGHTS)
+            });
+        }
+        return overrides;
+    }, [
+        activeCanvasView,
+        activeGraphFilters,
+        clearBranchLens,
+        kgRelationshipMode,
+        mindmapRelationshipMode,
+        selectKgRelationshipMode,
+        selectedBranchId,
+        selectedBranchTitle,
+        setActiveGraphFilters
+    ]);
+
+    const shellStatusBar = useWorkspaceShell ? (
+        <ShellStatusBar
+            items={shellStatusItems}
+            overrides={shellTemporaryOverrides}
+        />
+    ) : null;
+
     const shellBottomTray = useWorkspaceShell && shellActions.bottomTray ? (
         <ShellReviewTrayHost
             activeAIDraftSession={activeAIDraftSession}
@@ -2511,14 +2825,20 @@ const App = () => {
             hidden={false}
             selectedNodes={selectedNodes || []}
             autoOpenToken={nextStepsOpenToken}
-            summaryLabel={nextStepsOpenToken ? 'Next steps' : 'AI Helpers'}
-            onClose={() => setIsAiHelpersOpen(false)}
+            summaryLabel={
+                shellActions.rightPanel?.id === NEXT_STEPS_GUIDE_PANEL_ID
+                    ? 'Next steps'
+                    : 'AI Helpers'
+            }
+            onClose={closeAiHelpersPanel}
         />
     ) : null;
     const shellRightPanel = shellAiHelpersPanel || (shouldRenderRightPropertiesPanel ? (
         <ShellPropertiesPanelHost
             edges={edges}
             nodes={nodes}
+            onApplyBranch={applyBranchProperties}
+            onApplySource={applySourceProperties}
             onClearBranch={clearBranchLens}
             onCloseBranch={shellActions.closeRightPanel}
             onCloseEdge={closeEdgeInspector}
@@ -2671,12 +2991,7 @@ const App = () => {
             onValidationReportChange={setValidationReport}
             onSelectNode={focusNodeForReview}
             onOpenSources={openSourcesLibrary}
-            onOpenAiHelpers={() => {
-                setInspectorNodeId(undefined);
-                setInspectorEdgeId(undefined);
-                shellActions.closeRightPanel();
-                setIsAiHelpersOpen(true);
-            }}
+            onOpenAiHelpers={() => openAiHelpersPanel(AI_HELPERS_GUIDE_PANEL_ID)}
             aiUsage={aiUsage}
             aiUsageStatus={aiUsageStatus}
             aiUsageReviewStatus={aiUsageReviewStatus}
@@ -2712,14 +3027,19 @@ const App = () => {
                 setFlowList={setFlowList}
                 onOpenSources={openSourcesLibrary}
                 onToggleAiHelpers={() => {
+                    if (useWorkspaceShell) {
+                        if (shellActions.rightPanel?.kind === 'guide') {
+                            shellActions.closeRightPanel();
+                        } else {
+                            openAiHelpersPanel(AI_HELPERS_GUIDE_PANEL_ID);
+                        }
+                        return;
+                    }
                     setIsAiHelpersOpen((current) => {
                         const nextOpen = !current;
                         if (nextOpen) {
                             setInspectorNodeId(undefined);
                             setInspectorEdgeId(undefined);
-                            if (useWorkspaceShell) {
-                                shellActions.closeRightPanel();
-                            }
                         }
                         return nextOpen;
                     });
@@ -3192,7 +3512,7 @@ const App = () => {
                             selectedNodes={selectedNodes || []}
                             autoOpenToken={nextStepsOpenToken}
                             summaryLabel={nextStepsOpenToken ? 'Next steps' : 'AI Helpers'}
-                            onClose={() => setIsAiHelpersOpen(false)}
+                            onClose={closeAiHelpersPanel}
                         />
                     </Panel>
                 ) : null}
@@ -3252,6 +3572,7 @@ const App = () => {
                     leftWidth={workspaceShellLeftWidth}
                     leftPanel={workspaceNavigator}
                     centerCanvas={workspaceBody}
+                    statusBar={shellStatusBar}
                     rightPanel={shellRightPanel}
                     bottomTray={shellBottomTray}
                     overlayLayer={shellOverlayLayer}

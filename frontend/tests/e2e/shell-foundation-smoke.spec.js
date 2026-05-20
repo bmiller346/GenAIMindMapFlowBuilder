@@ -84,9 +84,12 @@ test('feature-flagged shell renders wrapper slots without legacy primary floatin
     await expect(page.getByTestId('workspace-shell')).toBeVisible();
     await expect(page.getByTestId('workspace-shell')).toHaveAttribute('data-has-left-panel', 'true');
     await expect(page.getByTestId('workspace-shell')).toHaveAttribute('data-has-right-panel', 'false');
+    await expect(page.getByTestId('workspace-shell')).toHaveAttribute('data-has-status-bar', 'true');
     await expect(page.getByTestId('shell-ribbon')).toBeVisible();
     await expect(page.getByTestId('workspace-shell-left-slot')).toBeVisible();
     await expect(page.getByTestId('workspace-shell-canvas-slot')).toBeVisible();
+    await expect(page.getByTestId('workspace-shell-status-slot')).toBeVisible();
+    await expect(page.getByTestId('workspace-shell-status-slot')).toContainText('View');
     await expect(page.getByRole('region', { name: 'Workspace tools' })).toBeVisible();
     await expect(page.getByTestId('workspace-shell-overlay-slot')).toBeVisible();
     await expectMountedSlotAttributesMatch(page);
@@ -117,6 +120,7 @@ test('feature-flagged shell keeps predictable slots at a narrow viewport', async
     await expect(page.getByTestId('workspace-shell')).toBeVisible();
     await expect(page.getByTestId('workspace-shell')).toHaveAttribute('data-has-left-panel', 'true');
     await expect(page.getByTestId('workspace-shell')).toHaveAttribute('data-has-right-panel', 'false');
+    await expect(page.getByTestId('workspace-shell')).toHaveAttribute('data-has-status-bar', 'true');
     await expectMountedSlotAttributesMatch(page);
     await expect(page.getByTestId('shell-ribbon')).toBeVisible();
     await expect(page.getByTestId('workspace-shell-left-slot')).toBeVisible();
@@ -128,16 +132,21 @@ test('feature-flagged shell keeps predictable slots at a narrow viewport', async
         const canvas = document.querySelector('[data-testid="workspace-shell-canvas-slot"]');
         const ribbon = document.querySelector('[data-testid="shell-ribbon"]');
         const left = document.querySelector('[data-testid="workspace-shell-left-slot"]');
+        const status = document.querySelector('[data-testid="workspace-shell-status-slot"]');
         const shellRect = shell?.getBoundingClientRect();
         const canvasRect = canvas?.getBoundingClientRect();
         const ribbonRect = ribbon?.getBoundingClientRect();
         const leftRect = left?.getBoundingClientRect();
+        const statusRect = status?.getBoundingClientRect();
 
         return {
             bodyOverflow: document.documentElement.scrollWidth - window.innerWidth,
             shellWidth: shellRect?.width || 0,
             canvasWidth: canvasRect?.width || 0,
             ribbonWidth: ribbonRect?.width || 0,
+            statusHeight: statusRect?.height || 0,
+            canvasBottom: canvasRect?.bottom || 0,
+            statusTop: statusRect?.top || 0,
             leftWidth: leftRect?.width || 0,
             leftRight: leftRect?.right || 0
         };
@@ -147,6 +156,8 @@ test('feature-flagged shell keeps predictable slots at a narrow viewport', async
     expect(metrics.shellWidth).toBeLessThanOrEqual(390);
     expect(metrics.canvasWidth).toBeGreaterThan(300);
     expect(metrics.ribbonWidth).toBeGreaterThan(300);
+    expect(metrics.statusHeight).toBeGreaterThan(20);
+    expect(metrics.canvasBottom).toBeLessThanOrEqual(metrics.statusTop + 1);
     expect(metrics.leftWidth).toBeLessThanOrEqual(390);
     expect(metrics.leftRight).toBeLessThanOrEqual(390);
 });
@@ -171,13 +182,16 @@ const expectMountedSlotAttributesMatch = async (page) => {
             leftAttr: shell?.getAttribute('data-has-left-panel'),
             rightAttr: shell?.getAttribute('data-has-right-panel'),
             bottomAttr: shell?.getAttribute('data-has-bottom-tray'),
+            statusAttr: shell?.getAttribute('data-has-status-bar'),
             hasLeftSlot: Boolean(document.querySelector('[data-testid="workspace-shell-left-slot"]')),
             hasRightSlot: Boolean(document.querySelector('[data-testid="workspace-shell-right-slot"]')),
-            hasBottomSlot: Boolean(document.querySelector('[data-testid="workspace-shell-bottom-slot"]'))
+            hasBottomSlot: Boolean(document.querySelector('[data-testid="workspace-shell-bottom-slot"]')),
+            hasStatusSlot: Boolean(document.querySelector('[data-testid="workspace-shell-status-slot"]'))
         };
     });
 
     expect(mountedSlots.leftAttr).toBe(String(mountedSlots.hasLeftSlot));
     expect(mountedSlots.rightAttr).toBe(String(mountedSlots.hasRightSlot));
     expect(mountedSlots.bottomAttr).toBe(String(mountedSlots.hasBottomSlot));
+    expect(mountedSlots.statusAttr).toBe(String(mountedSlots.hasStatusSlot));
 };

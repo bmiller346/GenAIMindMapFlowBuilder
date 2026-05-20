@@ -619,7 +619,7 @@ test('shell right rail persists relationship metadata edits', async ({ page }) =
 });
 
 test('shell right rail shows branch properties from the active branch lens', async ({ page }) => {
-    await setupMockBackend(page, { enableShell: true });
+    const { savedRequests, state } = await setupMockBackend(page, { enableShell: true });
 
     await page.setViewportSize({ width: 1600, height: 1000 });
     await page.goto('/');
@@ -641,13 +641,31 @@ test('shell right rail shows branch properties from the active branch lens', asy
     await expect(rightRail.locator('.branch-properties-panel')).toContainText('Relationships');
     await expect(page.locator('.metadata-inspector-floating-dock')).toHaveCount(0);
 
+    await rightRail.getByLabel('Branch title').fill('Branch A revised');
+    await rightRail.getByLabel('Branch owner').fill('Ops owner');
+    await rightRail.getByRole('button', { name: 'Apply branch' }).click();
+
+    await expect
+        .poll(() => {
+            const branch = parseSnapshot(state.savedFlowJson).nodes.find((item) => item.id === 'branch-a');
+            return {
+                title: branch?.data?.title,
+                owner_id: branch?.data?.owner_id
+            };
+        })
+        .toEqual({
+            title: 'Branch A revised',
+            owner_id: 'Ops owner'
+        });
+    expect(savedRequests.length).toBeGreaterThan(0);
+
     await rightRail.getByRole('button', { name: 'Clear lens' }).click();
     await expect(page.getByRole('region', { name: 'Active canvas scope' })).toHaveCount(0);
     await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
 });
 
 test('shell right rail shows source properties from the source library', async ({ page }) => {
-    await setupMockBackend(page, { enableShell: true });
+    const { savedRequests, state } = await setupMockBackend(page, { enableShell: true });
 
     await page.setViewportSize({ width: 1600, height: 1000 });
     await page.goto('/');
@@ -671,6 +689,26 @@ test('shell right rail shows source properties from the source library', async (
     await expect(rightRail.locator('.source-properties-panel')).toContainText('1 nodes');
     await expect(rightRail.locator('.source-properties-panel')).toContainText('Selection root');
     await expect(page.locator('.metadata-inspector-floating-dock')).toHaveCount(0);
+
+    await rightRail.getByLabel('Source title').fill('Shell Source Brief revised');
+    await rightRail.getByLabel('Source classification').fill('operating-guide');
+    await rightRail.getByRole('button', { name: 'Apply source' }).click();
+
+    await expect
+        .poll(() => {
+            const source = parseSnapshot(state.savedFlowJson).source_library.find(
+                (item) => item.id === 'source-shell-brief'
+            );
+            return {
+                title: source?.title,
+                classification: source?.classification
+            };
+        })
+        .toEqual({
+            title: 'Shell Source Brief revised',
+            classification: 'operating-guide'
+        });
+    expect(savedRequests.length).toBeGreaterThan(0);
 
     await rightRail.getByRole('button', { name: 'Close' }).click();
     await expect(page.locator('.workspace-shell__right')).toHaveCount(0);

@@ -228,17 +228,23 @@ const shellSlotRects = async (page) =>
         const left = rectFor('.workspace-shell__left');
         const right = rectFor('.workspace-shell__right');
         const bottom = rectFor('.workspace-shell__bottom');
+        const status = rectFor('.workspace-shell__status');
         const ribbon = rectFor('.workspace-shell__ribbon');
 
         return {
             left,
             right,
             bottom,
+            status,
             ribbon,
             leftBottomOverlap: overlapArea(left, bottom),
             rightBottomOverlap: overlapArea(right, bottom),
+            leftStatusOverlap: overlapArea(left, status),
+            rightStatusOverlap: overlapArea(right, status),
+            bottomStatusOverlap: overlapArea(bottom, status),
             leftRibbonOverlap: overlapArea(left, ribbon),
             rightRibbonOverlap: overlapArea(right, ribbon),
+            bottomAboveStatus: bottom && status ? bottom.bottom <= status.top + 1 : true,
             bodyOverflow: document.documentElement.scrollWidth - window.innerWidth
         };
     });
@@ -492,15 +498,23 @@ test('shell review tray stays bounded with the left rail at desktop and narrow w
 
     const desktopRects = await shellSlotRects(page);
     expect(desktopRects.leftBottomOverlap).toBe(0);
+    expect(desktopRects.leftStatusOverlap).toBe(0);
+    expect(desktopRects.bottomStatusOverlap).toBe(0);
+    expect(desktopRects.bottomAboveStatus).toBe(true);
     expect(desktopRects.leftRibbonOverlap).toBe(0);
     expect(desktopRects.bodyOverflow).toBeLessThanOrEqual(2);
+    expect(desktopRects.status?.height || 0).toBeGreaterThan(20);
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator('.workspace-shell__bottom .review-tray')).toBeVisible();
 
     const narrowRects = await shellSlotRects(page);
     expect(narrowRects.leftBottomOverlap).toBe(0);
+    expect(narrowRects.leftStatusOverlap).toBe(0);
+    expect(narrowRects.bottomStatusOverlap).toBe(0);
+    expect(narrowRects.bottomAboveStatus).toBe(true);
     expect(narrowRects.leftRibbonOverlap).toBe(0);
     expect(narrowRects.bodyOverflow).toBeLessThanOrEqual(2);
     expect(narrowRects.bottom?.height || 0).toBeLessThanOrEqual(380);
+    expect(narrowRects.status?.height || 0).toBeGreaterThan(20);
 });

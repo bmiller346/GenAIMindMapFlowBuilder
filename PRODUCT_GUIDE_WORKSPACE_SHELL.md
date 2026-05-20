@@ -75,9 +75,34 @@ Allowed overlays:
 Avoid placing persistent AI forms, metadata forms, or review queues over the
 canvas.
 
+### Bottom Status Bar
+
+The bottom status bar owns lightweight context and temporary view state.
+
+It should answer: "What am I looking at, and what temporary display rules are
+active?"
+
+Valid status subjects:
+
+- Selection count.
+- Active branch, focus, or isolated scope.
+- Active map lens or graph filter.
+- Relationship labels on/off.
+- Source, evidence, risk, or confidence coloring.
+- Compact source coverage and review-candidate counts.
+- Temporary override chips with clear actions.
+
+It should not become another review tray, metadata panel, or AI form. Long
+configuration belongs in the ribbon or a menu; generated work that requires
+accept/reject belongs in the Review Tray.
+
 ### Right Properties Panel
 
 The right panel owns metadata for the selected object.
+
+It may also host a lightweight AI Helpers / Next Steps guide surface. That
+guide is not metadata and should not become a draft-review or mutation-accept
+surface.
 
 Valid panel subjects:
 
@@ -86,6 +111,7 @@ Valid panel subjects:
 - Branch.
 - Source.
 - Workspace.
+- Guide.
 
 It should preserve editing behavior and source traceability, but it should not
 host large AI draft review flows.
@@ -132,13 +158,15 @@ It should not host persistent workspace tools.
 3. Reviewable AI output belongs in the bottom tray.
 4. Workspace orientation belongs in the left navigator.
 5. Map mode, lens, labels, branch colors, and layout belong in the ribbon.
-6. Quick Ask AI for selected nodes can stay lightweight, but graph-changing
+6. Temporary view overrides should be visible in the bottom status bar and easy
+   to clear.
+7. Quick Ask AI for selected nodes can stay lightweight, but graph-changing
    work must stay preview-first.
-7. Relationship labels are useful as a lens, not as permanent visual clutter.
-8. Branch colors should help scan structure without overpowering node text.
-9. Floating docks are transitional unless a specific utility window truly needs
+8. Relationship labels are useful as a lens, not as permanent visual clutter.
+9. Branch colors should help scan structure without overpowering node text.
+10. Floating docks are transitional unless a specific utility window truly needs
    free placement.
-10. The canonical graph remains the source of truth; shell state is layout
+11. The canonical graph remains the source of truth; shell state is layout
     state only.
 
 ## AI Workflow Language

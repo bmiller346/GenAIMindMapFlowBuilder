@@ -22,7 +22,8 @@ export const SHELL_RIGHT_PANEL_KINDS = Object.freeze([
     'node',
     'edge',
     'branch',
-    'source'
+    'source',
+    'guide'
 ]);
 
 export const SHELL_BOTTOM_TRAYS = Object.freeze([
@@ -247,6 +248,8 @@ const useShellStore = create((set, get) => ({
         get().openRightPanel({ kind: 'source', id: sourceId }),
     openBranchMetadata: (branchId) =>
         get().openRightPanel({ kind: 'branch', id: branchId }),
+    openGuidePanel: (guideId = 'aiHelpers') =>
+        get().openRightPanel({ kind: 'guide', id: guideId }),
     openBottomTray: (tray, options = {}) => {
         const trayKind = normalizeKind(tray, SHELL_BOTTOM_TRAYS);
         if (!trayKind) {

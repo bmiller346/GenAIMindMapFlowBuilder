@@ -1,6 +1,6 @@
 # UI Shell And Ribbon Refactor Roadmap
 
-Last updated: 2026-05-19
+Last updated: 2026-05-20
 
 ## Current Progress Snapshot
 
@@ -8,7 +8,7 @@ This refactor is being worked by multiple lanes. Do not treat a partially migrat
 
 ### Coordination Checkpoint: 2026-05-19
 
-Current global status: the shell refactor is a real opt-in MVP, not a default product rollout. The review-tray compatibility bridge has been removed, and AI Helpers now route to the shell right rail instead of a canvas overlay. The next bottleneck is finishing right-panel authority and default-readiness polish without reintroducing crowded UI.
+Current global status: the shell refactor is a real opt-in MVP, not a default product rollout. The review-tray compatibility bridge has been removed, AI Helpers / Next Steps now route through the shell right-rail guide route, and node/edge/source/branch metadata use shell right-panel authority. The next bottleneck is NodeInspector AI-review cleanup plus default-readiness polish without reintroducing crowded UI.
 
 Working-tree caution:
 
@@ -30,27 +30,27 @@ Ready for agents to build on:
   - right properties panel
   - bottom review tray
   - overlay layer
-- `shellStore` exists and has routing actions for ribbon, left panel, right panel, bottom tray, overlay, and active scope.
+- `shellStore` exists and has routing actions for ribbon, left panel, right panel, guide panel, bottom tray, overlay, and active scope.
 - Left navigator MVP is mounted behind the shell flag.
 - Node/edge properties MVP is mounted behind the shell flag.
 - Review tray MVP is mounted behind the shell flag for AI draft sessions, source draft review, workspace health validation issues, Connections, task preview/checklist, source repair, and Issues review.
-- AI Helpers / Next steps are mounted in the shell right rail behind the shell flag instead of the React Flow bottom-right overlay.
+- AI Helpers / Next steps route through `shellStore.rightPanel.kind === 'guide'` behind the shell flag instead of the React Flow bottom-right overlay.
 - LocalViews controls have been split into smaller modules. The shell Map tab now uses a dedicated `MapRibbonHost` rather than mounting the full `LocalViewsPanel`.
 
 Not ready for broad QA or cleanup:
 
 - Do not QA the shell as a finished layout.
 - Do not retire `FloatingDock` yet.
-- Do not expect all output/review surfaces to be final. Connections, task preview, checklist preview, source repair, and Issues review outputs now have direct shell tray routes; accepted/canonical `tasks` remains a structured canvas view. Source and branch properties now have read-only shell right-rail MVPs.
+- Do not expect all output/review surfaces to be final. Connections, task preview, checklist preview, source repair, and Issues review outputs now have direct shell tray routes; accepted/canonical `tasks` remains a structured canvas view. Source and branch properties now have editable shell right-rail MVPs.
 - Do not treat default legacy layout as a failure. The shell is intentionally flag-gated.
 - Do not run full visual regression against the shell without checking the lane readiness notes below; several surfaces are scaffolded but not product-complete.
 
 Current verification:
 
 - `npm run build` from `frontend/`: passing.
-- `node --test tests/shellStore.test.mjs tests/uiShellFeatureFlag.test.mjs tests/shellComponents.test.mjs tests/shellLayoutState.test.mjs` from `frontend/`: passing, 31 tests.
+- `node --test tests/shellStore.test.mjs tests/uiShellFeatureFlag.test.mjs tests/shellComponents.test.mjs tests/shellLayoutState.test.mjs` from `frontend/`: passing, 35 tests.
 - `npx playwright test tests/e2e/shell-foundation-smoke.spec.js` from `frontend/`: passing, 3 tests.
-- `npx playwright test tests/e2e/selection-shell-regression.spec.js` from `frontend/`: passing active coverage, 8 passed and 2 intentional `fixme` skips.
+- `npx playwright test tests/e2e/selection-shell-regression.spec.js` from `frontend/`: passing active coverage, 9 passed and 2 intentional `fixme` skips.
 - `npx playwright test tests/e2e/review-tray-regression.spec.js` from `frontend/`: passing, 5 tests.
 
 Known active QA gaps:
@@ -204,16 +204,16 @@ Not complete yet:
 - `WorkspaceShellAdapter`, `ShellPropertiesPanelHost`, and `ShellReviewTrayHost` still receive app state as props; they do not own data fetching or canvas state.
 - `App.jsx` still owns workflow state, but no longer imports `shellStore` directly.
 - `isSourcesOpen` remains for the default legacy path only; shell-path source-library opening is routed through `shellStore.leftPanel`.
-- `isAiHelpersOpen`, inspector ids, active AI draft/session state, and active AI previews still drive legacy and shell render decisions. `isAiHelpersOpen` is shell-placed in the right rail, but not yet owned by `shellStore`.
-- `shellStore.rightPanel` is still mirrored from graph-store inspector ids, not authoritative.
+- `isAiHelpersOpen` remains for the default legacy path only; shell-path AI Helpers / Next steps route through `shellStore.rightPanel.kind === 'guide'`.
+- Legacy inspector ids can still be promoted into `shellStore.rightPanel`, but `rightPanel` is the shell-path render authority for node, edge, source, branch, and guide surfaces.
 - `shellStore.bottomTray` is now authoritative for the currently migrated tray hosts and for local-output review tray route intent. Connections, task preview, checklist preview, source repair, and Issues review outputs now render directly through `ShellReviewTrayHost`; accepted/canonical `tasks` remains in the structured canvas `Tasks` view; no shell local-output fallback bridge remains.
 
 Next steps for Agent 2:
 
-1. Replace `isAiHelpersOpen` with a shell right-panel route only after Properties Panel and AI helper ownership agree on whether helpers should be a formal right-panel kind or a guide surface.
-2. Move right-panel authority from mirrored inspector ids to `shellStore.rightPanel` only after Properties Panel confirms source/branch routes.
-3. Keep source-library routing shell-only until QA confirms the embedded left-rail source library on narrow viewports.
-4. Next router cleanup should focus on `isAiHelpersOpen` and right-panel authority, not review-tray local-output routing.
+1. Keep `isAiHelpersOpen` legacy-only and prevent new shell code from reading it as layout state.
+2. Keep source-library routing shell-only until QA confirms the embedded left-rail source library on narrow viewports.
+3. Continue retiring legacy inspector-id callers only where the default/floating path has a clear replacement.
+4. Do not route generated/reviewable work through the guide panel; keep those flows in Review Tray.
 
 ### Agent 3: Ribbon / LocalViews Split
 
@@ -333,7 +333,7 @@ Not complete yet:
 - Branch/outline tree, saved views, and source navigation grouping are not split into dedicated left-nav sections yet.
 - A first read-only Outline route exists, but it is not yet a full branch/outline management surface.
 - A first Activity route exists, but it is the existing activity history surface embedded in the rail, not a redesigned timeline or notification center.
-- A first Sources route exists for the source library, but source internals are still the existing `SourcesPanel`; source metadata editing remains a Properties Panel follow-up.
+- A first Sources route exists for the source library, and source metadata editing is owned by the shell Properties Panel; source internals are still the existing `SourcesPanel`.
 - Outline/Activity collapse and resize now exist, but browser-level drag automation is still limited to visibility/state coverage rather than precise drag-distance assertions.
 - The left rail is only visible in the shell-flag path. The default path intentionally remains the old floating dock.
 - `isSourcesOpen` is now legacy-only for the shell-off path. Do not treat source library internals still looking like the existing SourcesPanel as a left-nav failure yet.
@@ -423,7 +423,7 @@ Next steps for Agent 6:
 
 ### Agent 5: Properties Panel
 
-Status: node/edge properties rail plus read-only source/branch properties MVPs complete behind the shell flag; default compatibility behavior preserved.
+Status: node/edge properties rail plus editable source/branch properties MVPs complete behind the shell flag; default compatibility behavior preserved.
 
 Completed:
 
@@ -435,12 +435,14 @@ Completed:
 - Shifted shell-path node/edge metadata authority to `shellStore.rightPanel`; legacy inspector ids can still be promoted for compatibility, but the shell properties host now renders from the right-panel route.
 - Stopped legacy AI action previews from mounting the floating metadata inspector when the shell flag is enabled; reviewable proposal surfaces should continue moving toward the bottom tray.
 - Added Playwright coverage for shell-flag node metadata editing and shell-flag relationship metadata editing in `frontend/tests/e2e/selection-shell-regression.spec.js`.
-- Added an explicit branch Properties action to the active branch-lens banner and a read-only `BranchPropertiesPanel` in the shell right rail.
+- Added an explicit branch Properties action to the active branch-lens banner and an editable `BranchPropertiesPanel` in the shell right rail.
 - Added Playwright coverage for shell-flag branch properties routing and verified AI draft review still routes to the bottom tray instead of the right rail.
-- Added an explicit source library Properties action and a read-only `SourcePropertiesPanel` in the shell right rail.
+- Added an explicit source library Properties action and an editable `SourcePropertiesPanel` in the shell right rail.
 - Added Playwright coverage for shell-flag source properties routing from the source library while keeping the source library surface closed after routing.
+- Added branch title/type/status/owner/due/summary editing from the shell right rail, applied to the canonical branch root node.
+- Added source title/status/classification/version/path editing from the shell right rail, applied to the persisted source library and synced to matching data-source nodes when present.
 - Added shell-store coverage that source and branch metadata routes open the right panel and clear review trays.
-- Added server-rendered component coverage that source and branch properties panels render read-only summaries.
+- Added server-rendered component coverage that source and branch properties panels render their summaries.
 - Added server-rendered component coverage that `ShellPropertiesPanelHost` uses the shell right-panel route as its metadata source.
 - Fixed a shell-mount React Flow update loop by stabilizing React Flow config props and avoiding redundant selected-node array state updates.
 - Verified `node --test tests/shellStore.test.mjs` and `node --test tests/shellComponents.test.mjs` from `frontend/` pass.
@@ -449,8 +451,7 @@ Completed:
 
 Not complete yet:
 
-- Source properties are read-only for this MVP; source metadata editing is not implemented.
-- Branch properties are read-only for this MVP; branch metadata editing is not implemented.
+- Source and branch properties now support focused metadata editing; richer source internals and branch governance fields remain future work.
 - AI draft sessions, AI action previews, source draft review, and other reviewable workflows are not moved to the right rail. That is intentional; those belong to Review Tray.
 - `NodeInspector` still contains AI review code for compatibility with the legacy/floating path. It has only been suppressed in the shell right rail via `metadataOnly`.
 - The right rail appears only in the shell-flag path. The default path intentionally remains the old floating metadata dock.
@@ -467,17 +468,17 @@ Dependencies:
 
 QA guidance:
 
-- Safe to QA now with the shell flag on: selecting/opening a node or edge routes metadata to the fixed right rail, the active branch lens can open read-only branch properties explicitly, and node/edge/branch properties do not appear at the same time.
+- Safe to QA now with the shell flag on: selecting/opening a node or edge routes metadata to the fixed right rail, the active branch lens can open and edit branch properties explicitly, source library Properties can edit source metadata, and node/edge/source/branch properties do not appear at the same time.
 - Safe to QA now with the shell flag off: metadata still appears in the floating dock and behaves as before.
-- Do not mark the properties lane complete yet: source metadata editing, branch metadata editing, and final legacy inspector-id cleanup still need follow-up.
-- Do not fail yet: "source metadata is read-only", "branch metadata is read-only", "AI draft review is not in the right rail", or "legacy NodeInspector still contains AI review code." Those are known deferred steps.
+- Do not mark the properties lane complete yet: richer source internals, richer branch governance fields, and final legacy inspector-id cleanup still need follow-up.
+- Do not fail yet: "source metadata fields are still limited", "branch metadata fields are still limited", "AI draft review is not in the right rail", or "legacy NodeInspector still contains AI review code." Those are known deferred steps.
 - Do not preemptively QA full FloatingDock retirement from this lane; that depends on Review Tray and default-shell rollout.
 
 Next steps for Agent 5:
 
 1. Keep node/edge metadata green.
-2. Upgrade source properties from read-only only after Agent 4 defines source-library ownership.
-3. Upgrade branch properties from read-only to editable only after save semantics are clear.
+2. Keep source-property edits scoped to library metadata until Agent 4 defines deeper source-library ownership.
+3. Keep branch-property edits scoped to the branch root node until richer branch save semantics are clear.
 4. Keep selecting node, edge, source, or branch opening exactly one right-panel surface.
 5. Add focused tests for source and branch panel behavior once editable.
 6. Do not put AI proposal review into the right panel.
@@ -502,7 +503,7 @@ Completed:
   - shell left navigator tab switching, collapse, event-driven open-tab behavior, and resize handle visibility
   - shell right rail node metadata edit/apply local behavior
   - shell right rail relationship metadata edit/apply/save
-  - shell right rail read-only branch properties from the active branch lens
+  - shell right rail editable branch properties from the active branch lens
   - shell AI draft review routing to the bottom tray instead of the right rail
 - Maintained `frontend/tests/e2e/review-tray-regression.spec.js` coverage for:
   - shell review tray Sources path for generated source draft review before accept
@@ -562,6 +563,7 @@ This section is the source of truth for agent handoffs. Do not treat a slot, pan
   - Verified: `node --test frontend/tests/shellStore.test.mjs` passes and `npm run build` passes.
 - `App.jsx` now mirrors a few safe legacy actions into shell state:
   - Node/edge selection opens `rightPanel`.
+  - AI Helpers / Next Steps opens `rightPanel.kind === 'guide'` on the shell path.
   - AI draft review opens `bottomTray`.
   - Workspace dock tab open opens `leftPanel`.
   - Structured AI and empty-canvas Ask AI set ribbon tab/scope.
@@ -582,7 +584,7 @@ This section is the source of truth for agent handoffs. Do not treat a slot, pan
   - Verified: `npm run build` and `npx playwright test tests/e2e/review-tray-regression.spec.js` from `frontend/` pass.
 - Properties rail MVP is implemented.
   - Files: `frontend/src/App.jsx`, `frontend/src/global-components/NodeInspector.jsx`, `frontend/src/shell/ShellRightPanel.jsx`, `frontend/src/shell/ShellPropertiesPanelHost.jsx`, `frontend/src/shell/BranchPropertiesPanel.jsx`, `frontend/src/index.css`.
-  - Status: shell-flag path hosts selected node and edge metadata plus explicit read-only branch properties in the right rail; default path preserves the legacy metadata floating dock.
+  - Status: shell-flag path hosts selected node and edge metadata plus editable source/branch properties in the right rail; default path preserves the legacy metadata floating dock.
   - Tests: `frontend/tests/e2e/selection-shell-regression.spec.js` covers node, edge, branch, source properties, and AI draft tray separation.
   - Verified: `npx playwright test tests/e2e/selection-shell-regression.spec.js` and `npm run build` from `frontend/` pass.
 
@@ -590,11 +592,12 @@ This section is the source of truth for agent handoffs. Do not treat a slot, pan
 
 - The shell store is currently a migration router, not the only UI renderer.
 - `isSourcesOpen` remains for the default legacy source library path only.
-- `isAiHelpersOpen`, `inspectorNodeId`, `inspectorEdgeId`, `activeAIDraftSession`, and `activeAIActionPreview` still drive live legacy surfaces.
+- `isAiHelpersOpen` remains for the default legacy AI Helpers path only; shell-path helpers use `shellStore.rightPanel.kind === 'guide'`.
+- `inspectorNodeId`, `inspectorEdgeId`, `activeAIDraftSession`, and `activeAIActionPreview` still drive live legacy surfaces.
 - `NodeInspector` still hosts metadata and AI preview/draft content together.
 - Bottom tray state and host exist; AI draft sessions, source draft review, and workspace health validation have routed tray hosts.
 - Find connections, task preview, checklist preview, source repair, and gaps/SME Issues are directly mounted in the shell tray. Accepted/canonical tasks remain in the structured canvas `Tasks` view.
-- Right rail state and host exist for node/edge metadata plus read-only source/branch properties, but source metadata editing, branch metadata editing, and `NodeInspector` AI-review extraction remain future work.
+- Right rail state and host exist for node/edge metadata plus editable source/branch properties, but richer source/branch semantics and `NodeInspector` AI-review extraction remain future work.
 - WorkspaceDock is controlled and shell-mounted behind the flag, and the source library has a shell-left route. Deeper left-nav IA and source internals remain future work.
 - QA should validate the current compatibility behavior and shell-store unit rules now. Full shell screenshots should wait until the relevant visible slot migrations land.
 - Full `selection-shell-regression.spec.js` active coverage is green: 8 passed and 2 intentional `fixme` skips.
@@ -617,12 +620,13 @@ Agent 2 can continue with narrow shell-router extraction, but should not move ow
 - Moved shell wrapper/ribbon orchestration out of the App return branch through `WorkspaceShellAdapter`.
 - Added authoritative `shellStore.bottomTray` route actions for local-output review tabs while preserving the compatibility host renderer.
 - Added authoritative `shellStore.leftPanel` source-library routing for the shell path while preserving `isSourcesOpen` for the default legacy path.
+- Added authoritative `shellStore.rightPanel.kind === 'guide'` routing for shell-path AI Helpers / Next Steps while preserving `isAiHelpersOpen` for the default legacy path.
 
 The next safe State/Panel Router work is:
 
 - Replace direct App cleanup calls with shell actions where the visible shell route is active.
 - Add adapters from legacy inspector/draft/output-controller state into `rightPanel` and `bottomTray` renderers only as those renderers grow.
-- Leave `isSourcesOpen` legacy-only and do not replace `isAiHelpersOpen` until Ribbon/Review Tray split quick AI from review AI.
+- Keep `isSourcesOpen` and `isAiHelpersOpen` legacy-only on the non-shell path.
 - Keep all current legacy behavior intact until the shell flag path is visually verified.
 
 ## Goal
@@ -675,6 +679,42 @@ Several components also mix multiple responsibilities:
   - Presentation, persistence, drag behavior, and docking rules, but no global collision model.
 
 ## Target Layout
+
+### Technical App Layout Model
+
+Use Revit as a familiar spatial reference, not as a parity target. TraceSpace
+should feel like a controlled technical workspace: commands above, navigation
+beside the model, properties beside the selected object, lightweight context at
+the bottom, and reviewable/generated work in a dedicated approval tray.
+
+Slot grammar:
+
+- Top ribbon: commands, modes, lens controls, view controls, and workflow
+  launchers.
+- Left workspace rail: workspace/source/outline/activity navigation.
+- Center canvas: the readable map/model surface with only lightweight transient
+  overlays.
+- Right properties/guide rail: selected-object metadata plus lightweight guide
+  surfaces.
+- Bottom status bar: selection count, active scope, active lens/filter, source
+  coverage state, and temporary view overrides.
+- Bottom review tray: generated or reviewable work that requires accept/reject
+  before mutating the accepted workspace.
+- Overlay layer: short-lived menus, confirmations, and true modal flows.
+
+Routing rule of thumb:
+
+- If it edits or describes the selected object, route it to the right rail.
+- If it navigates workspace content, route it to the left rail.
+- If it reviews generated candidates before mutation, route it to the bottom
+  review tray.
+- If it changes canvas display, route it to the ribbon or bottom status bar.
+- If it is only a short choice or confirmation, use a menu, popover, or modal.
+
+Temporary view overrides should be explicit. Branch isolate, evidence coloring,
+relationship labels, source coverage coloring, relationship candidate overlays,
+and risk/evidence lenses should surface as visible temporary state instead of
+feeling like accidental map changes.
 
 ### Top Ribbon
 
@@ -747,6 +787,33 @@ Existing components to migrate here:
 - `EdgeInspector`
 - selected source metadata
 
+### Bottom Status Bar
+
+One lightweight strip for "what mode am I in?"
+
+This is not the Review Tray. It should stay compact and explain active context:
+
+- Selection count and selected scope.
+- Active branch or isolated branch state.
+- Active map view, lens, and relationship label state.
+- Source/evidence/risk coloring state.
+- Confidence/source coverage summary.
+- Temporary override chips with clear actions.
+
+Examples:
+
+- `3 selected`
+- `Branch isolate: Sandbox execution plan`
+- `Lens: Structure Only`
+- `Relationship labels visible`
+- `Evidence coloring active`
+- `19/20 sourced`
+- `3 review candidates pending`
+
+Temporary overrides should be easy to clear from this strip without opening a
+large form. The status bar can also expose compact view-filter menus when the
+full ribbon would be too far away.
+
 ### Bottom Review Tray
 
 One place where unresolved generated work waits for approval.
@@ -798,8 +865,18 @@ Add a shell/layout state separate from graph data.
     width?: number | null
   } | null,
   rightPanel: {
-    kind: 'node' | 'edge' | 'branch' | 'source' | null,
+    kind: 'node' | 'edge' | 'branch' | 'source' | 'guide' | null,
     id: string | null
+  },
+  statusBar: {
+    selectionCount?: number,
+    activeLens?: string | null,
+    activeScopeLabel?: string | null,
+    temporaryOverrides?: Array<{
+      id: string,
+      label: string,
+      clearable?: boolean
+    }>
   },
   bottomTray: {
     kind: 'drafts' | 'connections' | 'issues' | 'tasks' | 'sources' | 'activity',
@@ -871,14 +948,14 @@ Suggested owner: Shell/Foundation Agent.
 
 ### Phase 2: Centralize Layout State
 
-Status: first safe slice complete. `shellStore` exists and App mirrors selected node/edge, workspace navigation, AI draft tray, ribbon tab, and active scope into it. This phase is not fully complete because legacy booleans and graph-store inspector state still drive live rendering.
+Status: safe slices complete for shell-path source routing, right-panel metadata, AI Helpers / Next Steps guide routing, local-output review tray routing, ribbon tab, and active scope. This phase is not fully complete because legacy booleans and graph-store inspector state still support the default non-shell layout.
 
 Purpose: remove scattered local booleans from `App.jsx`.
 
 Move or adapt:
 
 - `isSourcesOpen`
-- `isAiHelpersOpen`
+- `isAiHelpersOpen` for the default legacy path only
 - inspector open state
 - active workspace dock tab
 - bottom review tray open state
@@ -989,14 +1066,14 @@ Suggested owner: Ribbon/LocalViews Agent.
 
 Purpose: make metadata predictable.
 
-Status: partially complete. Node and edge metadata plus read-only source/branch details are in the shell right rail behind the feature flag; source editing, branch editing, and AI-review cleanup remain.
+Status: partially complete. Node and edge metadata plus editable source/branch details are in the shell right rail behind the feature flag; richer source/branch fields and AI-review cleanup remain.
 
 Migrate:
 
 - `NodeInspector` - complete for metadata mode behind shell flag.
 - `EdgeInspector` - complete behind shell flag.
-- selected branch details - read-only MVP complete behind shell flag; metadata editing not started.
-- selected source details - read-only MVP complete behind shell flag; metadata editing not started.
+- selected branch details - editable MVP complete behind shell flag; richer branch governance fields not started.
+- selected source details - editable MVP complete behind shell flag; richer source governance fields not started.
 
 Implementation notes:
 
@@ -1056,7 +1133,61 @@ Exit criteria:
 
 Suggested owner: Review Tray Agent.
 
-### Phase 7: Retire FloatingDock As Primary Layout
+### Phase 7: Add Bottom Status Bar And Temporary View Overrides
+
+Status: first MVP complete behind the shell flag. `ShellStatusBar` renders as a
+dedicated shell slot, separate from the bottom Review Tray, and currently shows
+view, selection, source coverage, review count, branch focus, graph filters, and
+relationship-lens temporary overrides.
+
+Purpose: make map context and temporary display state visible without opening
+more panels.
+
+Create:
+
+- `frontend/src/shell/ShellStatusBar.jsx` - complete.
+- status-bar shell slot in `WorkspaceShell` / `WorkspaceShellAdapter` - complete.
+- status derivation helper for selection count, active branch/scope, active
+  lens, relationship labels, filter chips, and source/evidence coloring -
+  first pass complete in `App.jsx`.
+
+Route here:
+
+- Selection count and multi-select scope.
+- Active branch isolate/focus.
+- Active graph filters and relationship lens.
+- Relationship labels on/off.
+- Source coverage / evidence coloring / risk coloring state.
+- Pending review candidate count as a compact indicator.
+- Clear temporary override actions.
+
+Do not route here:
+
+- Accept/reject review flows.
+- Metadata editing.
+- Long AI forms.
+- Full filter configuration panels.
+- Export/output previews.
+
+Exit criteria:
+
+- Shell flag path shows a compact bottom status strip when there is meaningful
+  selection, scope, lens, filter, or temporary override state: complete for the
+  MVP set.
+- Clearing a temporary override from the status bar updates the same state as
+  the corresponding ribbon/map control: complete for branch focus, filters, and
+  relationship lenses.
+- The bottom status bar and bottom Review Tray do not visually fight each other;
+  the tray may sit above or replace the status strip while active, but the user
+  should not see two unrelated bottom command systems: first pass covered by
+  review tray and shell smoke tests.
+- Build passes and shell screenshot coverage proves the status bar does not
+  overlap left/right rails or the ribbon: build and shell smoke pass; broader
+  screenshot QA remains useful before default rollout.
+
+Suggested owner: Shell/Foundation + Ribbon/LocalViews Agent.
+
+### Phase 8: Retire FloatingDock As Primary Layout
 
 Purpose: remove the accidental overlap system.
 
@@ -1306,7 +1437,7 @@ Completed deliverables:
 
 Deferred deliverables:
 
-- Removing `isSourcesOpen` / `isAiHelpersOpen` from `App.jsx`.
+- Removing `isSourcesOpen` / legacy-only `isAiHelpersOpen` from `App.jsx` after the default shell rollout.
 - Making shell state the only renderer for inspector and review surfaces.
 - Migrating AI preview/draft rendering out of `NodeInspector`.
 
@@ -1314,7 +1445,7 @@ Dependencies before more work:
 
 - Right-panel authority work depends on Properties Panel source/branch routes.
 - Bottom-tray authority work depends on Review Tray migrating the next real workflow.
-- `isSourcesOpen` / `isAiHelpersOpen` migration depends on Left Rail, Ribbon, and Review Tray owning those visible workflow hosts.
+- `isSourcesOpen` removal depends on Left Rail ownership; `isAiHelpersOpen` removal depends on retiring the default legacy layout.
 
 ### Work Package 3: Controlled WorkspaceDock
 
@@ -1444,10 +1575,10 @@ Files changed:
 
 Blocking/dependent work:
 
-- State/Panel Router must decide when `shellStore.rightPanel` becomes authoritative instead of mirrored from legacy `inspectorNodeId` / `inspectorEdgeId`.
+- `shellStore.rightPanel` is authoritative for shell-path node, edge, source, branch, and guide routes; later cleanup can remove legacy inspector-id compatibility after the default/floating path is retired.
 - Review Tray must own AI draft/session/proposal review before `NodeInspector` can be simplified into pure metadata editing.
-- Source-library ownership and save semantics must be defined before source properties move beyond read-only projection details.
-- Ribbon/LocalViews must settle branch lens/branch selection interactions before branch properties move beyond the explicit read-only Properties action.
+- Source-library ownership and save semantics must be defined before source properties move beyond focused library metadata fields.
+- Ribbon/LocalViews must settle branch lens/branch selection interactions before branch properties move beyond the explicit branch-root metadata action.
 - CSS/Layout Systems and QA should verify right-rail scrolling, width, and narrow viewport behavior before the shell flag becomes default.
 
 Notes for QA:
@@ -1455,7 +1586,7 @@ Notes for QA:
 - Check both shell-flag-on and shell-flag-off behavior.
 - With the shell flag on, verify node metadata local apply and edge relationship save/apply in the fixed right rail.
 - With the shell flag off, verify the existing floating metadata inspector behavior still works.
-- Do not check editable source metadata, branch metadata editing, or AI draft review as complete under this work package.
+- Do not check richer source governance metadata, richer branch governance fields, or AI draft review as complete under this work package.
 - Latest command: `npx playwright test tests/e2e/selection-shell-regression.spec.js`.
 - Current result is green for active coverage: node metadata, edge metadata, branch properties, source properties, AI draft tray separation, shell mount, left navigator, and branch lens coverage pass; 2 intentional `fixme` cases remain skipped.
 

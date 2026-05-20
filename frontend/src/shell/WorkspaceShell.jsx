@@ -4,6 +4,7 @@ const WorkspaceShell = ({
     ribbon,
     leftPanel,
     centerCanvas,
+    statusBar,
     rightPanel,
     rightPanelPlaceholder,
     bottomTray,
@@ -14,6 +15,7 @@ const WorkspaceShell = ({
     const hasLeftPanel = Boolean(leftPanel);
     const hasRightPanel = Boolean(rightPanel || rightPanelPlaceholder);
     const hasBottomTray = Boolean(bottomTray || bottomTrayPlaceholder);
+    const hasStatusBar = Boolean(statusBar);
 
     return (
         <div
@@ -21,7 +23,8 @@ const WorkspaceShell = ({
                 'workspace-shell',
                 hasLeftPanel ? 'workspace-shell--has-left' : '',
                 hasRightPanel ? 'workspace-shell--has-right' : '',
-                hasBottomTray ? 'workspace-shell--has-bottom' : ''
+                hasBottomTray ? 'workspace-shell--has-bottom' : '',
+                hasStatusBar ? 'workspace-shell--has-status' : ''
             ]
                 .filter(Boolean)
                 .join(' ')}
@@ -30,6 +33,7 @@ const WorkspaceShell = ({
             data-has-left-panel={hasLeftPanel ? 'true' : 'false'}
             data-has-right-panel={hasRightPanel ? 'true' : 'false'}
             data-has-bottom-tray={hasBottomTray ? 'true' : 'false'}
+            data-has-status-bar={hasStatusBar ? 'true' : 'false'}
         >
             <div className="workspace-shell__ribbon" data-testid="workspace-shell-ribbon-slot">
                 {renderSlot(ribbon)}
@@ -66,6 +70,15 @@ const WorkspaceShell = ({
                     data-testid="workspace-shell-bottom-slot"
                 >
                     {bottomTray || bottomTrayPlaceholder}
+                </section>
+            ) : null}
+            {hasStatusBar ? (
+                <section
+                    className="workspace-shell__status"
+                    aria-label="Workspace status"
+                    data-testid="workspace-shell-status-slot"
+                >
+                    {statusBar}
                 </section>
             ) : null}
             <div
