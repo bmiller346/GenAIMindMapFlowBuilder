@@ -2024,6 +2024,10 @@ def normalize_requested_artifact_types(values: Any) -> list[str]:
         "executive_summary": "executive_summary",
         "news_story": "news_article",
         "article": "news_article",
+        "newsletter": "newsletter",
+        "newsletter_update": "newsletter",
+        "update_brief": "newsletter",
+        "intranet_update": "newsletter",
         "sme_question": "sme_questions",
         "task": "tasks",
     }
@@ -2114,6 +2118,8 @@ def validate_generated_artifacts(
             _validate_executive_summary_artifact(item, path, errors)
         elif artifact_type == "news_article":
             _validate_news_article_artifact(item, path, errors)
+        elif artifact_type == "newsletter":
+            _validate_newsletter_artifact(item, path, errors)
 
         validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
         validation.setdefault("status", "needs_review" if item["status"] == "needs_review" else "valid")
@@ -2508,18 +2514,170 @@ def _validate_news_article_artifact(item: dict[str, Any], path: str, errors: lis
     headline = str(data.get("headline") or data.get("title") or "").strip()
     if not headline:
         errors.append(f"{path}.data.headline: news_article requires a headline")
-    for key in ("sections", "quotes", "fact_checks"):
+    for key in ("sections", "quotes", "fact_checks", "source_backed_appendix"):
         if key in data and not isinstance(data.get(key), list):
             errors.append(f"{path}.data.{key}: must be a list when provided")
     has_body = bool(str(data.get("lede") or data.get("body") or "").strip())
     has_sections = isinstance(data.get("sections"), list) and bool(data.get("sections"))
     if not has_body and not has_sections:
         errors.append(f"{path}.data: news_article requires lede, body, or sections")
-    _mark_unsourced_review_items(
+    _normalize_news_article_items(item, path)
+
+
+def _validate_newsletter_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
+    data = item.get("data", {})
+    title = str(data.get("title") or "").strip()
+    if not title:
+        errors.append(f"{path}.data.title: newsletter requires a title")
+    for key in (
+        "highlights",
+        "sections",
+        "upcoming",
+        "risks",
+        "decisions_needed",
+        "visual_blocks",
+        "source_backed_appendix",
+    ):
+        if key in data and not isinstance(data.get(key), list):
+            errors.append(f"{path}.data.{key}: must be a list when provided")
+    has_content = bool(str(data.get("opening_note") or "").strip()) or any(
+        isinstance(data.get(key), list) and bool(data.get(key))
+        for key in ("highlights", "sections", "upcoming")
+    )
+    if not has_content:
+        errors.append(f"{path}.data: newsletter requires opening_note, highlights, sections, or upcoming")
+    _normalize_news_article_items(
         item,
         path,
-        ("sections", "quotes", "fact_checks"),
+        section_keys=(
+            "highlights",
+            "sections",
+            "upcoming",
+            "risks",
+            "decisions_needed",
+            "visual_blocks",
+            "source_backed_appendix",
+        ),
+        missing_source_message="Source evidence is missing for this newsletter item.",
+        issue_code="newsletter_item_needs_review",
+        issue_message="Newsletter item is missing source evidence and was marked needs_review.",
     )
+
+
+def _normalize_news_article_items(
+    item: dict[str, Any],
+    path: str,
+    *,
+    section_keys: tuple[str, ...] = ("sections", "quotes", "fact_checks", "source_backed_appendix"),
+    missing_source_message: str = "Source evidence is missing for this news article item.",
+    issue_code: str = "news_article_item_needs_review",
+    issue_message: str = "News article item is missing source evidence and was marked needs_review.",
+) -> None:
+    data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
+    validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
+    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
+    item_needs_review = False
+
+    for key in section_keys:
+        values = data.get(key)
+        if not isinstance(values, list):
+            if key == "source_backed_appendix":
+                data[key] = []
+            continue
+        for index, value in enumerate(values):
+            if not isinstance(value, dict):
+                continue
+            item_path = f"{path}.data.{key}.{index}"
+            source_refs = value.get("source_refs", [])
+            assumptions = value.get("assumptions", [])
+            metadata = value.get("metadata") if isinstance(value.get("metadata"), dict) else {}
+            if not isinstance(source_refs, list):
+                source_refs = []
+            if not isinstance(assumptions, list):
+                assumptions = []
+
+            source_backed = any(
+                isinstance(source_ref, dict)
+                and str(source_ref.get("document_id") or "").strip()
+                for source_ref in source_refs
+            )
+            explicit_review_state = str(
+                value.get("review_state") or value.get("status") or ""
+            ).strip()
+            explicit_needs_review = explicit_review_state in {
+                "needs_review",
+                "review",
+                "in_review",
+                "rejected",
+            } or value.get("needs_review") is True
+            if source_backed:
+                value["source_backed"] = True
+                value["needs_review"] = explicit_needs_review
+                value["review_state"] = explicit_review_state or "reviewed"
+                value["status"] = "needs_review" if explicit_needs_review else "reviewed"
+                value["source_signal"] = str(
+                    value.get("source_signal")
+                    or metadata.get("source_signal")
+                    or "explicit_text"
+                )
+                metadata.setdefault("source_signal", value["source_signal"])
+                metadata.setdefault(
+                    "review_reason",
+                    "Source reference supplied; reviewer marked item for review."
+                    if explicit_needs_review
+                    else "Source reference supplied.",
+                )
+                item_needs_review = item_needs_review or explicit_needs_review
+            else:
+                review_assumption = missing_source_message
+                if not any(str(assumption).strip() for assumption in assumptions):
+                    assumptions = [review_assumption]
+                value["source_backed"] = False
+                value["needs_review"] = True
+                value["review_state"] = "needs_review"
+                value["status"] = "needs_review"
+                value["source_signal"] = str(
+                    value.get("source_signal")
+                    or metadata.get("source_signal")
+                    or "missing_source_ref"
+                )
+                value.setdefault("rationale", review_assumption)
+                metadata.setdefault("review_reason", review_assumption)
+                metadata.setdefault("source_signal", value["source_signal"])
+                item_needs_review = True
+                issues.append(
+                    {
+                        "code": issue_code,
+                        "severity": "warning",
+                        "message": issue_message,
+                        "path": item_path,
+                        "repaired": True,
+                    }
+                )
+
+            value["id"] = str(value.get("id") or f"{key}_{index + 1}")
+            value["title"] = str(value.get("title") or value.get("label") or f"{key.replace('_', ' ').title()} {index + 1}")
+            if "description" not in value:
+                value["description"] = value.get("summary")
+            if "content" not in value:
+                value["content"] = value.get("body") or value.get("quote") or value.get("description")
+            value.setdefault("confidence", None)
+            value.setdefault("rationale", None)
+            value["source_refs"] = source_refs
+            value["assumptions"] = [
+                str(assumption)
+                for assumption in assumptions
+                if isinstance(assumption, str) and assumption.strip()
+            ]
+            value["metadata"] = metadata
+
+    item["data"] = data
+    if item_needs_review:
+        item["status"] = "needs_review"
+        validation["status"] = "needs_review"
+    if issues:
+        validation["issues"] = issues
+    item["validation"] = validation
 
 
 def _mark_unsourced_review_items(
@@ -4698,6 +4856,9 @@ def classify_ai_draft_intent(
         capability = "draft_executive_summary"
         risk = "medium"
         model_policy = "balanced"
+    elif any(term in text for term in ("newsletter", "monthly update", "weekly update", "update brief", "intranet update", "stakeholder update")):
+        output_shape = "newsletter"
+        capability = "draft_newsletter"
     elif any(term in text for term in ("news article", "article draft", "press article", "journalistic article")):
         output_shape = "news_article"
         capability = "draft_news_article"
@@ -5549,17 +5710,17 @@ Output requirements:
 - Silently self-review before returning JSON: if the draft only contains generic category labels, is missing obvious domain-standard subtopics, or has fewer than 3 useful child branches under major concepts, revise it internally before finalizing.
 - Use your model knowledge of the requested domain to choose depth and subtopics; do not rely on hardcoded examples or stop at framework headings.
 - Populate generated_artifacts for visual or review outputs such as knowledge_graph, flow_chart, chart, checklist, tasks, source_coverage, software_overlap_report, and implementation_handoff_package.
-- If Intent classification.requested_artifact_types lists multiple outputs, keep output_shape as the primary lens but also fill any relevant secondary publishable top-level projections, such as executive_summary or news_article, so they can be reviewed as generated artifacts after the graph is accepted.
+- If Intent classification.requested_artifact_types lists multiple outputs, keep output_shape as the primary lens but also fill any relevant secondary publishable top-level projections, such as executive_summary, news_article, or newsletter, so they can be reviewed as generated artifacts after the graph is accepted.
 - For executive_summary outputs, write a leadership business case / decision memo, not a generic summary. Lead with the recommendation or decision requested, then explain why now, proposed scope, business value, governance/risk controls, investment/resource assumptions, success metrics, and the go/no-go decision gate. Distinguish existing capability from new investment. Use calm executive language such as controlled pilot, governed deployment, planning-level estimate, approval-gated, auditability, measured adoption, and operational leverage. Avoid hype and implementation minutiae.
 - Executive summaries should connect capabilities to measurable operational impact: time saved, rework reduced, standardization improved, support dependency lowered, scalability increased, risk reduced, or governance strengthened. When exact numbers are unavailable, use planning-level ranges only if the prompt/source supports them; otherwise identify the missing baseline metric as an assumption or review item.
-- For executive_summary and news_article outputs, fill the top-level executive_summary or news_article projection; it will be converted into a generated review artifact. Prefer these review artifacts over draft_nodes unless the user explicitly asks to change the graph. Keep unsourced claims, quotes, costs, timelines, ROI estimates, and inferred findings source_refs: [], include assumptions, and mark them needs_review.
+- For executive_summary, news_article, and newsletter outputs, fill the matching top-level projection; it will be converted into a generated review artifact. Prefer these review artifacts over draft_nodes unless the user explicitly asks to change the graph. Keep unsourced claims, quotes, costs, timelines, ROI estimates, and inferred findings source_refs: [], include assumptions, and mark them needs_review. For newsletters, include visual_blocks for optional map, flowchart, table, status, or relationship inserts when useful; these blocks should describe the visual and reference the view/source evidence rather than inventing an image.
 - For flow_chart outputs, model real flowchart grammar: decision steps need labeled outgoing paths such as Yes/No, Approved/Rejected, or Exception. Put branch text in flow_chart.edges[].label and durable graph edge metadata.branch_label / metadata.condition when you also emit draft_edges.
 - Populate the projection matching output_shape and, when graph changes are useful, draft_nodes and draft_edges.
 - Use stable draft IDs prefixed with draft_.
 - Use source_refs only by copying from Allowed source_refs.
 - For unsourced generated nodes, set source_refs: [] and add an assumption.
 - Strict schema mode requires every declared field. Include generated_artifacts, source_coverage, tasks, checklist, outline, table, kanban, presentation_sections, and review_annotations as arrays even when empty.
-- For typed object projections that are not relevant to the request, return null for flow_chart, knowledge_graph, chart, software_overlap_report, executive_output, executive_summary, and news_article. When they are relevant, fill their required arrays and use [] for empty nested lists.
+- For typed object projections that are not relevant to the request, return null for flow_chart, knowledge_graph, chart, software_overlap_report, executive_output, executive_summary, news_article, and newsletter. When they are relevant, fill their required arrays and use [] for empty nested lists.
 
 {ARTIFACT_REGISTRY_CONTRACT.strip()}
 """.strip()
@@ -5666,7 +5827,7 @@ def _artifact_from_top_level_projection(
     parsed: dict[str, Any],
     shape: str,
 ) -> dict[str, Any] | None:
-    if shape not in {"software_overlap_report", "flow_chart", "executive_output", "executive_summary", "news_article"}:
+    if shape not in {"software_overlap_report", "flow_chart", "executive_output", "executive_summary", "news_article", "newsletter"}:
         return None
     data = parsed.get(shape)
     if not isinstance(data, dict) or not data:
@@ -5684,6 +5845,9 @@ def _artifact_from_top_level_projection(
     elif shape == "news_article":
         title = str(data.get("headline") or data.get("title") or "News Article")
         artifact_id = str(data.get("id") or "artifact-news-article")
+    elif shape == "newsletter":
+        title = str(data.get("title") or "Newsletter")
+        artifact_id = str(data.get("id") or "artifact-newsletter")
     else:
         title = str(data.get("title") or "Software Overlap Report")
         artifact_id = str(data.get("id") or "artifact-software-overlap-report")
@@ -5703,7 +5867,7 @@ def _artifact_from_top_level_projection(
 
 
 def _top_level_projection_artifact_shapes(shape: str, classification: dict[str, Any] | None) -> list[str]:
-    supported_shapes = {"software_overlap_report", "flow_chart", "executive_output", "executive_summary", "news_article"}
+    supported_shapes = {"software_overlap_report", "flow_chart", "executive_output", "executive_summary", "news_article", "newsletter"}
     requested_shapes = []
     if isinstance(classification, dict):
         requested_shapes = classification.get("requested_artifact_types", [])

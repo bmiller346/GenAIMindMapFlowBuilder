@@ -52,24 +52,84 @@ def export_news_article_markdown(article: dict) -> str:
     section_lines = _article_section_lines(article.get("sections", []))
     if section_lines:
         body_parts.append(section_lines)
-    fact_checks = _roadmap_item_lines(article.get("fact_checks", []))
-    if fact_checks:
-        body_parts.append(f"## Fact Check Notes\n\n{fact_checks}")
+    review_notes = _article_review_lines(
+        list(article.get("fact_checks", []) or [])
+        + list(article.get("sections", []) or [])
+        + list(article.get("quotes", []) or [])
+    )
+    if review_notes:
+        body_parts.append(f"## Evidence and Review Notes\n\n{review_notes}")
     quote_lines = _roadmap_item_lines(article.get("quotes", []))
     if quote_lines:
         body_parts.append(f"## Source Notes\n\n{quote_lines}")
-    appendix = _appendix_lines(
-        list(article.get("sections", []) or [])
-        + list(article.get("quotes", []) or [])
-        + list(article.get("fact_checks", []) or [])
-        + [{"title": title, "source_refs": article.get("source_refs", [])}]
-    )
+    appendix_items = list(article.get("source_backed_appendix", []) or [])
+    if not appendix_items:
+        appendix_items = (
+            list(article.get("sections", []) or [])
+            + list(article.get("quotes", []) or [])
+            + list(article.get("fact_checks", []) or [])
+            + [{"title": title, "source_refs": article.get("source_refs", [])}]
+        )
+    appendix = _appendix_lines(appendix_items)
     if appendix:
         body_parts.append(f"## Source-backed Appendix\n\n{appendix}")
     assumptions = _plain_list(article.get("assumptions", []))
     if assumptions:
         body_parts.append(f"## Assumptions\n\n{assumptions}")
     evidence = _evidence_line(article)
+    if evidence:
+        body_parts.insert(0, evidence)
+    return f"# {title}\n\n" + "\n\n".join(body_parts) + "\n"
+
+
+def export_newsletter_markdown(newsletter: dict) -> str:
+    title = newsletter.get("title") or "Newsletter"
+    opening = [
+        str(newsletter.get("issue_label") or "").strip(),
+        str(newsletter.get("audience") or "").strip(),
+        str(newsletter.get("cadence") or "").strip(),
+        str(newsletter.get("opening_note") or "").strip(),
+    ]
+    body_parts = [part for part in opening if part]
+    for heading, key in (
+        ("Top Highlights", "highlights"),
+        ("In This Issue", "sections"),
+        ("Upcoming", "upcoming"),
+        ("Risks and Watch Items", "risks"),
+        ("Decisions Needed", "decisions_needed"),
+        ("Visual Blocks", "visual_blocks"),
+    ):
+        content = _article_section_lines(newsletter.get(key, []))
+        if content:
+            body_parts.append(f"## {heading}\n\n{content}")
+    review_notes = _article_review_lines(
+        list(newsletter.get("highlights", []) or [])
+        + list(newsletter.get("sections", []) or [])
+        + list(newsletter.get("upcoming", []) or [])
+        + list(newsletter.get("risks", []) or [])
+        + list(newsletter.get("decisions_needed", []) or [])
+        + list(newsletter.get("visual_blocks", []) or [])
+    )
+    if review_notes:
+        body_parts.append(f"## Editor Notes\n\n{review_notes}")
+    appendix_items = list(newsletter.get("source_backed_appendix", []) or [])
+    if not appendix_items:
+        appendix_items = (
+            list(newsletter.get("highlights", []) or [])
+            + list(newsletter.get("sections", []) or [])
+            + list(newsletter.get("upcoming", []) or [])
+            + list(newsletter.get("risks", []) or [])
+            + list(newsletter.get("decisions_needed", []) or [])
+            + list(newsletter.get("visual_blocks", []) or [])
+            + [{"title": title, "source_refs": newsletter.get("source_refs", [])}]
+        )
+    appendix = _appendix_lines(appendix_items)
+    if appendix:
+        body_parts.append(f"## Source-backed Appendix\n\n{appendix}")
+    assumptions = _plain_list(newsletter.get("assumptions", []))
+    if assumptions:
+        body_parts.append(f"## Assumptions\n\n{assumptions}")
+    evidence = _evidence_line(newsletter)
     if evidence:
         body_parts.insert(0, evidence)
     return f"# {title}\n\n" + "\n\n".join(body_parts) + "\n"
@@ -107,10 +167,50 @@ def _article_section_lines(items: list[dict]) -> str:
         if detail:
             lines.append(str(detail))
             lines.append("")
-        if item.get("status") == "needs_review" or item.get("needs_review"):
-            lines.append("_Needs review._")
-            lines.append("")
     return "\n".join(lines).strip()
+
+
+def _article_review_lines(items: list[dict]) -> str:
+    lines = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title") or item.get("label") or "Untitled"
+        key = (item.get("id"), title, item.get("description"))
+        if key in seen:
+            continue
+        seen.add(key)
+        notes = []
+        if item.get("source_backed") is True:
+            notes.append("source-backed")
+        elif item.get("source_backed") is False or item.get("needs_review"):
+            notes.append("needs review")
+        if item.get("confidence") not in (None, ""):
+            notes.append(f"confidence: {item.get('confidence')}")
+        source_signal = item.get("source_signal") or _metadata_value(item, "source_signal")
+        if source_signal:
+            notes.append(f"source signal: {source_signal}")
+        review_state = item.get("review_state") or item.get("status")
+        if review_state:
+            notes.append(f"review: {review_state}")
+        lines.append(f"- **{title}**")
+        if notes:
+            lines.append(f"  _{' | '.join(str(note) for note in notes if note)}_")
+        rationale = item.get("rationale") or _metadata_value(item, "rationale")
+        if rationale:
+            lines.append(f"  {rationale}")
+        assumptions = item.get("assumptions") if isinstance(item.get("assumptions"), list) else []
+        for assumption in assumptions:
+            if str(assumption or "").strip():
+                lines.append(f"  Assumption: {assumption}")
+    return "\n".join(lines)
+
+
+def _metadata_value(item: dict, key: str) -> str:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    value = metadata.get(key, "")
+    return str(value) if value not in (None, "") else ""
 
 
 def _plain_list(items: list) -> str:

@@ -694,8 +694,99 @@ def test_news_article_artifact_marks_unsourced_article_items_needs_review():
 
     assert artifact["status"] == "needs_review"
     assert artifact["data"]["sections"][0]["status"] == "needs_review"
+    assert artifact["data"]["sections"][0]["source_backed"] is False
+    assert artifact["data"]["sections"][0]["needs_review"] is True
+    assert artifact["data"]["sections"][0]["review_state"] == "needs_review"
     assert artifact["validation"]["status"] == "needs_review"
-    assert artifact["validation"]["issues"][0]["code"] == "artifact_item_needs_review"
+    assert artifact["validation"]["issues"][0]["code"] == "news_article_item_needs_review"
+
+
+def test_news_article_artifact_normalizes_rich_article_item_review_state():
+    [artifact] = validate_generated_artifacts(
+        [
+            {
+                "id": "article-rich",
+                "artifact_type": "news_article",
+                "data": {
+                    "headline": "Deployment Process Adds Approval Gate",
+                    "lede": "Deployment now includes an approval gate.",
+                    "sections": [
+                        {
+                            "id": "section-backed",
+                            "title": "Approval gate",
+                            "description": "Manager approval is required before deployment.",
+                            "confidence": 0.91,
+                            "source_signal": "explicit_text",
+                            "source_refs": [SOURCE_REF],
+                            "assumptions": [],
+                            "metadata": {},
+                        }
+                    ],
+                    "quotes": [
+                        {
+                            "id": "quote-review",
+                            "title": "Stakeholder quote",
+                            "content": "The approval owner should be confirmed.",
+                            "source_refs": [],
+                            "assumptions": [],
+                            "metadata": {},
+                        }
+                    ],
+                    "fact_checks": [
+                        {
+                            "id": "fact-backed",
+                            "title": "Approval is required",
+                            "description": "The procedure requires approval before deployment.",
+                            "source_refs": [SOURCE_REF],
+                            "assumptions": [],
+                            "metadata": {"source_signal": "explicit_text"},
+                        }
+                    ],
+                    "source_backed_appendix": [
+                        {
+                            "id": "appendix-backed",
+                            "title": "Approval evidence",
+                            "description": "Approval is required before deployment.",
+                            "source_refs": [SOURCE_REF],
+                            "assumptions": [],
+                            "metadata": {},
+                        }
+                    ],
+                    "source_refs": [SOURCE_REF],
+                    "assumptions": [],
+                },
+                "source_refs": [SOURCE_REF],
+                "assumptions": [],
+            }
+        ],
+        scope={"type": "workspace"},
+        model_provider="fixture",
+        model="gpt-test",
+        ai_role="Ask AI",
+        prompt_profile="news_article",
+        input_source_refs=[SOURCE_REF],
+    )
+
+    section = artifact["data"]["sections"][0]
+    quote = artifact["data"]["quotes"][0]
+    fact_check = artifact["data"]["fact_checks"][0]
+    appendix = artifact["data"]["source_backed_appendix"][0]
+    assert section["source_backed"] is True
+    assert section["needs_review"] is False
+    assert section["review_state"] == "reviewed"
+    assert section["status"] == "reviewed"
+    assert fact_check["source_backed"] is True
+    assert appendix["source_backed"] is True
+    assert quote["source_backed"] is False
+    assert quote["needs_review"] is True
+    assert quote["assumptions"] == [
+        "Source evidence is missing for this news article item."
+    ]
+    assert quote["metadata"]["review_reason"] == (
+        "Source evidence is missing for this news article item."
+    )
+    assert artifact["status"] == "needs_review"
+    assert artifact["validation"]["status"] == "needs_review"
 
 
 def test_top_level_news_article_projection_becomes_reviewable_artifact_item():
@@ -745,6 +836,210 @@ def test_top_level_news_article_projection_becomes_reviewable_artifact_item():
     assert artifact["artifact_type"] == "news_article"
     assert draft_item["title"] == "Deployment Process Adds Approval Gate"
     assert draft_item["content"] == "Manager review is required before rollout."
+
+
+def test_news_article_artifact_requires_headline_and_article_content():
+    with pytest.raises(GraphSchemaError) as exc:
+        validate_generated_artifacts(
+            [
+                {
+                    "id": "article-empty",
+                    "artifact_type": "news_article",
+                    "data": {
+                        "headline": "",
+                        "lede": "",
+                        "body": "",
+                        "sections": [],
+                        "quotes": [],
+                        "fact_checks": [],
+                    },
+                    "source_refs": [SOURCE_REF],
+                    "assumptions": [],
+                }
+            ],
+            scope={"type": "workspace"},
+            model_provider="fixture",
+            model="gpt-test",
+            ai_role="Ask AI",
+            prompt_profile="news_article",
+            input_source_refs=[SOURCE_REF],
+        )
+
+    assert any("news_article requires a headline" in error for error in exc.value.errors)
+    assert any(
+        "news_article requires lede, body, or sections" in error
+        for error in exc.value.errors
+    )
+
+
+def test_newsletter_artifact_normalizes_visual_blocks_and_review_metadata():
+    artifacts = validate_generated_artifacts(
+        [
+            {
+                "id": "newsletter-1",
+                "artifact_type": "newsletter",
+                "data": {
+                    "title": "Deployment Monthly Update",
+                    "issue_label": "May 2026",
+                    "audience": "Operations leaders",
+                    "cadence": "Monthly",
+                    "opening_note": "Deployment readiness is moving through approval.",
+                    "highlights": [
+                        {
+                            "id": "highlight-approval",
+                            "title": "Approval gate",
+                            "description": "Manager approval is required.",
+                            "source_refs": [SOURCE_REF],
+                            "assumptions": [],
+                            "metadata": {},
+                        }
+                    ],
+                    "sections": [],
+                    "upcoming": [],
+                    "risks": [],
+                    "decisions_needed": [],
+                    "visual_blocks": [
+                        {
+                            "id": "visual-flow",
+                            "title": "Approval flow",
+                            "description": "Insert a flowchart for approval and publish.",
+                            "source_refs": [],
+                            "assumptions": [],
+                            "metadata": {"visual_type": "flowchart"},
+                        }
+                    ],
+                    "source_backed_appendix": [],
+                    "source_refs": [SOURCE_REF],
+                    "assumptions": [],
+                    "metadata": {},
+                },
+                "source_refs": [SOURCE_REF],
+                "assumptions": [],
+            }
+        ],
+        scope={"type": "workspace"},
+        model_provider="fixture",
+        model="gpt-test",
+        ai_role="Ask AI",
+        prompt_profile="newsletter",
+        input_source_refs=[SOURCE_REF],
+    )
+
+    newsletter = artifacts[0]
+    highlight = newsletter["data"]["highlights"][0]
+    visual = newsletter["data"]["visual_blocks"][0]
+    assert newsletter["artifact_type"] == "newsletter"
+    assert highlight["source_backed"] is True
+    assert highlight["needs_review"] is False
+    assert highlight["review_state"] == "reviewed"
+    assert visual["source_backed"] is False
+    assert visual["needs_review"] is True
+    assert visual["review_state"] == "needs_review"
+    assert visual["assumptions"] == ["Source evidence is missing for this newsletter item."]
+    assert newsletter["validation"]["status"] == "needs_review"
+    assert newsletter["validation"]["issues"][0]["code"] == "newsletter_item_needs_review"
+
+
+def test_newsletter_artifact_requires_title_and_update_content():
+    with pytest.raises(GraphSchemaError) as exc:
+        validate_generated_artifacts(
+            [
+                {
+                    "id": "newsletter-empty",
+                    "artifact_type": "newsletter",
+                    "data": {
+                        "title": "",
+                        "issue_label": "",
+                        "audience": "",
+                        "cadence": "",
+                        "opening_note": "",
+                        "highlights": [],
+                        "sections": [],
+                        "upcoming": [],
+                        "risks": [],
+                        "decisions_needed": [],
+                        "visual_blocks": [],
+                        "source_backed_appendix": [],
+                    },
+                    "source_refs": [SOURCE_REF],
+                    "assumptions": [],
+                }
+            ],
+            scope={"type": "workspace"},
+            model_provider="fixture",
+            model="gpt-test",
+            ai_role="Ask AI",
+            prompt_profile="newsletter",
+            input_source_refs=[SOURCE_REF],
+        )
+
+    assert any("newsletter requires a title" in error for error in exc.value.errors)
+    assert any("newsletter requires opening_note" in error for error in exc.value.errors)
+
+
+def test_secondary_requested_news_article_projection_becomes_generated_artifact():
+    revision = parse_ai_draft_revision_response(
+        {
+            "intent": "draft_knowledge_graph",
+            "output_shape": "knowledge_graph",
+            "summary": "Knowledge graph plus article draft.",
+            "draft_nodes": [],
+            "draft_edges": [],
+            "draft_annotations": [],
+            "draft_items": [],
+            "generated_artifacts": [],
+            "knowledge_graph": {
+                "relationship_edges": [],
+                "clusters": [],
+            },
+            "news_article": {
+                "headline": "Deployment Process Adds Approval Gate",
+                "dek": "Manager review is required before rollout.",
+                "lede": "The deployment procedure requires approval before rollout.",
+                "body": "Teams must confirm manager approval before deployment begins.",
+                "sections": [
+                    {
+                        "id": "section-approval",
+                        "title": "Approval gate",
+                        "description": "Manager approval is required before deployment.",
+                        "source_refs": [SOURCE_REF],
+                        "assumptions": [],
+                        "metadata": {},
+                    }
+                ],
+                "quotes": [],
+                "fact_checks": [],
+                "source_refs": [SOURCE_REF],
+                "assumptions": [],
+            },
+            "source_coverage": [],
+            "tasks": [],
+            "checklist": [],
+            "flow_chart": {},
+            "chart": {},
+            "outline": [],
+            "table": [],
+            "kanban": [],
+            "presentation_sections": [],
+            "review_annotations": [],
+            "assumptions": [],
+            "source_refs": [SOURCE_REF],
+        },
+        prompt="Create a graph and article.",
+        scope={"type": "workspace"},
+        source_refs=[SOURCE_REF],
+        classification={
+            "output_shape": "knowledge_graph",
+            "intent": "draft_knowledge_graph",
+            "requested_artifact_types": ["knowledge_graph", "news_article"],
+        },
+    )
+
+    artifacts = revision["generated_artifacts"]
+    assert [artifact["artifact_type"] for artifact in artifacts] == ["news_article"]
+    article = artifacts[0]
+    assert article["data"]["sections"][0]["source_backed"] is True
+    assert article["data"]["sections"][0]["review_state"] == "reviewed"
 
 
 def test_top_level_flow_chart_projection_becomes_tolerant_artifact():
@@ -858,7 +1153,7 @@ def test_ai_draft_schema_has_first_class_software_overlap_report_output():
     assert "software_use_case" in entity_enum
 
 
-def test_ai_draft_schema_has_first_class_executive_summary_and_news_article_outputs():
+def test_ai_draft_schema_has_first_class_publishable_outputs():
     properties = AI_DRAFT_REVISION_OUTPUT_SCHEMA["properties"]
 
     assert "executive_summary" in properties
@@ -868,6 +1163,10 @@ def test_ai_draft_schema_has_first_class_executive_summary_and_news_article_outp
     assert "news_article" in properties
     assert {"headline", "lede", "body", "sections", "fact_checks"} <= set(
         properties["news_article"]["properties"]
+    )
+    assert "newsletter" in properties
+    assert {"title", "issue_label", "highlights", "visual_blocks", "source_backed_appendix"} <= set(
+        properties["newsletter"]["properties"]
     )
 
 

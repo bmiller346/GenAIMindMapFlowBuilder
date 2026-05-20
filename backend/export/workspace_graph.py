@@ -12,6 +12,7 @@ from export.completeness_review import (
 from export.markdown import (
     export_executive_output_markdown,
     export_news_article_markdown,
+    export_newsletter_markdown,
     export_team_roadmap_markdown,
 )
 from export.source_library import build_source_library
@@ -198,6 +199,10 @@ def artifact_to_news_article_markdown(artifact: dict) -> str:
     return export_news_article_markdown(artifact_export_data(artifact))
 
 
+def artifact_to_newsletter_markdown(artifact: dict) -> str:
+    return export_newsletter_markdown(artifact_export_data(artifact))
+
+
 def select_latest_ai_draft_artifact(
     sessions: list[dict],
     artifact_types: set[str],
@@ -251,8 +256,19 @@ def graph_to_news_article(graph: dict) -> dict:
             {
                 "title": section["title"],
                 "description": "Confirm the section against cited source material before publication.",
-                "status": "source_backed" if section.get("source_refs") else "needs_review",
+                "status": section.get("status", ""),
+                "review_state": section.get("review_state", ""),
+                "confidence": section.get("confidence", ""),
+                "source_backed": section.get("source_backed", False),
+                "needs_review": section.get("needs_review", True),
+                "rationale": section.get("rationale", ""),
+                "source_signal": section.get("source_signal", ""),
                 "source_refs": section.get("source_refs", []),
+                "assumptions": section.get("assumptions", []),
+                "metadata": {
+                    **section.get("metadata", {}),
+                    "layout_hint": "fact_check",
+                },
             }
             for section in sections
         ],
@@ -264,6 +280,41 @@ def graph_to_news_article(graph: dict) -> dict:
 
 def graph_to_news_article_markdown(graph: dict) -> str:
     return export_news_article_markdown(graph_to_news_article(graph))
+
+
+def graph_to_newsletter(graph: dict) -> dict:
+    nodes = [node for node in graph.get("nodes", []) if node.get("node_type") != "reference"]
+    sourced_nodes = [node for node in nodes if _has_source_ref(node)]
+    title = graph.get("workspace", {}).get("title") or "Workspace"
+    sections = [_news_article_section(node) for node in _top_nodes(sourced_nodes or nodes, limit=5)]
+    risks = [_news_article_section(node) for node in nodes if node.get("node_type") in RISK_TYPES][:4]
+    decisions = [_news_article_section(node) for node in nodes if node.get("node_type") in DECISION_TYPES][:4]
+    visual_blocks = _newsletter_visual_blocks(graph, nodes)
+    assumptions = []
+    if nodes and not sourced_nodes:
+        assumptions.append("No source-backed graph nodes are available; newsletter draft requires review.")
+    if visual_blocks and not any(block.get("source_refs") for block in visual_blocks):
+        assumptions.append("Visual block suggestions are graph-derived and should be reviewed before publication.")
+    return {
+        "title": f"{title} Update Brief",
+        "issue_label": "Draft issue",
+        "audience": "Stakeholders",
+        "cadence": "Ad hoc",
+        "opening_note": _news_article_lede(graph, nodes, sourced_nodes),
+        "highlights": sections[:3],
+        "sections": sections,
+        "upcoming": [],
+        "risks": risks,
+        "decisions_needed": decisions,
+        "visual_blocks": visual_blocks,
+        "source_backed_appendix": [_news_article_section(node) for node in sourced_nodes],
+        "source_refs": _merge_source_refs(*(node.get("source_refs", []) for node in sourced_nodes)),
+        "assumptions": assumptions,
+    }
+
+
+def graph_to_newsletter_markdown(graph: dict) -> str:
+    return export_newsletter_markdown(graph_to_newsletter(graph))
 
 
 def graph_to_completeness_review(graph: dict) -> dict:
@@ -770,20 +821,52 @@ def _executive_rationale(node: dict, item_type: str, source_backed: bool, needs_
 def _news_article_section(node: dict) -> dict:
     source_refs = node.get("source_refs", []) if isinstance(node.get("source_refs"), list) else []
     source_backed = any(ref.get("document_id") for ref in source_refs if isinstance(ref, dict))
+    needs_review = _needs_review(node) or not source_backed
+    source_signal = _node_source_signal(node, source_backed)
+    review_state = node.get("status", "")
+    rationale = _news_article_rationale(node, source_backed, needs_review)
     return {
         "id": f"section-{node.get('id', 'item')}",
+        "node_id": node.get("id", ""),
         "title": node.get("title") or "Untitled",
         "description": node.get("summary") or "",
-        "status": "source_backed" if source_backed and not _needs_review(node) else "needs_review",
+        "status": "source_backed" if source_backed and not needs_review else "needs_review",
+        "review_state": review_state,
+        "confidence": node.get("confidence", ""),
         "source_refs": source_refs,
+        "source_backed": source_backed,
+        "needs_review": needs_review,
+        "rationale": rationale,
+        "source_signal": source_signal,
         "assumptions": [] if source_backed else ["Graph item has no source reference."],
         "metadata": {
+            **(node.get("metadata", {}) if isinstance(node.get("metadata"), dict) else {}),
             "source": "workspace_graph_projection",
             "scope": "workspace",
             "artifact_type": "news_article",
-            "source_signal": "explicit_source_ref" if source_backed else "graph_projection",
+            "layout_hint": "section",
+            "rationale": rationale,
+            "review_reason": "" if source_backed and not needs_review else "Confirm source support before publication.",
+            "source_signal": source_signal,
         },
     }
+
+
+def _news_article_rationale(node: dict, source_backed: bool, needs_review: bool) -> str:
+    parts = [f"Projected from {node.get('node_type', 'node')} as a news article section."]
+    parts.append("Source-backed." if source_backed else "No source reference available.")
+    if needs_review:
+        parts.append("Requires editorial review before publication.")
+    return " ".join(parts)
+
+
+def _node_source_signal(node: dict, source_backed: bool) -> str:
+    metadata = node.get("metadata", {}) if isinstance(node.get("metadata"), dict) else {}
+    return (
+        node.get("source_signal")
+        or metadata.get("source_signal")
+        or ("explicit_source_ref" if source_backed else "graph_projection")
+    )
 
 
 def _news_article_lede(graph: dict, nodes: list[dict], sourced_nodes: list[dict]) -> str:
@@ -791,6 +874,61 @@ def _news_article_lede(graph: dict, nodes: list[dict], sourced_nodes: list[dict]
     base = workspace.get("summary") or workspace.get("brief", {}).get("goal") or ""
     metrics = f"Projected from {len(nodes)} content node(s), including {len(sourced_nodes)} source-backed item(s)."
     return f"{base} {metrics}".strip() if base else metrics
+
+
+def _newsletter_visual_blocks(graph: dict, nodes: list[dict]) -> list[dict]:
+    blocks: list[dict] = []
+    edge_count = len([edge for edge in graph.get("edges", []) if isinstance(edge, dict)])
+    if nodes:
+        blocks.append(
+            {
+                "id": "visual-map-overview",
+                "title": "Workspace map overview",
+                "description": "Use the accepted map as a compact overview of this issue.",
+                "status": "needs_review",
+                "review_state": "needs_review",
+                "confidence": "",
+                "source_refs": _merge_source_refs(*(node.get("source_refs", []) for node in nodes[:4])),
+                "source_backed": any(_has_source_ref(node) for node in nodes[:4]),
+                "needs_review": True,
+                "rationale": "Projected as an optional newsletter visual from the accepted workspace map.",
+                "source_signal": "workspace_graph_projection",
+                "assumptions": ["Reviewer should choose a cropped map, flowchart, table, or status visual before publishing."],
+                "metadata": {
+                    "source": "workspace_graph_projection",
+                    "scope": "workspace",
+                    "artifact_type": "newsletter",
+                    "visual_type": "mind_map",
+                    "node_count": len(nodes),
+                    "edge_count": edge_count,
+                },
+            }
+        )
+    if edge_count:
+        blocks.append(
+            {
+                "id": "visual-relationship-snapshot",
+                "title": "Dependency or handoff snapshot",
+                "description": "Use Connections or Flowchart view when this issue needs a relationship, handoff, or process visual.",
+                "status": "needs_review",
+                "review_state": "needs_review",
+                "confidence": "",
+                "source_refs": [],
+                "source_backed": False,
+                "needs_review": True,
+                "rationale": "Graph contains edges that may support a small relationship or flow visual.",
+                "source_signal": "workspace_graph_projection",
+                "assumptions": ["Select the final visual view and confirm labels before publishing."],
+                "metadata": {
+                    "source": "workspace_graph_projection",
+                    "scope": "workspace",
+                    "artifact_type": "newsletter",
+                    "visual_type": "relationships_or_flow",
+                    "edge_count": edge_count,
+                },
+            }
+        )
+    return blocks
 
 
 def _artifact_type_matches(artifact: dict, artifact_types: set[str]) -> bool:

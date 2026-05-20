@@ -694,6 +694,50 @@ def test_markdown_export_endpoints_use_accepted_article_artifacts(monkeypatch):
     assert "Publish date still needs confirmation." in article
 
 
+def test_news_article_markdown_endpoint_falls_back_to_graph_without_artifact(monkeypatch):
+    graph = {
+        "workspace": {
+            "id": "workspace-1",
+            "title": "Graph Article",
+            "summary": "Use the graph when no accepted article exists.",
+        },
+        "nodes": [
+            {
+                "id": "root",
+                "parent_id": None,
+                "title": "Graph-backed note",
+                "summary": "The graph supplies the fallback article.",
+                "node_type": "concept",
+                "status": "ai_generated",
+                "confidence": 0.86,
+                "source_refs": [
+                    {
+                        "document_id": "doc-graph",
+                        "page": 4,
+                        "quote_snippet": "Graph supplies the fallback article.",
+                    }
+                ],
+                "external_refs": {},
+                "metadata": {},
+            }
+        ],
+        "edges": [],
+        "tasks": [],
+        "views": {},
+    }
+
+    monkeypatch.setattr(app, "get_workspace_graph_or_404", lambda flow_id: graph)
+    monkeypatch.setattr(app, "list_ai_draft_sessions_for_workspace", lambda flow_id: [])
+
+    article = app.export_workspace_news_article_markdown("workspace-1").body.decode("utf-8")
+
+    assert "# Graph Article Update" in article
+    assert "## Graph-backed note" in article
+    assert "## Evidence and Review Notes" in article
+    assert "confidence: 0.86" in article
+    assert "Graph supplies the fallback article." in article
+
+
 def test_accepting_publishable_artifact_preserves_evidence_context():
     session = build_ai_draft_session(
         workspace_id="workspace-1",

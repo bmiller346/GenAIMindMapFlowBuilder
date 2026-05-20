@@ -6,11 +6,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from export.csv_tasks import export_task_rows
 from export.internal_graph_json import export_internal_graph
-from export.markdown import export_executive_summary_markdown, export_news_article_markdown
+from export.markdown import (
+    export_executive_summary_markdown,
+    export_news_article_markdown,
+    export_newsletter_markdown,
+)
 from export.workspace_graph import (
     build_workspace_graph,
     graph_to_news_article,
     graph_to_news_article_markdown,
+    graph_to_newsletter,
+    graph_to_newsletter_markdown,
     graph_to_executive_markdown,
     graph_to_executive_output,
     graph_to_markdown,
@@ -366,6 +372,156 @@ def test_executive_summary_and_news_article_artifacts_export_to_markdown():
     assert "Timing still needs confirmation." in article
 
 
+def test_news_article_markdown_uses_direct_appendix_and_mixed_review_notes():
+    markdown = export_news_article_markdown(
+        {
+            "headline": "Launch Notes",
+            "dek": "The launch plan is moving through review.",
+            "lede": "Teams have one cited update and one note that still needs evidence.",
+            "sections": [
+                {
+                    "id": "section-cited",
+                    "title": "Cited milestone",
+                    "description": "The pilot date is confirmed.",
+                    "source_backed": True,
+                    "needs_review": False,
+                    "status": "source_backed",
+                    "review_state": "approved",
+                    "confidence": 0.91,
+                    "source_signal": "explicit_source_ref",
+                    "source_refs": [
+                        {
+                            "document_id": "doc-launch",
+                            "page": 2,
+                            "quote_snippet": "Pilot date is confirmed.",
+                        }
+                    ],
+                },
+                {
+                    "id": "section-uncited",
+                    "title": "Uncited staffing note",
+                    "description": "Staffing coverage may need a second reviewer.",
+                    "source_backed": False,
+                    "needs_review": True,
+                    "status": "needs_review",
+                    "review_state": "needs_review",
+                    "confidence": 0.48,
+                    "source_signal": "graph_projection",
+                    "assumptions": ["Staffing note came from uncited graph context."],
+                },
+            ],
+            "fact_checks": [],
+            "quotes": [],
+            "source_refs": [
+                {
+                    "document_id": "doc-ignored",
+                    "quote_snippet": "This fallback should not appear when appendix is direct.",
+                }
+            ],
+            "source_backed_appendix": [
+                {
+                    "title": "Direct appendix evidence",
+                    "source_refs": [
+                        {
+                            "document_id": "doc-appendix",
+                            "page": 5,
+                            "quote_snippet": "Direct appendix citation.",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert "## Cited milestone" in markdown
+    assert "## Uncited staffing note" in markdown
+    assert "## Evidence and Review Notes" in markdown
+    assert "source-backed | confidence: 0.91" in markdown
+    assert "needs review | confidence: 0.48" in markdown
+    assert "Assumption: Staffing note came from uncited graph context." in markdown
+    assert "## Source-backed Appendix" in markdown
+    assert "Direct appendix citation." in markdown
+    assert "doc-ignored" not in markdown
+
+
+def test_newsletter_markdown_exports_visual_blocks_and_editor_notes():
+    markdown = export_newsletter_markdown(
+        {
+            "title": "Operations Monthly Update",
+            "issue_label": "May 2026",
+            "audience": "Operations leaders",
+            "cadence": "Monthly",
+            "opening_note": "This issue highlights source-backed launch readiness.",
+            "highlights": [
+                {
+                    "id": "highlight-1",
+                    "title": "Launch checklist is ready",
+                    "description": "The team has a cited launch checklist.",
+                    "source_backed": True,
+                    "needs_review": False,
+                    "confidence": 0.91,
+                    "review_state": "reviewed",
+                    "source_refs": [{"document_id": "doc-news", "quote_snippet": "launch checklist"}],
+                }
+            ],
+            "sections": [],
+            "upcoming": [],
+            "risks": [],
+            "decisions_needed": [],
+            "visual_blocks": [
+                {
+                    "id": "visual-flow",
+                    "title": "Launch flow diagram",
+                    "description": "Insert a flowchart showing review, approval, and publish steps.",
+                    "source_backed": False,
+                    "needs_review": True,
+                    "confidence": "",
+                    "review_state": "needs_review",
+                    "source_signal": "workspace_graph_projection",
+                    "assumptions": ["Reviewer must choose the final flowchart crop."],
+                }
+            ],
+            "source_backed_appendix": [
+                {
+                    "title": "Launch evidence",
+                    "source_refs": [{"document_id": "doc-news", "quote_snippet": "launch checklist"}],
+                }
+            ],
+            "source_refs": [{"document_id": "doc-news", "quote_snippet": "launch checklist"}],
+            "assumptions": ["Newsletter timing should be confirmed."],
+        }
+    )
+
+    assert "# Operations Monthly Update" in markdown
+    assert "May 2026" in markdown
+    assert "## Top Highlights" in markdown
+    assert "## Visual Blocks" in markdown
+    assert "Launch flow diagram" in markdown
+    assert "## Editor Notes" in markdown
+    assert "source-backed | confidence: 0.91" in markdown
+    assert "needs review | source signal: workspace_graph_projection" in markdown
+    assert "Reviewer must choose the final flowchart crop." in markdown
+    assert "## Source-backed Appendix" in markdown
+    assert "launch checklist" in markdown
+
+
+def test_newsletter_projection_uses_graph_and_suggests_visual_blocks():
+    graph = _validated_export_graph()
+    newsletter = graph_to_newsletter(graph)
+
+    assert newsletter["title"] == "Training Rollout Update Brief"
+    assert newsletter["highlights"]
+    assert newsletter["visual_blocks"]
+    assert newsletter["visual_blocks"][0]["metadata"]["visual_type"] == "mind_map"
+    assert newsletter["source_refs"]
+
+    markdown = graph_to_newsletter_markdown(graph)
+    assert "# Training Rollout Update Brief" in markdown
+    assert "## Top Highlights" in markdown
+    assert "## Visual Blocks" in markdown
+    assert "## Source-backed Appendix" in markdown
+
+
 def test_news_article_projection_uses_source_backed_graph_for_markdown_export():
     graph = _validated_export_graph()
     article = graph_to_news_article(graph)
@@ -380,6 +536,20 @@ def test_news_article_projection_uses_source_backed_graph_for_markdown_export():
         "Draft enablement checklist",
     ]
     assert article["sections"][1]["status"] == "needs_review"
+    assert article["sections"][1]["review_state"] == "needs_review"
+    assert article["sections"][1]["confidence"] == 0.55
+    assert article["sections"][1]["source_backed"] is True
+    assert article["sections"][1]["needs_review"] is True
+    assert article["sections"][1]["source_signal"] == "explicit_source_ref"
+    assert article["sections"][1]["metadata"]["artifact_type"] == "news_article"
+    assert article["sections"][1]["metadata"]["review_reason"] == (
+        "Confirm source support before publication."
+    )
+    assert article["fact_checks"][1]["confidence"] == 0.55
+    assert article["fact_checks"][1]["review_state"] == "needs_review"
+    assert article["fact_checks"][1]["source_backed"] is True
+    assert article["fact_checks"][1]["needs_review"] is True
+    assert article["fact_checks"][1]["source_signal"] == "explicit_source_ref"
     assert article["source_refs"] == [
         {
             "document_id": "doc-1",
@@ -401,7 +571,56 @@ def test_news_article_projection_uses_source_backed_graph_for_markdown_export():
     assert "# Training Rollout Update" in markdown
     assert "## Draft enablement checklist" in markdown
     assert "Checklist needs SME review." in markdown
-    assert "## Fact Check Notes" in markdown
+    assert "## Evidence and Review Notes" in markdown
+    assert "confidence: 0.55" in markdown
+
+
+def test_news_article_projection_marks_unsourced_graph_fallback_for_review():
+    graph = {
+        "workspace": {
+            "id": "workspace-unsourced",
+            "title": "Unsourced Workspace",
+            "summary": "Draft an article from graph-only notes.",
+        },
+        "nodes": [
+            {
+                "id": "uncited-1",
+                "parent_id": None,
+                "title": "Uncited launch note",
+                "summary": "The team expects launch readiness next week.",
+                "node_type": "concept",
+                "status": "ai_generated",
+                "confidence": 0.7,
+                "source_refs": [],
+                "external_refs": {},
+                "metadata": {"source_signal": "workspace_only"},
+            }
+        ],
+        "edges": [],
+        "tasks": [],
+        "views": {},
+    }
+
+    article = graph_to_news_article(graph)
+
+    assert article["assumptions"] == [
+        "No source-backed graph nodes are available; article draft requires review."
+    ]
+    assert article["sections"][0]["source_backed"] is False
+    assert article["sections"][0]["needs_review"] is True
+    assert article["sections"][0]["status"] == "needs_review"
+    assert article["sections"][0]["source_signal"] == "workspace_only"
+    assert article["sections"][0]["assumptions"] == ["Graph item has no source reference."]
+    assert article["fact_checks"][0]["source_backed"] is False
+    assert article["fact_checks"][0]["assumptions"] == ["Graph item has no source reference."]
+
+    markdown = graph_to_news_article_markdown(graph)
+    assert "## Uncited launch note" in markdown
+    assert "_Needs review._" not in markdown
+    assert "## Evidence and Review Notes" in markdown
+    assert "source signal: workspace_only" in markdown
+    assert "Assumption: Graph item has no source reference." in markdown
+    assert "## Source-backed Appendix" not in markdown
 
 
 def test_latest_ai_draft_artifact_prefers_accepted_then_latest_generated():

@@ -125,6 +125,7 @@ from export.markdown import (
 from export.workspace_graph import (
     artifact_export_data,
     artifact_to_news_article_markdown,
+    artifact_to_newsletter_markdown,
     build_workspace_graph,
     graph_to_completeness_markdown,
     graph_to_completeness_review,
@@ -133,6 +134,7 @@ from export.workspace_graph import (
     graph_to_mermaid,
     graph_to_mmd_json,
     graph_to_news_article_markdown,
+    graph_to_newsletter_markdown,
     graph_to_opml,
     graph_to_task_rows,
     graph_to_team_roadmap,
@@ -3266,6 +3268,20 @@ def export_workspace_news_article_markdown(flow_id: str):
     else:
         graph = get_workspace_graph_or_404(flow_id)
         content = graph_to_news_article_markdown(graph)
+    return Response(
+        content=content,
+        media_type="text/markdown",
+    )
+
+
+@app.get("/api/workspaces/{flow_id}/exports/newsletter.md")
+def export_workspace_newsletter_markdown(flow_id: str):
+    artifact = _latest_ai_draft_artifact(flow_id, {"newsletter"})
+    if artifact:
+        content = artifact_to_newsletter_markdown(artifact)
+    else:
+        graph = get_workspace_graph_or_404(flow_id)
+        content = graph_to_newsletter_markdown(graph)
     return Response(
         content=content,
         media_type="text/markdown",
