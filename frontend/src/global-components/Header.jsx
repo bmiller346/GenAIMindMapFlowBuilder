@@ -106,7 +106,8 @@ const Header = ({
     setIsDrawer,
     setFlowList,
     lightMode,
-    setLightMode
+    setLightMode,
+    onWorkspaceAskAi
 }) => {
     const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
     const [isUtilityMenuOpen, setIsUtilityMenuOpen] = useState(false);
@@ -1351,6 +1352,10 @@ const Header = ({
     const openWorkspaceAskAi = () => {
         setIsExportMenuOpen(false);
         setIsUtilityMenuOpen(false);
+        if (onWorkspaceAskAi) {
+            onWorkspaceAskAi();
+            return;
+        }
         setSelectedBranchId(undefined);
         setInspectorNodeId(undefined);
         pushNode(PromptModal, { scope: 'workspace' });

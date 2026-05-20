@@ -731,10 +731,20 @@ test('shell routes AI helpers into the right rail instead of a canvas overlay', 
     await page.goto('/');
     await openSelectionFixture(page);
 
+    await page.getByRole('button', { name: 'Ask AI', exact: true }).click();
+
+    const rightRail = page.locator('.workspace-shell__right');
+    await expect(rightRail).toBeVisible();
+    await expect(rightRail.locator('.ai-helpers-panel')).toBeVisible();
+    await expect(page.getByTestId('shell-ribbon')).toHaveAttribute('data-active-tab', 'ai');
+    await expect(page.locator('.modal .ai-action-modal')).toHaveCount(0);
+    await expect(page.locator('.react-flow__panel .ai-helpers-panel')).toHaveCount(0);
+    await rightRail.getByRole('button', { name: 'Close' }).click();
+    await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
+
     await page.getByAltText('Open workspaces').click();
     await page.getByRole('button', { name: /^AI helpers\b/i }).click();
 
-    const rightRail = page.locator('.workspace-shell__right');
     await expect(rightRail).toBeVisible();
     await expect(rightRail.locator('.ai-helpers-panel')).toBeVisible();
     await expect(rightRail.locator('.ai-helpers-body')).toBeVisible();

@@ -1430,6 +1430,31 @@ const App = () => {
         [setInspectorEdgeId, setInspectorNodeId, shellActions, useWorkspaceShell]
     );
 
+    const openShellWorkspaceAskAi = useCallback(() => {
+        setSelectedBranchId(undefined);
+        setInspectorNodeId(undefined);
+        setInspectorEdgeId(undefined);
+        setIsAiHelpersOpen(false);
+        shellActions.setRibbonTab('ai', { source: 'header' });
+        shellActions.setActiveScope({ type: 'workspace' });
+        shellActions.openGuidePanel(AI_HELPERS_GUIDE_PANEL_ID);
+        recordActivity({
+            type: 'ai_action_picker_opened',
+            title: 'Workspace Ask AI opened',
+            summary: 'Opened shell AI guide for the whole workspace.',
+            metadata: {
+                scope: 'workspace',
+                surface: 'shell_right_rail'
+            }
+        });
+    }, [
+        recordActivity,
+        setInspectorEdgeId,
+        setInspectorNodeId,
+        setSelectedBranchId,
+        shellActions
+    ]);
+
     const focusStructuredNodeInMap = useCallback(
         (nodeId) => {
             setActiveView('mindmap');
@@ -2902,6 +2927,7 @@ const App = () => {
                 setFlowList={setFlowList}
                 lightMode={lightMode}
                 setLightMode={setLightMode}
+                onWorkspaceAskAi={useWorkspaceShell ? openShellWorkspaceAskAi : undefined}
             />
             {useWorkspaceShell ? (
                 <WorkspaceShellAdapter
