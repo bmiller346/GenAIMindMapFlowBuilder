@@ -427,6 +427,7 @@ test('shift additive selection and lasso preserve selected nodes', async ({
     await shiftClickNode(page, 'Selection root');
     await expect.poll(() => selectedNodeCount(page)).toBe(1);
     await expect(page.locator('.shell-status-bar__item--accent')).toContainText('1');
+    await expect(page.locator('.selection-action-bar')).toHaveCount(0);
     await expect(nodeByTitle(page, 'Selection root')).toHaveClass(/selected/);
 
     await shiftClickNode(page, 'Branch A');
@@ -465,11 +466,13 @@ test('selection status actions and branch lens stay stable', async ({
     await expect(statusBar.locator('.shell-status-bar__item--accent')).toContainText('2');
     await expect(statusBar.getByRole('button', { name: 'Ask' })).toBeVisible();
     await expect(statusBar.getByRole('button', { name: 'Fit' })).toBeVisible();
+    await expect(page.locator('.selection-action-bar')).toHaveCount(0);
 
     const relationshipLens = page.locator('.mindmap-relationship-controls');
     await expect(relationshipLens).toBeVisible();
     await relationshipLens.getByRole('button', { name: /Branch A/ }).click();
     await expect(page.getByLabel('Temporary view overrides')).toContainText('Branch: Branch A');
+    await expect(page.getByRole('region', { name: 'Active canvas scope' })).toHaveCount(0);
     await expect(nodeByTitle(page, 'Branch A')).toHaveClass(/canvas-node-branch-root/);
     await expect(nodeByTitle(page, 'Branch B')).toHaveClass(/canvas-node-out-of-scope/);
 
@@ -744,7 +747,8 @@ test('shell right rail persists node metadata edits', async ({ page }) => {
     await expect(responseNodeByTitle(page, 'Shell rail metadata title')).toBeVisible();
 
     await responseNodeByTitle(page, 'Structured Evidence').click();
-    await expect(rightRail).toContainText('Structured evidence');
+    await expect(rightRail).toContainText('Structured Evidence');
+    await expect(rightRail).toContainText('Evidence');
     await expect(rightRail).toContainText('Shell QA Rows');
     await expect(rightRail.getByRole('button', { name: 'Mark reviewed' })).toHaveCount(0);
     await expect(rightRail.getByRole('button', { name: 'Create finding' })).toHaveCount(0);

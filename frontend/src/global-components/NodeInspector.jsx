@@ -968,8 +968,352 @@ const NodeInspector = ({
         );
     }
 
+    const inspectorClassName = metadataOnly
+        ? 'node-inspector node-inspector-shell-metadata'
+        : 'node-inspector';
+
+    const shellSectionHeading = (title, meta = '') => (
+        <div className="node-inspector-shell-section-heading">
+            <p>{title}</p>
+            {meta ? <span>{meta}</span> : null}
+        </div>
+    );
+
+    const shellBody = (
+        <>
+            <div className="node-inspector-shell-section node-inspector-shell-section-identity">
+                {shellSectionHeading('Identity', selectedNode.id)}
+                <label className="node-inspector-shell-wide-field">
+                    Title
+                    <input
+                        value={draft.title || ''}
+                        onChange={(e) => updateDraft('title', e.target.value)}
+                    />
+                </label>
+                <div className="node-inspector-grid node-inspector-shell-tight-grid">
+                    <label>
+                        Type
+                        <select
+                            value={draft.node_type || ''}
+                            onChange={(e) => updateDraft('node_type', e.target.value)}
+                        >
+                            <option value="">Auto</option>
+                            {NODE_TYPES.map((nodeType) => (
+                                <option key={nodeType} value={nodeType}>
+                                    {nodeType}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label>
+                        Confidence
+                        <input
+                            type="number"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            value={draft.confidence || ''}
+                            onChange={(e) => updateDraft('confidence', e.target.value)}
+                        />
+                    </label>
+                </div>
+            </div>
+
+            <div className="node-inspector-shell-section">
+                {shellSectionHeading('Review', validationIssues.length ? `${validationIssues.length} findings` : '')}
+                <label>
+                    State
+                    <select
+                        value={draft.status || 'ai_generated'}
+                        onChange={(e) => updateDraft('status', e.target.value)}
+                    >
+                        {REVIEW_STATES.map((state) => (
+                            <option key={state} value={state}>
+                                {state}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                {validationIssues.length > 0 ? (
+                    <div className="node-validation-issues node-inspector-shell-findings">
+                        {validationIssues.map((issue, index) => (
+                            <article
+                                key={`${issue.code || issue.label || 'issue'}-${index}`}
+                                className={`node-validation-issue node-validation-issue-${issue.severity || 'info'}`}
+                            >
+                                <span>
+                                    {issue.label || issue.code || 'Validation issue'}
+                                    {issue.repaired ? ' repaired' : ''}
+                                </span>
+                                <strong>{issue.detail || 'Review this node before export.'}</strong>
+                                {issue.code || issue.edgeId ? (
+                                    <small>
+                                        {[
+                                            issue.code ? `Code ${issue.code}` : '',
+                                            issue.edgeId ? `Edge ${issue.edgeId}` : ''
+                                        ]
+                                            .filter(Boolean)
+                                            .join(' | ')}
+                                    </small>
+                                ) : null}
+                            </article>
+                        ))}
+                    </div>
+                ) : null}
+            </div>
+
+            <div className="node-inspector-shell-section">
+                {shellSectionHeading('Task', isTaskMetadataNode ? 'task-capable' : 'optional')}
+                <div className="node-inspector-grid node-inspector-shell-tight-grid">
+                    <label>
+                        Priority
+                        <select
+                            value={draft.priority || ''}
+                            onChange={(e) => updateDraft('priority', e.target.value)}
+                        >
+                            {PRIORITIES.map((priority) => (
+                                <option key={priority || 'none'} value={priority}>
+                                    {priority || 'None'}
+                                </option>
+                            ))}
+                        </select>
+                    </label>
+                    <label>
+                        Due
+                        <input
+                            type="date"
+                            value={draft.due_date || ''}
+                            onChange={(e) => updateDraft('due_date', e.target.value)}
+                        />
+                    </label>
+                </div>
+                <label>
+                    Owner
+                    <input
+                        value={draft.owner_id || ''}
+                        onChange={(e) => updateDraft('owner_id', e.target.value)}
+                    />
+                </label>
+                {isTaskMetadataNode ? (
+                    <p className="node-inspector-shell-note">
+                        {missingTaskFields.length
+                            ? `Missing ${missingTaskFields.join(', ')}.`
+                            : 'Owner, priority, and due date are set.'}
+                    </p>
+                ) : null}
+            </div>
+
+            <div className="node-inspector-shell-section">
+                {shellSectionHeading('Map', branchNodeIds.size > 1 ? `${branchNodeIds.size} branch nodes` : '')}
+                <label>
+                    Visual role
+                    <select
+                        value={draft.emphasis || ''}
+                        onChange={(e) => updateDraft('emphasis', e.target.value)}
+                    >
+                        {NODE_EMPHASIS_OPTIONS.map((option) => (
+                            <option key={option.id || 'normal'} value={option.id}>
+                                {option.label}
+                            </option>
+                        ))}
+                    </select>
+                </label>
+                {branchNodeIds.size > 1 ? (
+                    <div className="node-emphasis-branch-actions">
+                        <button type="button" onClick={applyEmphasisToBranch}>
+                            Apply to branch
+                        </button>
+                        <span>{branchNodeIds.size} nodes</span>
+                    </div>
+                ) : null}
+            </div>
+
+            <div className="node-inspector-shell-section node-inspector-shell-section-evidence">
+                {shellSectionHeading('Evidence', isSourceBacked ? 'source-backed' : 'needs source')}
+                <div
+                    className={`node-citation-card ${
+                        isSourceBacked
+                            ? 'node-citation-card-backed'
+                            : 'node-citation-card-missing'
+                    }`}
+                >
+                    <div>
+                        <span>{isSourceBacked ? 'Primary source' : 'No primary source'}</span>
+                        <strong>
+                            {isSourceBacked
+                                ? citationSummary || 'Citation details available'
+                                : 'Attach document, page, section, or quote details.'}
+                        </strong>
+                    </div>
+                    {draft.source_quote ? <blockquote>{draft.source_quote}</blockquote> : null}
+                </div>
+                {sourceRefList.length > 1 ? (
+                    <div className="node-citation-list node-inspector-shell-citation-list">
+                        {sourceRefList.map((sourceRef, index) => (
+                            <article
+                                key={`${sourceRef.document_id || 'source'}-${index}`}
+                                className="node-citation-list-item"
+                            >
+                                <span>Source {index + 1}</span>
+                                <strong>
+                                    {[
+                                        sourceRef.document_id,
+                                        sourceRef.page ? `p. ${sourceRef.page}` : '',
+                                        sourceRef.section
+                                    ]
+                                        .filter(Boolean)
+                                        .join(' | ') || 'Unlabeled source'}
+                                </strong>
+                                {sourceRef.quote_snippet ? <p>{sourceRef.quote_snippet}</p> : null}
+                            </article>
+                        ))}
+                    </div>
+                ) : null}
+                <label>
+                    Document
+                    <input
+                        value={draft.source_document || ''}
+                        onChange={(e) => updateDraft('source_document', e.target.value)}
+                    />
+                </label>
+                <div className="node-inspector-grid node-inspector-shell-tight-grid">
+                    <label>
+                        Page
+                        <input
+                            value={draft.source_page || ''}
+                            onChange={(e) => updateDraft('source_page', e.target.value)}
+                        />
+                    </label>
+                    <label>
+                        Section
+                        <input
+                            value={draft.source_section || ''}
+                            onChange={(e) => updateDraft('source_section', e.target.value)}
+                        />
+                    </label>
+                </div>
+                <label>
+                    Quote
+                    <textarea
+                        rows={2}
+                        value={draft.source_quote || ''}
+                        onChange={(e) => updateDraft('source_quote', e.target.value)}
+                    />
+                </label>
+
+                {structuredDataContext.hasStructuredData ? (
+                    <div className="structured-artifact-inspector node-inspector-shell-structured">
+                        <div className="structured-artifact-facts">
+                            <span>Table</span>
+                            <strong>{structuredDataContext.tableName || 'Data table'}</strong>
+                            <span>Rows</span>
+                            <strong>{structuredDataContext.rowCount || 0}</strong>
+                            <span>Query</span>
+                            <strong>{structuredDataContext.queryId || 'Untracked query'}</strong>
+                            <span>Result</span>
+                            <strong>
+                                {structuredDataContext.resultHash
+                                    ? structuredDataContext.resultHash.slice(0, 16)
+                                    : 'No result hash'}
+                            </strong>
+                        </div>
+                        {structuredDataContext.artifactTypes.length ? (
+                            <div className="structured-artifact-chips">
+                                {structuredDataContext.artifactTypes.map((artifactType) => (
+                                    <span key={artifactType}>{humanizeId(artifactType)}</span>
+                                ))}
+                            </div>
+                        ) : null}
+                        {structuredDataContext.query ? (
+                            <pre className="structured-artifact-query">
+                                <code>{structuredDataContext.query}</code>
+                            </pre>
+                        ) : null}
+                        {structuredDataContext.sourceRefs.length ? (
+                            <div className="node-citation-list node-inspector-shell-citation-list">
+                                {structuredDataContext.sourceRefs.map((sourceRef, index) => (
+                                    <article
+                                        key={`${sourceRef.query_id || sourceRef.source_id || sourceRef.table_name || 'data-ref'}-${index}`}
+                                        className="node-citation-list-item"
+                                    >
+                                        <span>{humanizeId(sourceRef.source_type || 'data evidence')}</span>
+                                        <strong>
+                                            {[
+                                                sourceRef.table_name,
+                                                sourceRef.query_id,
+                                                sourceRef.result_hash
+                                                    ? sourceRef.result_hash.slice(0, 12)
+                                                    : ''
+                                            ]
+                                                .filter(Boolean)
+                                                .join(' | ') || 'Structured evidence ref'}
+                                        </strong>
+                                        {sourceRef.confidence ? (
+                                            <p>Confidence {sourceRef.confidence}</p>
+                                        ) : null}
+                                    </article>
+                                ))}
+                            </div>
+                        ) : null}
+                    </div>
+                ) : null}
+
+                <div className="node-inspector-shell-external">
+                    <div className="node-inspector-shell-subheading">
+                        <p>External refs</p>
+                    </div>
+                    {externalRefEntries.length > 0 ? (
+                        <div className="node-external-ref-list">
+                            {externalRefEntries.map(([provider, ref]) => (
+                                <article
+                                    key={provider}
+                                    className="node-external-ref-list-item"
+                                >
+                                    <span>{provider}</span>
+                                    <strong>{externalRefSummary(provider, ref)}</strong>
+                                </article>
+                            ))}
+                        </div>
+                    ) : null}
+                    <div className="node-inspector-grid node-inspector-shell-tight-grid">
+                        <label>
+                            Miro board
+                            <input
+                                value={draft.miro_board_id || ''}
+                                onChange={(e) => updateDraft('miro_board_id', e.target.value)}
+                            />
+                        </label>
+                        <label>
+                            Miro item
+                            <input
+                                value={draft.miro_item_id || ''}
+                                onChange={(e) => updateDraft('miro_item_id', e.target.value)}
+                            />
+                        </label>
+                    </div>
+                    <div className="node-inspector-grid node-inspector-shell-tight-grid">
+                        <label>
+                            monday board
+                            <input
+                                value={draft.monday_board_id || ''}
+                                onChange={(e) => updateDraft('monday_board_id', e.target.value)}
+                            />
+                        </label>
+                        <label>
+                            monday item
+                            <input
+                                value={draft.monday_item_id || ''}
+                                onChange={(e) => updateDraft('monday_item_id', e.target.value)}
+                            />
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </>
+    );
+
     return (
-        <aside className="node-inspector">
+        <aside className={inspectorClassName}>
             <div className="node-inspector-header">
                 <div>
                     <p className="node-inspector-kicker">Node metadata</p>
@@ -986,6 +1330,10 @@ const NodeInspector = ({
             </div>
 
             <div className="node-inspector-body">
+                {metadataOnly ? (
+                    shellBody
+                ) : (
+                    <>
                 {aiDraftSessionAppliesHere ? (
                     <AiDraftSessionPanel
                         session={activeAIDraftSession}
@@ -1391,6 +1739,8 @@ const NodeInspector = ({
                         </label>
                     </div>
                 </div>
+                    </>
+                )}
             </div>
 
             <div className="node-inspector-actions">

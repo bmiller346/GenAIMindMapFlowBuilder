@@ -15,10 +15,9 @@ const WorkspaceGuidanceTab = ({
         {hasWorkspaceNextSteps ? (
             <div className="workspace-next-steps-launcher">
                 <div className="workspace-dock-header">
-                    <strong>Next steps</strong>
+                    <strong>Next steps available</strong>
                     <span>{workspaceNextSteps.length}</span>
                 </div>
-                <p>Reopen recommended AI actions for the current workspace.</p>
                 <button type="button" onClick={onOpenNextSteps}>
                     Open next steps
                 </button>
