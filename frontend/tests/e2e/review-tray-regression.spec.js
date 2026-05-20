@@ -225,13 +225,19 @@ const shellSlotRects = async (page) =>
             const height = Math.max(0, Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top));
             return width * height;
         };
-        const left = rectFor('.workspace-shell__left');
-        const right = rectFor('.workspace-shell__right');
-        const bottom = rectFor('.workspace-shell__bottom');
-        const status = rectFor('.workspace-shell__status');
-        const ribbon = rectFor('.workspace-shell__ribbon');
+        const shell = rectFor('[data-testid="workspace-shell"]');
+        const left = rectFor('[data-testid="workspace-shell-left-slot"]');
+        const right = rectFor('[data-testid="workspace-shell-right-slot"]');
+        const bottom = rectFor('[data-testid="workspace-shell-bottom-slot"]');
+        const status = rectFor('[data-testid="workspace-shell-status-slot"]');
+        const ribbon = rectFor('[data-testid="workspace-shell-ribbon-slot"]');
 
         return {
+            viewport: {
+                width: window.innerWidth,
+                height: window.innerHeight
+            },
+            shell,
             left,
             right,
             bottom,
@@ -248,6 +254,50 @@ const shellSlotRects = async (page) =>
             bodyOverflow: document.documentElement.scrollWidth - window.innerWidth
         };
     });
+
+const expectShellSlotsBounded = (rects, { narrow = false, expectRight = false, expectBottom = false } = {}) => {
+    expect(rects.shell?.width || 0).toBeGreaterThan(300);
+    expect(rects.ribbon?.height || 0).toBeGreaterThan(40);
+    expect(rects.left?.height || 0).toBeGreaterThan(120);
+    expect(rects.status?.height || 0).toBeGreaterThan(20);
+    expect(rects.bodyOverflow).toBeLessThanOrEqual(2);
+
+    expect(rects.ribbon.left).toBeGreaterThanOrEqual(-1);
+    expect(rects.ribbon.right).toBeLessThanOrEqual(rects.viewport.width + 1);
+    expect(rects.left.left).toBeGreaterThanOrEqual(-1);
+    expect(rects.left.right).toBeLessThanOrEqual(rects.viewport.width + 1);
+    expect(rects.status.left).toBeGreaterThanOrEqual(-1);
+    expect(rects.status.right).toBeLessThanOrEqual(rects.viewport.width + 1);
+
+    expect(rects.left.top).toBeGreaterThanOrEqual(rects.ribbon.bottom - 1);
+    expect(rects.leftStatusOverlap).toBe(0);
+    expect(rects.leftRibbonOverlap).toBe(0);
+
+    if (expectRight) {
+        expect(rects.right?.height || 0).toBeGreaterThan(120);
+        expect(rects.right.left).toBeGreaterThanOrEqual(-1);
+        expect(rects.right.right).toBeLessThanOrEqual(rects.viewport.width + 1);
+        expect(rects.right.top).toBeGreaterThanOrEqual(rects.ribbon.bottom - 1);
+        expect(rects.rightStatusOverlap).toBe(0);
+        expect(rects.rightRibbonOverlap).toBe(0);
+    }
+
+    if (expectBottom) {
+        expect(rects.bottom?.height || 0).toBeGreaterThan(120);
+        expect(rects.bottomAboveStatus).toBe(true);
+        expect(rects.leftBottomOverlap).toBe(0);
+        expect(rects.rightBottomOverlap).toBe(0);
+        expect(rects.bottomStatusOverlap).toBe(0);
+    }
+
+    if (narrow && expectBottom) {
+        expect(rects.bottom.height).toBeLessThanOrEqual(Math.ceil(rects.viewport.height * 0.44) + 1);
+    }
+
+    if (narrow && expectRight) {
+        expect(rects.right.width).toBeLessThanOrEqual(rects.viewport.width - 8);
+    }
+};
 
 const setupMockBackend = async (page, initialFlowJson = emptyFlowJson()) => {
     await page.addInitScript(() => {
@@ -371,7 +421,10 @@ test('shell review tray hosts AI draft sessions in Drafts', async ({ page }) => 
 
     const tray = page.locator('.workspace-shell__bottom .review-tray');
     await expect(tray).toBeVisible();
+    await expect(tray).toContainText('Draft Review');
+    await expect(tray).toContainText('Preview AI draft changes here before accepting anything into the canvas.');
     await expect(tray.getByRole('tab', { name: 'Drafts' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tray.getByRole('tab')).toHaveCount(1);
     await expect(tray.locator('.ai-draft-session-panel')).toContainText('Review tray AI draft');
     await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
     await expect(page.locator('.metadata-inspector-floating-dock')).toHaveCount(0);
@@ -383,7 +436,7 @@ test('shell review tray hosts generated source draft before applying it', async 
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto('/');
 
-    await page.getByRole('button', { name: 'Add sources' }).click();
+    await page.getByTestId('rf__wrapper').getByRole('button', { name: 'Add sources', exact: true }).click();
     await page.getByText('Upload one DOCX').click();
     await expect(page.getByText('Load A Docx', { exact: true })).toBeVisible();
     await page.locator('#docxFileUpload').setInputFiles({
@@ -396,7 +449,10 @@ test('shell review tray hosts generated source draft before applying it', async 
     await expect.poll(() => docxUploadRequests.length).toBe(1);
     const tray = page.locator('.workspace-shell__bottom .review-tray');
     await expect(tray).toBeVisible();
+    await expect(tray).toContainText('Source Draft Review');
+    await expect(tray).toContainText('Review the generated source map before applying it to the workspace.');
     await expect(tray.getByRole('tab', { name: 'Sources' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tray.getByRole('tab')).toHaveCount(1);
     await expect(tray).toContainText('Source draft review');
     await expect(tray).toContainText(sourceTitle);
     await expect(tray).toContainText('Review tray source map');
@@ -438,7 +494,10 @@ test('shell review tray hosts workspace health issues from the left rail', async
 
     const tray = page.locator('.workspace-shell__bottom .review-tray');
     await expect(tray).toBeVisible();
+    await expect(tray).toContainText('Workspace Health Review');
+    await expect(tray).toContainText('Review validation issues from the current workspace health report.');
     await expect(tray.getByRole('tab', { name: 'Issues' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tray.getByRole('tab')).toHaveCount(1);
     await expect(tray.locator('.graph-validation-panel')).toBeVisible();
     await expect(tray).toContainText('Workspace health');
     await expect(tray).toContainText(/to review|No workspace health issues detected/);
@@ -455,13 +514,18 @@ test('shell review tray routes local output review views through shell state', a
 
     const tray = page.locator('.workspace-shell__bottom .review-tray');
     await expect(tray).toBeVisible();
+    await expect(tray).toContainText('Connections Review');
+    await expect(tray).toContainText('Review relationship candidates and source signals before treating them as canonical.');
     await expect(tray.getByRole('tab', { name: 'Connections' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tray.getByRole('tab', { name: 'Drafts' })).toHaveCount(0);
+    await expect(tray.getByRole('tab', { name: 'Activity' })).toHaveCount(0);
     await expect(tray.locator('.local-table-wrap')).toBeVisible();
     await expect(tray.locator('.local-view-content-surface')).toHaveCount(0);
     await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
 
-    await tray.getByRole('tab', { name: 'Tasks' }).click();
-    await expect(tray.getByRole('tab', { name: 'Tasks' })).toHaveAttribute('aria-selected', 'true');
+    await tray.getByRole('tab', { name: 'Task Preview' }).click();
+    await expect(tray.getByRole('tab', { name: 'Task Preview' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tray).toContainText('Preview-first task candidates. Accepted tasks stay in the structured canvas view.');
     await expect(tray.locator('.local-task-preview')).toBeVisible();
     await expect(tray.locator('.local-view-content-surface')).toHaveCount(0);
 
@@ -470,8 +534,8 @@ test('shell review tray routes local output review views through shell state', a
     await expect(tray.locator('.local-missing-info-preview')).toBeVisible();
     await expect(tray.locator('.local-view-content-surface')).toHaveCount(0);
 
-    await tray.getByRole('tab', { name: 'Sources' }).click();
-    await expect(tray.getByRole('tab', { name: 'Sources' })).toHaveAttribute('aria-selected', 'true');
+    await tray.getByRole('tab', { name: 'Source Review' }).click();
+    await expect(tray.getByRole('tab', { name: 'Source Review' })).toHaveAttribute('aria-selected', 'true');
     await expect(tray.locator('.local-source-repair-preview')).toBeVisible();
     await expect(tray.locator('.local-view-content-surface')).toHaveCount(0);
 
@@ -481,7 +545,8 @@ test('shell review tray routes local output review views through shell state', a
     await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
     await page.getByRole('button', { name: /^Checklist\b/ }).click();
     await expect(tray).toBeVisible();
-    await expect(tray.getByRole('tab', { name: 'Tasks' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tray.getByRole('tab', { name: 'Checklist Preview' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tray).toContainText('Preview-first checklist candidates. Accepting applies selected changes to the workspace.');
     await expect(tray.locator('.local-checklist-preview')).toBeVisible();
     await expect(tray.locator('.local-view-content-surface')).toHaveCount(0);
 });
@@ -497,24 +562,23 @@ test('shell review tray stays bounded with the left rail at desktop and narrow w
     await expect(page.locator('.workspace-shell__bottom .review-tray')).toBeVisible();
 
     const desktopRects = await shellSlotRects(page);
-    expect(desktopRects.leftBottomOverlap).toBe(0);
-    expect(desktopRects.leftStatusOverlap).toBe(0);
-    expect(desktopRects.bottomStatusOverlap).toBe(0);
-    expect(desktopRects.bottomAboveStatus).toBe(true);
-    expect(desktopRects.leftRibbonOverlap).toBe(0);
-    expect(desktopRects.bodyOverflow).toBeLessThanOrEqual(2);
-    expect(desktopRects.status?.height || 0).toBeGreaterThan(20);
+    expectShellSlotsBounded(desktopRects, { expectBottom: true });
+
+    await page.locator('.node-response').filter({ hasText: 'Unsourced review item' }).click();
+    await expect(page.getByTestId('workspace-shell-right-slot')).toBeVisible();
+    await expect(page.getByTestId('workspace-shell-bottom-slot')).toHaveCount(0);
+    expectShellSlotsBounded(await shellSlotRects(page), { expectRight: true });
 
     await page.setViewportSize({ width: 390, height: 844 });
-    await expect(page.locator('.workspace-shell__bottom .review-tray')).toBeVisible();
+    await expect(page.getByTestId('workspace-shell-right-slot')).toBeVisible();
+    await expect(page.getByTestId('workspace-shell-bottom-slot')).toHaveCount(0);
+    expectShellSlotsBounded(await shellSlotRects(page), { narrow: true, expectRight: true });
 
-    const narrowRects = await shellSlotRects(page);
-    expect(narrowRects.leftBottomOverlap).toBe(0);
-    expect(narrowRects.leftStatusOverlap).toBe(0);
-    expect(narrowRects.bottomStatusOverlap).toBe(0);
-    expect(narrowRects.bottomAboveStatus).toBe(true);
-    expect(narrowRects.leftRibbonOverlap).toBe(0);
-    expect(narrowRects.bodyOverflow).toBeLessThanOrEqual(2);
-    expect(narrowRects.bottom?.height || 0).toBeLessThanOrEqual(380);
-    expect(narrowRects.status?.height || 0).toBeGreaterThan(20);
+    await page.getByTestId('workspace-shell-right-slot').getByRole('button', { name: 'Close' }).click();
+    await expect(page.getByTestId('workspace-shell-right-slot')).toHaveCount(0);
+    await page.locator('.workspace-dock-tabs').getByRole('button', { name: 'Health' }).click();
+    await page.getByRole('button', { name: 'Review issues in tray' }).click();
+    await expect(page.locator('.workspace-shell__bottom .review-tray')).toBeVisible();
+    await expect(page.getByTestId('workspace-shell-right-slot')).toHaveCount(0);
+    expectShellSlotsBounded(await shellSlotRects(page), { narrow: true, expectBottom: true });
 });

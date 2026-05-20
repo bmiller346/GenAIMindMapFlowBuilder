@@ -11,6 +11,68 @@ import useIssuesReviewController from '../review/useIssuesReviewController.js';
 import useSourcesReviewController from '../review/useSourcesReviewController.js';
 import useTasksReviewController from '../review/useTasksReviewController.js';
 
+const LOCAL_REVIEW_TABS = ['connections', 'tasks', 'issues', 'sources'];
+
+const localReviewViewForTab = (tab, activeView = 'mindmap') => {
+    if (tab === 'connections') {
+        return 'connections';
+    }
+    if (tab === 'tasks') {
+        return activeView === 'checklist' ? 'checklist' : 'preview';
+    }
+    if (tab === 'issues') {
+        return activeView === 'sme' ? 'sme' : 'gaps';
+    }
+    if (tab === 'sources') {
+        return 'sources';
+    }
+    return null;
+};
+
+const localReviewTrayLabels = (activeView = 'mindmap') => ({
+    tasks: activeView === 'checklist' ? 'Checklist Preview' : 'Task Preview',
+    issues: activeView === 'sme' ? 'SME Questions' : 'Issues',
+    sources: 'Source Review'
+});
+
+const reviewTrayTitleForView = (view = 'mindmap') => {
+    if (view === 'checklist') {
+        return 'Checklist Preview';
+    }
+    if (view === 'preview') {
+        return 'Task Preview';
+    }
+    if (view === 'connections') {
+        return 'Connections Review';
+    }
+    if (view === 'sources') {
+        return 'Source Review';
+    }
+    if (view === 'sme') {
+        return 'SME Questions';
+    }
+    return 'Issues Review';
+};
+
+const localReviewDescriptionForView = (view = 'mindmap') => {
+    if (view === 'checklist') {
+        return 'Preview-first checklist candidates. Accepting applies selected changes to the workspace.';
+    }
+    if (view === 'preview') {
+        return 'Preview-first task candidates. Accepted tasks stay in the structured canvas view.';
+    }
+    if (view === 'connections') {
+        return 'Review relationship candidates and source signals before treating them as canonical.';
+    }
+    if (view === 'sources') {
+        return 'Review source coverage and repair suggestions before updating workspace evidence.';
+    }
+    if (view === 'sme') {
+        return 'Review SME questions before adding them back to the map.';
+    }
+    return 'Review missing information and workspace issues before updating the map.';
+};
+
 const ShellReviewTrayHost = ({
     activeAIDraftSession,
     activeView,
@@ -34,11 +96,25 @@ const ShellReviewTrayHost = ({
     const issuesReview = useIssuesReviewController();
     const sourcesReview = useSourcesReviewController();
     const tasksReview = useTasksReviewController({ onSelectNode });
+    const openLocalReviewTab = (tab) => {
+        const nextView = localReviewViewForTab(tab, activeView);
+        if (nextView) {
+            onOpenLocalOutputReviewTray?.(tab, { view: nextView });
+            onActiveViewChange?.(nextView);
+        }
+    };
+    const closeLocalReviewTray = () => {
+        onCloseTray();
+        onActiveViewChange?.('mindmap');
+    };
 
     if (bottomTray?.context === 'aiDraftSession' && activeAIDraftSession) {
         return (
             <ReviewTray
                 activeTab={bottomTray.kind}
+                availableTabs={['drafts']}
+                title="Draft Review"
+                description="Preview AI draft changes here before accepting anything into the canvas."
                 onTabChange={(tab) => onOpenBottomTray(tab, { context: 'aiDraftSession' })}
                 onClose={onCloseActiveDraftTray}
                 activeDraftSession={activeAIDraftSession}
@@ -51,6 +127,9 @@ const ShellReviewTrayHost = ({
         return (
             <ReviewTray
                 activeTab={bottomTray.kind}
+                availableTabs={['sources']}
+                title="Source Draft Review"
+                description="Review the generated source map before applying it to the workspace."
                 onTabChange={(tab) => onOpenBottomTray(tab, { context: 'sourceDraftReview' })}
                 onClose={() => {
                     clearPendingSourceDraft();
@@ -68,26 +147,12 @@ const ShellReviewTrayHost = ({
         return (
             <ReviewTray
                 activeTab="connections"
-                onTabChange={(tab) => {
-                    const nextView =
-                        tab === 'connections'
-                            ? 'connections'
-                            : tab === 'tasks'
-                              ? activeView === 'checklist' ? 'checklist' : 'preview'
-                              : tab === 'issues'
-                                ? activeView === 'sme' ? 'sme' : 'gaps'
-                                : tab === 'sources'
-                                  ? 'sources'
-                                  : null;
-                    if (nextView) {
-                        onOpenLocalOutputReviewTray?.(tab, { view: nextView });
-                        onActiveViewChange?.(nextView);
-                    }
-                }}
-                onClose={() => {
-                    onCloseTray();
-                    onActiveViewChange?.('mindmap');
-                }}
+                availableTabs={LOCAL_REVIEW_TABS}
+                title="Connections Review"
+                description={localReviewDescriptionForView('connections')}
+                tabLabels={localReviewTrayLabels(activeView)}
+                onTabChange={openLocalReviewTab}
+                onClose={closeLocalReviewTray}
             >
                 <ConnectionsReviewSurface
                     connectionRows={connectionsReview.connectionRows}
@@ -114,26 +179,12 @@ const ShellReviewTrayHost = ({
         return (
             <ReviewTray
                 activeTab="tasks"
-                onTabChange={(tab) => {
-                    const nextView =
-                        tab === 'connections'
-                            ? 'connections'
-                            : tab === 'tasks'
-                              ? activeView === 'checklist' ? 'checklist' : 'preview'
-                              : tab === 'issues'
-                                ? activeView === 'sme' ? 'sme' : 'gaps'
-                                : tab === 'sources'
-                                  ? 'sources'
-                                  : null;
-                    if (nextView) {
-                        onOpenLocalOutputReviewTray?.(tab, { view: nextView });
-                        onActiveViewChange?.(nextView);
-                    }
-                }}
-                onClose={() => {
-                    onCloseTray();
-                    onActiveViewChange?.('mindmap');
-                }}
+                availableTabs={LOCAL_REVIEW_TABS}
+                title={reviewTrayTitleForView(view)}
+                description={localReviewDescriptionForView(view)}
+                tabLabels={localReviewTrayLabels(view)}
+                onTabChange={openLocalReviewTab}
+                onClose={closeLocalReviewTray}
             >
                 {view === 'checklist' ? (
                     <ChecklistPreview
@@ -171,26 +222,12 @@ const ShellReviewTrayHost = ({
         return (
             <ReviewTray
                 activeTab="sources"
-                onTabChange={(tab) => {
-                    const nextView =
-                        tab === 'connections'
-                            ? 'connections'
-                            : tab === 'tasks'
-                              ? 'preview'
-                              : tab === 'issues'
-                                ? activeView === 'sme' ? 'sme' : 'gaps'
-                                : tab === 'sources'
-                                  ? 'sources'
-                                  : null;
-                    if (nextView) {
-                        onOpenLocalOutputReviewTray?.(tab, { view: nextView });
-                        onActiveViewChange?.(nextView);
-                    }
-                }}
-                onClose={() => {
-                    onCloseTray();
-                    onActiveViewChange?.('mindmap');
-                }}
+                availableTabs={LOCAL_REVIEW_TABS}
+                title="Source Review"
+                description={localReviewDescriptionForView('sources')}
+                tabLabels={localReviewTrayLabels(activeView)}
+                onTabChange={openLocalReviewTab}
+                onClose={closeLocalReviewTray}
             >
                 <SourcesReviewSurface
                     nodes={sourcesReview.nodes}
@@ -214,26 +251,12 @@ const ShellReviewTrayHost = ({
         return (
             <ReviewTray
                 activeTab="issues"
-                onTabChange={(tab) => {
-                    const nextView =
-                        tab === 'connections'
-                            ? 'connections'
-                            : tab === 'tasks'
-                              ? 'preview'
-                              : tab === 'issues'
-                                ? mode
-                                : tab === 'sources'
-                                  ? 'sources'
-                                  : null;
-                    if (nextView) {
-                        onOpenLocalOutputReviewTray?.(tab, { view: nextView });
-                        onActiveViewChange?.(nextView);
-                    }
-                }}
-                onClose={() => {
-                    onCloseTray();
-                    onActiveViewChange?.('mindmap');
-                }}
+                availableTabs={LOCAL_REVIEW_TABS}
+                title={reviewTrayTitleForView(mode)}
+                description={localReviewDescriptionForView(mode)}
+                tabLabels={localReviewTrayLabels(mode)}
+                onTabChange={openLocalReviewTab}
+                onClose={closeLocalReviewTray}
             >
                 <IssuesReviewSurface
                     mode={mode}
@@ -256,6 +279,9 @@ const ShellReviewTrayHost = ({
         return (
             <ReviewTray
                 activeTab="issues"
+                availableTabs={['issues']}
+                title="Workspace Health Review"
+                description="Review validation issues from the current workspace health report."
                 onTabChange={(tab) =>
                     onOpenBottomTray(tab, { context: tab === 'issues' ? 'validationIssues' : null })
                 }
