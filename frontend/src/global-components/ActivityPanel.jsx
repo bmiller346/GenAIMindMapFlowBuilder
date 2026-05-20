@@ -12,7 +12,7 @@ const STATUS_LABELS = {
 
 const DETAIL_KEYS = ['actor', 'integration', 'node_ids', 'source_ids'];
 
-const ActivityPanel = () => {
+const ActivityPanel = ({ embedded = false }) => {
     const activities = useActivityStore((s) => s.activities);
     const isActivityOpen = useActivityStore((s) => s.isActivityOpen);
     const setActivityOpen = useActivityStore((s) => s.setActivityOpen);
@@ -28,12 +28,12 @@ const ActivityPanel = () => {
         [activeFilter, activities]
     );
 
-    if (!isActivityOpen) {
+    if (!embedded && !isActivityOpen) {
         return null;
     }
 
     return (
-        <aside className="activity-panel">
+        <aside className={`activity-panel ${embedded ? 'activity-panel--embedded' : ''}`}>
             <div className="activity-panel-header">
                 <div>
                     <p>Activity</p>
@@ -43,9 +43,11 @@ const ActivityPanel = () => {
                     <button type="button" onClick={clearActivities}>
                         Clear
                     </button>
-                    <button type="button" onClick={() => setActivityOpen(false)}>
-                        Close
-                    </button>
+                    {!embedded ? (
+                        <button type="button" onClick={() => setActivityOpen(false)}>
+                            Close
+                        </button>
+                    ) : null}
                 </div>
             </div>
             <div className="activity-panel-filters">

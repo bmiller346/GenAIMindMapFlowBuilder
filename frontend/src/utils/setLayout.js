@@ -74,7 +74,8 @@ const edgeRelationshipType = (edge) => {
 	).toLowerCase();
 };
 
-const isHierarchyEdge = (edge) => HIERARCHY_RELATIONSHIP_TYPES.has(edgeRelationshipType(edge));
+const isHierarchyEdge = (edge) =>
+	Boolean(edge?.data?.mindmap_structure) || HIERARCHY_RELATIONSHIP_TYPES.has(edgeRelationshipType(edge));
 
 const isDecisionNode = (node) => {
 	const kind = nodeKind(node);
@@ -315,6 +316,12 @@ const layoutKnowledgeGraphElements = (nodes, edges) => {
 const getLayoutedElements = (nodes, edges, options = {}) => {
 	if (options.mode === 'knowledgeGraph') {
 		return layoutKnowledgeGraphElements(nodes, edges);
+	}
+	if (options.mode === 'mindmap') {
+		return layoutWithDagre(nodes, edges, {
+			ranksep: 150,
+			nodesep: 70
+		});
 	}
 	if (shouldUseFlowchartLayout(nodes, edges)) {
 		return layoutFlowchartElements(nodes, edges);

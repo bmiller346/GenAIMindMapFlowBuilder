@@ -87,7 +87,7 @@ const FailureList = ({ failures }) => {
     );
 };
 
-const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
+const SourcesPanel = ({ embedded = false, isOpen, onClose, onOpenSourceProperties, onSelectNode }) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -271,7 +271,7 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
         : `${projection.cited_node_count} cited node${projection.cited_node_count === 1 ? '' : 's'} across ${projection.sources.length} source${projection.sources.length === 1 ? '' : 's'}`;
 
     return (
-        <aside className="sources-panel">
+        <aside className={`sources-panel ${embedded ? 'sources-panel--embedded' : ''}`}>
             <div className="sources-panel-header">
                 <div>
                     <p>Source set / Media</p>
@@ -350,7 +350,17 @@ const SourcesPanel = ({ isOpen, onClose, onSelectNode }) => {
                                     <span>{selectedSource.type_label}</span>
                                     <h2>{selectedSource.title}</h2>
                                 </div>
-                                <strong>{sourceStatusLabel(selectedSource.status)}</strong>
+                                <div className="sources-detail-title-actions">
+                                    <strong>{sourceStatusLabel(selectedSource.status)}</strong>
+                                    {onOpenSourceProperties ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => onOpenSourceProperties(selectedSource.id)}
+                                        >
+                                            Properties
+                                        </button>
+                                    ) : null}
+                                </div>
                             </div>
 
                             <dl className="sources-metadata">

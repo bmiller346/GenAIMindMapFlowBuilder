@@ -260,7 +260,13 @@ const requestImmediateWorkspaceSave = () => {
     }, 50);
 };
 
-const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDraftAccepted }) => {
+const NodeInspector = ({
+    selectedNodeId,
+    validationIssues = [],
+    onClose,
+    onAiDraftAccepted,
+    metadataOnly = false
+}) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -314,6 +320,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
         [activeAIActionPreview]
     );
     const aiPreviewAppliesHere =
+        !metadataOnly &&
         activeAIActionPreview &&
         (activeAIActionPreview.source_node_id === selectedNodeId ||
             activeAIActionPreview.node_id === selectedNodeId ||
@@ -321,6 +328,7 @@ const NodeInspector = ({ selectedNodeId, validationIssues = [], onClose, onAiDra
             activeAIActionPreview.scope === 'workspace' ||
             activeAIActionPreview.scope?.type === 'workspace');
     const aiDraftSessionAppliesHere =
+        !metadataOnly &&
         activeAIDraftSession &&
         (activeAIDraftSession.scope?.type === 'workspace' ||
             (activeAIDraftSession.scope?.type === 'source' && !selectedNodeId) ||

@@ -6,6 +6,8 @@ import {
     MiniMap,
     Panel,
     ReactFlow,
+    SelectionMode,
+    applyNodeChanges,
     getBezierPath,
     getSmoothStepPath,
     getStraightPath,
@@ -16,7 +18,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import axios from 'axios';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FiChevronLeft, FiChevronRight, FiMaximize2, FiMessageSquare, FiTrash2 } from 'react-icons/fi';
+import { FiChevronLeft, FiChevronRight, FiMaximize2, FiMessageSquare, FiSend, FiTrash2 } from 'react-icons/fi';
 import { nodeTypes } from './nodes/nodeTypes.js';
 import { useShallow } from 'zustand/shallow';
 import useStore from './stores/store.js';
@@ -24,7 +26,6 @@ import Modal from './global-components/Modal.jsx';
 import Prompts from './global-components/Prompts.jsx';
 import getLayoutedElements from './utils/setLayout.js';
 import modalStore from './stores/modalStore';
-import AskMultiple from './global-components/AskMultiple.jsx';
 import Header from './global-components/Header.jsx';
 import Drawer from './global-components/Drawer.jsx';
 import flowStore from './stores/flowStore.js';
@@ -37,12 +38,30 @@ import ActivityPanel from './global-components/ActivityPanel.jsx';
 import SourcesPanel from './global-components/SourcesPanel.jsx';
 import IntegrationsPanel from './global-components/IntegrationsPanel.jsx';
 import AutomationsPanel from './global-components/AutomationsPanel.jsx';
-import WorkspaceDock, { WORKSPACE_DOCK_OPEN_TAB_EVENT } from './global-components/WorkspaceDock.jsx';
+import { WORKSPACE_DOCK_OPEN_TAB_EVENT } from './global-components/WorkspaceDock.jsx';
+import ShellPropertiesPanelHost from './shell/ShellPropertiesPanelHost.jsx';
+import ShellReviewTrayHost from './shell/ShellReviewTrayHost.jsx';
+import ShellOverlayHost from './shell/ShellOverlayHost.jsx';
+import ShellWorkspaceNavigatorHost from './shell/ShellWorkspaceNavigatorHost.jsx';
+import WorkspaceShellAdapter from './shell/WorkspaceShellAdapter.jsx';
+import useShellLayoutState from './shell/useShellLayoutState.js';
+import useWorkspaceShellRouter from './shell/useWorkspaceShellRouter.js';
+import {
+    KnowledgeGraphRelationshipRibbonGroup,
+    MindmapRelationshipRibbonGroup
+} from './ribbon/RelationshipRibbonGroups.jsx';
+import {
+    AiRibbonGroups,
+    OutputsRibbonGroups,
+    ReviewRibbonGroups
+} from './ribbon/AiRibbonGroups.jsx';
+import MapRibbonHost from './ribbon/MapRibbonHost.jsx';
 import AiHelpersPanel from './global-components/AiHelpersPanel.jsx';
 import AiGenerationProgress from './global-components/AiGenerationProgress.jsx';
 import SourceDraftReviewPanel from './global-components/SourceDraftReviewPanel.jsx';
 import DataSourceSelect from './global-components/DataSourceSelect.jsx';
 import PromptModal from './modals/PromptModal.jsx';
+import { isUiShellRibbonEnabled } from './config/uiShellFeatureFlag.js';
 import {
     getLastKgRelationshipMode,
     getLocalSetting,
@@ -55,6 +74,11 @@ import { rememberWorkspace, selectStartupWorkspace } from './utils/workspaceSess
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from './utils/askAiGenerationProgress';
 import { buildWorkspaceNextSteps } from './utils/workspaceNudges';
 import { createWorkspaceEdge, reflowSiblingSubtrees } from './utils/manualNodes';
+import {
+    buildAIDraftMemoryContext,
+    buildAIDraftSessionRequestPayload,
+    inferAIDraftChangeIntent
+} from './utils/aiDraftSessions';
 import {
     KG_RELATIONSHIP_MODE_OPTIONS,
     KG_RELATIONSHIP_MODES,
@@ -88,6 +112,39 @@ const ASK_AI_STAGE_PROGRESS = {
     validating_draft: 84,
     opening_preview: 96
 };
+const SELECTION_QUICK_ASK_MODES = [
+    { id: 'auto', label: 'Auto' },
+    { id: 'answer', label: 'Answer' },
+    { id: 'draft', label: 'Draft' }
+];
+const REACT_FLOW_FIT_VIEW_OPTIONS = { maxZoom: 1 };
+const REACT_FLOW_PRO_OPTIONS = { hideAttribution: true };
+const REACT_FLOW_MULTI_SELECTION_KEYS = ['Control', 'Meta', 'Shift'];
+const SELECTION_QUICK_ASK_ACTION_TERMS =
+    /\b(add|append|build|change|convert|create|draft|expand|generate|make|organize|propose|replace|rewrite|split|turn|update)\b/i;
+const SELECTION_QUICK_ASK_QUESTION_STARTERS =
+    /^(what|why|how|when|where|who|which|can you explain|explain|describe|tell me|clarify|summarize|define)\b/i;
+const MINDMAP_RELATIONSHIP_MODES = {
+    OFF: 'off'
+};
+const MINDMAP_RELATIONSHIP_MODE_OPTIONS = [
+    {
+        id: MINDMAP_RELATIONSHIP_MODES.OFF,
+        label: 'Structure Only',
+        shortLabel: 'Map',
+        description: 'Show the readable mind map backbone without semantic relationship labels.'
+    },
+    ...KG_RELATIONSHIP_MODE_OPTIONS.filter((option) =>
+        [
+            KG_RELATIONSHIP_MODES.INSIGHTS,
+            KG_RELATIONSHIP_MODES.EXECUTION,
+            KG_RELATIONSHIP_MODES.RISKS,
+            KG_RELATIONSHIP_MODES.DEPENDENCIES,
+            KG_RELATIONSHIP_MODES.EVIDENCE,
+            KG_RELATIONSHIP_MODES.ALL
+        ].includes(option.id)
+    )
+];
 const normalizeAskAiProgressStatus = (status = '') => {
     if (['success', 'fallback', 'completed'].includes(status)) {
         return 'completed';
@@ -127,11 +184,30 @@ const hasRoutableNextStep = (step = {}) => {
     return false;
 };
 const STRUCTURED_AI_PRESETS = {
+    connections: {
+        role: 'gap-analyst',
+        action: 'find_duplicate_overlapping_nodes',
+        scope: 'workspace',
+        visual: 'knowledge_graph',
+        view: 'connections',
+        prompt:
+            'Find cross-branch connection candidates in the current workspace. Do not rewrite the hierarchy. Propose relationship edges only when there is a clear signal, and include duplicates, overlaps, dependencies, supporting relationships, conflicts, blockers, rationale, confidence, and review state.'
+    },
+    softwareOverlap: {
+        role: 'enterprise-tool-rationalization',
+        action: 'find_duplicate_tools',
+        scope: 'workspace',
+        visual: 'software_overlap_report',
+        view: 'connections',
+        prompt:
+            'Create a software overlap and rationalization report for this workspace. Compare applications, systems, capabilities, supported workflows, user groups, owners, approval/security status, integrations, license or usage signals, replacement or retired status, source support, confidence, scoring factors, evidence, and recommended owner review. Label findings as potential overlap unless the evidence proves a duplicate.'
+    },
     tasks: {
         role: 'task-planner',
         action: 'generate_tasks',
         scope: 'branch',
         visual: 'tasks',
+        view: 'preview',
         prompt:
             'Create task candidates from the current workspace scope. Include action-oriented titles, status, priority, owner cues, due-date cues, dependencies, blockers, and review state.'
     },
@@ -140,6 +216,7 @@ const STRUCTURED_AI_PRESETS = {
         action: 'generate_tasks',
         scope: 'branch',
         visual: 'kanban',
+        view: 'tasks',
         prompt:
             'Create a Kanban-ready board from the current workspace scope. Supplement the graph with task nodes or task metadata, board status columns, priority, owner cues, due-date cues, dependencies, blockers, and review state so Kanban is populated after review.'
     },
@@ -148,6 +225,7 @@ const STRUCTURED_AI_PRESETS = {
         action: 'interpret_table_data',
         scope: 'workspace',
         visual: 'table',
+        view: 'chartData',
         prompt:
             'Create a structured table from the current workspace. Supplement nodes with stable columns, row candidates, source-backed evidence, and review flags.'
     },
@@ -156,6 +234,7 @@ const STRUCTURED_AI_PRESETS = {
         action: 'create_stakeholder_review_package',
         scope: 'workspace',
         visual: 'executive_summary',
+        view: 'executive',
         prompt:
             'Make this workspace executive-ready. Supplement missing key findings, recommended actions, risks, required decisions, confidence, source-backed appendix entries, and review state while preserving the current graph.'
     }
@@ -192,6 +271,20 @@ const nodeSourceRefs = (node) => {
         : Array.isArray(data.data?.source_refs)
           ? data.data.source_refs
           : [];
+};
+
+const draftSessionEndpoint = ({ flowId }) =>
+    `http://localhost:8000/api/workspaces/${encodeURIComponent(flowId)}/ai/draft-sessions`;
+
+const nodeMessageEndpoint = ({ flowId }) =>
+    `http://localhost:8000/api/workspaces/${encodeURIComponent(flowId)}/ai/node-message`;
+
+const shouldDraftSelectionQuickAsk = (prompt = '') => {
+    const text = String(prompt || '').trim();
+    if (!text) {
+        return false;
+    }
+    return SELECTION_QUICK_ASK_ACTION_TERMS.test(text) && !SELECTION_QUICK_ASK_QUESTION_STARTERS.test(text);
 };
 
 const hasSourceEvidence = (ref) =>
@@ -326,6 +419,7 @@ const SemanticEdge = ({
             ? 'semantic-edge-label--hierarchy'
             : 'semantic-edge-label--relationship',
         semantic.tone ? `semantic-edge-label--${semantic.tone}` : '',
+        semantic.mindmapRelationship ? 'semantic-edge-label--mindmap' : '',
         semantic.kgMuted ? 'kg-edge-muted' : ''
     ]
         .filter(Boolean)
@@ -433,8 +527,15 @@ const collectVisibleBranchIds = (nodes, edges, selectedBranchId) => {
         return new Set(nodes.map((node) => node.id));
     }
 
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const validEdges = edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+    const explicitHierarchyEdges = validEdges.filter((edge) => HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge)));
+    const structuralEdgeIds =
+        explicitHierarchyEdges.length > 0
+            ? new Set(explicitHierarchyEdges.map((edge) => edge.id))
+            : buildMindmapStructureEdgeIds(nodes, edges);
     const childrenByParent = edges
-        .filter((edge) => HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge)))
+        .filter((edge) => structuralEdgeIds.has(edge.id))
         .reduce((children, edge) => {
             const next = children.get(edge.source) || [];
             next.push(edge.target);
@@ -457,6 +558,14 @@ const collectVisibleBranchIds = (nodes, edges, selectedBranchId) => {
 
 const CANVAS_OUT_OF_SCOPE_NODE_CLASS = 'canvas-node-out-of-scope';
 const CANVAS_OUT_OF_SCOPE_EDGE_CLASS = 'canvas-edge-out-of-scope';
+const CANVAS_BRANCH_SCOPE_NODE_CLASS = 'canvas-node-in-branch-scope';
+const CANVAS_BRANCH_ROOT_NODE_CLASS = 'canvas-node-branch-root';
+const CANVAS_BRANCH_SCOPE_EDGE_CLASS = 'canvas-edge-in-branch-scope';
+const CANVAS_MINDMAP_STRUCTURE_EDGE_CLASS = 'canvas-edge-mindmap-structure';
+const CANVAS_MINDMAP_INFERRED_EDGE_CLASS = 'canvas-edge-mindmap-inferred';
+const CANVAS_MINDMAP_RELATIONSHIP_EDGE_CLASS = 'canvas-edge-mindmap-relationship';
+const CANVAS_BRANCH_COLOR_PREFIX = 'canvas-branch-color-';
+const CANVAS_BRANCH_COLOR_COUNT = 6;
 
 const REVIEWABLE_DRAFT_STATUSES = new Set(['', 'draft', 'drafting', 'previewed', 'generated', 'needs_review']);
 
@@ -563,6 +672,9 @@ const scopedClassName = (className = '', scopeClass, isActive) => {
             (value) =>
                 value &&
                 value !== CANVAS_OUT_OF_SCOPE_NODE_CLASS &&
+                value !== CANVAS_BRANCH_SCOPE_NODE_CLASS &&
+                value !== CANVAS_BRANCH_ROOT_NODE_CLASS &&
+                !value.startsWith(CANVAS_BRANCH_COLOR_PREFIX) &&
                 !value.startsWith('canvas-node-density-') &&
                 value !== CANVAS_OUT_OF_SCOPE_EDGE_CLASS
         );
@@ -575,8 +687,10 @@ const scopedClassName = (className = '', scopeClass, isActive) => {
 const canvasEdgeClassName = ({
     className = '',
     isOutOfScope = false,
+    isBranchScope = false,
     semantic,
-    activeCanvasView
+    activeCanvasView,
+    showSemanticStyling = activeCanvasView === 'knowledgeGraph'
 }) => {
     const classes = String(className || '')
         .split(/\s+/)
@@ -584,13 +698,21 @@ const canvasEdgeClassName = ({
             (value) =>
                 value &&
                 value !== CANVAS_OUT_OF_SCOPE_EDGE_CLASS &&
+                value !== CANVAS_BRANCH_SCOPE_EDGE_CLASS &&
+                value !== CANVAS_MINDMAP_STRUCTURE_EDGE_CLASS &&
+                value !== CANVAS_MINDMAP_INFERRED_EDGE_CLASS &&
+                value !== CANVAS_MINDMAP_RELATIONSHIP_EDGE_CLASS &&
+                !value.startsWith(CANVAS_BRANCH_COLOR_PREFIX) &&
                 !value.startsWith('semantic-edge-') &&
                 value !== 'semantic-edge'
         );
     if (isOutOfScope) {
         classes.push(CANVAS_OUT_OF_SCOPE_EDGE_CLASS);
     }
-    if (activeCanvasView === 'knowledgeGraph' && semantic) {
+    if (isBranchScope) {
+        classes.push(CANVAS_BRANCH_SCOPE_EDGE_CLASS);
+    }
+    if (showSemanticStyling && semantic) {
         classes.push('semantic-edge');
         classes.push(
             semantic.kind === 'hierarchy'
@@ -604,16 +726,83 @@ const canvasEdgeClassName = ({
 
 const isHierarchyCanvasEdge = (edge = {}) => HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge));
 
-const edgeMatchesCanvasLens = (
-    edge,
-    activeCanvasView,
-    { showMindmapRelationshipFallback = false } = {}
-) => {
+const edgeAxisScore = (edge = {}, nodeById = new Map()) => {
+    const source = nodeById.get(edge.source);
+    const target = nodeById.get(edge.target);
+    if (!source || !target) {
+        return 0;
+    }
+    const sourceX = Number(source.position?.x || 0);
+    const sourceY = Number(source.position?.y || 0);
+    const targetX = Number(target.position?.x || 0);
+    const targetY = Number(target.position?.y || 0);
+    const dx = targetX - sourceX;
+    const dy = Math.abs(targetY - sourceY);
+    if (dx < -40) {
+        return -180 + dx;
+    }
+    return Math.min(dx, 520) - dy * 0.08;
+};
+
+const wouldCreateTreeCycle = (sourceId, targetId, parentByNode) => {
+    let current = sourceId;
+    const seen = new Set([targetId]);
+    while (current) {
+        if (seen.has(current)) {
+            return true;
+        }
+        seen.add(current);
+        current = parentByNode.get(current);
+    }
+    return false;
+};
+
+const buildMindmapStructureEdgeIds = (nodes = [], edges = []) => {
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const validEdges = edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+    const explicitHierarchyEdges = validEdges.filter(isHierarchyCanvasEdge);
+    if (explicitHierarchyEdges.length > 0) {
+        return new Set(explicitHierarchyEdges.map((edge) => edge.id));
+    }
+
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const incomingByTarget = validEdges.reduce((lookup, edge) => {
+        lookup.set(edge.target, [...(lookup.get(edge.target) || []), edge]);
+        return lookup;
+    }, new Map());
+    const parentByNode = new Map();
+    const selectedEdgeIds = new Set();
+    const targets = [...incomingByTarget.keys()].sort((left, right) => {
+        const leftNode = nodeById.get(left);
+        const rightNode = nodeById.get(right);
+        return (
+            Number(leftNode?.position?.x || 0) - Number(rightNode?.position?.x || 0) ||
+            Number(leftNode?.position?.y || 0) - Number(rightNode?.position?.y || 0)
+        );
+    });
+
+    targets.forEach((targetId) => {
+        const candidates = (incomingByTarget.get(targetId) || [])
+            .map((edge, index) => ({ edge, index, score: edgeAxisScore(edge, nodeById) }))
+            .sort((left, right) => right.score - left.score || left.index - right.index);
+        const selected = candidates.find(
+            ({ edge }) => !wouldCreateTreeCycle(edge.source, edge.target, parentByNode)
+        )?.edge;
+        if (selected) {
+            parentByNode.set(selected.target, selected.source);
+            selectedEdgeIds.add(selected.id);
+        }
+    });
+
+    return selectedEdgeIds;
+};
+
+const edgeMatchesCanvasLens = (edge, activeCanvasView) => {
     const relationshipType = edgeRelationshipType(edge);
     const isHierarchy = isHierarchyCanvasEdge(edge);
 
     if (activeCanvasView === 'mindmap') {
-        return isHierarchy || showMindmapRelationshipFallback;
+        return isHierarchy;
     }
     if (activeCanvasView === 'knowledgeGraph') {
         return true;
@@ -650,10 +839,15 @@ const buildKgFocusNodeIds = (edges = [], focusNodeIds = []) => {
 
 const buildNodeDepths = (nodes = [], edges = []) => {
     const nodeIds = new Set(nodes.map((node) => node.id));
+    const validEdges = edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
+    const explicitHierarchyEdges = validEdges.filter((edge) => HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge)));
+    const structuralEdgeIds =
+        explicitHierarchyEdges.length > 0
+            ? new Set(explicitHierarchyEdges.map((edge) => edge.id))
+            : buildMindmapStructureEdgeIds(nodes, edges);
     const childIds = new Set();
-    const childrenByParent = edges.reduce((lookup, edge) => {
-        const isHierarchy = HIERARCHY_EDGE_TYPES.has(edgeRelationshipType(edge));
-        if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target) || !isHierarchy) {
+    const childrenByParent = validEdges.reduce((lookup, edge) => {
+        if (!structuralEdgeIds.has(edge.id)) {
             return lookup;
         }
         childIds.add(edge.target);
@@ -682,6 +876,101 @@ const buildNodeDepths = (nodes = [], edges = []) => {
     return depths;
 };
 
+const sortedNodeIdsByPosition = (nodeIds = [], nodeById = new Map()) =>
+    [...nodeIds].sort((left, right) => {
+        const leftNode = nodeById.get(left);
+        const rightNode = nodeById.get(right);
+        return (
+            Number(leftNode?.position?.x || 0) - Number(rightNode?.position?.x || 0) ||
+            Number(leftNode?.position?.y || 0) - Number(rightNode?.position?.y || 0) ||
+            String(left).localeCompare(String(right))
+        );
+    });
+
+const buildBranchColorAssignments = (nodes = [], edges = [], structuralEdgeIds = new Set()) => {
+    if (!nodes.length || !structuralEdgeIds.size) {
+        return { nodeColors: new Map(), edgeColors: new Map(), branchRoots: [] };
+    }
+
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const structuralEdges = edges.filter(
+        (edge) => structuralEdgeIds.has(edge.id) && nodeIds.has(edge.source) && nodeIds.has(edge.target)
+    );
+    const childrenByParent = structuralEdges.reduce((lookup, edge) => {
+        const children = lookup.get(edge.source) || [];
+        children.push(edge.target);
+        lookup.set(edge.source, children);
+        return lookup;
+    }, new Map());
+    const edgeByParentChild = structuralEdges.reduce((lookup, edge) => {
+        lookup.set(`${edge.source}->${edge.target}`, edge.id);
+        return lookup;
+    }, new Map());
+    const childIds = new Set(structuralEdges.map((edge) => edge.target));
+    const roots = sortedNodeIdsByPosition(
+        nodes.map((node) => node.id).filter((nodeId) => !childIds.has(nodeId)),
+        nodeById
+    );
+    const nodeColors = new Map();
+    const edgeColors = new Map();
+    const branchRoots = [];
+    let nextColor = 0;
+
+    const paintBranch = (startId, colorIndex) => {
+        const queue = [startId];
+        while (queue.length) {
+            const nodeId = queue.shift();
+            if (nodeColors.has(nodeId)) {
+                continue;
+            }
+            nodeColors.set(nodeId, colorIndex);
+            (childrenByParent.get(nodeId) || []).forEach((childId) => {
+                const edgeId = edgeByParentChild.get(`${nodeId}->${childId}`);
+                if (edgeId) {
+                    edgeColors.set(edgeId, colorIndex);
+                }
+                queue.push(childId);
+            });
+        }
+    };
+
+    roots.forEach((rootId) => {
+        let anchorId = rootId;
+        const trunkColor = nextColor % CANVAS_BRANCH_COLOR_COUNT;
+        nodeColors.set(anchorId, trunkColor);
+
+        while ((childrenByParent.get(anchorId) || []).length === 1) {
+            const childId = childrenByParent.get(anchorId)[0];
+            const edgeId = edgeByParentChild.get(`${anchorId}->${childId}`);
+            if (edgeId) {
+                edgeColors.set(edgeId, trunkColor);
+            }
+            nodeColors.set(childId, trunkColor);
+            anchorId = childId;
+        }
+
+        const children = sortedNodeIdsByPosition(childrenByParent.get(anchorId) || [], nodeById);
+        if (!children.length) {
+            branchRoots.push({ nodeId: anchorId, colorIndex: trunkColor });
+            nextColor += 1;
+            return;
+        }
+        children.forEach((childId) => {
+            const colorIndex = nextColor % CANVAS_BRANCH_COLOR_COUNT;
+            const edgeId = edgeByParentChild.get(`${anchorId}->${childId}`);
+            if (edgeId) {
+                edgeColors.set(edgeId, colorIndex);
+            }
+            branchRoots.push({ nodeId: childId, colorIndex });
+            paintBranch(childId, colorIndex);
+            nextColor += 1;
+        });
+    });
+
+    return { nodeColors, edgeColors, branchRoots };
+};
+
 const projectCanvasGraph = ({
     nodes,
     edges,
@@ -691,6 +980,7 @@ const projectCanvasGraph = ({
     canvasNodeDensity,
     mapStyle,
     kgRelationshipMode = KG_RELATIONSHIP_MODES.INSIGHTS,
+    mindmapRelationshipMode = MINDMAP_RELATIONSHIP_MODES.OFF,
     kgFocusNodeIds = []
 }) => {
     const hasBranchScope = Boolean(selectedBranchId);
@@ -699,23 +989,28 @@ const projectCanvasGraph = ({
     const normalizedMapStyle = normalizeMapStyle(mapStyle);
     const nodeDepths = buildNodeDepths(nodes, edges);
     const isKnowledgeGraph = activeCanvasView === 'knowledgeGraph';
-    const visibleNodeIds = new Set(nodes.map((node) => node.id));
-    const hasMindmapHierarchyEdges =
-        activeCanvasView === 'mindmap' &&
-        edges.some(
-            (edge) =>
-                visibleNodeIds.has(edge.source) &&
-                visibleNodeIds.has(edge.target) &&
-                isHierarchyCanvasEdge(edge)
-        );
-    const showMindmapRelationshipFallback =
-        activeCanvasView === 'mindmap' && !hasMindmapHierarchyEdges && edges.length > 0;
+    const isMindmap = activeCanvasView === 'mindmap';
+    const mindmapStructureEdgeIds = isMindmap
+        ? buildMindmapStructureEdgeIds(nodes, edges)
+        : new Set();
+    const branchColorAssignments = isMindmap
+        ? buildBranchColorAssignments(nodes, edges, mindmapStructureEdgeIds)
+        : { nodeColors: new Map(), edgeColors: new Map() };
+    const shouldShowMindmapRelationships =
+        isMindmap && mindmapRelationshipMode !== MINDMAP_RELATIONSHIP_MODES.OFF;
     const visibleEdges = edges
-        .filter((edge) =>
-            edgeMatchesCanvasLens(edge, activeCanvasView, {
-                showMindmapRelationshipFallback
-            })
-        )
+        .filter((edge) => {
+            if (!isMindmap) {
+                return edgeMatchesCanvasLens(edge, activeCanvasView);
+            }
+            if (mindmapStructureEdgeIds.has(edge.id)) {
+                return true;
+            }
+            return (
+                shouldShowMindmapRelationships &&
+                shouldShowKgSemanticEdge(edge, mindmapRelationshipMode, { includeHierarchy: false })
+            );
+        })
         .filter((edge) =>
             isKnowledgeGraph
                 ? shouldShowKgSemanticEdge(edge, kgRelationshipMode, { includeHierarchy: true })
@@ -749,6 +1044,19 @@ const projectCanvasGraph = ({
                 : '';
             const emphasis = node.data?.display?.emphasis || '';
             const emphasisClass = emphasis ? `canvas-node-emphasis-${emphasis}` : '';
+            const branchScopeClass =
+                hasBranchScope && isProjected && branchIds.has(node.id)
+                    ? CANVAS_BRANCH_SCOPE_NODE_CLASS
+                    : '';
+            const branchRootClass =
+                hasBranchScope && node.id === selectedBranchId
+                    ? CANVAS_BRANCH_ROOT_NODE_CLASS
+                    : '';
+            const branchColor = branchColorAssignments.nodeColors.get(node.id);
+            const branchColorClass =
+                isMindmap && branchColor !== undefined
+                    ? `${CANVAS_BRANCH_COLOR_PREFIX}${branchColor}`
+                    : '';
             const depth = nodeDepths.get(node.id) || 0;
             const depthClass =
                 normalizedMapStyle.hierarchy === 'depth'
@@ -757,7 +1065,16 @@ const projectCanvasGraph = ({
             return {
                 ...node,
                 hidden: !isProjected,
-                className: [nextClassName, densityClass, kgMutedClass, emphasisClass, depthClass]
+                className: [
+                    nextClassName,
+                    densityClass,
+                    kgMutedClass,
+                    emphasisClass,
+                    branchScopeClass,
+                    branchRootClass,
+                    branchColorClass,
+                    depthClass
+                ]
                     .filter(Boolean)
                     .join(' ')
             };
@@ -769,37 +1086,55 @@ const projectCanvasGraph = ({
             const semantic = edgeSemanticInfo(edge);
             const isKgMuted =
                 hasKgFocus && !kgFocusIds.has(edge.source) && !kgFocusIds.has(edge.target);
-            const isMindmapFallbackEdge =
-                showMindmapRelationshipFallback && !isHierarchyCanvasEdge(edge);
+            const isMindmapStructureEdge = isMindmap && mindmapStructureEdgeIds.has(edge.id);
+            const isMindmapRelationshipEdge = isMindmap && !isMindmapStructureEdge;
+            const isMindmapInferredEdge = isMindmapStructureEdge && !isHierarchyCanvasEdge(edge);
+            const showSemanticEdge = isKnowledgeGraph || isMindmapRelationshipEdge;
+            const branchColor = branchColorAssignments.edgeColors.get(edge.id);
+            const branchColorClass =
+                isMindmap && branchColor !== undefined
+                    ? `${CANVAS_BRANCH_COLOR_PREFIX}${branchColor}`
+                    : '';
             return {
                 ...edge,
-                type: isKnowledgeGraph
+                type: showSemanticEdge
                     ? 'semantic'
-                    : isMindmapFallbackEdge
+                    : isMindmapStructureEdge
                       ? 'smoothstep'
                       : edge.type || 'smoothstep',
-                label: isKnowledgeGraph ? semantic.label : edge.label,
+                label: isKnowledgeGraph ? semantic.label : isMindmap ? undefined : edge.label,
                 data: {
                     ...(edge.data || {}),
-                    semantic_edge: isKnowledgeGraph
+                    semantic_edge: showSemanticEdge
                         ? {
                               ...semantic,
-                              kgMuted: isKgMuted
+                              kgMuted: isKgMuted,
+                              mindmapRelationship: isMindmapRelationshipEdge
                           }
-                        : undefined
+                        : undefined,
+                    mindmap_structure: isMindmapStructureEdge ? true : undefined
                 },
                 hidden: !isProjected,
                 className: canvasEdgeClassName({
                     className: [
                         edge.className,
                         isKgMuted ? 'kg-edge-muted' : '',
-                        isMindmapFallbackEdge ? 'canvas-edge-relationship-fallback' : ''
+                        isMindmapStructureEdge ? CANVAS_MINDMAP_STRUCTURE_EDGE_CLASS : '',
+                        isMindmapInferredEdge ? CANVAS_MINDMAP_INFERRED_EDGE_CLASS : '',
+                        isMindmapRelationshipEdge ? CANVAS_MINDMAP_RELATIONSHIP_EDGE_CLASS : '',
+                        branchColorClass
                     ]
                         .filter(Boolean)
                         .join(' '),
                     isOutOfScope: isProjected && isOutOfScope,
+                    isBranchScope:
+                        hasBranchScope &&
+                        isProjected &&
+                        branchIds.has(edge.source) &&
+                        branchIds.has(edge.target),
                     semantic,
-                    activeCanvasView
+                    activeCanvasView,
+                    showSemanticStyling: showSemanticEdge
                 })
             };
         })
@@ -816,6 +1151,13 @@ const isEditableEventTarget = (target) => {
         ['input', 'textarea', 'select', 'option'].includes(tagName) ||
         Boolean(target.closest('[contenteditable="true"]'))
     );
+};
+
+const haveSameNodeIds = (left = [], right = []) => {
+    if (left.length !== right.length) {
+        return false;
+    }
+    return left.every((node, index) => node?.id === right[index]?.id);
 };
 
 const App = () => {
@@ -842,7 +1184,12 @@ const App = () => {
         setInspectorNodeId: state.setInspectorNodeId,
         inspectorEdgeId: state.inspectorEdgeId,
         setInspectorEdgeId: state.setInspectorEdgeId,
+        activeAIActionPreview: state.activeAIActionPreview,
+        activeAIDraftSession: state.activeAIDraftSession,
+        pendingSourceDraft: state.pendingSourceDraft,
+        clearPendingSourceDraft: state.clearPendingSourceDraft,
         setActiveAIDraftSession: state.setActiveAIDraftSession,
+        setActiveAIActionPreview: state.setActiveAIActionPreview,
         setActiveView: state.setActiveView,
         setViewPort: state.setViewPort,
         setWorkspaceBrief: state.setWorkspaceBrief,
@@ -872,7 +1219,12 @@ const App = () => {
         setInspectorNodeId,
         inspectorEdgeId,
         setInspectorEdgeId,
+        activeAIActionPreview,
+        activeAIDraftSession,
+        pendingSourceDraft,
+        clearPendingSourceDraft,
         setActiveAIDraftSession,
+        setActiveAIActionPreview,
         setActiveView,
         setViewPort,
         setWorkspaceBrief,
@@ -880,8 +1232,9 @@ const App = () => {
         setSourceLibrary,
         setAIActionRuns
     } = useStore(useShallow(selector));
+    const shellActions = useShellLayoutState();
+    const useWorkspaceShell = useMemo(() => isUiShellRibbonEnabled(), []);
     const areNodesIntialised = useNodesInitialized();
-    const [askMultipleClass, setAskMultipleClass] = useState();
     const [isDrawer, setIsDrawer] = useState(false);
     const setRfInstance = flowStore((s) => s.setRfInstance);
     const setFlow = flowStore((s) => s.setFlow);
@@ -894,6 +1247,13 @@ const App = () => {
     const setAutomations = useAutomationStore((s) => s.setAutomations);
     const [selectedNodes, setSelectedNodes] = useState();
     const [selectedCanvasNodes, setSelectedCanvasNodes] = useState([]);
+    const [selectionAskPrompt, setSelectionAskPrompt] = useState('');
+    const [selectionAskMode, setSelectionAskMode] = useState('auto');
+    const [selectionAskStatus, setSelectionAskStatus] = useState('');
+    const [selectionAskAnswer, setSelectionAskAnswer] = useState('');
+    const additiveSelectionAnchorRef = useRef(new Set());
+    const additiveSelectionPendingRef = useRef(false);
+    const additiveSelectionActiveRef = useRef(false);
     const [validationReport, setValidationReport] = useState();
     const [aiUsage, setAIUsage] = useState();
     const [aiUsageStatus, setAIUsageStatus] = useState('');
@@ -903,6 +1263,7 @@ const App = () => {
     const [kgRelationshipMode, setKgRelationshipMode] = useState(() =>
         getLastKgRelationshipMode()
     );
+    const [mindmapRelationshipMode, setMindmapRelationshipMode] = useState(MINDMAP_RELATIONSHIP_MODES.OFF);
     const kgRelationshipModeCounts = useMemo(
         () => buildKgRelationshipModeCounts(edges),
         [edges]
@@ -923,11 +1284,22 @@ const App = () => {
     const selectKgRelationshipMode = (mode) => {
         setKgRelationshipMode(saveLastKgRelationshipMode(mode));
     };
+    const handleMoveEnd = useCallback(
+        (event, viewport) => setViewPort(viewport),
+        [setViewPort]
+    );
     const pushNode = modalStore((s) => s.pushNode);
     const [flowList, setFlowList] = useState([]);
     const [isSourcesOpen, setIsSourcesOpen] = useState(false);
     const [isAiHelpersOpen, setIsAiHelpersOpen] = useState(false);
     const [aiGenerationProgress, setAiGenerationProgress] = useState(null);
+    const {
+        leftPanelKind,
+        workspaceDockActiveTab,
+        workspaceDockCollapsed,
+        workspaceDockWidth,
+        workspaceShellLeftWidth
+    } = shellActions;
     const [lightMode, setLightMode] = useState(
         () => getLocalSetting(SETTINGS_KEYS.theme) === 'light'
     );
@@ -999,13 +1371,16 @@ const App = () => {
                 );
                 setInspectorNodeId(undefined);
                 setInspectorEdgeId(undefined);
+                if (useWorkspaceShell) {
+                    shellActions.closeRightPanel();
+                }
                 setActiveAIDraftSession(response.data || session);
                 setAIUsageReviewStatus('Draft session opened for review.');
             } catch (error) {
                 setAIUsageReviewStatus('Draft session unavailable');
             }
         },
-        [flow_id, setActiveAIDraftSession, setInspectorEdgeId, setInspectorNodeId]
+        [flow_id, setActiveAIDraftSession, setInspectorEdgeId, setInspectorNodeId, shellActions, useWorkspaceShell]
     );
 
     const latestReviewableDraftSession = useMemo(
@@ -1024,15 +1399,19 @@ const App = () => {
         refreshAIUsage();
     }, [latestReviewableDraftSession, openUsageDraftSession, refreshAIUsage]);
 
+    const activeMetadataNodeId =
+        useWorkspaceShell && shellActions.rightPanel?.kind === 'node'
+            ? shellActions.rightPanel.id
+            : inspectorNodeId;
     const selectedNodeIssues = useMemo(() => {
-        if (!inspectorNodeId || !validationReport?.issues) {
+        if (!activeMetadataNodeId || !validationReport?.issues) {
             return [];
         }
 
         return validationReport.issues.filter(
-            (issue) => issue.nodeId === inspectorNodeId
+            (issue) => issue.nodeId === activeMetadataNodeId
         );
-    }, [inspectorNodeId, validationReport]);
+    }, [activeMetadataNodeId, validationReport]);
     const canvasGraph = useMemo(
         () =>
             projectCanvasGraph({
@@ -1044,6 +1423,7 @@ const App = () => {
                 canvasNodeDensity,
                 mapStyle,
                 kgRelationshipMode,
+                mindmapRelationshipMode,
                 kgFocusNodeIds: selectedCanvasNodes.map((node) => node.id)
             }),
         [
@@ -1053,11 +1433,27 @@ const App = () => {
             edges,
             kgRelationshipMode,
             mapStyle,
+            mindmapRelationshipMode,
             nodes,
             selectedBranchId,
             selectedCanvasNodes
         ]
     );
+    const mindmapBranchLegend = useMemo(() => {
+        if (activeCanvasView !== 'mindmap' || nodes.length === 0) {
+            return [];
+        }
+        const structuralEdgeIds = buildMindmapStructureEdgeIds(nodes, edges);
+        const assignments = buildBranchColorAssignments(nodes, edges, structuralEdgeIds);
+        return assignments.branchRoots
+            .map(({ nodeId, colorIndex }) => ({
+                id: nodeId,
+                colorIndex,
+                title: truncateInsightText(kgNodeTitle(nodes.find((node) => node.id === nodeId)), 42)
+            }))
+            .filter((branch) => branch.id)
+            .slice(0, 10);
+    }, [activeCanvasView, edges, nodes]);
     const isStructuredCanvasView = STRUCTURED_CANVAS_VIEWS.has(activeCanvasView);
     const renderedCanvasGraph = useMemo(() => {
         if (!isStructuredCanvasView) {
@@ -1071,6 +1467,49 @@ const App = () => {
     const selectedVisibleNodes = useMemo(() => {
         return renderedCanvasGraph.nodes.filter((node) => !node.hidden && node.selected);
     }, [renderedCanvasGraph.nodes]);
+    const selectedVisibleNodeKey = useMemo(
+        () => selectedVisibleNodes.map((node) => node.id).sort().join('|'),
+        [selectedVisibleNodes]
+    );
+    useEffect(() => {
+        setSelectionAskAnswer('');
+        setSelectionAskStatus('');
+    }, [selectedVisibleNodeKey]);
+    const isSelectionAskBusy = selectionAskStatus === 'Asking AI...' || selectionAskStatus === 'Preparing draft...';
+    useWorkspaceShellRouter({
+        activeAIDraftSession,
+        activeView,
+        bottomTray: shellActions.bottomTray,
+        enabled: useWorkspaceShell,
+        inspectorEdgeId,
+        inspectorNodeId,
+        openDraftReviewTray: shellActions.openDraftReviewTray,
+        openLocalOutputReviewTray: shellActions.openLocalOutputReviewTray,
+        openRightPanel: shellActions.openRightPanel,
+        openSourceDraftReviewTray: shellActions.openSourceDraftReviewTray,
+        closeBottomTray: shellActions.closeBottomTray,
+        closeRightPanel: shellActions.closeRightPanel,
+        pendingSourceDraft,
+        rightPanel: shellActions.rightPanel,
+        setInspectorEdgeId,
+        setInspectorNodeId
+    });
+
+    const shouldRenderRightPropertiesPanel =
+        useWorkspaceShell &&
+        Boolean(
+            shellActions.rightPanel?.kind &&
+                shellActions.rightPanel?.id
+        );
+    const shouldRenderShellAiHelpersPanel =
+        useWorkspaceShell && isAiHelpersOpen && !isStructuredCanvasView;
+    const shouldRenderInspectorDock = Boolean(
+        (!useWorkspaceShell && (inspectorNodeId || inspectorEdgeId)) ||
+            (!useWorkspaceShell && activeAIDraftSession) ||
+            (!useWorkspaceShell && activeAIActionPreview)
+    );
+    const isInspectorOpen = shouldRenderInspectorDock;
+    const isFocusPanelOpen = isAiHelpersOpen || isInspectorOpen;
     const selectedBranchNode = useMemo(
         () => nodes.find((node) => node.id === selectedBranchId),
         [nodes, selectedBranchId]
@@ -1081,33 +1520,59 @@ const App = () => {
         selectedBranchNode?.data?.summ ||
         selectedBranchId ||
         '';
+    const clearBranchLens = useCallback(() => {
+        setSelectedBranchId(undefined);
+        if (useWorkspaceShell && shellActions.rightPanel?.kind === 'branch') {
+            shellActions.closeRightPanel();
+        }
+    }, [setSelectedBranchId, shellActions, useWorkspaceShell]);
     const lastLayoutTriggerRef = useRef(trigger);
     const closeNodeInspector = useCallback(() => {
         setInspectorNodeId(undefined);
+        if (useWorkspaceShell) {
+            shellActions.closeRightPanel();
+        }
         const currentNodes = useStore.getState().nodes;
         setNodes(
             currentNodes.map((node) =>
                 node.selected ? { ...node, selected: false } : node
             )
         );
-    }, [setInspectorNodeId, setNodes]);
+    }, [setInspectorNodeId, setNodes, shellActions, useWorkspaceShell]);
     const openEdgeInspector = useCallback(
         (event, edge) => {
             if (typeof event === 'string') {
-                setInspectorEdgeId(event);
+                setIsAiHelpersOpen(false);
+                if (useWorkspaceShell) {
+                    setInspectorEdgeId(undefined);
+                    setInspectorNodeId(undefined);
+                    shellActions.openRightPanel({ kind: 'edge', id: event });
+                } else {
+                    setInspectorEdgeId(event);
+                }
                 return;
             }
             event?.stopPropagation?.();
             const edgeId = typeof edge === 'string' ? edge : edge?.id;
             if (edgeId) {
-                setInspectorEdgeId(edgeId);
+                setIsAiHelpersOpen(false);
+                if (useWorkspaceShell) {
+                    setInspectorEdgeId(undefined);
+                    setInspectorNodeId(undefined);
+                    shellActions.openRightPanel({ kind: 'edge', id: edgeId });
+                } else {
+                    setInspectorEdgeId(edgeId);
+                }
             }
         },
-        [setInspectorEdgeId]
+        [setInspectorEdgeId, setInspectorNodeId, shellActions, useWorkspaceShell]
     );
     const closeEdgeInspector = useCallback(() => {
         setInspectorEdgeId(undefined);
-    }, [setInspectorEdgeId]);
+        if (useWorkspaceShell) {
+            shellActions.closeRightPanel();
+        }
+    }, [setInspectorEdgeId, shellActions, useWorkspaceShell]);
     const focusNodeForReview = useCallback(
         (nodeId) => {
             if (!nodeId) {
@@ -1115,7 +1580,14 @@ const App = () => {
             }
 
             const node = nodes.find((item) => item.id === nodeId);
-            setInspectorNodeId(nodeId);
+            setIsAiHelpersOpen(false);
+            setInspectorEdgeId(undefined);
+            if (useWorkspaceShell) {
+                setInspectorNodeId(undefined);
+                shellActions.openRightPanel({ kind: 'node', id: nodeId });
+            } else {
+                setInspectorNodeId(nodeId);
+            }
 
             if (!node) {
                 return;
@@ -1136,7 +1608,7 @@ const App = () => {
                 { duration: 420, zoom: 1 }
             );
         },
-        [nodes, reactFlow, setInspectorNodeId, setNodes]
+        [nodes, reactFlow, setInspectorEdgeId, setInspectorNodeId, setNodes, shellActions, useWorkspaceShell]
     );
 
     const clearNodeSelection = useCallback(() => {
@@ -1144,7 +1616,6 @@ const App = () => {
         setNodes(currentNodes.map((node) => (node.selected ? { ...node, selected: false } : node)));
         setSelectedCanvasNodes([]);
         setSelectedNodes(undefined);
-        setAskMultipleClass('deanimate');
     }, [setNodes]);
 
     const syncCanvasSelection = useCallback((nextNodes) => {
@@ -1157,16 +1628,106 @@ const App = () => {
             responseNodes.length === nextSelectedNodes.length
         ) {
             setSelectedNodes(responseNodes);
-            setAskMultipleClass('animate');
         } else {
             setSelectedNodes(undefined);
-            setAskMultipleClass('deanimate');
         }
     }, []);
 
+    const mergeAdditiveSelectionAnchors = useCallback(
+        (nextNodes) => {
+            const anchorIds = additiveSelectionAnchorRef.current;
+            if (
+                anchorIds.size === 0 ||
+                (!additiveSelectionPendingRef.current && !additiveSelectionActiveRef.current)
+            ) {
+                return nextNodes;
+            }
+            let changed = false;
+            const mergedNodes = nextNodes.map((node) => {
+                if (!anchorIds.has(node.id) || node.selected) {
+                    return node;
+                }
+                changed = true;
+                return { ...node, selected: true };
+            });
+            return changed ? mergedNodes : nextNodes;
+        },
+        []
+    );
+
+    const handleNodesChange = useCallback(
+        (changes) => {
+            if (
+                additiveSelectionAnchorRef.current.size === 0 ||
+                (!additiveSelectionPendingRef.current && !additiveSelectionActiveRef.current)
+            ) {
+                onNodesChange(changes);
+                return;
+            }
+            const nextNodes = mergeAdditiveSelectionAnchors(
+                applyNodeChanges(changes, useStore.getState().nodes)
+            );
+            setNodes(nextNodes);
+            syncCanvasSelection(nextNodes);
+        },
+        [mergeAdditiveSelectionAnchors, onNodesChange, setNodes, syncCanvasSelection]
+    );
+
+    const handleCanvasPointerDownCapture = useCallback((event) => {
+        if (!event.shiftKey || event.button !== 0) {
+            additiveSelectionAnchorRef.current = new Set();
+            additiveSelectionPendingRef.current = false;
+            return;
+        }
+        const selectedIds = useStore
+            .getState()
+            .nodes.filter((node) => node.selected)
+            .map((node) => node.id);
+        additiveSelectionAnchorRef.current = new Set(selectedIds);
+        additiveSelectionPendingRef.current = selectedIds.length > 0;
+        window.setTimeout(() => {
+            if (!additiveSelectionActiveRef.current) {
+                additiveSelectionPendingRef.current = false;
+                additiveSelectionAnchorRef.current = new Set();
+            }
+        }, 0);
+    }, []);
+
+    const handleSelectionStart = useCallback((event) => {
+        if (event.shiftKey && additiveSelectionAnchorRef.current.size > 0) {
+            additiveSelectionActiveRef.current = true;
+            additiveSelectionPendingRef.current = false;
+            return;
+        }
+        additiveSelectionAnchorRef.current = new Set();
+        additiveSelectionPendingRef.current = false;
+        additiveSelectionActiveRef.current = false;
+    }, []);
+
+    const handleSelectionEnd = useCallback(
+        () => {
+            const anchorIds = additiveSelectionAnchorRef.current;
+            if (anchorIds.size > 0) {
+                const nextNodes = mergeAdditiveSelectionAnchors(useStore.getState().nodes);
+                setNodes(nextNodes);
+                syncCanvasSelection(nextNodes);
+            }
+            additiveSelectionAnchorRef.current = new Set();
+            additiveSelectionPendingRef.current = false;
+            additiveSelectionActiveRef.current = false;
+        },
+        [mergeAdditiveSelectionAnchors, setNodes, syncCanvasSelection]
+    );
+
     const handleNodeClick = useCallback(
         (event, node) => {
-            if (!event?.ctrlKey && !event?.metaKey) {
+            if (!event?.ctrlKey && !event?.metaKey && !event?.shiftKey) {
+                if (useWorkspaceShell) {
+                    setIsAiHelpersOpen(false);
+                    setInspectorEdgeId(undefined);
+                    setInspectorNodeId(undefined);
+                    shellActions.openRightPanel({ kind: 'node', id: node.id });
+                }
                 return;
             }
             event.preventDefault();
@@ -1178,7 +1739,7 @@ const App = () => {
             setNodes(nextNodes);
             syncCanvasSelection(nextNodes);
         },
-        [setNodes, syncCanvasSelection]
+        [setInspectorEdgeId, setInspectorNodeId, setNodes, shellActions, syncCanvasSelection, useWorkspaceShell]
     );
 
     const deleteSelectedNodes = useCallback(() => {
@@ -1247,6 +1808,13 @@ const App = () => {
             setInspectorNodeId(undefined);
         }
         if (
+            useWorkspaceShell &&
+            shellActions.rightPanel?.kind === 'node' &&
+            deletedIds.has(shellActions.rightPanel.id)
+        ) {
+            shellActions.closeRightPanel();
+        }
+        if (
             currentEdges.some(
                 (edge) =>
                     edge.id === inspectorEdgeId &&
@@ -1255,9 +1823,19 @@ const App = () => {
         ) {
             setInspectorEdgeId(undefined);
         }
+        if (
+            useWorkspaceShell &&
+            shellActions.rightPanel?.kind === 'edge' &&
+            currentEdges.some(
+                (edge) =>
+                    edge.id === shellActions.rightPanel.id &&
+                    (deletedIds.has(edge.source) || deletedIds.has(edge.target))
+            )
+        ) {
+            shellActions.closeRightPanel();
+        }
         setSelectedCanvasNodes([]);
         setSelectedNodes(undefined);
-        setAskMultipleClass('deanimate');
         setSaveStatus('dirty');
         window.setTimeout(() => setSaveStatus('dirty'), 100);
         recordActivity({
@@ -1281,7 +1859,9 @@ const App = () => {
         setInspectorNodeId,
         setNodes,
         setSaveStatus,
-        setSelectedBranchId
+        setSelectedBranchId,
+        shellActions,
+        useWorkspaceShell
     ]);
 
     const askAiAboutSelection = useCallback(() => {
@@ -1294,6 +1874,149 @@ const App = () => {
             nodeIds: selectedIds
         });
     }, [pushNode, selectedVisibleNodes]);
+
+    const submitSelectionQuickAsk = useCallback(
+        async (event) => {
+            event?.preventDefault?.();
+            const prompt = selectionAskPrompt.trim();
+            const selectedIds = selectedVisibleNodes.map((node) => node.id);
+            if (!prompt || selectedIds.length === 0) {
+                return;
+            }
+            if (!flow_id) {
+                setSelectionAskStatus('Save or reopen this workspace before asking AI.');
+                return;
+            }
+
+            const mode =
+                selectionAskMode === 'auto'
+                    ? shouldDraftSelectionQuickAsk(prompt)
+                        ? 'draft'
+                        : 'answer'
+                    : selectionAskMode;
+            const normalizedScope = { type: 'nodes', node_ids: selectedIds };
+            const sourceRefs = selectedVisibleNodes.flatMap(nodeSourceRefs);
+
+            setSelectionAskAnswer('');
+            setSelectionAskStatus(mode === 'draft' ? 'Preparing draft...' : 'Asking AI...');
+
+            if (mode === 'answer') {
+                try {
+                    const response = await axios.post(nodeMessageEndpoint({ flowId: flow_id }), {
+                        prompt,
+                        scope: normalizedScope,
+                        role: 'Ask AI',
+                        selected_model: 'auto',
+                        model: null,
+                        model_policy: 'balanced',
+                        source_refs: sourceRefs,
+                        metadata: {
+                            preview_mode: 'selection_quick_message',
+                            selected_node_count: selectedIds.length
+                        }
+                    });
+                    const answer = String(response?.data?.answer || '').trim();
+                    setSelectionAskAnswer(answer || 'No answer returned for this selection.');
+                    setSelectionAskStatus('');
+                    recordActivity({
+                        type: 'selection_quick_ai_answered',
+                        title: 'Answered selected-node question',
+                        summary: prompt,
+                        node_ids: selectedIds,
+                        metadata: {
+                            scope: 'nodes',
+                            selected_node_count: selectedIds.length,
+                            model: response?.data?.selected_model || 'auto'
+                        }
+                    });
+                } catch (error) {
+                    const detail =
+                        error.response?.data?.detail?.message ||
+                        error.response?.data?.detail ||
+                        error.message ||
+                        'Unable to answer from this selection.';
+                    setSelectionAskStatus(String(detail));
+                }
+                return;
+            }
+
+            try {
+                const role = { id: 'workflow-mapper', label: 'Workflow Mapper' };
+                const action = { id: 'custom_prompt', label: 'Custom prompt' };
+                const changeIntent = inferAIDraftChangeIntent(
+                    prompt,
+                    activeAIDraftSession?.session_id ? 'update' : 'supplement'
+                );
+                const memoryContext = buildAIDraftMemoryContext({
+                    nodes,
+                    edges,
+                    scope: normalizedScope,
+                    sourceRefs,
+                    activeDraftSession: activeAIDraftSession,
+                    prompt,
+                    changeIntent,
+                    outputMode: 'selection_quick_draft'
+                });
+                const requestPayload = buildAIDraftSessionRequestPayload({
+                    role,
+                    action,
+                    scope: normalizedScope,
+                    prompt,
+                    selectedModel: 'auto',
+                    workspaceBrief,
+                    memoryContext,
+                    changeIntent,
+                    expansionMode: 'exploratory',
+                    expansionTarget: 'selected_node',
+                    evidenceMode: 'workspace',
+                    citationPolicy: 'preferred',
+                    metadata: {
+                        preview_mode: 'selection_quick_draft',
+                        routed_role_id: role.id,
+                        routed_action_id: action.id,
+                        selected_node_count: selectedIds.length
+                    }
+                });
+                const response = await axios.post(draftSessionEndpoint({ flowId: flow_id }), requestPayload);
+                setActiveAIActionPreview(undefined);
+                setActiveAIDraftSession(response.data);
+                setSelectionAskPrompt('');
+                setSelectionAskStatus('Draft ready for review.');
+                recordActivity({
+                    type: 'selection_quick_ai_draft_requested',
+                    title: 'Drafted from selected nodes',
+                    summary: prompt,
+                    node_ids: selectedIds,
+                    metadata: {
+                        scope: 'nodes',
+                        selected_node_count: selectedIds.length,
+                        role: role.label,
+                        action: action.id
+                    }
+                });
+            } catch (error) {
+                const detail =
+                    error.response?.data?.detail?.message ||
+                    error.response?.data?.detail ||
+                    error.message ||
+                    'Unable to prepare a draft for this selection.';
+                setSelectionAskStatus(String(detail));
+            }
+        },
+        [
+            activeAIDraftSession,
+            edges,
+            flow_id,
+            nodes,
+            recordActivity,
+            selectedVisibleNodes,
+            selectionAskMode,
+            selectionAskPrompt,
+            setActiveAIDraftSession,
+            setActiveAIActionPreview,
+            workspaceBrief
+        ]
+    );
 
     const createKgRelationshipFromSelection = useCallback(() => {
         const selectedResponseNodes = selectedVisibleNodes.filter((node) => node.type === 'response');
@@ -1308,7 +2031,7 @@ const App = () => {
                 !isHierarchyEdge(edge)
         );
         if (existingEdge) {
-            setInspectorEdgeId(existingEdge.id);
+            openEdgeInspector(existingEdge.id);
             return;
         }
         const sourceTitle = nodeData(sourceNode).title || sourceNode.id;
@@ -1347,8 +2070,8 @@ const App = () => {
             },
             status: 'completed'
         });
-        setInspectorEdgeId(edge.id);
-    }, [edges, recordActivity, selectedVisibleNodes, setEdges, setInspectorEdgeId, setSaveStatus]);
+        openEdgeInspector(edge.id);
+    }, [edges, openEdgeInspector, recordActivity, selectedVisibleNodes, setEdges, setSaveStatus]);
 
     const openStructuredAiPreset = useCallback(
         (presetKey) => {
@@ -1358,6 +2081,15 @@ const App = () => {
             }
             const preferredScope =
                 preset.scope === 'branch' && selectedBranchId ? 'branch' : preset.scope;
+            if (preset.view) {
+                setActiveView(preset.view);
+            }
+            shellActions.setRibbonTab('ai', { preset: presetKey });
+            shellActions.setActiveScope(
+                preferredScope === 'branch'
+                    ? { type: 'branch', nodeId: selectedBranchId }
+                    : { type: 'workspace' }
+            );
             pushNode(PromptModal, {
                 scope: preferredScope,
                 nodeId: preferredScope === 'branch' ? selectedBranchId : undefined,
@@ -1376,16 +2108,38 @@ const App = () => {
                 }
             });
         },
-        [flow_id, pushNode, recordActivity, selectedBranchId]
+        [flow_id, pushNode, recordActivity, selectedBranchId, setActiveView, shellActions]
     );
 
     const openWorkspaceDockTab = useCallback((tab) => {
+        shellActions.openWorkspaceNavigation('workspace', {
+            tab,
+            collapsed: false,
+            width: workspaceDockWidth
+        });
         window.dispatchEvent(
             new CustomEvent(WORKSPACE_DOCK_OPEN_TAB_EVENT, {
                 detail: { tab }
             })
         );
-    }, []);
+    }, [shellActions, workspaceDockWidth]);
+
+    const openSourcesLibrary = useCallback(() => {
+        if (useWorkspaceShell) {
+            setIsSourcesOpen(false);
+            shellActions.openSourceLibrary({ width: workspaceDockWidth });
+            return;
+        }
+        setIsSourcesOpen(true);
+    }, [shellActions, useWorkspaceShell, workspaceDockWidth]);
+
+    const closeShellSourcesLibrary = useCallback(() => {
+        shellActions.openWorkspaceNavigation('workspace', {
+            tab: 'sources',
+            collapsed: false,
+            width: workspaceDockWidth
+        });
+    }, [shellActions, workspaceDockWidth]);
 
     const openEmptyCanvasSources = useCallback(() => {
         openWorkspaceDockTab('sources');
@@ -1395,6 +2149,13 @@ const App = () => {
     const openEmptyCanvasAskAi = useCallback((options = {}) => {
         setSelectedBranchId(undefined);
         setInspectorNodeId(undefined);
+        setInspectorEdgeId(undefined);
+        if (useWorkspaceShell) {
+            shellActions.closeRightPanel();
+        }
+        setIsAiHelpersOpen(false);
+        shellActions.setRibbonTab('ai', { source: 'emptyCanvas' });
+        shellActions.setActiveScope({ type: 'workspace' });
         pushNode(PromptModal, {
             scope: 'workspace',
             initialPrompt: options?.initialPrompt,
@@ -1408,7 +2169,7 @@ const App = () => {
                 scope: 'workspace'
             }
         });
-    }, [pushNode, recordActivity, setInspectorNodeId, setSelectedBranchId]);
+    }, [pushNode, recordActivity, setInspectorEdgeId, setInspectorNodeId, setSelectedBranchId, shellActions, useWorkspaceShell]);
 
     const openManualStart = useCallback(() => {
         openWorkspaceDockTab('build');
@@ -1434,14 +2195,24 @@ const App = () => {
     }, [reactFlow, selectedVisibleNodes]);
 
     const openNextStepsAfterDraftAccept = useCallback(() => {
+        setInspectorNodeId(undefined);
+        setInspectorEdgeId(undefined);
+        if (useWorkspaceShell) {
+            shellActions.closeRightPanel();
+        }
         setIsAiHelpersOpen(true);
         setNextStepsOpenToken((token) => token + 1);
-    }, []);
+    }, [setInspectorEdgeId, setInspectorNodeId, shellActions, useWorkspaceShell]);
 
     const openNextStepsFromDock = useCallback(() => {
+        setInspectorNodeId(undefined);
+        setInspectorEdgeId(undefined);
+        if (useWorkspaceShell) {
+            shellActions.closeRightPanel();
+        }
         setIsAiHelpersOpen(true);
         setNextStepsOpenToken((token) => token + 1);
-    }, []);
+    }, [setInspectorEdgeId, setInspectorNodeId, shellActions, useWorkspaceShell]);
 
     const reflowCanvasGraph = useCallback(() => {
         if (STRUCTURED_CANVAS_VIEWS.has(activeCanvasView)) {
@@ -1472,31 +2243,27 @@ const App = () => {
 
     const onChange = useCallback(
         ({ nodes }) => {
-            setSelectedCanvasNodes(nodes);
+            setSelectedCanvasNodes((current) =>
+                haveSameNodeIds(current, nodes) ? current : nodes
+            );
             const responseNodes = nodes.filter(
                 (ele) => ele.type === 'response'
             );
             if (responseNodes.length === 0) {
                 setSelectedNodes(undefined);
-                setAskMultipleClass('deanimate');
                 return;
             }
             if (responseNodes.length !== nodes.length) {
                 setSelectedNodes(undefined);
-                setAskMultipleClass('deanimate');
                 return;
             }
             if (responseNodes.length > 1 && responseNodes.length <= 4) {
                 setSelectedNodes(responseNodes);
-                setAskMultipleClass('animate');
-            } else if (
-                responseNodes.length > 4 &&
-                askMultipleClass === 'animate'
-            ) {
-                setAskMultipleClass('deanimate');
+            } else if (responseNodes.length > 4) {
+                setSelectedNodes(undefined);
             }
         },
-        [askMultipleClass]
+        []
     );
 
     useOnSelectionChange({
@@ -1529,10 +2296,8 @@ const App = () => {
         );
         if (responseNodes.length > 1 && responseNodes.length <= 4) {
             setSelectedNodes(responseNodes);
-            setAskMultipleClass('animate');
         } else if (responseNodes.length <= 1) {
             setSelectedNodes(undefined);
-            setAskMultipleClass('deanimate');
         }
     }, [nodes]);
 
@@ -1710,32 +2475,261 @@ const App = () => {
     const currentMapStyle = normalizeMapStyle(mapStyle);
     const canvasBackgroundColor = getMapStyleCanvasBackground(currentMapStyle, lightMode);
     const backgroundGridColor = getMapStyleGridColor(currentMapStyle, lightMode);
+    const isLocalOutputView = !CANVAS_VIEWS.has(activeView);
+    const closeActiveDraftTray = useCallback(() => {
+        setActiveAIDraftSession(undefined);
+        shellActions.closeBottomTray();
+    }, [setActiveAIDraftSession, shellActions]);
 
-    return (
-        <div className={lightMode ? 'app light' : 'app dark'}>
-            <Modal ChildProp={Prompts} />
-            <Header
-                setIsDrawer={setIsDrawer}
-                flowList={flowList}
-                setFlowList={setFlowList}
-                lightMode={lightMode}
-                setLightMode={setLightMode}
-            />
+    const openIssuesReviewTray = useCallback(() => {
+        shellActions.openValidationIssuesTray(flow_id);
+    }, [flow_id, shellActions]);
+
+    const shellBottomTray = useWorkspaceShell && shellActions.bottomTray ? (
+        <ShellReviewTrayHost
+            activeAIDraftSession={activeAIDraftSession}
+            activeView={activeView}
+            bottomTray={shellActions.bottomTray}
+            clearPendingSourceDraft={clearPendingSourceDraft}
+            edges={edges}
+            flowId={flow_id}
+            nodes={nodes}
+            onActiveViewChange={setActiveView}
+            onCloseActiveDraftTray={closeActiveDraftTray}
+            onCloseTray={shellActions.closeBottomTray}
+            onDraftAccepted={openNextStepsAfterDraftAccept}
+            onOpenBottomTray={shellActions.openBottomTray}
+            onOpenLocalOutputReviewTray={shellActions.openLocalOutputReviewTray}
+            onReportChange={setValidationReport}
+            onSelectEdge={openEdgeInspector}
+            onSelectNode={focusNodeForReview}
+            pendingSourceDraft={pendingSourceDraft}
+        />
+    ) : null;
+    const shellAiHelpersPanel = shouldRenderShellAiHelpersPanel ? (
+        <AiHelpersPanel
+            hidden={false}
+            selectedNodes={selectedNodes || []}
+            autoOpenToken={nextStepsOpenToken}
+            summaryLabel={nextStepsOpenToken ? 'Next steps' : 'AI Helpers'}
+            onClose={() => setIsAiHelpersOpen(false)}
+        />
+    ) : null;
+    const shellRightPanel = shellAiHelpersPanel || (shouldRenderRightPropertiesPanel ? (
+        <ShellPropertiesPanelHost
+            edges={edges}
+            nodes={nodes}
+            onClearBranch={clearBranchLens}
+            onCloseBranch={shellActions.closeRightPanel}
+            onCloseEdge={closeEdgeInspector}
+            onCloseNode={closeNodeInspector}
+            onFocusBranchNode={focusNodeForReview}
+            rightPanel={shellActions.rightPanel}
+            selectedNodeIssues={selectedNodeIssues}
+            sourceLibrary={sourceLibrary}
+            workspaceBrief={workspaceBrief}
+        />
+    ) : null);
+    const shellOverlayLayer = <ShellOverlayHost overlay={shellActions.overlay} />;
+    const handleBranchLensChange = useCallback(
+        (branchId) => {
+            if (selectedBranchId === branchId) {
+                clearBranchLens();
+                return;
+            }
+
+            setSelectedBranchId(branchId);
+            if (useWorkspaceShell && shellActions.rightPanel?.kind === 'branch') {
+                shellActions.openBranchMetadata(branchId);
+            }
+        },
+        [clearBranchLens, selectedBranchId, setSelectedBranchId, shellActions, useWorkspaceShell]
+    );
+    const openShellReviewView = useCallback(
+        (view) => {
+            setActiveView(view);
+            shellActions.setRibbonTab('review', { view });
+        },
+        [setActiveView, shellActions]
+    );
+    const openShellOutputView = useCallback(
+        (view) => {
+            setActiveView(view);
+            shellActions.setRibbonTab('outputs', { view });
+        },
+        [setActiveView, shellActions]
+    );
+    const renderShellRibbonContent = useCallback(
+        ({ activeTab }) => {
+            if (activeTab === 'ai') {
+                return (
+                    <AiRibbonGroups
+                        canUseWorkspace={Boolean(flow_id)}
+                        onFindConnections={() => openStructuredAiPreset('connections')}
+                        onFindSoftwareOverlap={() => openStructuredAiPreset('softwareOverlap')}
+                        onCreateStructuredTable={() => openStructuredAiPreset('table')}
+                        onGenerateTasks={() => openStructuredAiPreset('tasks')}
+                    />
+                );
+            }
+            if (activeTab === 'review') {
+                return (
+                    <ReviewRibbonGroups
+                        canReview={nodes.length > 0}
+                        onOpenConnections={() => openShellReviewView('connections')}
+                        onOpenTaskPreview={() => openShellReviewView('preview')}
+                        onOpenIssues={() => openShellReviewView('gaps')}
+                        onOpenSources={() => openShellReviewView('sources')}
+                    />
+                );
+            }
+            if (activeTab === 'outputs') {
+                return (
+                    <OutputsRibbonGroups
+                        canOpenOutputs={nodes.length > 0}
+                        onOpenTable={() => openShellOutputView('table')}
+                        onOpenExecutive={() => openShellOutputView('executive')}
+                        onOpenChecklist={() => openShellReviewView('checklist')}
+                    />
+                );
+            }
+
+            return activeTab === 'map' && CANVAS_VIEWS.has(activeView) ? (
+                <div className="shell-ribbon-command-stack">
+                    <MapRibbonHost />
+                    {activeView === 'mindmap' && nodes.length > 0 ? (
+                        <MindmapRelationshipRibbonGroup
+                            options={MINDMAP_RELATIONSHIP_MODE_OPTIONS}
+                            mode={mindmapRelationshipMode}
+                            modeCounts={kgRelationshipModeCounts}
+                            offMode={MINDMAP_RELATIONSHIP_MODES.OFF}
+                            branchLegend={mindmapBranchLegend}
+                            selectedBranchId={selectedBranchId}
+                            onModeChange={setMindmapRelationshipMode}
+                            onBranchFocus={handleBranchLensChange}
+                        />
+                    ) : null}
+                    {activeCanvasView === 'knowledgeGraph' && nodes.length > 0 ? (
+                        <KnowledgeGraphRelationshipRibbonGroup
+                            options={KG_RELATIONSHIP_MODE_OPTIONS}
+                            mode={kgRelationshipMode}
+                            modeCounts={kgRelationshipModeCounts}
+                            collapsed={kgRelationshipTrayCollapsed}
+                            topInsights={kgTopInsights}
+                            onModeChange={selectKgRelationshipMode}
+                            onToggleCollapsed={() =>
+                                setKgRelationshipTrayCollapsed((current) => !current)
+                            }
+                            onOpenInsight={openEdgeInspector}
+                        />
+                    ) : null}
+                </div>
+            ) : (
+                <div className="shell-ribbon__placeholder" aria-label="Ribbon command groups">
+                    <span>Workspace commands</span>
+                </div>
+            );
+        },
+        [
+            activeCanvasView,
+            activeView,
+            focusNodeForReview,
+            flow_id,
+            handleBranchLensChange,
+            kgRelationshipMode,
+            kgRelationshipModeCounts,
+            kgRelationshipTrayCollapsed,
+            kgTopInsights,
+            mindmapBranchLegend,
+            mindmapRelationshipMode,
+            nodes.length,
+            openEdgeInspector,
+            openShellOutputView,
+            openShellReviewView,
+            openStructuredAiPreset,
+            selectKgRelationshipMode,
+            selectedBranchId
+        ]
+    );
+
+    const workspaceNavigator = (
+        <ShellWorkspaceNavigatorHost
+            activeTab={workspaceDockActiveTab}
+            leftPanelKind={leftPanelKind}
+            onActiveTabChange={shellActions.setLeftPanelTab}
+            collapsed={workspaceDockCollapsed}
+            onCollapsedChange={shellActions.setLeftPanelCollapsed}
+            width={workspaceDockWidth}
+            onWidthChange={shellActions.setLeftPanelWidth}
+            enabled={useWorkspaceShell}
+            flowId={flow_id}
+            isFocusPanelOpen={isFocusPanelOpen}
+            isStructuredCanvasView={isStructuredCanvasView}
+            nodes={nodes}
+            edges={edges}
+            validationReport={validationReport}
+            onValidationReportChange={setValidationReport}
+            onSelectNode={focusNodeForReview}
+            onOpenSources={openSourcesLibrary}
+            onOpenAiHelpers={() => {
+                setInspectorNodeId(undefined);
+                setInspectorEdgeId(undefined);
+                shellActions.closeRightPanel();
+                setIsAiHelpersOpen(true);
+            }}
+            aiUsage={aiUsage}
+            aiUsageStatus={aiUsageStatus}
+            aiUsageReviewStatus={aiUsageReviewStatus}
+            onRefreshAiUsage={refreshAIUsage}
+            onOpenUsageDraftSession={openUsageDraftSession}
+            onOpenIssuesTray={openIssuesReviewTray}
+            onOpenWorkspaceNavigation={shellActions.openWorkspaceNavigation}
+            onSelectBranch={setSelectedBranchId}
+            hasWorkspaceNextSteps={hasWorkspaceNextSteps}
+            workspaceNextSteps={workspaceNextSteps}
+            onOpenNextSteps={openNextStepsFromDock}
+            hasWorkspaceContentNodes={hasWorkspaceContentNodes}
+            sourceNavigator={
+                <SourcesPanel
+                    embedded
+                    isOpen={useWorkspaceShell && leftPanelKind === 'sources'}
+                    onClose={closeShellSourcesLibrary}
+                    onOpenSourceProperties={(sourceId) => {
+                        shellActions.openSourceMetadata(sourceId);
+                        closeShellSourcesLibrary();
+                    }}
+                    onSelectNode={focusNodeForReview}
+                />
+            }
+        />
+    );
+    const workspaceBody = (
+        <>
             <Drawer
                 isDrawer={isDrawer}
                 setIsDrawer={setIsDrawer}
                 flowList={flowList}
                 setFlowList={setFlowList}
-                onOpenSources={() => setIsSourcesOpen(true)}
-                onToggleAiHelpers={() =>
-                    setIsAiHelpersOpen((current) => !current)
-                }
+                onOpenSources={openSourcesLibrary}
+                onToggleAiHelpers={() => {
+                    setIsAiHelpersOpen((current) => {
+                        const nextOpen = !current;
+                        if (nextOpen) {
+                            setInspectorNodeId(undefined);
+                            setInspectorEdgeId(undefined);
+                            if (useWorkspaceShell) {
+                                shellActions.closeRightPanel();
+                            }
+                        }
+                        return nextOpen;
+                    });
+                }}
             />
             <ActivityPanel />
             <SourcesPanel
-                isOpen={isSourcesOpen}
+                isOpen={!useWorkspaceShell && isSourcesOpen}
                 onClose={() => setIsSourcesOpen(false)}
-                onSelectNode={setInspectorNodeId}
+                onSelectNode={focusNodeForReview}
             />
             <IntegrationsPanel validationReport={validationReport} />
             <AutomationsPanel validationReport={validationReport} />
@@ -1744,15 +2738,18 @@ const App = () => {
                 edgeTypes={edgeTypes}
                 nodes={renderedCanvasGraph.nodes}
                 edges={renderedCanvasGraph.edges}
-                onNodesChange={onNodesChange}
+                onNodesChange={handleNodesChange}
                 onEdgesChange={onEdgesChange}
                 onNodeClick={handleNodeClick}
                 onEdgeClick={openEdgeInspector}
-                onMoveEnd={(event, viewport) => setViewPort(viewport)}
+                onPointerDownCapture={handleCanvasPointerDownCapture}
+                onMoveEnd={handleMoveEnd}
+                onSelectionStart={handleSelectionStart}
+                onSelectionEnd={handleSelectionEnd}
                 colorMode={lightMode ? 'light' : 'dark'}
                 fitView={true}
-                fitViewOptions={{ maxZoom: 1 }}
-                proOptions={{ hideAttribution: true }}
+                fitViewOptions={REACT_FLOW_FIT_VIEW_OPTIONS}
+                proOptions={REACT_FLOW_PRO_OPTIONS}
                 onInit={setRfInstance}
                 className={[
                     getMapStyleClassNames(mapStyle),
@@ -1762,7 +2759,9 @@ const App = () => {
                 ].filter(Boolean).join(' ')}
                 minZoom={0.2}
                 maxZoom={2.5}
-                multiSelectionKeyCode={['Control', 'Meta']}
+                selectionKeyCode="Shift"
+                selectionMode={SelectionMode.Partial}
+                multiSelectionKeyCode={REACT_FLOW_MULTI_SELECTION_KEYS}
             >
                 <Background
                     gap={28}
@@ -1812,7 +2811,7 @@ const App = () => {
                                 showInteractive={false}
                             />
                         ) : null}
-                        {renderedCanvasGraph.nodes.length >= 5 && !isAiHelpersOpen ? (
+                        {renderedCanvasGraph.nodes.length >= 5 && !isFocusPanelOpen ? (
                             <MiniMap
                                 position="bottom-right"
                                 pannable
@@ -1896,118 +2895,222 @@ const App = () => {
                         onCreateExecutiveOutput={() => openStructuredAiPreset('executive')}
                     />
                 ) : null}
-                <FloatingDock
-                    id="workspaceTools"
-                    ariaLabel="Workspace tools dock"
-                    className="workspace-tools-floating-dock"
-                    defaultPlacement={{ dock: 'left', offset: { x: 0, y: 96 } }}
-                    controlsPlacement="child"
-                >
-                    <WorkspaceDock
-                        flowId={flow_id}
-                        nodes={nodes}
-                        edges={edges}
-                        validationReport={validationReport}
-                        onValidationReportChange={setValidationReport}
-                        onSelectNode={focusNodeForReview}
-                        onOpenSources={() => setIsSourcesOpen(true)}
-                        onOpenAiHelpers={() => setIsAiHelpersOpen(true)}
-                        aiUsage={aiUsage}
-                        aiUsageStatus={aiUsageStatus}
-                        aiUsageReviewStatus={aiUsageReviewStatus}
-                        onRefreshAiUsage={refreshAIUsage}
-                        onOpenUsageDraftSession={openUsageDraftSession}
-                        hasWorkspaceNextSteps={hasWorkspaceNextSteps}
-                        workspaceNextSteps={workspaceNextSteps}
-                        onOpenNextSteps={openNextStepsFromDock}
-                        hasWorkspaceContentNodes={hasWorkspaceContentNodes}
-                        suppressGuidanceNudges={isStructuredCanvasView}
-                    />
-                </FloatingDock>
-                {!isStructuredCanvasView ? (
-                    <Panel position="bottom">
-                        <AskMultiple
-                            data={askMultipleClass}
-                            selectedNodes={selectedNodes}
-                        />
-                    </Panel>
+                {!useWorkspaceShell && workspaceNavigator ? (
+                    <FloatingDock
+                        id="workspaceTools"
+                        ariaLabel="Workspace tools dock"
+                        className="workspace-tools-floating-dock"
+                        defaultPlacement={{ dock: 'left', offset: { x: 0, y: 96 } }}
+                        controlsPlacement="child"
+                    >
+                        {workspaceNavigator}
+                    </FloatingDock>
                 ) : null}
-                {selectedBranchId && !isStructuredCanvasView ? (
+                {selectedBranchId && !isStructuredCanvasView && !isFocusPanelOpen ? (
                     <Panel position="top-left" style={{ display: 'block' }}>
                         <section className="canvas-scope-banner" aria-label="Active canvas scope">
                             <span>Branch lens</span>
                             <strong>{selectedBranchTitle || 'Selected branch'}</strong>
                             <small>Other visible nodes stay dimmed for context.</small>
-                            <button type="button" onClick={() => setSelectedBranchId(undefined)}>
-                                Clear
-                            </button>
+                            <div className="canvas-scope-banner__actions">
+                                {useWorkspaceShell ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => shellActions.openBranchMetadata(selectedBranchId)}
+                                    >
+                                        Properties
+                                    </button>
+                                ) : null}
+                                <button type="button" onClick={clearBranchLens}>
+                                    Clear
+                                </button>
+                            </div>
                         </section>
                     </Panel>
                 ) : null}
-                {selectedVisibleNodes.length && !isStructuredCanvasView ? (
+                {selectedVisibleNodes.length && !isStructuredCanvasView && !isFocusPanelOpen ? (
                     <Panel position="bottom-center" style={{ display: 'block' }}>
                         <section className="selection-action-bar" aria-label="Selected node actions">
-                            <strong>
-                                {selectedVisibleNodes.length} selected
-                            </strong>
-                            {selectedBranchId ? <span>Branch lens active</span> : null}
-                            {activeCanvasView === 'knowledgeGraph' && selectedVisibleNodes.length === 2 ? (
-                                <button type="button" onClick={createKgRelationshipFromSelection}>
-                                    Connect
+                            <div className="selection-action-main">
+                                <strong>
+                                    {selectedVisibleNodes.length} selected
+                                </strong>
+                                {selectedBranchId ? <span>Branch lens active</span> : null}
+                                {activeCanvasView === 'knowledgeGraph' && selectedVisibleNodes.length === 2 ? (
+                                    <button type="button" onClick={createKgRelationshipFromSelection}>
+                                        Connect
+                                    </button>
+                                ) : null}
+                                <button type="button" onClick={askAiAboutSelection}>
+                                    <FiMessageSquare />
+                                    More
                                 </button>
-                            ) : null}
-                            <button type="button" onClick={askAiAboutSelection}>
-                                <FiMessageSquare />
-                                Ask AI
-                            </button>
-                            <button type="button" onClick={fitSelectedNodes}>
-                                <FiMaximize2 />
-                                Fit
-                            </button>
-                            <button
-                                type="button"
-                                className="selection-action-danger"
-                                onClick={deleteSelectedNodes}
-                            >
-                                <FiTrash2 />
-                                Delete
-                            </button>
-                            <button type="button" onClick={clearNodeSelection}>
-                                Clear
-                            </button>
-                            {selectedBranchId ? (
-                                <button type="button" onClick={() => setSelectedBranchId(undefined)}>
-                                    Clear lens
+                                <button type="button" onClick={fitSelectedNodes}>
+                                    <FiMaximize2 />
+                                    Fit
                                 </button>
+                                <button
+                                    type="button"
+                                    className="selection-action-danger"
+                                    onClick={deleteSelectedNodes}
+                                >
+                                    <FiTrash2 />
+                                    Delete
+                                </button>
+                                <button type="button" onClick={clearNodeSelection}>
+                                    Clear
+                                </button>
+                                {selectedBranchId ? (
+                                    <button type="button" onClick={clearBranchLens}>
+                                        Clear lens
+                                    </button>
+                                ) : null}
+                            </div>
+                            <form className="selection-quick-ask" onSubmit={submitSelectionQuickAsk}>
+                                <div className="selection-quick-mode" aria-label="Quick Ask AI mode">
+                                    {SELECTION_QUICK_ASK_MODES.map((mode) => (
+                                        <button
+                                            key={mode.id}
+                                            type="button"
+                                            className={selectionAskMode === mode.id ? 'active' : ''}
+                                            onClick={() => setSelectionAskMode(mode.id)}
+                                        >
+                                            {mode.label}
+                                        </button>
+                                    ))}
+                                </div>
+                                <input
+                                    value={selectionAskPrompt}
+                                    onChange={(event) => setSelectionAskPrompt(event.target.value)}
+                                    placeholder="Ask about the selected nodes..."
+                                    aria-label="Ask AI about selected nodes"
+                                />
+                                <button type="submit" disabled={!selectionAskPrompt.trim() || isSelectionAskBusy}>
+                                    <FiSend />
+                                </button>
+                            </form>
+                            {selectionAskStatus || selectionAskAnswer ? (
+                                <div className="selection-quick-result">
+                                    {selectionAskStatus ? <span>{selectionAskStatus}</span> : null}
+                                    {selectionAskAnswer ? <p>{selectionAskAnswer}</p> : null}
+                                </div>
                             ) : null}
                         </section>
                     </Panel>
                 ) : null}
-                <FloatingDock
-                    id="canvasLens"
-                    ariaLabel="Canvas lens toolbar"
-                    className="canvas-lens-floating-dock"
-                    defaultPlacement={{
-                        dock: CANVAS_VIEWS.has(activeView) ? 'top' : 'right',
-                        offset: CANVAS_VIEWS.has(activeView)
-                            ? { x: 0, y: 0 }
-                            : { x: -12, y: 86 }
-                    }}
-                >
-                    <LocalViewsPanel
-                        hidden={false}
-                        onSelectNode={focusNodeForReview}
-                        onSelectEdge={setInspectorEdgeId}
-                    />
-                </FloatingDock>
-                {activeCanvasView === 'knowledgeGraph' && nodes.length > 0 ? (
+                {!useWorkspaceShell && !isFocusPanelOpen && CANVAS_VIEWS.has(activeView) ? (
+                    <FloatingDock
+                        id="canvasLens"
+                        ariaLabel="Canvas lens toolbar"
+                        className="canvas-lens-floating-dock"
+                        defaultPlacement={{
+                            dock: CANVAS_VIEWS.has(activeView) ? 'top' : 'right',
+                            offset: CANVAS_VIEWS.has(activeView)
+                                ? { x: 0, y: 0 }
+                                : { x: -12, y: 86 }
+                        }}
+                    >
+                        <LocalViewsPanel
+                            hidden={false}
+                            onSelectNode={focusNodeForReview}
+                            onSelectEdge={openEdgeInspector}
+                        />
+                    </FloatingDock>
+                ) : null}
+                {!useWorkspaceShell && isLocalOutputView && !isFocusPanelOpen ? (
+                    <FloatingDock
+                        id="workspaceOutput"
+                        ariaLabel="Workspace output workflow"
+                        className="workspace-output-floating-dock"
+                        defaultPlacement={{
+                            dock: 'left',
+                            offset: { x: 0, y: 96 }
+                        }}
+                    >
+                        <LocalViewsPanel
+                            hidden={false}
+                            onSelectNode={focusNodeForReview}
+                            onSelectEdge={openEdgeInspector}
+                        />
+                    </FloatingDock>
+                ) : null}
+                {!useWorkspaceShell && activeView === 'mindmap' && nodes.length > 0 && !isFocusPanelOpen ? (
+                    <FloatingDock
+                        id="mindmapRelationships"
+                        ariaLabel="Mind map relationship lens"
+                        className="mindmap-relationship-floating-dock"
+                        defaultPlacement={{
+                            dock: 'top',
+                            offset: { x: 420, y: 0 }
+                        }}
+                    >
+                        <section
+                            className="kg-relationship-controls mindmap-relationship-controls"
+                            aria-label="Mind map relationship lens"
+                        >
+                            <div className="kg-relationship-header">
+                                <div>
+                                    <span>Map lens</span>
+                                    <strong>
+                                        {MINDMAP_RELATIONSHIP_MODE_OPTIONS.find((option) => option.id === mindmapRelationshipMode)?.label ||
+                                            'Structure Only'}
+                                    </strong>
+                                </div>
+                            </div>
+                            <div className="kg-relationship-mode-buttons mindmap-relationship-mode-buttons">
+                                {MINDMAP_RELATIONSHIP_MODE_OPTIONS.map((option) => (
+                                    <button
+                                        key={option.id}
+                                        type="button"
+                                        className={mindmapRelationshipMode === option.id ? 'active' : ''}
+                                        title={option.description}
+                                        onClick={() => setMindmapRelationshipMode(option.id)}
+                                    >
+                                        <span>{option.shortLabel || option.label}</span>
+                                        <small>
+                                            {option.id === MINDMAP_RELATIONSHIP_MODES.OFF
+                                                ? 'tree'
+                                                : kgRelationshipModeCounts[option.id] || 0}
+                                        </small>
+                                    </button>
+                                ))}
+                            </div>
+                            {mindmapBranchLegend.length ? (
+                                <div className="mindmap-branch-legend" aria-label="Mind map branches">
+                                    {mindmapBranchLegend.map((branch) => (
+                                        <button
+                                            key={branch.id}
+                                            type="button"
+                                            className={[
+                                                `canvas-branch-color-${branch.colorIndex}`,
+                                                selectedBranchId === branch.id ? 'active' : ''
+                                            ]
+                                                .filter(Boolean)
+                                                .join(' ')}
+                                            title={`Focus ${branch.title}`}
+                                            onClick={() =>
+                                                setSelectedBranchId(
+                                                    selectedBranchId === branch.id ? undefined : branch.id
+                                                )
+                                            }
+                                        >
+                                            <span />
+                                            <strong>{branch.title}</strong>
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : null}
+                        </section>
+                    </FloatingDock>
+                ) : null}
+                {!useWorkspaceShell && activeCanvasView === 'knowledgeGraph' && nodes.length > 0 ? (
                     <FloatingDock
                         id="kgRelationships"
                         ariaLabel="Knowledge graph relationship toolbar"
                         className="kg-relationship-floating-dock"
                         defaultPlacement={{
                             dock: 'top',
-                            offset: { x: 0, y: 54 }
+                            offset: { x: 420, y: 0 }
                         }}
                     >
                         <section
@@ -2055,7 +3158,10 @@ const App = () => {
                                                     key={insight.id}
                                                     type="button"
                                                     title={insight.rationale || `${insight.sourceTitle} ${insight.relationship} ${insight.targetTitle}`}
-                                                    onClick={() => setInspectorEdgeId(insight.id)}
+                                                    onClick={() => {
+                                                        setIsAiHelpersOpen(false);
+                                                        setInspectorEdgeId(insight.id);
+                                                    }}
                                                 >
                                                     <span>{insight.familyLabel}</span>
                                                     <strong>{insight.sourceTitle}</strong>
@@ -2076,38 +3182,83 @@ const App = () => {
                         </section>
                     </FloatingDock>
                 ) : null}
-                <Panel
-                    position="bottom-right"
-                    style={{ display: 'block' }}
-                >
-                    <AiHelpersPanel
-                        hidden={!isAiHelpersOpen || isStructuredCanvasView}
-                        selectedNodes={selectedNodes || []}
-                        autoOpenToken={nextStepsOpenToken}
-                        summaryLabel={nextStepsOpenToken ? 'Next steps' : 'AI Helpers'}
-                        onClose={() => setIsAiHelpersOpen(false)}
-                    />
-                </Panel>
-                <Panel
-                    position="top-right"
-                    style={{ display: 'block' }}
-                >
-                    {inspectorEdgeId ? (
-                        <EdgeInspector
-                            selectedEdgeId={inspectorEdgeId}
-                            onClose={closeEdgeInspector}
+                {!useWorkspaceShell ? (
+                    <Panel
+                        position="bottom-right"
+                        style={{ display: 'block' }}
+                    >
+                        <AiHelpersPanel
+                            hidden={!isAiHelpersOpen || isStructuredCanvasView}
+                            selectedNodes={selectedNodes || []}
+                            autoOpenToken={nextStepsOpenToken}
+                            summaryLabel={nextStepsOpenToken ? 'Next steps' : 'AI Helpers'}
+                            onClose={() => setIsAiHelpersOpen(false)}
                         />
-                    ) : (
-                        <NodeInspector
-                            selectedNodeId={inspectorNodeId}
-                            validationIssues={selectedNodeIssues}
-                            onClose={closeNodeInspector}
-                            onAiDraftAccepted={openNextStepsAfterDraftAccept}
-                        />
-                    )}
-                </Panel>
-                <SourceDraftReviewPanel />
+                    </Panel>
+                ) : null}
+                {shouldRenderInspectorDock ? (
+                    <FloatingDock
+                        id="metadataInspector"
+                        ariaLabel="Node metadata drawer"
+                        className="metadata-inspector-floating-dock"
+                        defaultPlacement={{
+                            dock: 'right',
+                            offset: { x: 0, y: 92 }
+                        }}
+                    >
+                        {inspectorEdgeId ? (
+                            <EdgeInspector
+                                selectedEdgeId={inspectorEdgeId}
+                                onClose={closeEdgeInspector}
+                            />
+                        ) : (
+                            <NodeInspector
+                                selectedNodeId={inspectorNodeId}
+                                validationIssues={selectedNodeIssues}
+                                onClose={closeNodeInspector}
+                                onAiDraftAccepted={openNextStepsAfterDraftAccept}
+                            />
+                        )}
+                    </FloatingDock>
+                ) : null}
+                {!useWorkspaceShell ? <SourceDraftReviewPanel /> : null}
             </ReactFlow>
+        </>
+    );
+
+    return (
+        <div
+            className={[
+                'app',
+                lightMode ? 'light' : 'dark',
+                useWorkspaceShell ? 'ui-shell-ribbon-enabled' : ''
+            ]
+                .filter(Boolean)
+                .join(' ')}
+        >
+            <Modal ChildProp={Prompts} />
+            <Header
+                setIsDrawer={setIsDrawer}
+                flowList={flowList}
+                setFlowList={setFlowList}
+                lightMode={lightMode}
+                setLightMode={setLightMode}
+            />
+            {useWorkspaceShell ? (
+                <WorkspaceShellAdapter
+                    activeRibbonTab={shellActions.activeRibbonTab}
+                    onRibbonTabChange={shellActions.setRibbonTab}
+                    renderRibbonContent={renderShellRibbonContent}
+                    leftWidth={workspaceShellLeftWidth}
+                    leftPanel={workspaceNavigator}
+                    centerCanvas={workspaceBody}
+                    rightPanel={shellRightPanel}
+                    bottomTray={shellBottomTray}
+                    overlayLayer={shellOverlayLayer}
+                />
+            ) : (
+                workspaceBody
+            )}
         </div>
     );
 };

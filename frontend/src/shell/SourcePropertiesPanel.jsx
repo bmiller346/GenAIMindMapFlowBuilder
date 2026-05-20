@@ -1,0 +1,140 @@
+import { useMemo } from 'react';
+import { buildSourceLibraryProjection } from '../views/graphProjection.js';
+import ShellRightPanel from './ShellRightPanel.jsx';
+
+const formatBytes = (size) => {
+    if (!size) {
+        return '';
+    }
+    if (size < 1024) {
+        return `${size} B`;
+    }
+    if (size < 1024 * 1024) {
+        return `${(size / 1024).toFixed(1)} KB`;
+    }
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const sourceStatusLabel = (status) =>
+    ({
+        uploaded: 'Uploaded',
+        parsed: 'Parsed',
+        chunked: 'Sections ready',
+        'used in graph': 'Used in graph',
+        failed: 'Failed',
+        'brief only': 'Brief only'
+    }[status] || status || 'Unknown');
+
+const SourcePropertiesPanel = ({
+    edges = [],
+    nodes = [],
+    onClose,
+    onSelectNode,
+    sourceId,
+    sourceLibrary = [],
+    workspaceBrief = {}
+}) => {
+    const projection = useMemo(
+        () => buildSourceLibraryProjection(nodes, edges, workspaceBrief, sourceLibrary),
+        [edges, nodes, sourceLibrary, workspaceBrief]
+    );
+    const source = projection.sources.find((item) => item.id === sourceId);
+
+    return (
+        <ShellRightPanel title="Source properties">
+            <section className="source-properties-panel" aria-label="Source properties">
+                {source ? (
+                    <>
+                        <div className="source-properties-panel__header">
+                            <span>{source.type_label || 'Source'}</span>
+                            <h2>{source.title}</h2>
+                            <p>{source.id}</p>
+                        </div>
+
+                        <dl className="source-properties-panel__stats">
+                            <div>
+                                <dt>Status</dt>
+                                <dd>{sourceStatusLabel(source.status)}</dd>
+                            </div>
+                            <div>
+                                <dt>Coverage</dt>
+                                <dd>{source.coverage_count || 0} nodes</dd>
+                            </div>
+                            <div>
+                                <dt>Extraction</dt>
+                                <dd>
+                                    {source.chunk_count || 0} sections, {source.segment_count || 0} segments
+                                </dd>
+                            </div>
+                            {source.size ? (
+                                <div>
+                                    <dt>Size</dt>
+                                    <dd>{formatBytes(source.size)}</dd>
+                                </div>
+                            ) : null}
+                            {source.path ? (
+                                <div>
+                                    <dt>Path</dt>
+                                    <dd>{source.path}</dd>
+                                </div>
+                            ) : null}
+                        </dl>
+
+                        <section className="source-properties-panel__section">
+                            <div className="source-properties-panel__section-heading">
+                                <p>Citing nodes</p>
+                                <span>{source.citing_nodes.length}</span>
+                            </div>
+                            {source.citing_nodes.length ? (
+                                <div className="source-properties-panel__list">
+                                    {source.citing_nodes.slice(0, 5).map((node) => (
+                                        <button
+                                            key={`${source.id}-${node.id}-${node.source_location || 'source'}`}
+                                            type="button"
+                                            onClick={() => onSelectNode?.(node.id)}
+                                        >
+                                            <strong>{node.title}</strong>
+                                            <span>{node.source_location || 'Document level'}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="source-properties-panel__empty">No cited nodes yet.</p>
+                            )}
+                        </section>
+
+                        <section className="source-properties-panel__section">
+                            <div className="source-properties-panel__section-heading">
+                                <p>Snippets</p>
+                                <span>{source.snippets.length}</span>
+                            </div>
+                            {source.snippets.length ? (
+                                <div className="source-properties-panel__snippets">
+                                    {source.snippets.slice(0, 3).map((snippet) => (
+                                        <blockquote key={`${snippet.node_id}-${snippet.text.slice(0, 24)}`}>
+                                            <p>{snippet.text}</p>
+                                            <cite>
+                                                {[snippet.node_title, snippet.location].filter(Boolean).join(' | ')}
+                                            </cite>
+                                        </blockquote>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="source-properties-panel__empty">No quote snippets attached.</p>
+                            )}
+                        </section>
+                    </>
+                ) : (
+                    <p className="source-properties-panel__empty">Select a source from the library.</p>
+                )}
+                <div className="source-properties-panel__actions">
+                    <button type="button" onClick={onClose}>
+                        Close
+                    </button>
+                </div>
+            </section>
+        </ShellRightPanel>
+    );
+};
+
+export default SourcePropertiesPanel;

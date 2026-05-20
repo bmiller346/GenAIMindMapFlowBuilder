@@ -1937,7 +1937,7 @@ const ResponseNode = ({ id, data }) => {
             return;
         }
 
-        const additiveSelection = event.ctrlKey || event.metaKey;
+        const additiveSelection = event.ctrlKey || event.metaKey || event.shiftKey;
         event.stopPropagation();
         setNodes(
             nodes.map((node) =>

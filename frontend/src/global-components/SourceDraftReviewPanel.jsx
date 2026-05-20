@@ -11,7 +11,7 @@ import {
     summarizeSourceDraft
 } from '../utils/sourceDraftReview';
 
-const SourceDraftReviewPanel = () => {
+const SourceDraftReviewPanel = ({ variant = 'floating' }) => {
     const selector = (state) => ({
         pendingSourceDraft: state.pendingSourceDraft,
         setNodes: state.setNodes,
@@ -96,12 +96,7 @@ const SourceDraftReviewPanel = () => {
         commitDraft(sourceBackedDraftGraph(graph), 'source_backed');
     };
 
-    return (
-        <Panel
-            position="top-right"
-            className="source-draft-review-panel-shell"
-            style={{ display: 'block' }}
-        >
+    const content = (
         <aside className="source-draft-review-panel" aria-label="Source draft review">
             <div className="source-draft-review-panel__header">
                 <div>
@@ -187,6 +182,19 @@ const SourceDraftReviewPanel = () => {
                 </button>
             </div>
         </aside>
+    );
+
+    if (variant === 'tray') {
+        return content;
+    }
+
+    return (
+        <Panel
+            position="top-right"
+            className="source-draft-review-panel-shell"
+            style={{ display: 'block' }}
+        >
+            {content}
         </Panel>
     );
 };

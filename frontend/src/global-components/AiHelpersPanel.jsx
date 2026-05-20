@@ -56,6 +56,13 @@ const OUTPUT_PROMPT_DEFAULTS = {
         role: 'workflow-mapper',
         action: 'custom_prompt'
     },
+    'create-newsletter': {
+        role: 'research-assistant',
+        action: 'custom_prompt',
+        visual: 'newsletter',
+        prompt:
+            'Draft a source-backed newsletter or update brief from this workspace. Include a title, issue label, audience, cadence, opening note, top highlights, issue sections, upcoming work, risks, decisions needed, optional visual blocks for map/flow/table/status snapshots, source-backed appendix, assumptions, and review state.'
+    },
     'extract-chart-data': {
         role: 'data-table-interpreter',
         action: 'interpret_table_data'
@@ -126,6 +133,12 @@ const AiHelpersPanel = ({
             setIsOpen(true);
         }
     }, [autoOpenToken]);
+
+    useEffect(() => {
+        if (!hidden) {
+            setIsOpen(true);
+        }
+    }, [hidden]);
 
     const projection = useMemo(
         () => buildGraphProjection(nodes, edges, selectedBranchId),
@@ -306,6 +319,13 @@ const AiHelpersPanel = ({
                     'flowchart',
                     projection.nodes.length,
                     'Prepared flow chart generation target.'
+                ),
+                helperAction(
+                    'create-newsletter',
+                    'Create newsletter',
+                    'outline',
+                    projection.nodes.length,
+                    'Prepared newsletter output target.'
                 ),
                 helperAction(
                     'extract-chart-data',
@@ -506,6 +526,7 @@ const AiHelpersPanel = ({
 
             setActiveView(action.view);
             setIsOpen(false);
+            onClose?.();
             addActivity({
                 status: 'completed',
                 title: `${role.name}: ${action.label}`,
@@ -569,6 +590,8 @@ const AiHelpersPanel = ({
             directActionId = 'extract-chart-data';
         } else if (action.type === 'generate_output' && outputType === 'knowledge_graph') {
             directActionId = 'create-knowledge-graph';
+        } else if (action.type === 'generate_output' && outputType === 'newsletter') {
+            directActionId = 'create-newsletter';
         }
 
         if (!directActionId) {
@@ -592,7 +615,8 @@ const AiHelpersPanel = ({
                 table: 'chartData',
                 chart: 'chartData',
                 flow_chart: 'flowchart',
-                knowledge_graph: 'connections'
+                knowledge_graph: 'connections',
+                newsletter: 'outline'
             }[view] || view
         );
     };

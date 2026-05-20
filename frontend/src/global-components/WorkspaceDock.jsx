@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { FiChevronLeft, FiChevronRight, FiMaximize2 } from 'react-icons/fi';
-import AddDataSource from './AddDataSource.jsx';
-import GraphValidationPanel from './GraphValidationPanel.jsx';
-import WorkspaceBriefPanel from './WorkspaceBriefPanel.jsx';
-import MapStylePanel from './MapStylePanel.jsx';
-import ManualNodeControls from './ManualNodeControls.jsx';
-import WorkspaceNudgeSurface from './WorkspaceNudgeSurface.jsx';
+import WorkspaceSourcesTab from './workspaceDock/WorkspaceSourcesTab.jsx';
+import WorkspaceHealthTab from './workspaceDock/WorkspaceHealthTab.jsx';
+import WorkspaceGuidanceTab from './workspaceDock/WorkspaceGuidanceTab.jsx';
+import WorkspaceBuildTab from './workspaceDock/WorkspaceBuildTab.jsx';
 
 const WORKSPACE_DOCK_TABS = [
     ['sources', 'Sources'],
@@ -13,19 +11,20 @@ const WORKSPACE_DOCK_TABS = [
     ['guidance', 'Guide'],
     ['build', 'Build']
 ];
-const WORKSPACE_DOCK_TAB_IDS = new Set(WORKSPACE_DOCK_TABS.map(([id]) => id));
+export const WORKSPACE_DOCK_TAB_IDS = new Set(WORKSPACE_DOCK_TABS.map(([id]) => id));
 
 export const WORKSPACE_DOCK_OPEN_TAB_EVENT = 'docmap:workspace-dock-open-tab';
 
-const formatUsageNumber = (value) => {
-    const count = Number(value || 0);
-    if (!Number.isFinite(count) || count <= 0) {
-        return '0';
-    }
-    return count.toLocaleString();
-};
-
 const WorkspaceDock = ({
+    activeTab: controlledActiveTab,
+    onActiveTabChange,
+    open: controlledOpen,
+    onOpenChange,
+    collapsed: controlledCollapsed,
+    onCollapsedChange,
+    width: controlledWidth,
+    onWidthChange,
+    className = '',
     flowId,
     nodes = [],
     edges = [],
@@ -39,6 +38,7 @@ const WorkspaceDock = ({
     aiUsageReviewStatus = '',
     onRefreshAiUsage,
     onOpenUsageDraftSession,
+    onOpenIssuesTray,
     hasWorkspaceNextSteps,
     workspaceNextSteps = [],
     onOpenNextSteps,
@@ -46,9 +46,57 @@ const WorkspaceDock = ({
     suppressGuidanceNudges = false,
     dockControls
 }) => {
-    const [activeTab, setActiveTab] = useState('guidance');
-    const [collapsed, setCollapsed] = useState(false);
-    const [width, setWidth] = useState(17.65);
+    const [uncontrolledActiveTab, setUncontrolledActiveTab] = useState('guidance');
+    const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState(false);
+    const [uncontrolledWidth, setUncontrolledWidth] = useState(17.65);
+    const activeTab = WORKSPACE_DOCK_TAB_IDS.has(controlledActiveTab)
+        ? controlledActiveTab
+        : uncontrolledActiveTab;
+    const isCollapsedControlled =
+        typeof controlledCollapsed === 'boolean' || typeof controlledOpen === 'boolean';
+    const collapsed = typeof controlledCollapsed === 'boolean'
+        ? controlledCollapsed
+        : typeof controlledOpen === 'boolean'
+          ? !controlledOpen
+          : uncontrolledCollapsed;
+    const parsedControlledWidth = Number(controlledWidth);
+    const isWidthControlled = Number.isFinite(parsedControlledWidth);
+    const width = isWidthControlled ? parsedControlledWidth : uncontrolledWidth;
+
+    const updateActiveTab = useCallback(
+        (nextTab) => {
+            if (!WORKSPACE_DOCK_TAB_IDS.has(nextTab)) {
+                return;
+            }
+            if (controlledActiveTab === undefined) {
+                setUncontrolledActiveTab(nextTab);
+            }
+            onActiveTabChange?.(nextTab);
+        },
+        [controlledActiveTab, onActiveTabChange]
+    );
+
+    const updateCollapsed = useCallback(
+        (nextCollapsed) => {
+            if (!isCollapsedControlled) {
+                setUncontrolledCollapsed(nextCollapsed);
+            }
+            onCollapsedChange?.(nextCollapsed);
+            onOpenChange?.(!nextCollapsed);
+        },
+        [isCollapsedControlled, onCollapsedChange, onOpenChange]
+    );
+
+    const updateWidth = useCallback(
+        (nextWidth) => {
+            const clampedWidth = Math.max(15.5, Math.min(nextWidth, 27));
+            if (!isWidthControlled) {
+                setUncontrolledWidth(clampedWidth);
+            }
+            onWidthChange?.(clampedWidth);
+        },
+        [isWidthControlled, onWidthChange]
+    );
 
     useEffect(() => {
         if (activeTab === 'health') {
@@ -60,14 +108,14 @@ const WorkspaceDock = ({
         const handleOpenTab = (event) => {
             const nextTab = String(event?.detail?.tab || '').trim();
             if (WORKSPACE_DOCK_TAB_IDS.has(nextTab)) {
-                setCollapsed(false);
-                setActiveTab(nextTab);
+                updateCollapsed(false);
+                updateActiveTab(nextTab);
             }
         };
         window.addEventListener(WORKSPACE_DOCK_OPEN_TAB_EVENT, handleOpenTab);
         return () =>
             window.removeEventListener(WORKSPACE_DOCK_OPEN_TAB_EVENT, handleOpenTab);
-    }, []);
+    }, [updateActiveTab, updateCollapsed]);
 
     const startResize = useCallback(
         (event) => {
@@ -81,7 +129,7 @@ const WorkspaceDock = ({
 
             const handlePointerMove = (moveEvent) => {
                 const widthDelta = (moveEvent.clientX - startX) / 16;
-                setWidth(Math.max(15.5, Math.min(startWidth + widthDelta, 27)));
+                updateWidth(startWidth + widthDelta);
             };
 
             const stopResize = () => {
@@ -94,16 +142,22 @@ const WorkspaceDock = ({
             window.addEventListener('pointerup', stopResize);
             window.addEventListener('pointercancel', stopResize);
         },
-        [width]
+        [updateWidth, width]
     );
 
     return (
         <section
-            className={`workspace-dock ${collapsed ? 'workspace-dock--collapsed' : ''}`}
+            className={[
+                'workspace-dock',
+                collapsed ? 'workspace-dock--collapsed' : '',
+                className
+            ]
+                .filter(Boolean)
+                .join(' ')}
             aria-label="Workspace tools"
             style={{ '--workspace-dock-width': `${width}rem` }}
         >
-            <nav className="workspace-dock-tabs" aria-label="Workspace panel">
+            <nav className="workspace-dock-tabs workspace-dock-nav" aria-label="Workspace panel">
                 <div className="workspace-dock-panel-actions">
                     {dockControls ? (
                         <div className="workspace-dock-controls-slot">
@@ -115,7 +169,7 @@ const WorkspaceDock = ({
                         className="workspace-dock-icon-button"
                         title={collapsed ? 'Expand panel' : 'Collapse panel'}
                         aria-label={collapsed ? 'Expand workspace panel' : 'Collapse workspace panel'}
-                        onClick={() => setCollapsed((current) => !current)}
+                        onClick={() => updateCollapsed(!collapsed)}
                     >
                         {collapsed ? <FiChevronRight /> : <FiChevronLeft />}
                     </button>
@@ -125,7 +179,7 @@ const WorkspaceDock = ({
                         key={id}
                         type="button"
                         className={activeTab === id ? 'active' : ''}
-                        onClick={() => setActiveTab(id)}
+                        onClick={() => updateActiveTab(id)}
                     >
                         {label}
                     </button>
@@ -133,118 +187,38 @@ const WorkspaceDock = ({
             </nav>
             <div className="workspace-dock-content">
                 {activeTab === 'sources' ? (
-                    <div className="workspace-dock-section">
-                        <div className="workspace-dock-header">
-                            <strong>Sources</strong>
-                            <button type="button" onClick={onOpenSources}>
-                                Library
-                            </button>
-                        </div>
-                        <AddDataSource />
-                    </div>
+                    <WorkspaceSourcesTab onOpenSources={onOpenSources} />
                 ) : null}
                 {activeTab === 'health' ? (
-                    <div className="workspace-dock-section">
-                        <GraphValidationPanel
-                            flowId={flowId}
-                            nodes={nodes}
-                            edges={edges}
-                            onSelectNode={onSelectNode}
-                            onReportChange={onValidationReportChange}
-                            defaultExpanded
-                        />
-                        <section className="workspace-ai-usage" aria-label="Workspace AI usage">
-                            <div>
-                                <strong>AI usage</strong>
-                                <button type="button" onClick={onRefreshAiUsage}>
-                                    Refresh
-                                </button>
-                            </div>
-                            <p>
-                                {formatUsageNumber(aiUsage?.total_tokens)} tokens
-                                {aiUsage?.estimated_cost_usd
-                                    ? ` · ${aiUsage.estimated_cost_usd} est.`
-                                    : ''}
-                            </p>
-                            <span>
-                                {aiUsageStatus ||
-                                    `${formatUsageNumber(aiUsage?.session_count)} draft sessions tracked`}
-                            </span>
-                            {aiUsageReviewStatus ? <small>{aiUsageReviewStatus}</small> : null}
-                            {Array.isArray(aiUsage?.sessions) && aiUsage.sessions.length ? (
-                                <details>
-                                    <summary>Details</summary>
-                                    <div className="workspace-ai-usage-sessions">
-                                        {aiUsage.sessions.slice(0, 5).map((session) => (
-                                            <article key={session.session_id || session.created_at}>
-                                                <div>
-                                                    <strong>{session.selected_model || 'auto'}</strong>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => onOpenUsageDraftSession?.(session)}
-                                                        disabled={!session.session_id}
-                                                    >
-                                                        Review
-                                                    </button>
-                                                </div>
-                                                <span>
-                                                    {formatUsageNumber(session.total_tokens)} tokens
-                                                    {session.estimated_cost_usd
-                                                        ? ` · ${session.estimated_cost_usd} est.`
-                                                        : ''}
-                                                </span>
-                                                <small>
-                                                    {session.status || 'draft'} ·{' '}
-                                                    {formatUsageNumber(session.revisions?.length)} revisions
-                                                </small>
-                                            </article>
-                                        ))}
-                                    </div>
-                                </details>
-                            ) : null}
-                        </section>
-                    </div>
+                    <WorkspaceHealthTab
+                        flowId={flowId}
+                        nodes={nodes}
+                        edges={edges}
+                        onSelectNode={onSelectNode}
+                        onValidationReportChange={onValidationReportChange}
+                        onOpenIssuesTray={onOpenIssuesTray}
+                        aiUsage={aiUsage}
+                        aiUsageStatus={aiUsageStatus}
+                        aiUsageReviewStatus={aiUsageReviewStatus}
+                        onRefreshAiUsage={onRefreshAiUsage}
+                        onOpenUsageDraftSession={onOpenUsageDraftSession}
+                    />
                 ) : null}
                 {activeTab === 'guidance' ? (
-                    <div className="workspace-dock-section workspace-guide-panel">
-                        {hasWorkspaceNextSteps ? (
-                            <div className="workspace-next-steps-launcher">
-                                <div className="workspace-dock-header">
-                                    <strong>Next steps</strong>
-                                    <span>{workspaceNextSteps.length}</span>
-                                </div>
-                                <p>Reopen recommended AI actions for the current workspace.</p>
-                                <button type="button" onClick={onOpenNextSteps}>
-                                    Open next steps
-                                </button>
-                            </div>
-                        ) : null}
-                        {!suppressGuidanceNudges ? (
-                            <WorkspaceNudgeSurface
-                                validationIssues={validationReport?.issues || []}
-                                onFocusNode={onSelectNode}
-                                onOpenSources={onOpenSources}
-                                onOpenAiHelpers={onOpenAiHelpers}
-                            />
-                        ) : null}
-                        {!hasWorkspaceNextSteps ? (
-                            <div className="workspace-guide-empty">
-                                <strong>Guide</strong>
-                                <p>
-                                    {hasWorkspaceContentNodes
-                                        ? 'No recommended AI actions right now.'
-                                        : 'Create the first workspace node before guidance starts making recommendations.'}
-                                </p>
-                            </div>
-                        ) : null}
-                    </div>
+                    <WorkspaceGuidanceTab
+                        validationReport={validationReport}
+                        onSelectNode={onSelectNode}
+                        onOpenSources={onOpenSources}
+                        onOpenAiHelpers={onOpenAiHelpers}
+                        hasWorkspaceNextSteps={hasWorkspaceNextSteps}
+                        workspaceNextSteps={workspaceNextSteps}
+                        onOpenNextSteps={onOpenNextSteps}
+                        hasWorkspaceContentNodes={hasWorkspaceContentNodes}
+                        suppressGuidanceNudges={suppressGuidanceNudges}
+                    />
                 ) : null}
                 {activeTab === 'build' ? (
-                    <div className="workspace-flow-controls">
-                        <WorkspaceBriefPanel embedded />
-                        <MapStylePanel />
-                        <ManualNodeControls />
-                    </div>
+                    <WorkspaceBuildTab />
                 ) : null}
             </div>
             {!collapsed ? (

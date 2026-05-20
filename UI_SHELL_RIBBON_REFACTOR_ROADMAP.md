@@ -433,6 +433,7 @@ Completed:
 - Kept `NodeInspector` and `EdgeInspector` save/apply mutation logic unchanged.
 - Added `metadataOnly` support to `NodeInspector` so the shell right rail shows node metadata without also becoming the AI proposal/draft review host.
 - Shifted shell-path node/edge metadata authority to `shellStore.rightPanel`; legacy inspector ids can still be promoted for compatibility, but the shell properties host now renders from the right-panel route.
+- Stopped legacy AI action previews from mounting the floating metadata inspector when the shell flag is enabled; reviewable proposal surfaces should continue moving toward the bottom tray.
 - Added Playwright coverage for shell-flag node metadata editing and shell-flag relationship metadata editing in `frontend/tests/e2e/selection-shell-regression.spec.js`.
 - Added an explicit branch Properties action to the active branch-lens banner and a read-only `BranchPropertiesPanel` in the shell right rail.
 - Added Playwright coverage for shell-flag branch properties routing and verified AI draft review still routes to the bottom tray instead of the right rail.
