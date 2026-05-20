@@ -69,6 +69,7 @@ const VISUAL_OPTIONS = [
     { id: 'kanban', label: 'Kanban' },
     { id: 'executive_summary', label: 'Executive Summary' },
     { id: 'news_article', label: 'News Article' },
+    { id: 'newsletter', label: 'Newsletter' },
     { id: 'sme_questions', label: 'SME Questions' },
     { id: 'software_overlap_report', label: 'Software Overlap' },
     { id: 'implementation_handoff_package', label: 'Handoff' },
@@ -135,7 +136,11 @@ const SUMMARY_COMPANION_OUTPUTS = [
     },
     {
         shape: 'news_article',
-        pattern: /\b(news article|article draft|newsletter|monthly update|press release|current news|latest news)\b/
+        pattern: /\b(news article|article draft|press release|current news|latest news)\b/
+    },
+    {
+        shape: 'newsletter',
+        pattern: /\b(newsletter|monthly update|weekly update|quarterly update|update brief|intranet update|intranet article|announcement|internal comms?|internal communications?|release notes?|stakeholder updates?)\b/
     }
 ];
 
@@ -159,6 +164,7 @@ const OUTPUT_SHAPE_VIEW = {
     executive_summary: 'executive',
     executive_output: 'executive',
     news_article: 'outline',
+    newsletter: 'outline',
     review_annotations: 'gaps',
     sme_questions: 'sme',
     source_coverage: 'sources',
@@ -179,6 +185,7 @@ const OUTPUT_SHAPE_ROUTE = {
     executive_summary: { roleId: 'enterprise-readiness-planner', actionId: 'create_stakeholder_review_package' },
     executive_output: { roleId: 'enterprise-readiness-planner', actionId: 'create_stakeholder_review_package' },
     news_article: { roleId: 'research-assistant', actionId: 'custom_prompt' },
+    newsletter: { roleId: 'research-assistant', actionId: 'custom_prompt' },
     sme_questions: { roleId: 'sme-question-generator', actionId: 'create_sme_questions' },
     source_coverage: { roleId: 'source-ref-repair', actionId: 'find_missing_source_support' },
     software_overlap_report: { roleId: 'enterprise-tool-rationalization', actionId: 'find_duplicate_tools' },
@@ -207,7 +214,10 @@ const inferOutputShape = (prompt, actionId = '') => {
     if (/\b(executive summary|exec summary|leadership summary|board summary|briefing memo|decision brief)\b/.test(text)) {
         return 'executive_summary';
     }
-    if (/\b(news article|article draft|newsletter|monthly update|press release|current news|latest news)\b/.test(text)) {
+    if (/\b(newsletter|monthly update|weekly update|quarterly update|update brief|intranet update|intranet article|announcement|internal comms?|internal communications?|release notes?|stakeholder updates?)\b/.test(text)) {
+        return 'newsletter';
+    }
+    if (/\b(news article|article draft|press release|current news|latest news)\b/.test(text)) {
         return 'news_article';
     }
     if (/\b(kanban|board|columns)\b/.test(text)) {
@@ -471,7 +481,7 @@ const nodeTypeForShape = (shape, actionId) => {
     if (shape === 'executive_summary' || shape === 'executive_output') {
         return 'reference';
     }
-    if (shape === 'news_article') {
+    if (shape === 'news_article' || shape === 'newsletter') {
         return 'reference';
     }
     if (shape === 'table') {

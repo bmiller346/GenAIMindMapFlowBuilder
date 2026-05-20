@@ -31,6 +31,7 @@ const OUTPUT_GROUPS = [
             { id: 'tasks', label: 'Tasks' },
             { id: 'checklist', label: 'Checklist' },
             { id: 'team_roadmap', label: 'Team roadmap' },
+            { id: 'newsletter', label: 'Newsletter' },
             { id: 'chart_data', label: 'Chart data' }
         ]
     },

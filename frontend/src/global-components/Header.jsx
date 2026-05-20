@@ -64,6 +64,44 @@ const acceptedArtifactTypesFromActivity = (events = []) => {
     return types;
 };
 
+const acceptedPublishableArtifactsFromActivity = (events = []) => {
+    const artifactsById = new Map();
+    (Array.isArray(events) ? events : []).forEach((event) => {
+        const artifacts = event?.metadata?.accepted_artifacts;
+        if (!Array.isArray(artifacts)) {
+            return;
+        }
+        artifacts.forEach((artifact, index) => {
+            const type = artifact?.artifact_type || artifact?.artifactType;
+            if (!type) {
+                return;
+            }
+            const id =
+                artifact?.id ||
+                `${type}-${event?.metadata?.session_id || event?.id || 'activity'}-${index}`;
+            artifactsById.set(id, {
+                ...artifact,
+                id,
+                artifact_type: type,
+                data:
+                    artifact?.data && typeof artifact.data === 'object'
+                        ? {
+                              ...artifact.data,
+                              id: artifact.data.id || id,
+                              artifact_type: artifact.data.artifact_type || type
+                          }
+                        : {
+                              id,
+                              artifact_type: type,
+                              title: artifact?.title || artifact?.label || type,
+                              review_state: artifact?.review_state
+                          }
+            });
+        });
+    });
+    return Array.from(artifactsById.values());
+};
+
 const Header = ({
     setIsDrawer,
     setFlowList,
@@ -171,6 +209,13 @@ const Header = ({
             extension: 'md',
             suffix: 'news-article',
             artifactTypes: ['news_article']
+        },
+        {
+            id: 'newsletter.md',
+            label: 'Newsletter',
+            extension: 'md',
+            suffix: 'newsletter',
+            artifactTypes: ['newsletter']
         },
         {
             id: 'team-roadmap.md',
@@ -289,6 +334,10 @@ const Header = ({
     );
     const acceptedArtifactTypes = useMemo(
         () => acceptedArtifactTypesFromActivity(activityEvents),
+        [activityEvents]
+    );
+    const acceptedPublishableArtifacts = useMemo(
+        () => acceptedPublishableArtifactsFromActivity(activityEvents),
         [activityEvents]
     );
 
@@ -1036,9 +1085,9 @@ const Header = ({
             flowNodes: getNodes(),
             flowEdges: getEdges()
         });
-        if (exportGraph.nodes.length === 0) {
+        if (exportGraph.nodes.length === 0 && acceptedPublishableArtifacts.length === 0) {
             setStatus(400);
-            setMsg('Add exportable nodes to the workspace before exporting a PDF.');
+            setMsg('Add exportable nodes or accept a publishable AI output before exporting a PDF.');
             pushNode(ErrorModal);
             return;
         }
@@ -1050,6 +1099,7 @@ const Header = ({
             flowName: flow_name,
             mapStyle: mapStyle?.theme || mapStyle,
             workspaceBrief,
+            acceptedArtifacts: acceptedPublishableArtifacts,
             onExportComplete: (result) => {
                 recordActivity({
                     type: 'export_pdf_downloaded',

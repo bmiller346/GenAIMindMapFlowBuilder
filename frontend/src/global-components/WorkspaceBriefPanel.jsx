@@ -20,6 +20,7 @@ const OUTPUT_LABELS = {
     tasks: 'Tasks',
     checklist: 'Checklist',
     team_roadmap: 'Team roadmap',
+    newsletter: 'Newsletter',
     chart_data: 'Chart data',
     sme_questions: 'SME questions',
     missing_info_report: 'Missing info',
