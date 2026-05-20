@@ -13,7 +13,7 @@ const SOURCE_REPAIR_AI_PRESET = {
     scope: 'workspace'
 };
 
-const useSourcesReviewController = () => {
+const useSourcesReviewController = ({ onOpenWorkspaceAskAi } = {}) => {
     const {
         nodes,
         edges,
@@ -63,14 +63,21 @@ const useSourcesReviewController = () => {
         };
         const preferredScope =
             normalizedPreset.scope === 'branch' && selectedBranchId ? 'branch' : 'workspace';
-        pushNode(PromptModal, {
-            scope: preferredScope,
-            nodeId: preferredScope === 'branch' ? selectedBranchId : undefined,
-            initialRoleId: normalizedPreset.role,
-            initialActionId: normalizedPreset.action,
-            initialPrompt: normalizedPreset.initialPrompt,
-            initialVisual: normalizedPreset.initialVisual || 'auto'
+        const handledByShell = onOpenWorkspaceAskAi?.({
+            ...normalizedPreset,
+            preferredScope,
+            nodeId: preferredScope === 'branch' ? selectedBranchId : undefined
         });
+        if (!handledByShell) {
+            pushNode(PromptModal, {
+                scope: preferredScope,
+                nodeId: preferredScope === 'branch' ? selectedBranchId : undefined,
+                initialRoleId: normalizedPreset.role,
+                initialActionId: normalizedPreset.action,
+                initialPrompt: normalizedPreset.initialPrompt,
+                initialVisual: normalizedPreset.initialVisual || 'auto'
+            });
+        }
         recordActivity({
             type: 'ai_action_picker_opened',
             title: 'Workspace Ask AI opened',

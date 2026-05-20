@@ -61,6 +61,8 @@ Ready for agents to build on:
 - Shell Ask AI entry points route to shell-owned surfaces: general Ask AI opens
   the right-rail guide, while reviewable AI commands such as Find Connections
   open the bottom Review Tray.
+- Shell source-library Ask AI actions open the right-rail guide with source
+  scope instead of the legacy prompt modal.
 - Shell source intake entry points open the bottom Review Tray source intake
   surface instead of the legacy source-picker modal.
 - AI generation progress appears in the shell status bar instead of a React Flow
@@ -116,7 +118,7 @@ is dead in both shell-on and shell-off paths.
 | Legacy overlap `fixme` has disposition | Shell-off FloatingDock compatibility layout | Known overlap remains ambiguous when shell becomes default and rollback is needed | Either keep skipped with explicit shell-off waiver/manual screenshot gate, narrow to shell-only geometry, or replace with stable bounding-box coverage | Disposition documented: skipped as shell-off compatibility territory while shell slot geometry guards default readiness | Yes |
 | Shell-off compatibility remains covered | Feature flag rollback path | Default-on rollout cannot be safely disabled or corrupts existing workspace data | Run shell-off smoke/manual pass and confirm legacy FloatingDock surfaces still open, edit, save, and reopen existing workspace data | Open | Yes |
 | Right rail metadata stays metadata-only and persistent | Node, edge, branch, source properties | AI review/action UI leaks into properties rail, or property edits are lost | Run selection shell regression for node/edge/branch/source properties and metadata-only NodeInspector assertions | Mostly covered; rerun after active test edits land | Yes |
-| Review Tray remains authoritative for reviewable generated work | Bottom tray | AI drafts, source drafts, issues, connections, tasks preview, or checklist preview fall back to legacy/full-panel routes | Run review tray regression for direct tray routes and close behavior | Mostly covered and rerun after shell AI/source-intake routing; advanced prompt-builder flows remain open | Yes |
+| Review Tray remains authoritative for reviewable generated work | Bottom tray | AI drafts, source drafts, issues, connections, tasks preview, or checklist preview fall back to legacy/full-panel routes | Run review tray regression for direct tray routes and close behavior | Mostly covered and rerun after shell AI/source-intake routing; source-library Ask AI now uses the right-rail guide; advanced prompt-builder flows remain open | Yes |
 | FloatingDock removal | Legacy floating layout | Removing compatibility chrome breaks shell-off rollback | Keep audit-only until default shell and output cleanup are complete | Deferred | No |
 | Richer source/branch metadata | Right rail properties | Default properties are useful but not fully product-complete | Product follow-up with field expansion and persistence tests | Deferred | No |
 | Full map projection helper extraction | Mind map projection/lens internals | Lens work remains harder to evolve but current behavior can ship | Refactor plan after branch/lens styling stabilizes | First extraction landed in `frontend/src/utils/canvasProjection.js` with focused unit coverage; broader density/lens rules deferred | No |
@@ -157,6 +159,9 @@ Before any agent starts, check `git status --short`; active work may exist in
 - Source Intake: shell Home/Sources `Add sources` now opens a source intake
   surface in the bottom Review Tray; shell-off still uses the legacy picker
   modal, and individual upload dialogs remain modal for now.
+- Source Ask AI: shell source-library actions now open the AI guide in the
+  right rail with `source_document` scope preselected; shell-off keeps the
+  legacy prompt modal.
 - QA / Default Readiness: shell slot bounding-box coverage exists for ribbon,
   left rail, right rail, review tray, status bar, and narrow Outputs ribbon
   command groups. Shift additive selection/lasso coverage is active. One legacy

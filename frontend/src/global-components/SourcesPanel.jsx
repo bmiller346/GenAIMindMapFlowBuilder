@@ -87,7 +87,14 @@ const FailureList = ({ failures }) => {
     );
 };
 
-const SourcesPanel = ({ embedded = false, isOpen, onClose, onOpenSourceProperties, onSelectNode }) => {
+const SourcesPanel = ({
+    embedded = false,
+    isOpen,
+    onAskAIForSources,
+    onClose,
+    onOpenSourceProperties,
+    onSelectNode
+}) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -146,17 +153,24 @@ const SourcesPanel = ({ embedded = false, isOpen, onClose, onOpenSourcePropertie
             (total, source) => total + (Array.isArray(source.chunks) ? source.chunks.length : 0),
             0
         );
-        pushNode(PromptModal, {
-            scope: 'source',
-            sourceId: boundedSources[0].id,
-            source: boundedSources[0],
+        const handledByShell = onAskAIForSources?.({
             sources: boundedSources,
-            initialRoleId: preset.roleId || 'source-ref-repair',
-            initialActionId: preset.actionId || 'find_missing_source_support',
-            initialPrompt: preset.prompt || '',
-            initialVisual: preset.visual || 'auto',
-            initialChangeIntent: preset.changeIntent || ''
+            preset,
+            sourceChunkCount
         });
+        if (!handledByShell) {
+            pushNode(PromptModal, {
+                scope: 'source',
+                sourceId: boundedSources[0].id,
+                source: boundedSources[0],
+                sources: boundedSources,
+                initialRoleId: preset.roleId || 'source-ref-repair',
+                initialActionId: preset.actionId || 'find_missing_source_support',
+                initialPrompt: preset.prompt || '',
+                initialVisual: preset.visual || 'auto',
+                initialChangeIntent: preset.changeIntent || ''
+            });
+        }
         recordActivity({
             type: sources.length > 1 ? 'ai_multi_source_draft_requested' : 'ai_source_draft_requested',
             title:

@@ -940,6 +940,29 @@ test('shell right rail shows source properties from the source library', async (
     await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
 });
 
+test('shell source Ask AI actions route to the right rail guide', async ({ page }) => {
+    await setupMockBackend(page, { enableShell: true });
+
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto('/');
+    await openSelectionFixture(page);
+
+    await page.locator('.shell-left-navigator__modebar').getByRole('button', { name: 'Sources', exact: true }).click();
+
+    const sourcePanel = page.locator('.sources-panel');
+    await expect(sourcePanel).toBeVisible();
+    await expect(sourcePanel).toContainText('Shell Source Brief');
+    await sourcePanel.getByText('Other actions').click();
+    await sourcePanel.getByRole('button', { name: /Ask AI about source/ }).click();
+
+    const rightRail = page.locator('.workspace-shell__right');
+    await expect(rightRail).toBeVisible();
+    await expect(rightRail).toContainText('AI Helpers');
+    await expect(rightRail.getByLabel('Scope before generation')).toHaveValue('source_document');
+    await expect(rightRail).toContainText('Shell Source Brief');
+    await expect(page.locator('.modal .ai-action-modal')).toHaveCount(0);
+});
+
 test('shell routes AI draft review to tray instead of right properties rail', async ({ page }) => {
     await setupMockBackend(page, { enableShell: true });
 

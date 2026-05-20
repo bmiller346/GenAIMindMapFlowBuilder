@@ -47,7 +47,7 @@ import ShellWorkspaceNavigatorHost from './shell/ShellWorkspaceNavigatorHost.jsx
 import WorkspaceShellAdapter from './shell/WorkspaceShellAdapter.jsx';
 import useShellLayoutState from './shell/useShellLayoutState.js';
 import useWorkspaceShellRouter from './shell/useWorkspaceShellRouter.js';
-import { SHELL_LOCAL_OUTPUT_TRAY_BY_VIEW } from './stores/shellStore.js';
+import useShellStore, { SHELL_LOCAL_OUTPUT_TRAY_BY_VIEW } from './stores/shellStore.js';
 import {
     KnowledgeGraphRelationshipRibbonGroup,
     MindmapRelationshipRibbonGroup
@@ -461,6 +461,7 @@ const App = () => {
         setAIActionRuns
     } = useStore(useShallow(selector));
     const shellActions = useShellLayoutState();
+    const shellActiveScope = useShellStore((state) => state.activeScope);
     const useWorkspaceShell = useMemo(() => isUiShellRibbonEnabled(), []);
     const areNodesIntialised = useNodesInitialized();
     const [isDrawer, setIsDrawer] = useState(false);
@@ -1312,6 +1313,7 @@ const App = () => {
             source = 'workspace',
             scope = 'workspace',
             nodeId,
+            sourceId,
             action = '',
             initialPrompt = '',
             initialVisual = 'auto',
@@ -1323,12 +1325,19 @@ const App = () => {
             setInspectorNodeId(undefined);
             setInspectorEdgeId(undefined);
             setIsAiHelpersOpen(false);
+            if (scope === 'source' && sourceId) {
+                modalStore.getState().setSourceId(sourceId);
+            }
             shellActions.setRibbonTab('ai', { source, action });
-            shellActions.setActiveScope(
-                scope === 'branch' && nodeId
-                    ? { type: 'branch', nodeId }
-                    : { type: 'workspace' }
-            );
+            if (scope === 'source' && sourceId) {
+                shellActions.setActiveScope({ type: 'source', sourceId });
+            } else {
+                shellActions.setActiveScope(
+                    scope === 'branch' && nodeId
+                        ? { type: 'branch', nodeId }
+                        : { type: 'workspace' }
+                );
+            }
             shellActions.openGuidePanel(AI_HELPERS_GUIDE_PANEL_ID);
             recordActivity({
                 type: 'ai_action_picker_opened',
@@ -1336,6 +1345,7 @@ const App = () => {
                 summary,
                 metadata: {
                     scope,
+                    source_id: sourceId || '',
                     action,
                     initial_prompt: initialPrompt,
                     initial_visual: initialVisual,
@@ -1543,6 +1553,32 @@ const App = () => {
     const openShellWorkspaceAskAi = useCallback(() => {
         openShellAiGuide({ source: 'header' });
     }, [openShellAiGuide]);
+
+    const openShellSourceAskAi = useCallback(
+        (options = {}) => {
+            if (!useWorkspaceShell) {
+                return false;
+            }
+            const { sources = [], preferredScope = 'source', nodeId } = options;
+            const preset = options.preset || options;
+            const firstSource = sources[0];
+            const sourceId = firstSource?.id || firstSource?.source_document_id || firstSource?.document_id;
+            openShellAiGuide({
+                source: 'sourceLibrary',
+                scope: preferredScope === 'branch' ? 'branch' : sourceId ? 'source' : 'workspace',
+                nodeId,
+                sourceId,
+                action: preset.action || preset.actionId || '',
+                initialPrompt: preset.initialPrompt || preset.prompt || '',
+                initialVisual: preset.initialVisual || preset.visual || 'auto',
+                summary: sourceId
+                    ? `Opened shell AI guide for source: ${firstSource?.title || sourceId}.`
+                    : 'Opened shell AI guide for source review.'
+            });
+            return true;
+        },
+        [openShellAiGuide, useWorkspaceShell]
+    );
 
     const focusStructuredNodeInMap = useCallback(
         (nodeId) => {
@@ -2203,6 +2239,7 @@ const App = () => {
             onDraftAccepted={openNextStepsAfterDraftAccept}
             onOpenBottomTray={shellActions.openBottomTray}
             onOpenLocalOutputReviewTray={shellActions.openLocalOutputReviewTray}
+            onOpenSourceAskAi={openShellSourceAskAi}
             onReportChange={setValidationReport}
             onSelectEdge={openEdgeInspector}
             onSelectNode={focusNodeForReview}
@@ -2214,6 +2251,7 @@ const App = () => {
             hidden={false}
             selectedNodes={selectedNodes || []}
             autoOpenToken={nextStepsOpenToken}
+            initialScopeType={shellActiveScope?.type === 'source' ? 'source_document' : ''}
             summaryLabel={
                 shellActions.rightPanel?.id === NEXT_STEPS_GUIDE_PANEL_ID
                     ? 'Next steps'
@@ -2463,6 +2501,7 @@ const App = () => {
                         shellActions.openSourceMetadata(sourceId);
                         closeShellSourcesLibrary();
                     }}
+                    onAskAIForSources={openShellSourceAskAi}
                     onSelectNode={focusNodeForReview}
                 />
             }

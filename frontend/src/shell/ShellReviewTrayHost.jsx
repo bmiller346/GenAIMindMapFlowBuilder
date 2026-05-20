@@ -88,6 +88,7 @@ const ShellReviewTrayHost = ({
     onDraftAccepted,
     onOpenBottomTray,
     onOpenLocalOutputReviewTray,
+    onOpenSourceAskAi,
     onReportChange,
     onSelectNode,
     onSelectEdge,
@@ -95,7 +96,9 @@ const ShellReviewTrayHost = ({
 }) => {
     const connectionsReview = useConnectionsReviewController();
     const issuesReview = useIssuesReviewController();
-    const sourcesReview = useSourcesReviewController();
+    const sourcesReview = useSourcesReviewController({
+        onOpenWorkspaceAskAi: onOpenSourceAskAi
+    });
     const tasksReview = useTasksReviewController({ onSelectNode });
     const openLocalReviewTab = (tab) => {
         const nextView = localReviewViewForTab(tab, activeView);

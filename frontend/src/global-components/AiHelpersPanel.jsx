@@ -94,6 +94,7 @@ const AiHelpersPanel = ({
     hidden,
     selectedNodes = [],
     autoOpenToken = 0,
+    initialScopeType = '',
     summaryLabel = 'AI Helpers',
     onClose
 }) => {
@@ -139,6 +140,12 @@ const AiHelpersPanel = ({
             setIsOpen(true);
         }
     }, [hidden]);
+
+    useEffect(() => {
+        if (initialScopeType) {
+            setScopeType(initialScopeType);
+        }
+    }, [initialScopeType]);
 
     const projection = useMemo(
         () => buildGraphProjection(nodes, edges, selectedBranchId),
