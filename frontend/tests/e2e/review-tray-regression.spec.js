@@ -75,6 +75,48 @@ const validationIssueFlowJson = () =>
         automations: []
     });
 
+const checklistCandidateFlowJson = () =>
+    JSON.stringify({
+        nodes: [
+            createNode({
+                id: 'checklist-root',
+                title: 'Review checklist intake',
+                position: { x: 160, y: 160 },
+                sourceRefs: [
+                    {
+                        document_id: sourceId,
+                        chunk_id: 'chunk-checklist',
+                        section: 'Checklist Intake',
+                        quote_snippet: 'Confirm the intake checklist before publishing.'
+                    }
+                ]
+            })
+        ],
+        edges: [],
+        viewport: { x: 0, y: 0, zoom: 1 },
+        workspace_brief: {},
+        source_library: [
+            {
+                id: sourceId,
+                title: sourceTitle,
+                type: 'docx',
+                type_label: 'DOCX',
+                status: 'parsed',
+                component_id: 'docx-review-tray-source',
+                chunks: [
+                    {
+                        id: 'chunk-checklist',
+                        heading: 'Checklist Intake',
+                        snippet: 'Confirm the intake checklist before publishing.'
+                    }
+                ]
+            }
+        ],
+        activity_events: [],
+        ai_action_runs: [],
+        automations: []
+    });
+
 const draftSession = () => ({
     session_id: 'review-tray-draft-session-1',
     workspace_id: flowId,
@@ -549,6 +591,54 @@ test('shell review tray routes local output review views through shell state', a
     await expect(tray).toContainText('Preview-first checklist candidates. Accepting applies selected changes to the workspace.');
     await expect(tray.locator('.local-checklist-preview')).toBeVisible();
     await expect(tray.locator('.local-view-content-surface')).toHaveCount(0);
+});
+
+test('accepted checklist preview persists after save and reopen', async ({ page }) => {
+    const { savedRequests, state } = await setupMockBackend(page, checklistCandidateFlowJson());
+
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto('/');
+
+    await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
+    await page.getByRole('button', { name: /^Checklist\b/ }).click();
+
+    const tray = page.locator('.workspace-shell__bottom .review-tray');
+    await expect(tray).toBeVisible();
+    await expect(tray.getByRole('tab', { name: 'Checklist Preview' })).toHaveAttribute('aria-selected', 'true');
+    await expect(tray.locator('.local-checklist-preview')).toContainText('Review checklist intake');
+
+    await tray.getByRole('button', { name: 'Accept selected' }).click();
+    await expect(page.getByRole('button', { name: 'Unsaved changes' })).toBeVisible();
+    await page.getByRole('button', { name: 'Unsaved changes' }).click();
+
+    await expect
+        .poll(() => {
+            const snapshot = parseSnapshot(state.savedFlowJson);
+            const node = snapshot.nodes.find((item) => item.id === 'checklist-root');
+            return {
+                saved: savedRequests.length > 0,
+                accepted: Boolean(node?.data?.checklist_projection?.accepted),
+                flow: node?.data?.local_preview_acceptances?.at(-1)?.flow || '',
+                label: node?.data?.checklist_projection?.label || ''
+            };
+        })
+        .toEqual({
+            saved: true,
+            accepted: true,
+            flow: 'branch_to_checklist',
+            label: 'Review checklist intake'
+        });
+
+    await page.getByAltText('Open workspaces').click();
+    await page.locator('.flow-row-main').filter({ hasText: 'Review Tray Flow' }).click();
+    const tableView = page.getByRole('region', { name: 'Table', exact: true });
+    await expect(tableView).toContainText('Review checklist intake');
+
+    await tableView.getByRole('button', { name: 'Review checklist intake', exact: true }).click();
+    await expect(page.getByTestId('workspace-shell-right-slot')).toContainText('Review checklist intake');
+
+    const reopened = parseSnapshot(state.savedFlowJson).nodes.find((item) => item.id === 'checklist-root');
+    expect(reopened?.data?.checklist_projection?.accepted).toBe(true);
 });
 
 test('shell review tray stays bounded with the left rail at desktop and narrow widths', async ({ page }) => {

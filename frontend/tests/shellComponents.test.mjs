@@ -185,8 +185,17 @@ test('Home and Sources ribbon groups render stable command surfaces', async () =
     );
 
     assert.match(homeHtml, /aria-label="Home ribbon commands"/);
+    assert.match(homeHtml, /aria-label="Home view commands"/);
     assert.match(homeHtml, /Map/);
+    assert.match(homeHtml, /Outline/);
+    assert.match(homeHtml, /Tasks/);
+    assert.match(homeHtml, /aria-label="Workspace browser commands"/);
     assert.match(homeHtml, /Workspace/);
+    assert.match(homeHtml, /Activity/);
+    assert.match(homeHtml, /Health/);
+    assert.match(homeHtml, /aria-label="Start workspace actions"/);
+    assert.match(homeHtml, /Add sources/);
+    assert.match(homeHtml, /Ask AI/);
     assert.match(homeHtml, /Next steps/);
     assert.match(sourcesHtml, /aria-label="Sources ribbon commands"/);
     assert.match(sourcesHtml, /Library/);

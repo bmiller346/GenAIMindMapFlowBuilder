@@ -89,7 +89,7 @@ export const HomeRibbonGroups = ({
     onOpenNextSteps
 }) => (
     <div className="shell-ribbon-command-stack" aria-label="Home ribbon commands">
-        <section className="shell-ribbon-command-group" aria-label="Workspace home">
+        <section className="shell-ribbon-command-group" aria-label="Home view commands">
             <span>Home</span>
             <RibbonButton
                 title="Map"
@@ -99,43 +99,43 @@ export const HomeRibbonGroups = ({
             />
             <RibbonButton
                 title="Outline"
-                detail="Review hierarchy as a structured view"
+                detail="Open structured hierarchy"
                 icon={FiList}
                 disabled={!canUseWorkspace}
                 onClick={onOpenOutline}
             />
             <RibbonButton
                 title="Tasks"
-                detail="Open confirmed task work"
+                detail="Open accepted task work"
                 icon={FiCheckSquare}
                 disabled={!canUseWorkspace}
                 onClick={onOpenTasks}
             />
         </section>
-        <section className="shell-ribbon-command-group" aria-label="Workspace navigation">
-            <span>Navigate</span>
+        <section className="shell-ribbon-command-group" aria-label="Workspace browser commands">
+            <span>Browser</span>
             <RibbonButton
                 title="Workspace"
-                detail="Open workspace browser"
+                detail="Show project browser"
                 icon={FiFolder}
                 onClick={onOpenWorkspace}
             />
             <RibbonButton
                 title="Activity"
-                detail="Open recent workspace activity"
+                detail="Show activity browser"
                 icon={FiActivity}
                 onClick={onOpenActivity}
             />
             <RibbonButton
                 title="Health"
-                detail="Open validation and readiness"
+                detail="Show validation browser"
                 icon={FiShield}
                 disabled={!canUseWorkspace}
                 onClick={onOpenHealth}
             />
         </section>
-        <section className="shell-ribbon-command-group" aria-label="Workspace creation">
-            <span>Create</span>
+        <section className="shell-ribbon-command-group" aria-label="Start workspace actions">
+            <span>Start</span>
             <RibbonButton
                 title="Add sources"
                 detail="Open source intake"

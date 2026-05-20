@@ -233,7 +233,7 @@ export const ConnectionsReadinessSummary = ({
                 )}
             </div>
         </div>
-        <div className="local-transformation-path" aria-label="Graph transformation path">
+        <div className="local-transformation-path" aria-label="Connections readiness path">
             <span>TraceSpace Map</span>
             <span>Find cross-branch connections</span>
             <span>Review candidates</span>
