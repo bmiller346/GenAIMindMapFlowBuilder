@@ -1162,6 +1162,7 @@ const projectCanvasGraph = ({
                     isBranchScope:
                         hasBranchScope &&
                         isProjected &&
+                        isMindmapStructureEdge &&
                         branchIds.has(edge.source) &&
                         branchIds.has(edge.target),
                     semantic,

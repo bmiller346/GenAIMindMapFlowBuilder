@@ -58,6 +58,11 @@ the core hierarchy.
   may inherit structural branch emphasis. The next implementation pass should
   limit strong branch edge emphasis to structural mind map edges and keep
   relationship edges visually secondary.
+- Current implementation update: strong `canvas-edge-in-branch-scope` emphasis
+  is now limited to structural mind map edges. Relationship-label lens behavior
+  has e2e coverage proving labels are absent by default, appear when the shell
+  ribbon Insights lens is enabled, and disappear again when Structure Only is
+  restored.
 - Relationship-label visibility currently depends on edge type selection in
   `projectCanvasGraph`: mind map hierarchy edges stay `smoothstep`, while KG
   and enabled mind map relationship edges become `semantic` and render labels
@@ -226,8 +231,8 @@ lens behavior expands further.
 
 Current validation gaps:
 
-- Add coverage that mind map relationship labels are absent by default and
-  appear only after the relationship-label lens is enabled.
+- Add projection-level coverage for structural-only branch traversal and
+  semantic edge exclusion from strong branch emphasis.
 - Add projection-level coverage before broad lens expansion: branch scope,
   branch color assignment, structural-only branch traversal, and semantic edge
   exclusion from strong branch emphasis.

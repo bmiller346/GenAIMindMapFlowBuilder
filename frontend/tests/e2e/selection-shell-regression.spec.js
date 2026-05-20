@@ -113,6 +113,23 @@ const initialFlow = ({ selectedNodeIds = [] } = {}) =>
                     rationale: 'Branch B is supported by the root context.',
                     source_signal: 'manual QA fixture'
                 }
+            },
+            {
+                id: 'edge-a-evidence',
+                source: 'branch-a',
+                target: 'structured-evidence',
+                type: 'smoothstep',
+                animated: false,
+                relationship_type: 'supports',
+                confidence: 0.82,
+                rationale: 'Structured evidence supports Branch A without becoming hierarchy.',
+                source_signal: 'manual QA fixture',
+                data: {
+                    relationship_type: 'supports',
+                    confidence: 0.82,
+                    rationale: 'Structured evidence supports Branch A without becoming hierarchy.',
+                    source_signal: 'manual QA fixture'
+                }
             }
         ],
         viewport: { x: 140, y: 260, zoom: 0.9 },
@@ -512,8 +529,33 @@ test('shell Outputs ribbon separates accepted output views from checklist previe
     await expect(page.locator('.shell-output-surface-panel')).toHaveCount(0);
 
     await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
+    await page.getByRole('button', { name: 'Executive' }).click();
+    await expect(page.locator('.canvas-structured-view-executive')).toBeVisible();
+    await expect(page.locator('.workspace-shell__bottom .review-tray')).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
+    await page.getByRole('button', { name: 'Flowchart' }).click();
+    await expect(page.locator('.canvas-structured-view-flowchart')).toBeVisible();
+    await expect(page.locator('.workspace-shell__bottom .review-tray')).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
+    await page.getByRole('button', { name: /^Tasks\b/ }).click();
+    await expect(page.locator('.canvas-structured-view-tasks')).toBeVisible();
+    await expect(page.locator('.workspace-shell__bottom .review-tray')).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
     await page.getByRole('button', { name: 'Kanban' }).click();
     await expect(page.locator('.canvas-structured-view-kanban')).toBeVisible();
+    await expect(page.locator('.workspace-shell__bottom .review-tray')).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
+    await page.getByRole('button', { name: 'Implementation' }).click();
+    await expect(page.locator('.shell-output-surface-panel')).toBeVisible();
+    await expect(page.locator('.workspace-shell__bottom .review-tray')).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
+    await page.getByRole('button', { name: 'Status' }).click();
+    await expect(page.locator('.shell-output-surface-panel')).toBeVisible();
     await expect(page.locator('.workspace-shell__bottom .review-tray')).toHaveCount(0);
 
     await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
@@ -567,6 +609,27 @@ test('shell Outputs ribbon command groups stay scrollable without overlap at nar
     expect(metrics.groupCount).toBeGreaterThanOrEqual(4);
     expect(metrics.contentScrollWidth).toBeGreaterThanOrEqual(metrics.contentClientWidth);
     expect(metrics.overlapPairs).toEqual([]);
+});
+
+test('mind map relationship labels are lens controlled in the shell ribbon', async ({ page }) => {
+    await setupMockBackend(page, { enableShell: true });
+
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto('/');
+    await openSelectionFixture(page);
+
+    await page.getByRole('tab', { name: 'Map' }).click();
+    await expect(page.getByTestId('shell-ribbon')).toHaveAttribute('data-active-tab', 'map');
+    const relationshipLens = page.getByLabel('Mind map relationship lens');
+    await expect(page.locator('.semantic-edge-label--mindmap')).toHaveCount(0);
+    await expect(page.locator('.react-flow__edge.canvas-edge-mindmap-relationship')).toHaveCount(0);
+
+    await relationshipLens.getByRole('button', { name: /Insights/i }).click();
+    await expect(page.locator('.semantic-edge-label--mindmap')).toHaveCount(2);
+    await expect(page.locator('.semantic-edge-label--mindmap').first()).toContainText('Supports');
+
+    await relationshipLens.getByRole('button', { name: /Map/i }).click();
+    await expect(page.locator('.semantic-edge-label--mindmap')).toHaveCount(0);
 });
 
 test('shell left navigator tabs, collapse, and open-tab events stay in the left rail', async ({ page }) => {
