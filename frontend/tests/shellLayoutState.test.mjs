@@ -128,4 +128,50 @@ test('deriveShellLayoutState preserves the left panel kind for shell navigator m
             workspaceShellLeftWidth: '23rem'
         }
     );
+
+    assert.deepEqual(
+        pickLayoutFields(
+            deriveShellLayoutState({
+                ...baseShellState,
+                leftPanel: {
+                    kind: 'health',
+                    tab: 'health',
+                    id: null,
+                    collapsed: false,
+                    width: 20
+                }
+            })
+        ),
+        {
+            activeRibbonTab: 'home',
+            leftPanelKind: 'health',
+            workspaceDockActiveTab: 'health',
+            workspaceDockCollapsed: false,
+            workspaceDockWidth: 20,
+            workspaceShellLeftWidth: '20rem'
+        }
+    );
+
+    assert.deepEqual(
+        pickLayoutFields(
+            deriveShellLayoutState({
+                ...baseShellState,
+                leftPanel: {
+                    kind: 'build',
+                    tab: 'build',
+                    id: null,
+                    collapsed: false,
+                    width: 21
+                }
+            })
+        ),
+        {
+            activeRibbonTab: 'home',
+            leftPanelKind: 'build',
+            workspaceDockActiveTab: 'build',
+            workspaceDockCollapsed: false,
+            workspaceDockWidth: 21,
+            workspaceShellLeftWidth: '21rem'
+        }
+    );
 });

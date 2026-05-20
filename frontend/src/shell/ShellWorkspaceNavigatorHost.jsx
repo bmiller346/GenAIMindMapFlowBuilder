@@ -1,7 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import WorkspaceDock, { WORKSPACE_DOCK_TAB_IDS } from '../global-components/WorkspaceDock.jsx';
 import { WORKSPACE_DOCK_OPEN_TAB_EVENT } from '../global-components/WorkspaceDock.jsx';
 import ShellLeftNavigatorHost from './ShellLeftNavigatorHost.jsx';
+
+const SHELL_NAVIGATOR_TAB_KINDS = new Set(['health', 'build']);
 
 const ShellWorkspaceNavigatorHost = ({
     activeTab,
@@ -46,6 +48,32 @@ const ShellWorkspaceNavigatorHost = ({
         }
     }, [activeTab]);
 
+    const openWorkspaceNavigator = useCallback(
+        (tab = 'workspace') => {
+            const nextTab = WORKSPACE_DOCK_TAB_IDS.has(tab)
+                ? tab
+                : lastWorkspaceTabRef.current;
+            const nextKind = SHELL_NAVIGATOR_TAB_KINDS.has(nextTab) ? nextTab : 'workspace';
+            onOpenWorkspaceNavigation(nextKind, {
+                tab: nextTab,
+                collapsed: false,
+                width
+            });
+        },
+        [onOpenWorkspaceNavigation, width]
+    );
+
+    const openWorkspaceTab = useCallback(
+        (nextTab) => {
+            if (!enabled) {
+                onActiveTabChange?.(nextTab);
+                return;
+            }
+            openWorkspaceNavigator(nextTab);
+        },
+        [enabled, onActiveTabChange, openWorkspaceNavigator]
+    );
+
     useEffect(() => {
         if (!enabled) {
             return undefined;
@@ -57,17 +85,13 @@ const ShellWorkspaceNavigatorHost = ({
                 return;
             }
             lastWorkspaceTabRef.current = nextTab;
-            onOpenWorkspaceNavigation('workspace', {
-                tab: nextTab,
-                collapsed: false,
-                width
-            });
+            openWorkspaceNavigator(nextTab);
         };
 
         window.addEventListener(WORKSPACE_DOCK_OPEN_TAB_EVENT, handleOpenWorkspaceTab);
         return () =>
             window.removeEventListener(WORKSPACE_DOCK_OPEN_TAB_EVENT, handleOpenWorkspaceTab);
-    }, [enabled, onOpenWorkspaceNavigation, width]);
+    }, [enabled, openWorkspaceNavigator]);
 
     if (isFocusPanelOpen) {
         return null;
@@ -76,7 +100,7 @@ const ShellWorkspaceNavigatorHost = ({
     const workspaceNavigator = (
         <WorkspaceDock
             activeTab={activeTab}
-            onActiveTabChange={onActiveTabChange}
+            onActiveTabChange={openWorkspaceTab}
             open={!collapsed}
             collapsed={collapsed}
             onCollapsedChange={onCollapsedChange}
@@ -109,16 +133,6 @@ const ShellWorkspaceNavigatorHost = ({
         return workspaceNavigator;
     }
 
-    const openWorkspaceNavigator = () => {
-        onOpenWorkspaceNavigation('workspace', {
-            tab: WORKSPACE_DOCK_TAB_IDS.has(activeTab)
-                ? activeTab
-                : lastWorkspaceTabRef.current,
-            collapsed: false,
-            width
-        });
-    };
-
     const openOutlineNavigator = () => {
         onOpenWorkspaceNavigation('outline', {
             tab: 'outline',
@@ -135,7 +149,7 @@ const ShellWorkspaceNavigatorHost = ({
         });
     };
 
-    const activeKind = ['outline', 'activity', 'sources'].includes(leftPanelKind)
+    const activeKind = ['outline', 'activity', 'sources', 'health', 'build'].includes(leftPanelKind)
         ? leftPanelKind
         : 'workspace';
 

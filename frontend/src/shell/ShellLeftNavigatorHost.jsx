@@ -1,5 +1,15 @@
 import { useCallback, useMemo } from 'react';
-import { FiChevronLeft, FiChevronRight, FiMaximize2 } from 'react-icons/fi';
+import {
+    FiActivity,
+    FiBookOpen,
+    FiChevronLeft,
+    FiChevronRight,
+    FiFolder,
+    FiList,
+    FiMaximize2,
+    FiShield,
+    FiTool
+} from 'react-icons/fi';
 import ActivityPanel from '../global-components/ActivityPanel.jsx';
 import { OutlineNode } from '../views/localViews/ReviewExplanationContent.jsx';
 
@@ -17,6 +27,15 @@ const HIERARCHY_EDGE_TYPES = new Set([
 
 const nodeTitle = (node = {}) =>
     node.data?.title || node.data?.data?.summ || node.data?.question || node.id || 'Untitled node';
+
+const NAVIGATOR_MODES = [
+    { kind: 'workspace', label: 'Workspace', icon: FiFolder },
+    { kind: 'outline', label: 'Outline', icon: FiList },
+    { kind: 'sources', label: 'Sources', icon: FiBookOpen },
+    { kind: 'activity', label: 'Activity', icon: FiActivity },
+    { kind: 'health', label: 'Health', icon: FiShield },
+    { kind: 'build', label: 'Build', icon: FiTool }
+];
 
 const relationshipType = (edge = {}) =>
     String(
@@ -127,11 +146,33 @@ const ShellLeftNavigatorHost = ({
     const isOutline = activeKind === 'outline';
     const isActivity = activeKind === 'activity';
     const isSources = activeKind === 'sources';
-    const isWorkspace = !isOutline && !isActivity && !isSources;
+    const isHealth = activeKind === 'health';
+    const isBuild = activeKind === 'build';
+    const isWorkspace = !isOutline && !isActivity && !isSources && !isHealth && !isBuild;
+    const usesWorkspaceDock = isWorkspace || isHealth || isBuild;
+
+    const openMode = useCallback(
+        (kind) => {
+            if (kind === 'outline') {
+                onOpenOutline?.();
+            } else if (kind === 'sources') {
+                onOpenSources?.();
+            } else if (kind === 'activity') {
+                onOpenActivity?.();
+            } else if (kind === 'health') {
+                onOpenWorkspace?.('health');
+            } else if (kind === 'build') {
+                onOpenWorkspace?.('build');
+            } else {
+                onOpenWorkspace?.('workspace');
+            }
+        },
+        [onOpenActivity, onOpenOutline, onOpenSources, onOpenWorkspace]
+    );
 
     const startResize = useCallback(
         (event) => {
-            if (event.button !== 0 || isWorkspace) {
+            if (event.button !== 0 || usesWorkspaceDock) {
                 return;
             }
             event.preventDefault();
@@ -155,7 +196,7 @@ const ShellLeftNavigatorHost = ({
             window.addEventListener('pointerup', stopResize);
             window.addEventListener('pointercancel', stopResize);
         },
-        [isWorkspace, onWidthChange, width]
+        [onWidthChange, usesWorkspaceDock, width]
     );
 
     return (
@@ -169,35 +210,26 @@ const ShellLeftNavigatorHost = ({
             aria-label="Workspace navigator"
         >
             <div className="shell-left-navigator__modebar" aria-label="Navigator modes">
-                <button
-                    type="button"
-                    className={isWorkspace ? 'active' : ''}
-                    onClick={onOpenWorkspace}
-                >
-                    Workspace
-                </button>
-                <button
-                    type="button"
-                    className={isOutline ? 'active' : ''}
-                    onClick={onOpenOutline}
-                >
-                    Outline
-                </button>
-                <button
-                    type="button"
-                    className={isSources ? 'active' : ''}
-                    onClick={onOpenSources}
-                >
-                    Sources
-                </button>
-                <button
-                    type="button"
-                    className={isActivity ? 'active' : ''}
-                    onClick={onOpenActivity}
-                >
-                    Activity
-                </button>
-                {!isWorkspace ? (
+                <div className="shell-left-navigator__mode-buttons">
+                    {NAVIGATOR_MODES.map(({ kind, label, icon: Icon }) => (
+                        <button
+                            key={kind}
+                            type="button"
+                            className={
+                                activeKind === kind || (kind === 'workspace' && isWorkspace)
+                                    ? 'active'
+                                    : ''
+                            }
+                            title={label}
+                            aria-label={label}
+                            onClick={() => openMode(kind)}
+                        >
+                            <Icon aria-hidden="true" />
+                            <span>{label}</span>
+                        </button>
+                    ))}
+                </div>
+                {!usesWorkspaceDock ? (
                     <button
                         type="button"
                         className="shell-left-navigator__icon-button"
@@ -209,7 +241,7 @@ const ShellLeftNavigatorHost = ({
                     </button>
                 ) : null}
             </div>
-            {isWorkspace || !collapsed ? (
+            {usesWorkspaceDock || !collapsed ? (
                 <div className="shell-left-navigator__body">
                     {isOutline ? (
                         <ShellOutlineNavigator
@@ -227,7 +259,7 @@ const ShellLeftNavigatorHost = ({
                     )}
                 </div>
             ) : null}
-            {!isWorkspace && !collapsed ? (
+            {!usesWorkspaceDock && !collapsed ? (
                 <button
                     type="button"
                     className="shell-left-navigator__resize-handle"

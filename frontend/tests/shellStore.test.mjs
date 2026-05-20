@@ -197,7 +197,7 @@ test('source library route opens the sources left panel and sources ribbon', () 
     });
 });
 
-test('outline and activity navigation stay scoped to the left panel', () => {
+test('project browser navigation modes stay scoped to the left panel', () => {
     resetShellStore();
 
     useShellStore.getState().openNodeMetadata('node-1');
@@ -231,6 +231,42 @@ test('outline and activity navigation stay scoped to the left panel', () => {
         id: null,
         collapsed: false,
         width: 19
+    });
+    assert.deepEqual(useShellStore.getState().rightPanel, {
+        kind: 'node',
+        id: 'node-1'
+    });
+
+    useShellStore.getState().openWorkspaceNavigation('health', {
+        tab: 'health',
+        collapsed: false,
+        width: 20
+    });
+
+    assert.deepEqual(useShellStore.getState().leftPanel, {
+        kind: 'health',
+        tab: 'health',
+        id: null,
+        collapsed: false,
+        width: 20
+    });
+    assert.deepEqual(useShellStore.getState().rightPanel, {
+        kind: 'node',
+        id: 'node-1'
+    });
+
+    useShellStore.getState().openWorkspaceNavigation('build', {
+        tab: 'build',
+        collapsed: false,
+        width: 22
+    });
+
+    assert.deepEqual(useShellStore.getState().leftPanel, {
+        kind: 'build',
+        tab: 'build',
+        id: null,
+        collapsed: false,
+        width: 22
     });
     assert.deepEqual(useShellStore.getState().rightPanel, {
         kind: 'node',
