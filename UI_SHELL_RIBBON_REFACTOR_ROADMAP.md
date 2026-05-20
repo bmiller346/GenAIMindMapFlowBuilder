@@ -65,6 +65,8 @@ Ready for agents to build on:
   scope instead of the legacy prompt modal.
 - Shell source intake entry points open the bottom Review Tray source intake
   surface instead of the legacy source-picker modal.
+- Shell branch-lens chips now stay visible when `activeView` is mind map even
+  if `activeCanvasView` briefly lags behind the rendered ribbon state.
 - AI generation progress appears in the shell status bar instead of a React Flow
   canvas progress dock.
 - Shift additive click/lasso selection has active shell regression coverage.
@@ -113,7 +115,7 @@ is dead in both shell-on and shell-off paths.
 | Accepted output surfaces need verification | Outputs ribbon and accepted workspace views | Accepted Table/Executive/Flowchart/Tasks/Kanban commands route to an invisible surface or wrong tray workflow | Verify Table, Executive, Flowchart, Tasks, and Kanban open accepted canvas/output surfaces; verify Checklist Preview opens the Review Tray | E2E route coverage passing for Table, Executive, Flowchart, Tasks, Kanban, Implementation, Status, and Checklist Preview | Yes |
 | Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Preview candidates become canonical work before acceptance, or accepted artifacts remain trapped in preview UI | E2E or component coverage for Table/Kanban not opening tray, Checklist Preview opening tray, accepted tasks staying in structured canvas, and checklist artifact persistence | Route split covered; accepted checklist artifact persistence still open | Yes |
 | Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 23 serialized shell e2e passed, 1 intentional skip | Yes |
-| Map readability and relationship lenses are visually verified | Map ribbon, branch scope, relationship labels | Branch focus, selected nodes, and relationship labels compete visually or confuse review | Visual QA plus coverage that mind map relationship labels default off and can be toggled on intentionally | Default-off / toggle-on e2e and projection unit coverage passing; manual visual QA still open | Yes |
+| Map readability and relationship lenses are visually verified | Map ribbon, branch scope, relationship labels | Branch focus, selected nodes, and relationship labels compete visually or confuse review | Visual QA plus coverage that mind map relationship labels default off and can be toggled on intentionally | Default-off / toggle-on e2e, branch-lens e2e, and projection unit coverage passing; manual visual QA still open | Yes |
 | Preview-first graph mutation remains safe | Connections review and generated previews | Find Connections or related candidate acceptance mutates canonical graph without review | Verify generated connection candidates enter Review Tray first and accept/reject preserves existing mutation behavior | Shell AI ribbon Find Connections now routes to the Review Tray instead of `PromptModal`; acceptance mutation behavior still needs deeper candidate accept/reject QA | Yes |
 | Legacy overlap `fixme` has disposition | Shell-off FloatingDock compatibility layout | Known overlap remains ambiguous when shell becomes default and rollback is needed | Either keep skipped with explicit shell-off waiver/manual screenshot gate, narrow to shell-only geometry, or replace with stable bounding-box coverage | Disposition documented: skipped as shell-off compatibility territory while shell slot geometry guards default readiness | Yes |
 | Shell-off compatibility remains covered | Feature flag rollback path | Default-on rollout cannot be safely disabled or corrupts existing workspace data | Run shell-off smoke/manual pass and confirm legacy FloatingDock surfaces still open, edit, save, and reopen existing workspace data | Open | Yes |
@@ -162,6 +164,9 @@ Before any agent starts, check `git status --short`; active work may exist in
 - Source Ask AI: shell source-library actions now open the AI guide in the
   right rail with `source_document` scope preselected; shell-off keeps the
   legacy prompt modal.
+- Branch Lens: shell map branch chips are computed when the rendered map view is
+  active, preventing the relationship lens from showing without branch focus
+  controls during transient view-state mismatches.
 - QA / Default Readiness: shell slot bounding-box coverage exists for ribbon,
   left rail, right rail, review tray, status bar, and narrow Outputs ribbon
   command groups. Shift additive selection/lasso coverage is active. One legacy

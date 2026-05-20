@@ -669,7 +669,7 @@ const App = () => {
         ]
     );
     const mindmapBranchLegend = useMemo(() => {
-        if (activeCanvasView !== 'mindmap' || nodes.length === 0) {
+        if ((activeView !== 'mindmap' && activeCanvasView !== 'mindmap') || nodes.length === 0) {
             return [];
         }
         const structuralEdgeIds = buildProjectedMindmapStructureEdgeIds(nodes, edges);
@@ -682,7 +682,7 @@ const App = () => {
             }))
             .filter((branch) => branch.id)
             .slice(0, 10);
-    }, [activeCanvasView, edges, nodes]);
+    }, [activeCanvasView, activeView, edges, nodes]);
     const isStructuredCanvasView = STRUCTURED_CANVAS_VIEWS.has(activeCanvasView);
     const isShellOutputSurfaceView =
         useWorkspaceShell && SHELL_OUTPUT_SURFACE_VIEWS.has(activeView);

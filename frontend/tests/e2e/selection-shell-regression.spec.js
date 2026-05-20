@@ -665,7 +665,7 @@ test('shell left navigator tabs, collapse, and open-tab events stay in the left 
     await expect(leftRail.locator('.sources-panel--embedded')).toBeVisible();
     await expect(leftRail.locator('.sources-panel--embedded')).toContainText('Source set / Media');
     await expect(page.locator('body > .sources-panel')).toHaveCount(0);
-    await leftRail.locator('.sources-panel--embedded').getByRole('button', { name: 'Close' }).click();
+    await navigatorModes.getByRole('button', { name: 'Workspace', exact: true }).click();
     await expect(navigatorModes.getByRole('button', { name: 'Workspace', exact: true })).toHaveClass(/active/);
 
     await leftRail.getByRole('button', { name: 'Collapse navigator' }).click();
