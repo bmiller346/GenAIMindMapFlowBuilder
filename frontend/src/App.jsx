@@ -2960,6 +2960,9 @@ const App = () => {
                         canOpenOutputs={nodes.length > 0}
                         onOpenTable={() => openShellOutputView('table')}
                         onOpenExecutive={() => openShellOutputView('executive')}
+                        onOpenFlowchart={() => openShellOutputView('flowchart')}
+                        onOpenTasks={() => openShellOutputView('tasks')}
+                        onOpenKanban={() => openShellOutputView('kanban')}
                         onOpenChecklist={() => openShellReviewView('checklist')}
                         onOpenImplementationPackage={() => openShellOutputView('mondayInput')}
                         onOpenStatusReview={() => openShellOutputView('mondayStatus')}

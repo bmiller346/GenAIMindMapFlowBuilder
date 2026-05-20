@@ -189,6 +189,28 @@ test('Sources ribbon disables source repair until sources exist', async () => {
     assert.match(html, /disabled=""/);
 });
 
+test('Outputs ribbon separates accepted views, previews, and handoff outputs', async () => {
+    const { OutputsRibbonGroups } = await loadShellModules();
+    const html = renderToStaticMarkup(
+        React.createElement(OutputsRibbonGroups, {
+            canOpenOutputs: true
+        })
+    );
+
+    assert.match(html, /aria-label="Accepted output views"/);
+    assert.match(html, /Table/);
+    assert.match(html, /Executive/);
+    assert.match(html, /Flowchart/);
+    assert.match(html, /aria-label="Execution output views"/);
+    assert.match(html, /Tasks/);
+    assert.match(html, /Kanban/);
+    assert.match(html, /aria-label="Preview output views"/);
+    assert.match(html, /Checklist Preview/);
+    assert.match(html, /aria-label="Handoff output views"/);
+    assert.match(html, /Implementation/);
+    assert.match(html, /Status/);
+});
+
 test('branch and source properties panels render editable summaries', async () => {
     const { BranchPropertiesPanel, SourcePropertiesPanel } = await loadShellModules();
     const nodes = [

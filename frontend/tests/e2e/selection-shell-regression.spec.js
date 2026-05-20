@@ -496,6 +496,79 @@ test('shell flag mounts ribbon, navigator, and canvas slots without legacy works
     await expect(responseNodeByTitle(page, 'Selection root')).toBeVisible();
 });
 
+test('shell Outputs ribbon separates accepted output views from checklist preview', async ({ page }) => {
+    await setupMockBackend(page, { enableShell: true });
+
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto('/');
+    await openSelectionFixture(page);
+
+    await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Checklist Preview' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Table' }).click();
+    await expect(page.locator('.canvas-structured-view-table')).toBeVisible();
+    await expect(page.locator('.workspace-shell__bottom .review-tray')).toHaveCount(0);
+    await expect(page.locator('.shell-output-surface-panel')).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
+    await page.getByRole('button', { name: 'Kanban' }).click();
+    await expect(page.locator('.canvas-structured-view-kanban')).toBeVisible();
+    await expect(page.locator('.workspace-shell__bottom .review-tray')).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
+    await page.getByRole('button', { name: 'Checklist Preview' }).click();
+    const tray = page.locator('.workspace-shell__bottom .review-tray');
+    await expect(tray).toBeVisible();
+    await expect(tray.getByRole('tab', { name: 'Checklist Preview' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('.canvas-structured-view-checklist')).toHaveCount(0);
+});
+
+test('shell Outputs ribbon command groups stay scrollable without overlap at narrow width', async ({ page }) => {
+    await setupMockBackend(page, { enableShell: true });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    await openSelectionFixture(page);
+
+    await page.getByRole('tab', { name: 'Outputs', exact: true }).click();
+    await expect(page.getByTestId('shell-ribbon')).toHaveAttribute('data-active-tab', 'outputs');
+    await expect(page.getByRole('button', { name: 'Table' })).toBeVisible();
+
+    const metrics = await page.evaluate(() => {
+        const content = document.querySelector('[data-testid="shell-ribbon-content"]');
+        const groups = [...document.querySelectorAll('.shell-ribbon-command-group')].map((element) => {
+            const rect = element.getBoundingClientRect();
+            return {
+                left: rect.left,
+                right: rect.right,
+                width: rect.width
+            };
+        });
+        const overlapPairs = [];
+        for (let index = 0; index < groups.length - 1; index += 1) {
+            const current = groups[index];
+            const next = groups[index + 1];
+            const overlap = Math.max(0, current.right - next.left);
+            if (overlap > 1) {
+                overlapPairs.push({ index, overlap });
+            }
+        }
+        return {
+            bodyOverflow: document.documentElement.scrollWidth - window.innerWidth,
+            contentClientWidth: content?.clientWidth || 0,
+            contentScrollWidth: content?.scrollWidth || 0,
+            groupCount: groups.length,
+            overlapPairs
+        };
+    });
+
+    expect(metrics.bodyOverflow).toBeLessThanOrEqual(2);
+    expect(metrics.groupCount).toBeGreaterThanOrEqual(4);
+    expect(metrics.contentScrollWidth).toBeGreaterThanOrEqual(metrics.contentClientWidth);
+    expect(metrics.overlapPairs).toEqual([]);
+});
+
 test('shell left navigator tabs, collapse, and open-tab events stay in the left rail', async ({ page }) => {
     await setupMockBackend(page, { enableShell: true });
 
@@ -786,6 +859,8 @@ test('shell routes AI draft review to tray instead of right properties rail', as
     await expect(page.locator('.metadata-inspector-floating-dock')).toHaveCount(0);
 });
 
+// Keep this skipped while FloatingDock remains the shell-off compatibility path:
+// default-shell readiness is guarded by shell slot geometry tests instead.
 test.fixme('major floating panels do not overlap when branch lens is active', async ({ page }) => {
     await setupMockBackend(page, {
         selectedNodeIds: ['root', 'branch-a']

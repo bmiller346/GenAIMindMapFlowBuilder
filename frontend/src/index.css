@@ -219,25 +219,29 @@
 }
 
 .react-flow__node.canvas-node-in-branch-scope .node-response {
-  border-color: rgba(102, 194, 165, 0.72);
+  border-color: color-mix(in srgb, var(--canvas-branch-color, #66c2a5) 76%, var(--question-border));
+  background:
+    linear-gradient(90deg, rgba(var(--canvas-branch-color-rgb, 102, 194, 165), 0.14), transparent 46%),
+    var(--node-response-background);
   box-shadow:
-    0 0 0 1px rgba(102, 194, 165, 0.58),
+    0 0 0 1px rgba(var(--canvas-branch-color-rgb, 102, 194, 165), 0.46),
+    0 0 0 4px rgba(var(--canvas-branch-color-rgb, 102, 194, 165), 0.1),
     0 12px 30px rgba(0, 0, 0, 0.16);
 }
 
 .react-flow__node.canvas-node-branch-root .node-response {
-  border-color: #66c2a5;
+  border-color: var(--canvas-branch-color, #66c2a5);
   background:
-    linear-gradient(0deg, rgba(102, 194, 165, 0.14), rgba(102, 194, 165, 0.14)),
+    linear-gradient(90deg, rgba(var(--canvas-branch-color-rgb, 102, 194, 165), 0.18), transparent 52%),
     var(--node-response-background);
   box-shadow:
-    0 0 0 2px rgba(102, 194, 165, 0.85),
-    0 0 0 8px rgba(102, 194, 165, 0.16),
+    0 0 0 1px rgba(var(--canvas-branch-color-rgb, 102, 194, 165), 0.86),
+    0 0 0 6px rgba(var(--canvas-branch-color-rgb, 102, 194, 165), 0.16),
     0 18px 38px rgba(0, 0, 0, 0.2);
 }
 
 .react-flow__node.canvas-node-branch-root .node-response::before {
-  background: #66c2a5;
+  background: var(--canvas-branch-color, #66c2a5);
   width: 0.34rem;
 }
 
@@ -292,9 +296,10 @@
 }
 
 .react-flow__edge.canvas-edge-in-branch-scope .react-flow__edge-path {
-  stroke: #66c2a5;
-  stroke-width: 2.5;
-  opacity: 0.9;
+  stroke: color-mix(in srgb, var(--canvas-branch-color, #66c2a5) 86%, var(--font-color));
+  stroke-width: 2.6;
+  opacity: 0.92;
+  filter: drop-shadow(0 0.12rem 0.28rem rgba(var(--canvas-branch-color-rgb, 102, 194, 165), 0.22));
 }
 
 .react-flow__edge.canvas-edge-mindmap-inferred .react-flow__edge-path {
@@ -1410,6 +1415,7 @@
 
 .shell-ribbon-command-group {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 0.45rem;
   min-width: 0;
@@ -1821,11 +1827,19 @@
 
 @media (max-width: 1100px) {
   .app.ui-shell-ribbon-enabled {
+    --workspace-shell-header-height: 5.9rem;
     --workspace-shell-ribbon-height: 6.4rem;
     --workspace-shell-left-width: min(20rem, 86vw);
     --workspace-shell-right-width: min(24rem, 92vw);
     --workspace-shell-bottom-height: min(18rem, 44vh);
     --workspace-shell-status-height: 2.25rem;
+  }
+
+  .app.ui-shell-ribbon-enabled .header-actions {
+    flex-wrap: nowrap;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
 
   .workspace-shell,

@@ -6,13 +6,13 @@ Last updated: 2026-05-20
 
 This refactor is being worked by multiple lanes. Do not treat a partially migrated shell surface as a regression until the owning lane marks the specific work package complete.
 
-### Coordination Checkpoint: 2026-05-19
+### Coordination Checkpoint: 2026-05-20
 
-Current global status: the shell refactor is a real opt-in MVP, not a default product rollout. The review-tray compatibility bridge has been removed, AI Helpers / Next Steps now route through the shell right-rail guide route, and node/edge/source/branch metadata use shell right-panel authority. The next bottleneck is NodeInspector AI-review cleanup plus default-readiness polish without reintroducing crowded UI.
+Current global status: the shell refactor is a real opt-in MVP, not a default product rollout. The review-tray compatibility bridge has been removed, AI Helpers / Next Steps now route through the shell right-rail guide route, node/edge/source/branch metadata use shell right-panel authority, and shell-mode `NodeInspector` is metadata-only. Home/Sources ribbon commands, first Outputs command groups, left navigator Health/Build modes, review-tray UX labels, bottom status bar, and default-readiness gates have all landed behind the feature flag.
 
 Working-tree caution:
 
-- The working tree is very dirty, including backend/export/electron files and many frontend files. Agents must keep ownership narrow, list touched files, and avoid batch-committing unrelated changes.
+- Keep ownership narrow and check `git status --short` before editing. As of this checkpoint, there may be active uncommitted work around map readability, Outputs ribbon grouping, and shell output tests. Do not overwrite that work while updating the roadmap.
 
 Feature flag:
 
@@ -36,164 +36,245 @@ Ready for agents to build on:
 - Review tray MVP is mounted behind the shell flag for AI draft sessions, source draft review, workspace health validation issues, Connections, task preview/checklist, source repair, and Issues review.
 - AI Helpers / Next steps route through `shellStore.rightPanel.kind === 'guide'` behind the shell flag instead of the React Flow bottom-right overlay.
 - LocalViews controls have been split into smaller modules. The shell Map tab now uses a dedicated `MapRibbonHost` rather than mounting the full `LocalViewsPanel`.
+- Home and Sources ribbon command groups now expose stable shell command surfaces.
+- Outputs ribbon commands now distinguish accepted workspace views, execution projections, checklist preview, and handoff outputs for Table, Executive, Flowchart, Tasks, Kanban, Checklist Preview, Implementation, and Status.
+- Shell Review Tray labels now distinguish task/checklist previews from accepted task views.
+- Left navigator now has first-class Workspace, Sources, Outline, Activity, Health, and Build modes behind the shell flag.
+- Shift additive click/lasso selection has active shell regression coverage.
+- A map readability / lens product guide now documents branch highlighting, relationship-label lenses, and branch color language.
 
 Not ready for broad QA or cleanup:
 
 - Do not QA the shell as a finished layout.
 - Do not retire `FloatingDock` yet.
-- Do not expect all output/review surfaces to be final. Connections, task preview, checklist preview, source repair, and Issues review outputs now have direct shell tray routes; accepted/canonical `tasks` remains a structured canvas view. Source and branch properties now have editable shell right-rail MVPs.
+- Do not expect all output/review surfaces to be final. Connections, task preview, checklist preview, source repair, and Issues review outputs now have direct shell tray routes; accepted/canonical `tasks` remains a structured canvas view. Source and branch properties now have editable shell right-rail MVPs. Output command grouping is improving, but accepted output surfaces still need visual QA and product polish.
 - Do not treat default legacy layout as a failure. The shell is intentionally flag-gated.
 - Do not run full visual regression against the shell without checking the lane readiness notes below; several surfaces are scaffolded but not product-complete.
 
 Current verification:
 
 - `npm run build` from `frontend/`: passing.
-- `node --test tests/shellStore.test.mjs tests/uiShellFeatureFlag.test.mjs tests/shellComponents.test.mjs tests/shellLayoutState.test.mjs` from `frontend/`: passing, 35 tests.
+- `node --test tests/shellComponents.test.mjs tests/shellStore.test.mjs tests/shellLayoutState.test.mjs tests/uiShellFeatureFlag.test.mjs` from `frontend/`: passing, 38 tests.
 - `npx playwright test tests/e2e/shell-foundation-smoke.spec.js` from `frontend/`: passing, 3 tests.
-- `npx playwright test tests/e2e/selection-shell-regression.spec.js` from `frontend/`: passing active coverage, 9 passed and 2 intentional `fixme` skips.
-- `npx playwright test tests/e2e/review-tray-regression.spec.js` from `frontend/`: passing, 5 tests.
+- `npx playwright test tests/e2e/selection-shell-regression.spec.js tests/e2e/review-tray-regression.spec.js tests/e2e/shell-foundation-smoke.spec.js` from `frontend/`: passing, 20 passed and 1 intentional `fixme` skip.
 
 Known active QA gaps:
 
-- Shift-click / shift-drag additive selection is documented as a `fixme` and should not block unrelated shell-slot work.
-- Full `selection-shell-regression.spec.js` has 2 intentional `fixme` skips; active coverage is passing.
 - Legacy floating panel overlap in the old layout is documented as a `fixme`; the shell migration is the intended long-term fix.
+- Manual visual QA is still needed for ribbon/tray/right-rail density, especially with map lens controls active.
+- Branch highlighting and relationship-label lenses are documented but only partly implemented. The current low-risk branch styling polish is in progress and should be verified visually before default-shell rollout.
+
+### Default Shell Go/No-Go
+
+Current decision: **no-go for default-on** until every pre-default row below is
+green or explicitly waived with a dated owner note. This gate is about making
+the shell the default workspace UI, not about retiring legacy code.
+`FloatingDock` removal remains deferred unless a separate audit proves a surface
+is dead in both shell-on and shell-off paths.
+
+| Blocker | Surface | Risk | Required verification | Status | Pre-default required? |
+| --- | --- | --- | --- | --- | --- |
+| Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Default shell feels crowded or hides controls at common desktop/narrow sizes | Run shell e2e geometry coverage plus manual screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Automated narrow/header/ribbon/tray coverage passing; manual screenshot signoff still open | Yes |
+| Accepted output surfaces need verification | Outputs ribbon and accepted workspace views | Accepted Table/Executive/Flowchart/Tasks/Kanban commands route to an invisible surface or wrong tray workflow | Verify Table, Executive, Flowchart, Tasks, and Kanban open accepted canvas/output surfaces; verify Checklist Preview opens the Review Tray | In progress with active Outputs lane work | Yes |
+| Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Preview candidates become canonical work before acceptance, or accepted artifacts remain trapped in preview UI | E2E or component coverage for Table/Kanban not opening tray, Checklist Preview opening tray, accepted tasks staying in structured canvas, and checklist artifact persistence | In progress | Yes |
+| Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing; rerun after the next implementation slice | Yes |
+| Map readability and relationship lenses are visually verified | Map ribbon, branch scope, relationship labels | Branch focus, selected nodes, and relationship labels compete visually or confuse review | Visual QA plus coverage that mind map relationship labels default off and can be toggled on intentionally | Open | Yes |
+| Preview-first graph mutation remains safe | Connections review and generated previews | Find Connections or related candidate acceptance mutates canonical graph without review | Verify generated connection candidates enter Review Tray first and accept/reject preserves existing mutation behavior | Open | Yes |
+| Legacy overlap `fixme` has disposition | Shell-off FloatingDock compatibility layout | Known overlap remains ambiguous when shell becomes default and rollback is needed | Either keep skipped with explicit shell-off waiver/manual screenshot gate, narrow to shell-only geometry, or replace with stable bounding-box coverage | Disposition documented: skipped as shell-off compatibility territory while shell slot geometry guards default readiness | Yes |
+| Shell-off compatibility remains covered | Feature flag rollback path | Default-on rollout cannot be safely disabled or corrupts existing workspace data | Run shell-off smoke/manual pass and confirm legacy FloatingDock surfaces still open, edit, save, and reopen existing workspace data | Open | Yes |
+| Right rail metadata stays metadata-only and persistent | Node, edge, branch, source properties | AI review/action UI leaks into properties rail, or property edits are lost | Run selection shell regression for node/edge/branch/source properties and metadata-only NodeInspector assertions | Mostly covered; rerun after active test edits land | Yes |
+| Review Tray remains authoritative for reviewable generated work | Bottom tray | AI drafts, source drafts, issues, connections, tasks preview, or checklist preview fall back to legacy/full-panel routes | Run review tray regression for direct tray routes and close behavior | Mostly covered; rerun after active tray/output edits land | Yes |
+| FloatingDock removal | Legacy floating layout | Removing compatibility chrome breaks shell-off rollback | Keep audit-only until default shell and output cleanup are complete | Deferred | No |
+| Richer source/branch metadata | Right rail properties | Default properties are useful but not fully product-complete | Product follow-up with field expansion and persistence tests | Deferred | No |
+| Full map projection helper extraction | Mind map projection/lens internals | Lens work remains harder to evolve but current behavior can ship | Refactor plan after branch/lens styling stabilizes | Deferred | No |
 
 ### Current Open Items / Agent Split
 
 Use this section when splitting the remaining shell work across parallel agents.
 Before any agent starts, check `git status --short`; active work may exist in
-`frontend/src/global-components/NodeInspector.jsx` and
-`frontend/tests/e2e/selection-shell-regression.spec.js` from the
-NodeInspector cleanup lane.
+`PRODUCT_GUIDE_MAP_READABILITY_AND_LENSES.md`, `frontend/src/App.jsx`,
+`frontend/src/ribbon/AiRibbonGroups.jsx`, `frontend/src/index.css`,
+`frontend/tests/shellComponents.test.mjs`, and
+`frontend/tests/e2e/selection-shell-regression.spec.js`.
 
-#### Agent A: NodeInspector / Metadata Purity
+#### Landed Shell Lanes
 
-Primary goal: make shell-mode node metadata a pure right-rail metadata surface
-while preserving the shell-off legacy compatibility path.
+- NodeInspector / Metadata Purity: complete for the shell path. Shell node
+  metadata passes `metadataOnly`; task readiness, structured-evidence review,
+  AI draft takeover, and AI proposal actions are suppressed in the right rail.
+  Legacy shell-off behavior remains intact.
+- Ribbon / Outputs: first command surface pass complete. Home and Sources are
+  real command groups, and Outputs has accepted/execution/handoff grouping in
+  progress. Accepted `tasks` remains a structured canvas view; Checklist
+  Preview remains a Review Tray route.
+- Review Tray UX: first polish pass complete. Tray headings, scope copy, single
+  purpose tabs, Task Preview / Checklist Preview labels, and close behavior are
+  routed through the shell tray host.
+- Left Navigator / Project Browser: first-class Workspace, Sources, Outline,
+  Activity, Health, and Build modes are complete behind the shell flag.
+- QA / Default Readiness: shell slot bounding-box coverage exists for ribbon,
+  left rail, right rail, review tray, status bar, and narrow Outputs ribbon
+  command groups. Shift additive selection/lasso coverage is active. One legacy
+  major floating-panel overlap `fixme` remains intentionally skipped with a
+  documented shell-off compatibility disposition.
 
-Owns:
+#### Landed Agent A: Default Shell Readiness
 
-- `frontend/src/global-components/NodeInspector.jsx`
-- focused shell metadata tests in
-  `frontend/tests/e2e/selection-shell-regression.spec.js`
-- any small adapter code needed for `metadataOnly`
-
-Work:
-
-- Strip AI proposal, AI draft, and action-creation UI from shell metadata mode.
-- Keep legacy/floating NodeInspector behavior intact while the shell remains
-  feature-flagged.
-- Verify AI draft/proposal review continues to route through the Review Tray,
-  not the right rail.
-
-Avoid:
-
-- Review Tray visual redesign.
-- Source/branch panel field expansion.
-- FloatingDock retirement.
-
-#### Agent B: Ribbon / Outputs
-
-Primary goal: make the top ribbon feel like a real command surface instead of a
-set of placeholders.
+Status: landed as documentation/checklist work. Captured default-shell go/no-go
+blockers and separated pre-default requirements from post-default cleanup.
 
 Owns:
 
-- `frontend/src/ribbon/*`
-- `frontend/src/views/LocalViewsPanel.jsx`
-- `frontend/src/views/OutputPanel.jsx`
-- relevant App ribbon wiring in `frontend/src/App.jsx`
+- `UI_SHELL_RIBBON_REFACTOR_ROADMAP.md`
+- `UI_SHELL_RIBBON_REGRESSION_CHECKLIST.md`
+- `frontend/tests/e2e/UI_SHELL_REGRESSION_CHECKLIST.md`
 
-Work:
+Remaining validation:
 
-- Add stable Home and Sources ribbon command groups.
-- Move table, executive, handoff, and other non-review outputs into intentional
-  shell output surfaces.
-- Keep ribbon commands thin: route through shell/router actions and existing
-  workflow controllers instead of owning workflow state.
+- Keep the blocker table current as Agent E visual QA and output verification
+  land.
+- Mark rows green only after the named verification passes.
+- Keep `FloatingDock` retirement deferred unless a concrete safe path exists.
 
 Avoid:
 
-- Accepted `tasks` becoming tray-only.
-- Review Tray candidate acceptance behavior.
-- Right-rail metadata editing.
+- Large UI implementation.
+- Broad `App.jsx` changes.
 
-#### Agent C: Review Tray UX
+#### Landed Agent B: FloatingDock Retirement Audit
 
-Primary goal: make all reviewable/generated work feel like one coherent
-preview-first system.
+Status: landed for render-time `FloatingDock` mounts. A follow-up must inventory
+non-`FloatingDock` floating React Flow panels before any retirement work starts.
 
 Owns:
 
-- `frontend/src/review/*`
-- `frontend/src/shell/ShellReviewTrayHost.jsx`
-- `frontend/tests/e2e/review-tray-regression.spec.js`
+- `frontend/src/App.jsx` read-only unless a tiny dead-path cleanup is obvious.
+- `frontend/src/views/LocalViewsPanel.jsx` read-only unless a tiny dead-path
+  cleanup is obvious.
+- `frontend/src/global-components/FloatingDock.jsx`
+- `frontend/src/shell/README.md`
+- `UI_SHELL_RIBBON_REFACTOR_ROADMAP.md`
 
-Work:
+Remaining validation:
 
-- Polish tab labels, empty states, close behavior, and scope messaging.
-- Keep Connections, Tasks Preview, Checklist Preview, Sources, and Issues
-  consistent.
-- Add direct tray tests when new direct surfaces replace legacy/full-panel
-  compatibility routes.
+- Keep `FloatingDock` removal blocked until default-on, rollback coverage, and
+  metadata/output/map QA are complete.
+- Track non-`FloatingDock` panels separately from `FloatingDock` retirement.
 
 Avoid:
 
-- Accepted/canonical `tasks` routing into the tray.
-- Metadata editing in the tray.
-- Large output surfaces that are not review/accept flows.
+- Removing `FloatingDock` broadly.
+- Changing shell default behavior.
 
-#### Agent D: Left Navigator / Project Browser
+#### Landed Agent C: Map Readability And Lenses
 
-Primary goal: mature the left rail into the workspace/project browser.
+Status: product guide and first branch styling polish landed. Relationship-label
+lens controls and structural-only branch edge emphasis remain implementation
+work.
 
 Owns:
 
-- `frontend/src/global-components/WorkspaceDock.jsx`
-- `frontend/src/global-components/workspaceDock/*`
-- `frontend/src/shell/ShellWorkspaceNavigatorHost.jsx`
-- `frontend/src/shell/ShellLeftNavigatorHost.jsx`
-- source-library shell-left integration points
+- `PRODUCT_GUIDE_MAP_READABILITY_AND_LENSES.md`
+- `PRODUCT_GUIDE_WORKSPACE_SHELL.md` only for product-rule alignment.
+- Focused map/lens code if implementing a small visual improvement.
 
-Work:
+Remaining validation:
 
-- Improve Sources, Outline, Activity, Health, and Build left-rail surfaces.
-- Keep source-library navigation in the left rail for shell mode.
-- Add desktop/narrow QA for left rail resize, collapse, and interaction with
-  right rail, status bar, and review tray.
+- Verify branch scope highlighting is direct and readable, not hatch-like.
+- Promote relationship labels as a lens/filter control, not an always-on map
+  decoration.
+- Keep branch scope, selected node state, and relationship-label state visually
+  distinct.
+- Ensure semantic relationship edges do not inherit structural branch emphasis
+  when mind map relationship labels are enabled.
 
 Avoid:
 
-- Right-rail source metadata save semantics beyond routing/opening.
-- Ribbon command ownership.
-- Review Tray candidate flows.
+- New popups.
+- Large `projectCanvasGraph` refactors before helper extraction is planned.
 
-#### Agent E: QA / Default Shell Readiness
+#### Landed Agent D/E: Visual QA And Shell Geometry
 
-Primary goal: convert known gaps into reliable automated or manual release
-checks before default-shell rollout.
+Status: first automated visual QA slice landed. It found and fixed a real
+narrow-width header/ribbon collision by reserving a taller shell-only narrow
+header and keeping header actions in one horizontally scrollable row.
 
 Owns:
 
 - `frontend/tests/e2e/selection-shell-regression.spec.js`
-- `frontend/tests/e2e/shell-foundation-smoke.spec.js`
 - `frontend/tests/e2e/review-tray-regression.spec.js`
-- `frontend/tests/e2e/UI_SHELL_REGRESSION_CHECKLIST.md`
+- `frontend/tests/e2e/shell-foundation-smoke.spec.js`
+- small CSS fixes only when isolated.
+
+Landed work:
+
+- Added narrow-width Outputs ribbon geometry coverage for command group overlap
+  and body overflow at 390px.
+- Kept the legacy FloatingDock overlap test skipped and documented its
+  disposition as shell-off compatibility coverage territory.
+- Verified shell e2e bundle: 20 passed, 1 intentional skip.
+
+Remaining validation:
+
+- Manual screenshot signoff at 1600x1000, 1440x900, and 390x844 with shell on
+  and shell off.
+- Recheck the 390px guard whenever future global header actions are added.
+
+#### Next Agent E: Checklist And Accepted Output Continuation
+
+Primary goal: keep preview/accepted output boundaries crisp.
+
+Owns:
+
+- `UX_NUDGES_AND_OUTPUTS_ROADMAP.md`
+- `PRODUCT_GUIDE_STRUCTURED_WORK_OUTPUTS.md`
+- focused output/checklist surfaces if implementing a small next step.
 
 Work:
 
-- Convert the two `fixme` tests when selectors and behavior are stable:
-  shift additive selection/lasso and major panel overlap.
-- Add screenshot or bounding-box coverage for ribbon, left rail, right rail,
-  status bar, and review tray at desktop and narrow widths.
-- Maintain separate shell-on and shell-off regression coverage.
-- Define the final blockers before flipping the shell on by default.
+- Preserve the three-state split:
+  - Checklist Preview: Review Tray.
+  - Checklist View / Checklist Artifact: accepted workspace/output layer.
+  - Tasks: structured canvas view after acceptance.
+- Continue persistent checklist artifact planning or implementation.
+- Align Outputs ribbon grouping with accepted views, execution projections, and
+  handoff surfaces.
 
 Avoid:
 
-- Feature implementation unless it is a tiny testability fix.
-- Retiring FloatingDock before the owning feature lanes are complete.
+- Moving task candidates into the Tasks view before acceptance.
+- Making Checklist Preview an accepted canvas view.
+
+### Consolidated Refactor Game Plan
+
+The parallel-agent split was useful for discovering and landing ownership
+boundaries, but the remaining work is now integration-heavy. Move from broad
+parallel lanes to one integration owner plus targeted audit agents.
+
+Recommended operating model:
+
+- One integration owner keeps `App.jsx`, shell routing, roadmap/checklists, and
+  final staging coherent.
+- Use short-lived read-only audit agents for focused questions: visual QA,
+  FloatingDock/non-FloatingDock inventory, map/lens correctness, and output
+  route coverage.
+- Avoid five simultaneous implementation agents touching shared files such as
+  `App.jsx`, `frontend/src/index.css`, and shell e2e specs.
+
+Next sequence:
+
+1. Expand Outputs route tests for Executive, Flowchart, Tasks, Implementation,
+   and Status, or explicitly leave them as pre-default blockers.
+2. Add relationship-label lens coverage: default-off in mind map, toggle-on
+   through the shell ribbon/lens control.
+3. Add a non-`FloatingDock` floating surface inventory and decide which are
+   shell overlays, temporary canvas affordances, or retirement candidates.
+4. Complete manual screenshot signoff for shell on/off at desktop and narrow
+   widths.
+5. Rerun build, shell units, shell e2e, and review tray e2e as the final
+   pre-default verification bundle.
+6. Only after those pass, decide whether to flip the shell default flag. Keep
+   `FloatingDock` retirement as a post-default cleanup track.
 
 #### Deferred Integration: FloatingDock Retirement
 
@@ -244,7 +325,7 @@ Completed:
 Not complete yet:
 
 - The shell wrapper is not the default UI.
-- The top ribbon is not product-complete; it currently hosts a dedicated Map ribbon host plus first AI/Review/Outputs command groups, while Home/Sources are still placeholders.
+- The top ribbon is not product-complete; it currently hosts a dedicated Map ribbon host plus first Home, Sources, AI, Review, and Outputs command groups.
 - The overlay layer exists but is not the authoritative popover/modal router.
 - Shell responsive behavior is predictable enough for smoke coverage, but still needs CSS/Layout Systems follow-up before product QA or default rollout.
 - The shell does not yet own all panel state. Legacy local state still drives live behavior in several areas.
@@ -276,7 +357,7 @@ QA guidance:
 - Safe to QA now with shell flag off:
   - legacy behavior remains unchanged
 - Do not fail yet:
-  - non-Map ribbon tabs still show placeholder content
+  - non-Map ribbon tabs have first command groups but are not yet product-final
   - Map controls still carry some old styling inside the ribbon
   - relationship controls still have compatibility wiring and are not final ribbon groups
   - overlay layer is unused
@@ -340,7 +421,7 @@ Completed:
 - `node --test frontend/tests/shellStore.test.mjs` passes.
 - `npm run build` from `frontend/` passes.
 - `node --test tests/shellStore.test.mjs tests/shellLayoutState.test.mjs tests/shellComponents.test.mjs tests/uiShellFeatureFlag.test.mjs` from `frontend/` passes.
-- `npx playwright test tests/e2e/selection-shell-regression.spec.js` from `frontend/` passes with 8 active tests and 2 intentional `fixme` skips.
+- `npx playwright test tests/e2e/selection-shell-regression.spec.js` from `frontend/` passes active shell coverage, including shift additive selection/lasso; one legacy overlap `fixme` remains intentionally skipped in the combined shell e2e run.
 
 Not complete yet:
 
@@ -405,8 +486,8 @@ Not complete yet:
 - Find connections setup now has an AI ribbon entry. Candidate review has a clean `ConnectionsReviewSurface`, and Agent 6 now mounts it directly in `ShellReviewTrayHost` through `useConnectionsReviewController`.
 - Task preview now has clean `TasksReviewSurface` exports, and Agent 6 mounts task candidate routes directly in `ShellReviewTrayHost` through `useTasksReviewController`. Accepted/canonical `tasks` stays in the structured canvas Tasks view. Checklist Preview is also routed through the direct tray host.
 - Source repair/coverage review now has a clean `SourcesReviewSurface` export, and Agent 6 now mounts it directly in `ShellReviewTrayHost` through `useSourcesReviewController`.
-- Non-review output surfaces are not yet moved into an Outputs shell surface.
-- Home and Sources ribbon tabs still use placeholder content until their owning lanes migrate commands.
+- First non-review output surfaces now have shell Outputs command routes. Table, Executive, Flowchart, Tasks, Kanban, Implementation, and Status are exposed through the grouped Outputs ribbon.
+- Home and Sources ribbon tabs now have first command groups. They still need product polish and visual QA, but they are no longer placeholders.
 - Agent 3's component extraction dependency for Agent 6 is complete. Direct tray routes exist for Connections, Tasks, Checklist, Sources, and Issues. The old `useLocalOutputReviewController`, `reviewSurfaceRegistry`, `ShellLocalOutputReviewTrayHost`, and `LocalViewsPanel outputOnly` bridge have been removed.
 - The shell Map tab no longer mounts `LocalViewsPanel`; it uses a thin `MapRibbonHost` with the extracted compact map controls and shared LocalViews config.
 
@@ -419,13 +500,13 @@ Dependencies:
 QA guidance:
 
 - Safe to QA: existing LocalViews behavior, shell Map tab ribbon rendering behind the shell flag, map view switching, filters, branch scope, node density, reflow dispatch, relationship lens mode switching, mind map branch focus, KG insight edge opening, output menu routing, relationship review copy/download, and task preview acceptance.
-- Do not fail yet: "Find connections is still also available from LocalViews/ribbon output menu", "table/executive/handoff output content is not in an Outputs shell surface", "`OutputPanel` still supports legacy/full-panel output routes", or "Home/Sources ribbon tabs are placeholders." Those are known incomplete migration steps.
+- Do not fail yet: "Find connections is still also available from LocalViews/ribbon output menu", "`OutputPanel` still supports legacy/full-panel output routes", or "Home/Sources/Outputs ribbon commands are not product-final." Those are known incomplete migration steps.
 
 Next steps for Agent 3:
 
-1. Add stable Home and Sources command groups.
+1. Finish visual QA for the Home, Sources, and Outputs command groups.
 2. Keep ribbon commands thin by routing through shell/router actions as remaining review controllers land.
-3. Keep ribbon commands thin: they should call shell/router actions, not own workflow state.
+3. Complete accepted/execution/handoff Outputs grouping without moving preview candidates into accepted views.
 4. Keep Checklist Preview routed through the direct tray path, while Checklist View / Checklist Artifact remain accepted workspace/output-layer concerns.
 5. Keep relationship labels lens-driven, not always-on.
 6. Do not redesign the whole ribbon visually yet; finish command ownership first.
@@ -656,8 +737,8 @@ Completed:
 
 Not complete yet:
 
-- `selection-shell-regression.spec.js` active coverage is green; the two `fixme` cases remain deferred.
-- Shift-click and shift-drag additive selection remain as `test.fixme` because the current reliable fixture uses seeded selection state.
+- `selection-shell-regression.spec.js` active coverage is green; the legacy major-panel overlap case remains deferred as `fixme`.
+- Shift-click and shift-drag additive selection now have active shell regression coverage.
 - Full major-panel overlap assertion remains as `test.fixme`; it should be converted into shell-slot visual coverage after migrated slots are fully populated.
 - Review tray e2e coverage exists for Drafts, generated source draft review, validation Issues, and direct local-output review routes for Connections, Tasks, Checklist, Issues, and Sources.
 - Left rail drag-resize still needs active browser automation once the handle interaction is stable; current coverage verifies collapse, event open, tab switch, and resize handle presence.
@@ -668,7 +749,8 @@ QA guidance:
 - Treat the shell as an opt-in MVP. Test default legacy behavior and shell-flag behavior separately.
 - Passing criteria for Shell/Foundation now include: build green, shell store unit tests green, and `shell-foundation-smoke.spec.js` green.
 - Passing criteria for Properties Panel include the green right-rail subset of `selection-shell-regression.spec.js`; remaining source/branch-editing work is tracked separately.
-- Do not block unrelated shell-slot work on the two current `fixme` tests.
+- Do not block unrelated shell-slot work on the remaining legacy major-panel
+  overlap `fixme`; shift additive selection/lasso now has active coverage.
 
 Next steps for Agent 7:
 
@@ -678,9 +760,8 @@ Next steps for Agent 7:
    - shell-foundation-smoke
    - review-tray-regression
    - selection-shell-regression active coverage
-2. Convert the two `fixme` tests only when selectors and behavior are stable:
-   - shift additive selection/lasso
-   - major panel overlap
+2. Resolve or waive the remaining legacy major-panel overlap `fixme`; keep
+   shift additive selection/lasso coverage active.
 3. Add or adjust direct tray tests when new direct surfaces replace the remaining fallback compatibility host.
 4. Keep source-left-rail coverage green now that shell-path source library opening is routed through `shellStore.leftPanel`.
 5. Keep manual screenshot QA for relationship lens/ribbon layout until CSS stabilizes.
@@ -742,8 +823,8 @@ This section is the source of truth for agent handoffs. Do not treat a slot, pan
 - Find connections, task preview, checklist preview, source repair, and gaps/SME Issues are directly mounted in the shell tray. Accepted/canonical tasks remain in the structured canvas `Tasks` view.
 - Right rail state and host exist for node/edge metadata plus editable source/branch properties, with shell node metadata kept metadata-only. Richer source/branch semantics remain future work.
 - WorkspaceDock is controlled and shell-mounted behind the flag, and the source library has a shell-left route. Deeper left-nav IA and source internals remain future work.
-- QA should validate the current compatibility behavior and shell-store unit rules now. Full shell screenshots should wait until the relevant visible slot migrations land.
-- Full `selection-shell-regression.spec.js` active coverage is green: 8 passed and 2 intentional `fixme` skips.
+- QA should validate the current compatibility behavior and shell-store unit rules now. Full shell screenshots are now required before default-on because the primary visible shell slots have landed behind the feature flag.
+- Full shell selection/review/foundation e2e coverage is green for active cases; one legacy major floating-panel overlap `fixme` remains skipped.
 
 ### Dependency Order For Next Agents
 
@@ -1192,15 +1273,15 @@ Create:
 Move:
 
 - Canvas view controls to top ribbon: complete behind the shell feature flag on the Map tab.
-- Output workflow content to bottom tray or left rail depending on type: rendering is isolated in `OutputPanel`; actual slot migration is not started.
-- Find connections setup to AI ribbon: not started.
-- Accepted/proposed relationship review to bottom tray: not started.
+- Output workflow content to bottom tray or accepted output surfaces depending on type: direct review tray routes are complete for migrated preview/review workflows; accepted output routes have first shell command surfaces.
+- Find connections setup to AI ribbon: complete for the shell path.
+- Accepted/proposed relationship review to bottom tray: complete for the direct Connections tray route.
 
 Exit criteria:
 
 - `LocalViewsPanel` is reduced to a compatibility wrapper or removed: partially complete. It delegates controls and output rendering, but still owns derived state, menu state, and acceptance actions.
 - Canvas controls do not render as a floating dock: complete behind the shell feature flag. Legacy floating dock remains when the shell flag is off.
-- Large output surfaces no longer occupy the top lane: not complete. This depends on review tray/output-surface migration.
+- Large output surfaces no longer occupy the top lane in the shell path for the migrated review workflows; accepted output surfaces still need visual QA and product polish.
 - Build passes: complete for the current extraction (`npm run build` from `frontend/`).
 
 Suggested owner: Ribbon/LocalViews Agent.
@@ -1644,14 +1725,14 @@ Deliverables:
 Remaining dependent work:
 
 - CSS/Layout Systems should turn the first-pass narrow viewport behavior into product-final responsive UX and verify z-index interactions with the ribbon/right panel/bottom tray.
-- State/Panel Router should move the controlled left-panel state into `shellStore` after QA confirms the MVP.
+- State/Panel Router has moved the controlled left-panel route into `shellStore`; remaining work is cleanup of shell-off compatibility callers after default rollout.
 - QA should add or run the shell-flag smoke checklist before other agents assume the left rail is product-complete.
 
 ### Work Package 5: Ribbon Extraction
 
 Agent: Ribbon Agent
 
-Status: partially complete. Control extraction and first shell Map tab placement are done.
+Status: partially complete. Control extraction, shell Map tab placement, and first Home/Sources/AI/Review/Outputs command groups are done behind the shell flag. Outputs accepted/execution/preview/handoff grouping has a first implementation and needs expanded route QA.
 
 Scope:
 
@@ -1666,24 +1747,28 @@ Deliverables:
 
 Blocking/dependent work:
 
-- State/Panel Router must confirm richer tab/context ownership before non-Map tabs become functional command surfaces.
-- QA can verify shell Map tab rendering behind the shell flag, but should not treat placeholder non-Map tabs as incomplete product behavior yet.
+- State/Panel Router must confirm richer tab/context ownership before non-Map tabs become product-final command surfaces.
+- QA can verify shell Map tab rendering and first Home/Sources/Outputs command groups behind the shell flag, but should not treat missing final command density as a shell foundation failure yet.
 
 ### Work Package 6: Output Surface Migration
 
 Agent: Ribbon Agent + Review Tray Agent
 
-Status: partially complete behind the shell flag. Find connections now has an AI ribbon command and a direct Connections tray surface; broader output surface cleanup remains.
+Status: partially complete behind the shell flag. Find connections has an AI ribbon command and a direct Connections tray surface. Task/checklist/source/issues previews are direct tray routes. Accepted output, execution projection, preview, and handoff shell command groups now exist for the first pass.
 
 Scope:
 
 - Move `Find connections` workflow from `LocalViewsPanel` to AI ribbon + review tray: complete for the shell-flag path.
-- Current prep: non-canvas output/review surfaces have direct tray surfaces for Connections, Tasks, Checklist, Sources, and Issues; the fallback `OutputPanel` bridge remains for unrouted or implicit local-output cases.
+- Current prep: non-canvas review surfaces have direct tray surfaces for Connections, Tasks Preview, Checklist Preview, Sources, and Issues. Accepted/output surfaces route through shell output view commands where implemented. `OutputPanel` remains for legacy/full-panel compatibility and any unrouted output cases.
 
 Deliverables:
 
 - AI ribbon command for Find connections: complete behind the shell flag.
 - Connections review surface: complete through `ConnectionsReviewSurface` mounted by `ShellReviewTrayHost`.
+- Accepted table/executive and handoff status/implementation shell routes: first pass complete.
+- Accepted/execution/preview/handoff Outputs grouping for Flowchart, Tasks,
+  Kanban, Checklist Preview, Implementation, and Status: first pass complete;
+  expanded route QA remains.
 - Build passes: complete from `frontend/`.
 
 Dependencies:
@@ -1731,7 +1816,7 @@ Notes for QA:
 - With the shell flag off, verify the existing floating metadata inspector behavior still works.
 - Do not check richer source governance metadata, richer branch governance fields, or AI draft review as complete under this work package.
 - Latest command: `npx playwright test tests/e2e/selection-shell-regression.spec.js`.
-- Current result is green for active coverage: node metadata, edge metadata, branch properties, source properties, AI draft tray separation, shell mount, left navigator, and branch lens coverage pass; 2 intentional `fixme` cases remain skipped.
+- Current result is green for active coverage: node metadata, edge metadata, branch properties, source properties, AI draft tray separation, shell mount, left navigator, branch lens coverage, and shift additive selection/lasso pass; the legacy major-panel overlap `fixme` remains skipped.
 
 ### Work Package 8: Review Tray MVP
 

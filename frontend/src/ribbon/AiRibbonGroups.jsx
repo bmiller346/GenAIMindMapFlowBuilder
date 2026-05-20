@@ -219,13 +219,16 @@ export const OutputsRibbonGroups = ({
     canOpenOutputs,
     onOpenTable,
     onOpenExecutive,
+    onOpenFlowchart,
+    onOpenTasks,
+    onOpenKanban,
     onOpenChecklist,
     onOpenImplementationPackage,
     onOpenStatusReview
 }) => (
     <div className="shell-ribbon-command-stack" aria-label="Outputs ribbon commands">
-        <section className="shell-ribbon-command-group" aria-label="Output views">
-            <span>Outputs</span>
+        <section className="shell-ribbon-command-group" aria-label="Accepted output views">
+            <span>Accepted</span>
             <RibbonButton
                 title="Table"
                 detail="View structured workspace rows"
@@ -239,11 +242,38 @@ export const OutputsRibbonGroups = ({
                 onClick={onOpenExecutive}
             />
             <RibbonButton
-                title="Checklist"
+                title="Flowchart"
+                detail="View accepted process structure"
+                disabled={!canOpenOutputs}
+                onClick={onOpenFlowchart}
+            />
+        </section>
+        <section className="shell-ribbon-command-group" aria-label="Execution output views">
+            <span>Execute</span>
+            <RibbonButton
+                title="Tasks"
+                detail="Open confirmed task rows"
+                disabled={!canOpenOutputs}
+                onClick={onOpenTasks}
+            />
+            <RibbonButton
+                title="Kanban"
+                detail="Project accepted tasks as a board"
+                disabled={!canOpenOutputs}
+                onClick={onOpenKanban}
+            />
+        </section>
+        <section className="shell-ribbon-command-group" aria-label="Preview output views">
+            <span>Preview</span>
+            <RibbonButton
+                title="Checklist Preview"
                 detail="Review checklist candidates"
                 disabled={!canOpenOutputs}
                 onClick={onOpenChecklist}
             />
+        </section>
+        <section className="shell-ribbon-command-group" aria-label="Handoff output views">
+            <span>Handoff</span>
             <RibbonButton
                 title="Implementation"
                 detail="Review handoff package"

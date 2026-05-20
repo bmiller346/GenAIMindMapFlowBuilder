@@ -25,6 +25,8 @@ and how future validation should prove the capability.
 - `PRODUCT_GUIDE_KNOWLEDGE_GRAPH_RELATIONSHIPS.md` - semantic relationship
   edges, Connections review, knowledge graph lenses, and relationship review
   exports.
+- `PRODUCT_GUIDE_MAP_READABILITY_AND_LENSES.md` - mind map readability,
+  selected branch clarity, relationship-label lenses, and branch color language.
 - `PRODUCT_GUIDE_WORKSPACE_SHELL.md` - controlled workspace shell, top ribbon,
   left navigator, right properties panel, and bottom review tray.
 - `PRODUCT_GUIDE_SPLITS.md` - guide-versus-roadmap boundaries.
