@@ -48,6 +48,135 @@ export const AiRibbonGroups = ({
     </div>
 );
 
+export const HomeRibbonGroups = ({
+    canUseWorkspace,
+    onOpenMap,
+    onOpenOutline,
+    onOpenTasks,
+    onOpenWorkspace,
+    onOpenActivity,
+    onOpenHealth,
+    onAddSource,
+    onAskAi,
+    onStartManual,
+    onOpenNextSteps
+}) => (
+    <div className="shell-ribbon-command-stack" aria-label="Home ribbon commands">
+        <section className="shell-ribbon-command-group" aria-label="Workspace home">
+            <span>Home</span>
+            <RibbonButton
+                title="Map"
+                detail="Return to the main canvas"
+                onClick={onOpenMap}
+            />
+            <RibbonButton
+                title="Outline"
+                detail="Review hierarchy as a structured view"
+                disabled={!canUseWorkspace}
+                onClick={onOpenOutline}
+            />
+            <RibbonButton
+                title="Tasks"
+                detail="Open confirmed task work"
+                disabled={!canUseWorkspace}
+                onClick={onOpenTasks}
+            />
+        </section>
+        <section className="shell-ribbon-command-group" aria-label="Workspace navigation">
+            <span>Navigate</span>
+            <RibbonButton
+                title="Workspace"
+                detail="Open workspace browser"
+                onClick={onOpenWorkspace}
+            />
+            <RibbonButton
+                title="Activity"
+                detail="Open recent workspace activity"
+                onClick={onOpenActivity}
+            />
+            <RibbonButton
+                title="Health"
+                detail="Open validation and readiness"
+                disabled={!canUseWorkspace}
+                onClick={onOpenHealth}
+            />
+        </section>
+        <section className="shell-ribbon-command-group" aria-label="Workspace creation">
+            <span>Create</span>
+            <RibbonButton
+                title="Add sources"
+                detail="Open source intake"
+                onClick={onAddSource}
+            />
+            <RibbonButton
+                title="Ask AI"
+                detail="Start a preview-first draft"
+                disabled={!canUseWorkspace}
+                onClick={onAskAi}
+            />
+            <RibbonButton
+                title="Start node"
+                detail="Create a manual root"
+                disabled={!canUseWorkspace}
+                onClick={onStartManual}
+            />
+            <RibbonButton
+                title="Next steps"
+                detail="Open guided workspace actions"
+                disabled={!canUseWorkspace}
+                onClick={onOpenNextSteps}
+            />
+        </section>
+    </div>
+);
+
+export const SourcesRibbonGroups = ({
+    canUseWorkspace,
+    hasSources,
+    onOpenLibrary,
+    onAddSource,
+    onReviewSources,
+    onRepairSources,
+    onOpenSourceHealth
+}) => (
+    <div className="shell-ribbon-command-stack" aria-label="Sources ribbon commands">
+        <section className="shell-ribbon-command-group" aria-label="Source library">
+            <span>Library</span>
+            <RibbonButton
+                title="Library"
+                detail="Open embedded source browser"
+                onClick={onOpenLibrary}
+            />
+            <RibbonButton
+                title="Add sources"
+                detail="Upload or connect source material"
+                onClick={onAddSource}
+            />
+            <RibbonButton
+                title="Source health"
+                detail="Open source readiness"
+                disabled={!canUseWorkspace}
+                onClick={onOpenSourceHealth}
+            />
+        </section>
+        <section className="shell-ribbon-command-group" aria-label="Source review">
+            <span>Review</span>
+            <RibbonButton
+                title="Review support"
+                detail="Open source support tray"
+                disabled={!canUseWorkspace}
+                onClick={onReviewSources}
+            />
+            <RibbonButton
+                title="Repair sources"
+                detail="Ask AI for missing support"
+                disabled={!canUseWorkspace || !hasSources}
+                onClick={onRepairSources}
+            />
+        </section>
+    </div>
+);
+
 export const ReviewRibbonGroups = ({
     canReview,
     onOpenConnections,
@@ -90,7 +219,9 @@ export const OutputsRibbonGroups = ({
     canOpenOutputs,
     onOpenTable,
     onOpenExecutive,
-    onOpenChecklist
+    onOpenChecklist,
+    onOpenImplementationPackage,
+    onOpenStatusReview
 }) => (
     <div className="shell-ribbon-command-stack" aria-label="Outputs ribbon commands">
         <section className="shell-ribbon-command-group" aria-label="Output views">
@@ -112,6 +243,18 @@ export const OutputsRibbonGroups = ({
                 detail="Review checklist candidates"
                 disabled={!canOpenOutputs}
                 onClick={onOpenChecklist}
+            />
+            <RibbonButton
+                title="Implementation"
+                detail="Review handoff package"
+                disabled={!canOpenOutputs}
+                onClick={onOpenImplementationPackage}
+            />
+            <RibbonButton
+                title="Status"
+                detail="Review handoff status input"
+                disabled={!canOpenOutputs}
+                onClick={onOpenStatusReview}
             />
         </section>
     </div>

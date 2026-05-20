@@ -33,14 +33,16 @@ const loadShellModules = async () => {
         { default: BranchPropertiesPanel },
         { default: SourcePropertiesPanel },
         { default: ShellPropertiesPanelHost },
-        { default: ShellStatusBar }
+        { default: ShellStatusBar },
+        ribbonGroups
     ] = await Promise.all([
         server.ssrLoadModule('/src/shell/WorkspaceShell.jsx'),
         server.ssrLoadModule('/src/shell/ShellRibbon.jsx'),
         server.ssrLoadModule('/src/shell/BranchPropertiesPanel.jsx'),
         server.ssrLoadModule('/src/shell/SourcePropertiesPanel.jsx'),
         server.ssrLoadModule('/src/shell/ShellPropertiesPanelHost.jsx'),
-        server.ssrLoadModule('/src/shell/ShellStatusBar.jsx')
+        server.ssrLoadModule('/src/shell/ShellStatusBar.jsx'),
+        server.ssrLoadModule('/src/ribbon/AiRibbonGroups.jsx')
     ]);
     return {
         WorkspaceShell,
@@ -48,7 +50,8 @@ const loadShellModules = async () => {
         BranchPropertiesPanel,
         SourcePropertiesPanel,
         ShellPropertiesPanelHost,
-        ShellStatusBar
+        ShellStatusBar,
+        ...ribbonGroups
     };
 };
 
@@ -147,6 +150,43 @@ test('ShellRibbon falls back to the first tab when active tab is unknown', async
     assert.match(html, /data-active-tab="home"/);
     assert.match(html, /id="shell-ribbon-panel-home"/);
     assert.match(html, /Workspace commands/);
+});
+
+test('Home and Sources ribbon groups render stable command surfaces', async () => {
+    const { HomeRibbonGroups, SourcesRibbonGroups } = await loadShellModules();
+    const homeHtml = renderToStaticMarkup(
+        React.createElement(HomeRibbonGroups, {
+            canUseWorkspace: true
+        })
+    );
+    const sourcesHtml = renderToStaticMarkup(
+        React.createElement(SourcesRibbonGroups, {
+            canUseWorkspace: true,
+            hasSources: true
+        })
+    );
+
+    assert.match(homeHtml, /aria-label="Home ribbon commands"/);
+    assert.match(homeHtml, /Map/);
+    assert.match(homeHtml, /Workspace/);
+    assert.match(homeHtml, /Next steps/);
+    assert.match(sourcesHtml, /aria-label="Sources ribbon commands"/);
+    assert.match(sourcesHtml, /Library/);
+    assert.match(sourcesHtml, /Review support/);
+    assert.match(sourcesHtml, /Repair sources/);
+});
+
+test('Sources ribbon disables source repair until sources exist', async () => {
+    const { SourcesRibbonGroups } = await loadShellModules();
+    const html = renderToStaticMarkup(
+        React.createElement(SourcesRibbonGroups, {
+            canUseWorkspace: true,
+            hasSources: false
+        })
+    );
+
+    assert.match(html, /Repair sources/);
+    assert.match(html, /disabled=""/);
 });
 
 test('branch and source properties panels render editable summaries', async () => {

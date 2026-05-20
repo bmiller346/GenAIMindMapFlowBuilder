@@ -53,8 +53,10 @@ import {
 } from './ribbon/RelationshipRibbonGroups.jsx';
 import {
     AiRibbonGroups,
+    HomeRibbonGroups,
     OutputsRibbonGroups,
-    ReviewRibbonGroups
+    ReviewRibbonGroups,
+    SourcesRibbonGroups
 } from './ribbon/AiRibbonGroups.jsx';
 import MapRibbonHost from './ribbon/MapRibbonHost.jsx';
 import AiHelpersPanel from './global-components/AiHelpersPanel.jsx';
@@ -97,6 +99,7 @@ import {
 
 const CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph', 'flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
 const STRUCTURED_CANVAS_VIEWS = new Set(['flowchart', 'outline', 'executive', 'tasks', 'kanban', 'table']);
+const SHELL_OUTPUT_SURFACE_VIEWS = new Set(['chartData', 'mondayInput', 'mondayStatus']);
 const SHELL_METADATA_RIGHT_PANEL_KINDS = new Set(['node', 'edge', 'branch', 'source']);
 const AI_HELPERS_GUIDE_PANEL_ID = 'aiHelpers';
 const NEXT_STEPS_GUIDE_PANEL_ID = 'nextSteps';
@@ -1484,15 +1487,17 @@ const App = () => {
             .slice(0, 10);
     }, [activeCanvasView, edges, nodes]);
     const isStructuredCanvasView = STRUCTURED_CANVAS_VIEWS.has(activeCanvasView);
+    const isShellOutputSurfaceView =
+        useWorkspaceShell && SHELL_OUTPUT_SURFACE_VIEWS.has(activeView);
     const renderedCanvasGraph = useMemo(() => {
-        if (!isStructuredCanvasView) {
+        if (!isStructuredCanvasView && !isShellOutputSurfaceView) {
             return canvasGraph;
         }
         return {
             nodes: [],
             edges: []
         };
-    }, [canvasGraph, isStructuredCanvasView]);
+    }, [canvasGraph, isShellOutputSurfaceView, isStructuredCanvasView]);
     const selectedVisibleNodes = useMemo(() => {
         return renderedCanvasGraph.nodes.filter((node) => !node.hidden && node.selected);
     }, [renderedCanvasGraph.nodes]);
@@ -2879,8 +2884,41 @@ const App = () => {
         },
         [setActiveView, shellActions]
     );
+    const openSourceRepairAi = useCallback(() => {
+        openEmptyCanvasAskAi({
+            initialPrompt:
+                'Find missing or weak source support in this workspace. Return source-backed repair candidates with evidence, confidence, and review notes before applying anything.',
+            initialVisual: 'review_annotations'
+        });
+    }, [openEmptyCanvasAskAi]);
     const renderShellRibbonContent = useCallback(
         ({ activeTab }) => {
+            if (activeTab === 'home') {
+                return (
+                    <HomeRibbonGroups
+                        canUseWorkspace={Boolean(flow_id)}
+                        onOpenMap={() => {
+                            setActiveView('mindmap');
+                            shellActions.setRibbonTab('map', { view: 'mindmap' });
+                        }}
+                        onOpenOutline={() => {
+                            setActiveView('outline');
+                            shellActions.setRibbonTab('home', { view: 'outline' });
+                        }}
+                        onOpenTasks={() => {
+                            setActiveView('tasks');
+                            shellActions.setRibbonTab('home', { view: 'tasks' });
+                        }}
+                        onOpenWorkspace={() => openWorkspaceDockTab('workspace')}
+                        onOpenActivity={() => openWorkspaceDockTab('activity')}
+                        onOpenHealth={() => openWorkspaceDockTab('health')}
+                        onAddSource={openEmptyCanvasSources}
+                        onAskAi={() => openEmptyCanvasAskAi()}
+                        onStartManual={openManualStart}
+                        onOpenNextSteps={openNextStepsFromDock}
+                    />
+                );
+            }
             if (activeTab === 'ai') {
                 return (
                     <AiRibbonGroups
@@ -2903,6 +2941,19 @@ const App = () => {
                     />
                 );
             }
+            if (activeTab === 'sources') {
+                return (
+                    <SourcesRibbonGroups
+                        canUseWorkspace={Boolean(flow_id)}
+                        hasSources={sourceLibrary.length > 0}
+                        onOpenLibrary={openSourcesLibrary}
+                        onAddSource={openEmptyCanvasSources}
+                        onReviewSources={() => openShellReviewView('sources')}
+                        onRepairSources={openSourceRepairAi}
+                        onOpenSourceHealth={() => openWorkspaceDockTab('health')}
+                    />
+                );
+            }
             if (activeTab === 'outputs') {
                 return (
                     <OutputsRibbonGroups
@@ -2910,6 +2961,8 @@ const App = () => {
                         onOpenTable={() => openShellOutputView('table')}
                         onOpenExecutive={() => openShellOutputView('executive')}
                         onOpenChecklist={() => openShellReviewView('checklist')}
+                        onOpenImplementationPackage={() => openShellOutputView('mondayInput')}
+                        onOpenStatusReview={() => openShellOutputView('mondayStatus')}
                     />
                 );
             }
@@ -2963,12 +3016,22 @@ const App = () => {
             mindmapBranchLegend,
             mindmapRelationshipMode,
             nodes.length,
+            openEmptyCanvasAskAi,
+            openEmptyCanvasSources,
             openEdgeInspector,
+            openManualStart,
+            openNextStepsFromDock,
+            openSourceRepairAi,
+            openSourcesLibrary,
+            openWorkspaceDockTab,
             openShellOutputView,
             openShellReviewView,
             openStructuredAiPreset,
             selectKgRelationshipMode,
-            selectedBranchId
+            selectedBranchId,
+            setActiveView,
+            shellActions,
+            sourceLibrary.length
         ]
     );
 
@@ -3119,6 +3182,20 @@ const App = () => {
                             }
                             scopeDescription={aiProgressDescription}
                             onDismiss={() => setAiGenerationProgress(null)}
+                        />
+                    </Panel>
+                ) : null}
+                {isShellOutputSurfaceView ? (
+                    <Panel
+                        position="top-left"
+                        className="shell-output-surface-panel"
+                        style={{ display: 'block' }}
+                    >
+                        <LocalViewsPanel
+                            hidden={false}
+                            outputOnly
+                            onSelectNode={focusNodeForReview}
+                            onSelectEdge={openEdgeInspector}
                         />
                     </Panel>
                 ) : null}

@@ -289,7 +289,7 @@ const mergeGeneratedTaskPreviewRows = (rows, generatedPreview) => {
     });
 };
 
-const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
+const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdge }) => {
     const selector = (state) => ({
         nodes: state.nodes,
         edges: state.edges,
@@ -881,6 +881,18 @@ const LocalViewsPanel = ({ hidden, onSelectNode, onSelectEdge }) => {
             onTogglePreviewRow={togglePreviewRow}
         />
     );
+
+    if (outputOnly) {
+        return (
+            <section
+                ref={panelRef}
+                className="local-views-panel local-views-panel-shell-output"
+                aria-label="Workspace output surface"
+            >
+                {outputPanel}
+            </section>
+        );
+    }
 
     if (isCanvasView) {
         return (
