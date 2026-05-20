@@ -47,6 +47,7 @@ import ShellWorkspaceNavigatorHost from './shell/ShellWorkspaceNavigatorHost.jsx
 import WorkspaceShellAdapter from './shell/WorkspaceShellAdapter.jsx';
 import useShellLayoutState from './shell/useShellLayoutState.js';
 import useWorkspaceShellRouter from './shell/useWorkspaceShellRouter.js';
+import { SHELL_LOCAL_OUTPUT_TRAY_BY_VIEW } from './stores/shellStore.js';
 import {
     KnowledgeGraphRelationshipRibbonGroup,
     MindmapRelationshipRibbonGroup
@@ -1306,10 +1307,55 @@ const App = () => {
         openEdgeInspector(edge.id);
     }, [edges, openEdgeInspector, recordActivity, selectedVisibleNodes, setEdges, setSaveStatus]);
 
+    const openShellAiGuide = useCallback(
+        ({
+            source = 'workspace',
+            scope = 'workspace',
+            nodeId,
+            action = '',
+            initialPrompt = '',
+            initialVisual = 'auto',
+            summary = 'Opened shell AI guide for the whole workspace.'
+        } = {}) => {
+            if (scope !== 'branch') {
+                setSelectedBranchId(undefined);
+            }
+            setInspectorNodeId(undefined);
+            setInspectorEdgeId(undefined);
+            setIsAiHelpersOpen(false);
+            shellActions.setRibbonTab('ai', { source, action });
+            shellActions.setActiveScope(
+                scope === 'branch' && nodeId
+                    ? { type: 'branch', nodeId }
+                    : { type: 'workspace' }
+            );
+            shellActions.openGuidePanel(AI_HELPERS_GUIDE_PANEL_ID);
+            recordActivity({
+                type: 'ai_action_picker_opened',
+                title: 'Workspace Ask AI opened',
+                summary,
+                metadata: {
+                    scope,
+                    action,
+                    initial_prompt: initialPrompt,
+                    initial_visual: initialVisual,
+                    surface: 'shell_right_rail'
+                }
+            });
+        },
+        [
+            recordActivity,
+            setInspectorEdgeId,
+            setInspectorNodeId,
+            setSelectedBranchId,
+            shellActions
+        ]
+    );
+
     const openStructuredAiPreset = useCallback(
         (presetKey) => {
             const preset = STRUCTURED_AI_PRESETS[presetKey];
-            if (!preset || !flow_id) {
+            if (!preset || (!useWorkspaceShell && !flow_id)) {
                 return;
             }
             const preferredScope =
@@ -1323,6 +1369,38 @@ const App = () => {
                     ? { type: 'branch', nodeId: selectedBranchId }
                     : { type: 'workspace' }
             );
+            if (useWorkspaceShell) {
+                const reviewTray = SHELL_LOCAL_OUTPUT_TRAY_BY_VIEW[preset.view];
+                if (reviewTray) {
+                    shellActions.openLocalOutputReviewTray(reviewTray, {
+                        id: presetKey,
+                        view: preset.view
+                    });
+                    recordActivity({
+                        type: 'ai_action_picker_opened',
+                        title: 'Workspace Ask AI opened',
+                        summary: `Opened shell review tray for preview-first action: ${preset.action}.`,
+                        metadata: {
+                            scope: preferredScope,
+                            action: preset.action || '',
+                            initial_prompt: preset.prompt || '',
+                            initial_visual: preset.visual || 'auto',
+                            surface: 'shell_review_tray'
+                        }
+                    });
+                    return;
+                }
+                openShellAiGuide({
+                    source: 'ribbonPreset',
+                    scope: preferredScope,
+                    nodeId: preferredScope === 'branch' ? selectedBranchId : undefined,
+                    action: preset.action || '',
+                    initialPrompt: preset.prompt || '',
+                    initialVisual: preset.visual || 'auto',
+                    summary: `Opened shell AI guide for preview-first action: ${preset.action}.`
+                });
+                return;
+            }
             pushNode(PromptModal, {
                 scope: preferredScope,
                 nodeId: preferredScope === 'branch' ? selectedBranchId : undefined,
@@ -1341,7 +1419,16 @@ const App = () => {
                 }
             });
         },
-        [flow_id, pushNode, recordActivity, selectedBranchId, setActiveView, shellActions]
+        [
+            flow_id,
+            openShellAiGuide,
+            pushNode,
+            recordActivity,
+            selectedBranchId,
+            setActiveView,
+            shellActions,
+            useWorkspaceShell
+        ]
     );
 
     const openWorkspaceDockTab = useCallback((tab) => {
@@ -1384,7 +1471,13 @@ const App = () => {
         setInspectorNodeId(undefined);
         setInspectorEdgeId(undefined);
         if (useWorkspaceShell) {
-            shellActions.closeRightPanel();
+            openShellAiGuide({
+                source: 'emptyCanvas',
+                initialPrompt: options?.initialPrompt || '',
+                initialVisual: options?.initialVisual || 'auto',
+                summary: 'Opened shell AI guide from the empty canvas.'
+            });
+            return;
         }
         setIsAiHelpersOpen(false);
         shellActions.setRibbonTab('ai', { source: 'emptyCanvas' });
@@ -1402,7 +1495,16 @@ const App = () => {
                 scope: 'workspace'
             }
         });
-    }, [pushNode, recordActivity, setInspectorEdgeId, setInspectorNodeId, setSelectedBranchId, shellActions, useWorkspaceShell]);
+    }, [
+        openShellAiGuide,
+        pushNode,
+        recordActivity,
+        setInspectorEdgeId,
+        setInspectorNodeId,
+        setSelectedBranchId,
+        shellActions,
+        useWorkspaceShell
+    ]);
 
     const openManualStart = useCallback(() => {
         openWorkspaceDockTab('build');
@@ -1431,29 +1533,8 @@ const App = () => {
     );
 
     const openShellWorkspaceAskAi = useCallback(() => {
-        setSelectedBranchId(undefined);
-        setInspectorNodeId(undefined);
-        setInspectorEdgeId(undefined);
-        setIsAiHelpersOpen(false);
-        shellActions.setRibbonTab('ai', { source: 'header' });
-        shellActions.setActiveScope({ type: 'workspace' });
-        shellActions.openGuidePanel(AI_HELPERS_GUIDE_PANEL_ID);
-        recordActivity({
-            type: 'ai_action_picker_opened',
-            title: 'Workspace Ask AI opened',
-            summary: 'Opened shell AI guide for the whole workspace.',
-            metadata: {
-                scope: 'workspace',
-                surface: 'shell_right_rail'
-            }
-        });
-    }, [
-        recordActivity,
-        setInspectorEdgeId,
-        setInspectorNodeId,
-        setSelectedBranchId,
-        shellActions
-    ]);
+        openShellAiGuide({ source: 'header' });
+    }, [openShellAiGuide]);
 
     const focusStructuredNodeInMap = useCallback(
         (nodeId) => {

@@ -738,6 +738,27 @@ test('shell routes AI helpers into the right rail instead of a canvas overlay', 
     await rightRail.getByRole('button', { name: 'Close' }).click();
     await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
 
+    await page.getByRole('tab', { name: 'Home', exact: true }).click();
+    await page
+        .getByTestId('shell-ribbon-content')
+        .getByRole('button', { name: 'Ask AI', exact: true })
+        .click();
+    await expect(rightRail).toBeVisible();
+    await expect(rightRail.locator('.ai-helpers-panel')).toBeVisible();
+    await expect(page.locator('.modal .ai-action-modal')).toHaveCount(0);
+    await rightRail.getByRole('button', { name: 'Close' }).click();
+    await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
+
+    await page.getByRole('tab', { name: 'AI', exact: true }).click();
+    await page.getByTestId('shell-ribbon-content').getByRole('button', { name: 'Find connections' }).click();
+    const reviewTray = page.locator('.workspace-shell__bottom .review-tray');
+    await expect(reviewTray).toBeVisible();
+    await expect(reviewTray).toContainText('Connections Review');
+    await expect(page.locator('.workspace-shell__right')).toHaveCount(0);
+    await expect(page.locator('.modal .ai-action-modal')).toHaveCount(0);
+    await reviewTray.getByRole('button', { name: 'Close review tray' }).click();
+    await expect(page.locator('.workspace-shell__bottom .review-tray')).toHaveCount(0);
+
     await page.getByAltText('Open workspaces').click();
     await page.getByRole('button', { name: /^AI helpers\b/i }).click();
 
