@@ -174,6 +174,35 @@ test('closed shell properties slot stays collapsed until selection content is re
     await expectMountedSlotAttributesMatch(page);
 });
 
+test('shell routes AI generation progress through status bar instead of canvas dock', async ({ page }) => {
+    await mockBackend(page);
+
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/#/');
+
+    await expect(page.getByTestId('workspace-shell')).toBeVisible();
+    await page.evaluate(() => {
+        window.dispatchEvent(
+            new CustomEvent('mindmapwizard:ask-ai-generation-progress', {
+                detail: {
+                    requestId: 'shell-progress-fixture',
+                    status: 'running',
+                    stage: 'building_preview',
+                    detail: 'Building preview',
+                    role: { label: 'Workflow Mapper' },
+                    scope: { type: 'workspace' }
+                }
+            })
+        );
+    });
+
+    const statusSlot = page.getByTestId('workspace-shell-status-slot');
+    const progress = statusSlot.locator('.shell-status-bar__progress');
+    await expect(progress).toBeVisible();
+    await expect(progress).toContainText('Workflow Mapper is drafting');
+    await expect(page.locator('.ai-generation-progress-dock')).toHaveCount(0);
+});
+
 const expectMountedSlotAttributesMatch = async (page) => {
     const mountedSlots = await page.evaluate(() => {
         const shell = document.querySelector('[data-testid="workspace-shell"]');

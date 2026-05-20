@@ -94,7 +94,14 @@ test('WorkspaceShell renders status bar independently from review tray', async (
             centerCanvas: React.createElement('div', null, 'Canvas'),
             statusBar: React.createElement(ShellStatusBar, {
                 items: [{ id: 'view', label: 'View', value: 'Mind map' }],
-                overrides: [{ id: 'branch', label: 'Branch: Pilot' }]
+                overrides: [{ id: 'branch', label: 'Branch: Pilot' }],
+                progress: {
+                    status: 'running',
+                    progress: 35,
+                    title: 'Ask AI is drafting',
+                    latestStatus: 'Building preview',
+                    scopeLabel: 'Canvas draft'
+                }
             })
         })
     );
@@ -106,6 +113,9 @@ test('WorkspaceShell renders status bar independently from review tray', async (
     assert.match(html, /View/);
     assert.match(html, /Mind map/);
     assert.match(html, /Branch: Pilot/);
+    assert.match(html, /AI generation progress/);
+    assert.match(html, /Ask AI is drafting/);
+    assert.match(html, /Building preview/);
 });
 
 test('WorkspaceShell renders placeholder-backed optional slots', async () => {

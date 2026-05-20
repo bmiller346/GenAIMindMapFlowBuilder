@@ -2166,6 +2166,17 @@ const App = () => {
             actions={shellSelectionActions}
             items={shellStatusItems}
             overrides={shellTemporaryOverrides}
+            progress={aiGenerationProgress ? {
+                status: aiProgressStatus,
+                progress:
+                    aiProgressStatus === 'completed'
+                        ? 100
+                        : ASK_AI_STAGE_PROGRESS[aiProgressStageId],
+                title: aiProgressTitle,
+                latestStatus: aiGenerationProgress?.detail || aiGenerationProgress?.message,
+                scopeLabel: aiProgressScopeLabel,
+                onDismiss: () => setAiGenerationProgress(null)
+            } : null}
         />
     ) : null;
 
@@ -2520,7 +2531,7 @@ const App = () => {
                     color={backgroundGridColor}
                     style={{ backgroundColor: canvasBackgroundColor }}
                 />
-                {aiGenerationProgress ? (
+                {aiGenerationProgress && !useWorkspaceShell ? (
                     <Panel
                         position="bottom-center"
                         className="ai-generation-progress-dock"

@@ -1,9 +1,12 @@
-const ShellStatusBar = ({ actions = [], items = [], overrides = [] }) => {
+const ShellStatusBar = ({ actions = [], items = [], overrides = [], progress = null }) => {
     const visibleActions = actions.filter((action) => action?.label && action?.onClick);
     const visibleItems = items.filter((item) => item?.label || item?.value);
     const visibleOverrides = overrides.filter((override) => override?.label);
+    const visibleProgress = progress && (progress.title || progress.status || progress.latestStatus)
+        ? progress
+        : null;
 
-    if (!visibleItems.length && !visibleOverrides.length && !visibleActions.length) {
+    if (!visibleItems.length && !visibleOverrides.length && !visibleActions.length && !visibleProgress) {
         return null;
     }
 
@@ -39,6 +42,30 @@ const ShellStatusBar = ({ actions = [], items = [], overrides = [] }) => {
                             ) : null}
                         </span>
                     ))}
+                </div>
+            ) : null}
+            {visibleProgress ? (
+                <div
+                    className={`shell-status-bar__progress shell-status-bar__progress--${visibleProgress.status || 'running'}`}
+                    aria-label="AI generation progress"
+                >
+                    <div className="shell-status-bar__progress-copy">
+                        <span>{visibleProgress.scopeLabel || 'AI draft'}</span>
+                        <strong>{visibleProgress.title || 'Ask AI is drafting'}</strong>
+                        {visibleProgress.latestStatus ? <small>{visibleProgress.latestStatus}</small> : null}
+                    </div>
+                    <div className="shell-status-bar__progress-meter" aria-hidden="true">
+                        <span style={{ width: `${Math.max(0, Math.min(Number(visibleProgress.progress) || 0, 100))}%` }} />
+                    </div>
+                    {visibleProgress.onDismiss ? (
+                        <button
+                            type="button"
+                            aria-label="Dismiss AI generation progress"
+                            onClick={visibleProgress.onDismiss}
+                        >
+                            x
+                        </button>
+                    ) : null}
                 </div>
             ) : null}
             {visibleActions.length ? (
