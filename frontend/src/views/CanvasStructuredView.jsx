@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { FiGitBranch, FiMap } from 'react-icons/fi';
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
@@ -12,9 +12,13 @@ import {
     getExecutiveOutputProjection,
     getFlowchartProjection,
     getKanbanColumns,
+    getSankeyFlowProjection,
     getTaskCandidateRows,
     getTaskRows
 } from './graphProjection.js';
+import { buildSankeyPlotlySpec } from '../utils/sankeyFlow.js';
+
+const Graph = lazy(() => import('../global-components/Graph'));
 
 const VIEW_LABELS = {
     executive: 'Executive',
@@ -413,6 +417,57 @@ const ReadinessCallout = ({ title, detail, issues = [], actionLabel, onAction })
     </section>
 );
 
+const SankeyFlowPanel = ({ sankeyFlow, sankeySpec, onOpenNode }) => {
+    if (!sankeyFlow?.eligible || !sankeySpec) {
+        return null;
+    }
+    const topRows = sankeyFlow.rows.slice(0, 5);
+
+    return (
+        <section className="canvas-structured-sankey-panel" aria-label="Flow lens">
+            <div className="canvas-structured-sankey-summary">
+                <div>
+                    <strong>Flow lens</strong>
+                    <span>
+                        {[
+                            `${sankeyFlow.path_count} paths`,
+                            `${sankeyFlow.node_count} evidence node${sankeyFlow.node_count === 1 ? '' : 's'}`,
+                            sankeyFlow.metric_labels.join(', ')
+                        ]
+                            .filter(Boolean)
+                            .join(' | ')}
+                    </span>
+                </div>
+                <small>
+                    Source, target, and value rows from accepted structured evidence. Width shows the selected metric.
+                </small>
+            </div>
+            <div className="canvas-structured-sankey-body">
+                <div className="canvas-structured-sankey-plot">
+                    <Suspense fallback={<div className="lazy-block">Loading flow...</div>}>
+                        <Graph data={sankeySpec} />
+                    </Suspense>
+                </div>
+                <div className="canvas-structured-sankey-paths">
+                    {topRows.map((row) => (
+                        <button
+                            type="button"
+                            key={row.id}
+                            onClick={() => onOpenNode?.(row.evidence_node_id)}
+                        >
+                            <span>{row.source}</span>
+                            <span>{row.target}</span>
+                            <strong>
+                                {row.metric_label}: {row.value.toLocaleString()}
+                            </strong>
+                        </button>
+                    ))}
+                </div>
+            </div>
+        </section>
+    );
+};
+
 const childDetailRows = (children = []) =>
     children.map((child) => ({
         title: child.title || child.id,
@@ -667,6 +722,27 @@ const CanvasStructuredView = ({
     const executiveReadyState = useMemo(
         () => executiveReadiness(executiveOutput),
         [executiveOutput]
+    );
+    const sankeyFlow = useMemo(() => getSankeyFlowProjection(projection), [projection]);
+    const sankeySpec = useMemo(
+        () =>
+            sankeyFlow.eligible
+                ? buildSankeyPlotlySpec(
+                      sankeyFlow.rows.map((row) => ({
+                          source: row.source,
+                          target: row.target,
+                          value: row.value
+                      })),
+                      {
+                          sourceColumn: 'source',
+                          targetColumn: 'target',
+                          valueColumn: 'value',
+                          title: 'Structured evidence flow',
+                          height: 280
+                      }
+                  ).spec
+                : null,
+        [sankeyFlow]
     );
     const potentialTaskRows = useMemo(
         () => getTaskCandidateRows(projection).slice(0, 24),
@@ -2281,6 +2357,11 @@ const CanvasStructuredView = ({
                                 </div>
                             </dl>
                         </section>
+                        <SankeyFlowPanel
+                            sankeyFlow={sankeyFlow}
+                            sankeySpec={sankeySpec}
+                            onOpenNode={onOpenNode}
+                        />
                         {hierarchyUndoNotice ? (
                             <div className="canvas-structured-undo-toast" role="status">
                                 <span>{hierarchyUndoNotice.message}</span>

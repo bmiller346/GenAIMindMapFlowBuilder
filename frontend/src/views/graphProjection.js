@@ -4,6 +4,7 @@ import {
     KG_RELATIONSHIP_FAMILIES,
     getKgRelationshipSummary
 } from '../utils/kgRelationshipFilters.js';
+import { buildSankeyFlowRows } from '../utils/sankeyFlow.js';
 
 const TASK_CAPABLE_TYPES = new Set([
     'task',
@@ -3029,6 +3030,85 @@ const sqlArtifactForNode = (node = {}) =>
 
 const tableArtifactForNode = (node = {}) =>
     (node.generated_artifacts || []).find((artifact) => artifact?.artifact_type === 'data_table');
+
+const chartArtifactForNode = (node = {}) =>
+    (node.generated_artifacts || []).find((artifact) => artifact?.artifact_type === 'chart');
+
+const chartSpecForNode = (node = {}) => chartArtifactForNode(node)?.data?.chart_spec || {};
+
+const sankeyColumnOptionsForSpec = (chartSpec = {}) => ({
+    sourceColumn: chartSpec.source_column || chartSpec.sourceColumn,
+    targetColumn: chartSpec.target_column || chartSpec.targetColumn,
+    valueColumn: chartSpec.value_column || chartSpec.valueColumn
+});
+
+const structuredFlowRowsForNode = (node = {}) => {
+    const chartArtifact = chartArtifactForNode(node);
+    const tableArtifact = tableArtifactForNode(node);
+    return Array.isArray(chartArtifact?.data?.data_rows) && chartArtifact.data.data_rows.length
+        ? chartArtifact.data.data_rows
+        : Array.isArray(tableArtifact?.data?.rows) && tableArtifact.data.rows.length
+          ? tableArtifact.data.rows
+          : node.table_rows || [];
+};
+
+export const getSankeyFlowProjection = (projection = {}) => {
+    const nodes = projection.nodes || [];
+    const flowNodes = [];
+    const flowRows = [];
+
+    nodes.forEach((node) => {
+        const rows = structuredFlowRowsForNode(node);
+        const chartSpec = chartSpecForNode(node);
+        const flow = buildSankeyFlowRows(rows, sankeyColumnOptionsForSpec(chartSpec));
+        if (!flow.eligible) {
+            return;
+        }
+        const structuredEvidence = structuredEvidenceForTask(node) || {};
+        const nodeFlowRows = flow.rows.map((row, index) => ({
+            id: `${node.id}:sankey:${index}`,
+            evidence_node_id: node.id,
+            evidence_title: node.title,
+            source: row.source,
+            target: row.target,
+            value: row.value,
+            metric_label: flow.metricLabel,
+            source_column: flow.sourceColumn,
+            target_column: flow.targetColumn,
+            value_column: flow.valueColumn,
+            represented_row_indexes: row.rowIndexes,
+            represented_rows: row.rows,
+            source_refs: node.source_refs || [],
+            review_state: node.review_state || node.status || 'needs_review',
+            table_name: structuredEvidence.table_name || '',
+            query_id: structuredEvidence.query_id || '',
+            result_hash: structuredEvidence.result_hash || ''
+        }));
+        flowNodes.push({
+            id: node.id,
+            title: node.title,
+            table_name: structuredEvidence.table_name || '',
+            query_id: structuredEvidence.query_id || '',
+            result_hash: structuredEvidence.result_hash || '',
+            metric_label: flow.metricLabel,
+            path_count: nodeFlowRows.length,
+            source_backed: Boolean(structuredEvidence.source_backed),
+            source_refs: node.source_refs || [],
+            review_state: node.review_state || node.status || 'needs_review'
+        });
+        flowRows.push(...nodeFlowRows);
+    });
+
+    return {
+        eligible: flowRows.length > 0,
+        node_count: flowNodes.length,
+        path_count: flowRows.length,
+        value_total: flowRows.reduce((total, row) => total + row.value, 0),
+        metric_labels: Array.from(new Set(flowRows.map((row) => row.metric_label))).filter(Boolean),
+        nodes: flowNodes,
+        rows: flowRows
+    };
+};
 
 const structuredEvidenceForTask = (node = {}) => {
     const refs = node.source_refs || [];

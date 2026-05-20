@@ -14,6 +14,7 @@ import {
     getGraphConfidenceSummary,
     getKanbanColumns,
     getRelationshipFamilyReviewGroups,
+    getSankeyFlowProjection,
     getSourceRepairPreviewRows,
     getTeamRoadmapProjection,
     getTaskCandidateRows,
@@ -441,6 +442,107 @@ test('kanban task rows preserve structured data evidence metadata', () => {
     assert.equal(taskRow.structured_evidence.evidence_node_id, 'structured-evidence-1');
     assert.match(taskRow.structured_evidence.query, /SELECT category/);
     assert.equal(backlog.items[0].structured_evidence.table_name, 'software_inventory');
+});
+
+test('sankey flow projection builds source target value paths from structured artifacts', () => {
+    const structuredRef = {
+        source_type: 'data_table',
+        table_name: 'system_process_costs',
+        query_id: 'query-flow-1',
+        result_hash: 'flowhash123',
+        row_count: 3,
+        confidence: 0.91
+    };
+    const projection = buildGraphProjection(
+        [
+            {
+                ...node('structured-evidence-1', 'artifact', 'System process flow'),
+                data: {
+                    ...node('structured-evidence-1', 'artifact').data,
+                    source_refs: [structuredRef],
+                    artifact_type: 'structured_data_analysis',
+                    generated_artifacts: [
+                        {
+                            id: 'artifact-table-1',
+                            artifact_type: 'data_table',
+                            data: {
+                                rows: [
+                                    {
+                                        source_system: 'CRM',
+                                        target_process: 'Sales reporting',
+                                        monthly_cost: 12000
+                                    },
+                                    {
+                                        source_system: 'CRM',
+                                        target_process: 'Sales reporting',
+                                        monthly_cost: 3000
+                                    },
+                                    {
+                                        source_system: 'ERP',
+                                        target_process: 'Finance close',
+                                        monthly_cost: 22000
+                                    }
+                                ],
+                                columns: ['source_system', 'target_process', 'monthly_cost'],
+                                row_count: 3,
+                                query_id: 'query-flow-1',
+                                table_name: 'system_process_costs',
+                                result_hash: 'flowhash123'
+                            }
+                        },
+                        {
+                            id: 'artifact-chart-1',
+                            artifact_type: 'chart',
+                            data: {
+                                chart_spec: {
+                                    chart_type: 'sankey',
+                                    source_column: 'source_system',
+                                    target_column: 'target_process',
+                                    value_column: 'monthly_cost'
+                                },
+                                query_id: 'query-flow-1'
+                            }
+                        }
+                    ],
+                    metadata: {
+                        domain: 'structured_data',
+                        table_name: 'system_process_costs',
+                        query_id: 'query-flow-1',
+                        result_hash: 'flowhash123',
+                        row_count: 3
+                    }
+                }
+            }
+        ],
+        []
+    );
+
+    const sankey = getSankeyFlowProjection(projection);
+
+    assert.equal(sankey.eligible, true);
+    assert.equal(sankey.node_count, 1);
+    assert.equal(sankey.path_count, 2);
+    assert.equal(sankey.value_total, 37000);
+    assert.deepEqual(sankey.metric_labels, ['Monthly Cost']);
+    assert.equal(sankey.nodes[0].query_id, 'query-flow-1');
+    assert.equal(sankey.rows[0].source, 'ERP');
+    assert.equal(sankey.rows[0].target, 'Finance close');
+    assert.equal(sankey.rows[0].value, 22000);
+    assert.deepEqual(sankey.rows[1].represented_row_indexes, [0, 1]);
+    assert.equal(sankey.rows[1].source_refs[0].result_hash, 'flowhash123');
+});
+
+test('sankey flow projection does not treat ordinary graph hierarchy as flow data', () => {
+    const projection = buildGraphProjection(
+        [node('root', 'concept', 'Root'), node('child', 'task', 'Child')],
+        [{ id: 'edge-1', source: 'root', target: 'child', type: 'smoothstep' }]
+    );
+
+    const sankey = getSankeyFlowProjection(projection);
+
+    assert.equal(sankey.eligible, false);
+    assert.equal(sankey.node_count, 0);
+    assert.equal(sankey.path_count, 0);
 });
 
 test('accepted checklist projections preserve checklist metadata in preview rows', () => {

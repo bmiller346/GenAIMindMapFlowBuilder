@@ -55,6 +55,7 @@ import {
     structuredDataAcceptance,
     structuredDataChildData
 } from '../utils/structuredDataArtifacts';
+import { buildSankeyPlotlySpec } from '../utils/sankeyFlow';
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from '../utils/askAiGenerationProgress';
 import { NODE_EMPHASIS_OPTIONS } from '../utils/mapStyles';
 
@@ -406,6 +407,35 @@ const ResponseNode = ({ id, data }) => {
     const df = Array.isArray(workspaceData.df) ? workspaceData.df : [];
     const graph = workspaceData.graph || {};
     const isManualTable = data.manual && df.length > 0;
+    const structuredDataContext = useMemo(
+        () => getStructuredDataArtifactContext(data),
+        [data]
+    );
+    const structuredSankey = useMemo(
+        () =>
+            buildSankeyPlotlySpec(structuredDataContext.chartRows || df, {
+                sourceColumn:
+                    structuredDataContext.chartSpec?.source_column ||
+                    structuredDataContext.chartSpec?.sourceColumn,
+                targetColumn:
+                    structuredDataContext.chartSpec?.target_column ||
+                    structuredDataContext.chartSpec?.targetColumn,
+                valueColumn:
+                    structuredDataContext.chartSpec?.value_column ||
+                    structuredDataContext.chartSpec?.valueColumn,
+                title: `${structuredDataContext.tableName || 'Structured data'} flow`
+            }),
+        [
+            df,
+            structuredDataContext.chartRows,
+            structuredDataContext.chartSpec,
+            structuredDataContext.tableName
+        ]
+    );
+    const shouldShowStructuredSankey =
+        structuredDataContext.hasStructuredData &&
+        structuredSankey.spec &&
+        (String(structuredDataContext.chartType).toLowerCase() === 'sankey' || Object.keys(graph).length === 0);
     const titleValue = displayTitle || summary || '';
     const summaryPreview = compactNodeText(summary);
     const shouldShowSummaryPreview =
@@ -472,10 +502,6 @@ const ResponseNode = ({ id, data }) => {
                 }, new Set())
             ),
         [df]
-    );
-    const structuredDataContext = useMemo(
-        () => getStructuredDataArtifactContext(data),
-        [data]
     );
     const getNodeLabel = (node) => getWorkspaceNodeData(node).title || node?.id || '';
 
@@ -2456,6 +2482,29 @@ const ResponseNode = ({ id, data }) => {
                     <TableComponent df={df} />
                 </Suspense>
             )}
+            {shouldShowStructuredSankey ? (
+                <section className="structured-sankey-card nodrag">
+                    <div className="structured-sankey-header">
+                        <div>
+                            <h3>Flow lens</h3>
+                            <p>
+                                {[
+                                    structuredSankey.flow.metricLabel,
+                                    structuredSankey.flow.rows.length
+                                        ? `${structuredSankey.flow.rows.length} paths`
+                                        : '',
+                                    structuredDataContext.queryId ? `Query ${structuredDataContext.queryId}` : ''
+                                ]
+                                    .filter(Boolean)
+                                    .join(' | ')}
+                            </p>
+                        </div>
+                    </div>
+                    <Suspense fallback={<div className="lazy-block">Loading flow...</div>}>
+                        <Graph data={structuredSankey.spec} />
+                    </Suspense>
+                </section>
+            ) : null}
             {Object.keys(graph).length !== 0 && (
                 <Suspense fallback={<div className="lazy-block">Loading chart...</div>}>
                     <Graph data={graph} />
