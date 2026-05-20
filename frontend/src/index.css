@@ -2305,6 +2305,11 @@
     border-right: 1px solid var(--workspace-shell-border);
   }
 
+  .workspace-shell__left:has(.shell-left-navigator--collapsed) {
+    width: 2.75rem;
+    max-width: 2.75rem;
+  }
+
   .workspace-shell__right {
     right: 0;
     width: var(--workspace-shell-right-width);

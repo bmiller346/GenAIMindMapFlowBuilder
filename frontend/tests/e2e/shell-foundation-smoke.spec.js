@@ -237,6 +237,24 @@ test('default shell keeps predictable slots at a narrow viewport', async ({ page
     expect(metrics.canvasBottom).toBeLessThanOrEqual(metrics.statusTop + 1);
     expect(metrics.leftWidth).toBeLessThanOrEqual(390);
     expect(metrics.leftRight).toBeLessThanOrEqual(390);
+
+    await page.getByRole('button', { name: 'Collapse navigator' }).click();
+    const collapsedMetrics = await page.evaluate(() => {
+        const left = document.querySelector('[data-testid="workspace-shell-left-slot"]');
+        const canvas = document.querySelector('[data-testid="workspace-shell-canvas-slot"]');
+        const leftRect = left?.getBoundingClientRect();
+        const canvasRect = canvas?.getBoundingClientRect();
+        return {
+            leftWidth: leftRect?.width || 0,
+            leftRight: leftRect?.right || 0,
+            canvasLeft: canvasRect?.left || 0,
+            canvasWidth: canvasRect?.width || 0
+        };
+    });
+    expect(collapsedMetrics.leftWidth).toBeLessThanOrEqual(56);
+    expect(collapsedMetrics.leftRight).toBeLessThanOrEqual(56);
+    expect(collapsedMetrics.canvasLeft).toBeLessThanOrEqual(1);
+    expect(collapsedMetrics.canvasWidth).toBeGreaterThan(300);
 });
 
 test('closed shell properties slot stays collapsed until selection content is ready', async ({ page }) => {

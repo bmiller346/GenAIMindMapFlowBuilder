@@ -161,7 +161,7 @@ be resolved before retiring the shell-off compatibility path.
 
 | Blocker | Surface | Risk | Required verification | Status | Pre-default required? |
 | --- | --- | --- | --- | --- | --- |
-| Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Crowded default UI or hidden controls | Shell geometry e2e plus screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Automated narrow/header/ribbon/tray coverage passing; manual screenshot signoff still open | Yes |
+| Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Crowded default UI or hidden controls | Shell geometry e2e plus screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Screenshot matrix captured and inspected; narrow collapsed-left-rail hitbox fixed and covered. Human/product visual signoff remains recommended before rollback retirement | Yes |
 | Accepted output surfaces need verification | Outputs ribbon and accepted workspace views | Accepted outputs open the wrong surface or no visible surface | Verify accepted Table/Executive/Flowchart/Tasks/Kanban routes do not open the tray; verify Checklist Preview does open the tray | E2E route coverage passing for Table, Executive, Flowchart, Tasks, Kanban, Implementation, Status, and Checklist Preview | Yes |
 | Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Candidate previews become canonical before acceptance | Coverage for accepted tasks in structured canvas, Checklist Preview in tray, and accepted checklist artifact persistence | Route split covered; accepted checklist artifact persistence covered by review-tray save/reopen regression | Yes |
 | Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with stale fixtures or untested routes | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 28 serialized shell e2e passed, 1 intentional skip | Yes |
@@ -177,7 +177,7 @@ be resolved before retiring the shell-off compatibility path.
 
 - `selection-shell-regression.spec.js`, `review-tray-regression.spec.js`, `shell-foundation-smoke.spec.js`, `shellStore.test.mjs`, `shellLayoutState.test.mjs`, and `shellComponents.test.mjs` pass.
 - Shell-critical `test.fixme` coverage is either fixed or explicitly waived with a manual screenshot gate.
-- Manual screenshot pass is complete at 1600x1000, 1440x900, and 390x844 with shell disabled and enabled.
+- Screenshot matrix has been captured at 1600x1000, 1440x900, and 390x844 with shell disabled and enabled; human/product signoff remains recommended before rollback retirement.
 - With shell enabled, WorkspaceDock, source library, Activity, AI Helpers, metadata properties, and review workflows route to shell slots without duplicate primary floating chrome.
 - Right rail node, edge, branch, and source property edits apply and persist where expected; metadata-only right rail does not expose AI draft accept/reject or action-creation controls.
 - Bottom review tray hosts Drafts, Sources/source repair, Issues, Connections, Tasks preview, and Checklist Preview without opening legacy local-output bridge surfaces.

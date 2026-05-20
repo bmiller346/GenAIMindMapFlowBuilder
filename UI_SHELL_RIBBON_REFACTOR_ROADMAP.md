@@ -99,7 +99,7 @@ Current verification:
 Known active QA gaps:
 
 - Legacy floating panel overlap in the old layout is documented as a `fixme`; the shell migration is the intended long-term fix.
-- Manual visual QA is still needed for ribbon/tray/right-rail density, especially with map lens controls active.
+- Screenshot QA captured shell on/off at 1600x1000, 1440x900, and 390x844. That pass found and fixed a narrow collapsed-left-rail hitbox issue; map/lens product signoff remains separate.
 - Branch highlighting and relationship-label lenses are documented and have e2e coverage for default-off / toggle-on label behavior plus projection-level unit coverage for structural-only traversal and semantic edge exclusion from strong branch emphasis. Manual visual QA is still needed before default-shell rollout.
 
 ### Default Shell Follow-Up Gate
@@ -112,7 +112,7 @@ is dead in both shell-on and shell-off paths.
 
 | Blocker | Surface | Risk | Required verification | Status | Pre-default required? |
 | --- | --- | --- | --- | --- | --- |
-| Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Default shell feels crowded or hides controls at common desktop/narrow sizes | Run shell e2e geometry coverage plus manual screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Automated narrow/header/ribbon/tray/status progress coverage passing; manual screenshot signoff still open | Yes |
+| Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Default shell feels crowded or hides controls at common desktop/narrow sizes | Run shell e2e geometry coverage plus manual screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Screenshot matrix captured and inspected; narrow collapsed-left-rail hitbox fixed and covered. Human/product visual signoff remains recommended before rollback retirement | Yes |
 | Accepted output surfaces need verification | Outputs ribbon and accepted workspace views | Accepted Table/Executive/Flowchart/Tasks/Kanban commands route to an invisible surface or wrong tray workflow | Verify Table, Executive, Flowchart, Tasks, and Kanban open accepted canvas/output surfaces; verify Checklist Preview opens the Review Tray | E2E route coverage passing for Table, Executive, Flowchart, Tasks, Kanban, Implementation, Status, and Checklist Preview | Yes |
 | Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Preview candidates become canonical work before acceptance, or accepted artifacts remain trapped in preview UI | E2E or component coverage for Table/Kanban not opening tray, Checklist Preview opening tray, accepted tasks staying in structured canvas, and checklist artifact persistence | Route split covered; accepted checklist artifact persistence covered by review-tray save/reopen regression | Yes |
 | Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 25 serialized shell e2e passed, 1 intentional skip | Yes |
@@ -269,9 +269,12 @@ Avoid:
 
 #### Landed Agent D/E: Visual QA And Shell Geometry
 
-Status: first automated visual QA slice landed. It found and fixed a real
-narrow-width header/ribbon collision by reserving a taller shell-only narrow
-header and keeping header actions in one horizontally scrollable row.
+Status: second automated visual QA slice landed. The first pass found and fixed
+a real narrow-width header/ribbon collision by reserving a taller shell-only
+narrow header and keeping header actions in one horizontally scrollable row.
+The current pass captured shell on/off screenshots at 1600x1000, 1440x900, and
+390x844, then fixed the collapsed narrow left rail so it no longer keeps a wide
+hitbox over the canvas.
 
 Owns:
 
@@ -284,14 +287,18 @@ Landed work:
 
 - Added narrow-width Outputs ribbon geometry coverage for command group overlap
   and body overflow at 390px.
+- Added narrow collapsed-left-rail geometry coverage so the shell left slot
+  shrinks to the icon rail and the canvas remains clickable/readable at 390px.
 - Kept the legacy FloatingDock overlap test skipped and documented its
   disposition as shell-off compatibility coverage territory.
 - Verified shell e2e bundle: 20 passed, 1 intentional skip.
+- Captured and inspected shell on/off screenshots at 1600x1000, 1440x900, and
+  390x844 for default, properties, and review tray states where applicable.
 
 Remaining validation:
 
-- Manual screenshot signoff at 1600x1000, 1440x900, and 390x844 with shell on
-  and shell off.
+- Human/product screenshot signoff at 1600x1000, 1440x900, and 390x844 with
+  shell on and shell off before retiring rollback compatibility.
 - Recheck the 390px guard whenever future global header actions are added.
 
 #### Next Agent E: Checklist And Accepted Output Continuation
