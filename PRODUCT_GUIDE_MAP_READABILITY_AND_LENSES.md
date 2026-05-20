@@ -198,6 +198,16 @@ Validation:
 - Unit tests should prove mind map view defaults to hierarchy-only edges.
 - Run affected tests and `npm run build`.
 
+Current implementation update:
+
+- First extraction landed in `frontend/src/utils/canvasProjection.js`.
+- Focused projection coverage landed in
+  `frontend/tests/canvasProjection.test.mjs` for hierarchy-only default mind
+  map edges, relationship-lens inclusion, semantic relationship exclusion from
+  strong branch emphasis, and structural-only branch color assignment.
+- Future lens behavior should expand these tests instead of re-growing
+  projection internals inside `App.jsx`.
+
 ### 4. Tighten Relationship Label Visibility
 
 Files:
@@ -231,8 +241,7 @@ lens behavior expands further.
 
 Current validation gaps:
 
-- Add projection-level coverage for structural-only branch traversal and
-  semantic edge exclusion from strong branch emphasis.
-- Add projection-level coverage before broad lens expansion: branch scope,
-  branch color assignment, structural-only branch traversal, and semantic edge
-  exclusion from strong branch emphasis.
+- Manual visual QA is still needed for branch scope, selected-node state,
+  relationship-label state, and dense-map readability.
+- Broader lens expansion should add projection coverage for any new density,
+  confidence, or color assignment rule before it ships.

@@ -54,15 +54,15 @@ Not ready for broad QA or cleanup:
 Current verification:
 
 - `npm run build` from `frontend/`: passing.
-- `node --test tests/shellComponents.test.mjs tests/shellStore.test.mjs tests/shellLayoutState.test.mjs tests/uiShellFeatureFlag.test.mjs` from `frontend/`: passing, 38 tests.
+- `node --test tests/shellComponents.test.mjs tests/shellStore.test.mjs tests/shellLayoutState.test.mjs tests/uiShellFeatureFlag.test.mjs tests/canvasProjection.test.mjs` from `frontend/`: passing, 41 tests.
 - `npx playwright test tests/e2e/shell-foundation-smoke.spec.js` from `frontend/`: passing, 3 tests.
-- `npx playwright test tests/e2e/selection-shell-regression.spec.js tests/e2e/review-tray-regression.spec.js tests/e2e/shell-foundation-smoke.spec.js` from `frontend/`: passing, 21 passed and 1 intentional `fixme` skip.
+- `npx playwright test tests/e2e/selection-shell-regression.spec.js tests/e2e/review-tray-regression.spec.js tests/e2e/shell-foundation-smoke.spec.js --workers=1` from `frontend/`: passing, 21 passed and 1 intentional `fixme` skip.
 
 Known active QA gaps:
 
 - Legacy floating panel overlap in the old layout is documented as a `fixme`; the shell migration is the intended long-term fix.
 - Manual visual QA is still needed for ribbon/tray/right-rail density, especially with map lens controls active.
-- Branch highlighting and relationship-label lenses are documented and have first e2e coverage for default-off / toggle-on label behavior. Manual visual QA and projection-level unit coverage are still needed before default-shell rollout.
+- Branch highlighting and relationship-label lenses are documented and have e2e coverage for default-off / toggle-on label behavior plus projection-level unit coverage for structural-only traversal and semantic edge exclusion from strong branch emphasis. Manual visual QA is still needed before default-shell rollout.
 
 ### Default Shell Go/No-Go
 
@@ -77,8 +77,8 @@ is dead in both shell-on and shell-off paths.
 | Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Default shell feels crowded or hides controls at common desktop/narrow sizes | Run shell e2e geometry coverage plus manual screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Automated narrow/header/ribbon/tray coverage passing; manual screenshot signoff still open | Yes |
 | Accepted output surfaces need verification | Outputs ribbon and accepted workspace views | Accepted Table/Executive/Flowchart/Tasks/Kanban commands route to an invisible surface or wrong tray workflow | Verify Table, Executive, Flowchart, Tasks, and Kanban open accepted canvas/output surfaces; verify Checklist Preview opens the Review Tray | E2E route coverage passing for Table, Executive, Flowchart, Tasks, Kanban, Implementation, Status, and Checklist Preview | Yes |
 | Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Preview candidates become canonical work before acceptance, or accepted artifacts remain trapped in preview UI | E2E or component coverage for Table/Kanban not opening tray, Checklist Preview opening tray, accepted tasks staying in structured canvas, and checklist artifact persistence | Route split covered; accepted checklist artifact persistence still open | Yes |
-| Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 38 shell unit tests, 21 shell e2e passed, 1 intentional skip | Yes |
-| Map readability and relationship lenses are visually verified | Map ribbon, branch scope, relationship labels | Branch focus, selected nodes, and relationship labels compete visually or confuse review | Visual QA plus coverage that mind map relationship labels default off and can be toggled on intentionally | Default-off / toggle-on e2e passing; manual visual QA and projection unit coverage still open | Yes |
+| Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 21 serialized shell e2e passed, 1 intentional skip | Yes |
+| Map readability and relationship lenses are visually verified | Map ribbon, branch scope, relationship labels | Branch focus, selected nodes, and relationship labels compete visually or confuse review | Visual QA plus coverage that mind map relationship labels default off and can be toggled on intentionally | Default-off / toggle-on e2e and projection unit coverage passing; manual visual QA still open | Yes |
 | Preview-first graph mutation remains safe | Connections review and generated previews | Find Connections or related candidate acceptance mutates canonical graph without review | Verify generated connection candidates enter Review Tray first and accept/reject preserves existing mutation behavior | Open | Yes |
 | Legacy overlap `fixme` has disposition | Shell-off FloatingDock compatibility layout | Known overlap remains ambiguous when shell becomes default and rollback is needed | Either keep skipped with explicit shell-off waiver/manual screenshot gate, narrow to shell-only geometry, or replace with stable bounding-box coverage | Disposition documented: skipped as shell-off compatibility territory while shell slot geometry guards default readiness | Yes |
 | Shell-off compatibility remains covered | Feature flag rollback path | Default-on rollout cannot be safely disabled or corrupts existing workspace data | Run shell-off smoke/manual pass and confirm legacy FloatingDock surfaces still open, edit, save, and reopen existing workspace data | Open | Yes |
@@ -86,7 +86,7 @@ is dead in both shell-on and shell-off paths.
 | Review Tray remains authoritative for reviewable generated work | Bottom tray | AI drafts, source drafts, issues, connections, tasks preview, or checklist preview fall back to legacy/full-panel routes | Run review tray regression for direct tray routes and close behavior | Mostly covered; rerun after active tray/output edits land | Yes |
 | FloatingDock removal | Legacy floating layout | Removing compatibility chrome breaks shell-off rollback | Keep audit-only until default shell and output cleanup are complete | Deferred | No |
 | Richer source/branch metadata | Right rail properties | Default properties are useful but not fully product-complete | Product follow-up with field expansion and persistence tests | Deferred | No |
-| Full map projection helper extraction | Mind map projection/lens internals | Lens work remains harder to evolve but current behavior can ship | Refactor plan after branch/lens styling stabilizes | Deferred | No |
+| Full map projection helper extraction | Mind map projection/lens internals | Lens work remains harder to evolve but current behavior can ship | Refactor plan after branch/lens styling stabilizes | First extraction landed in `frontend/src/utils/canvasProjection.js` with focused unit coverage; broader density/lens rules deferred | No |
 
 ### Current Open Items / Agent Split
 
@@ -170,7 +170,8 @@ Avoid:
 
 Status: product guide, first branch styling polish, relationship-label
 default-off / toggle-on coverage, and structural-only branch edge emphasis fix
-landed. Manual visual QA and projection-level tests remain.
+landed. Projection helper extraction and first projection-level tests have
+landed. Manual visual QA remains.
 
 Owns:
 
@@ -186,13 +187,13 @@ Remaining validation:
   decoration.
 - Keep branch scope, selected node state, and relationship-label state visually
   distinct.
-- Add projection-level tests for semantic relationship edge exclusion from
-  strong branch emphasis before broad lens expansion.
+- Keep the projection-level tests for semantic relationship edge exclusion from
+  strong branch emphasis green before broad lens expansion.
 
 Avoid:
 
 - New popups.
-- Large `projectCanvasGraph` refactors before helper extraction is planned.
+- Large `projectCanvasGraph` behavior changes without focused projection tests.
 
 #### Landed Agent D/E: Visual QA And Shell Geometry
 
@@ -266,15 +267,13 @@ Next sequence:
 
 1. Add accepted checklist artifact persistence coverage or explicitly defer it
    as a post-default artifact concern.
-2. Add projection-level tests for semantic relationship edge exclusion from
-   strong branch emphasis.
-3. Add a non-`FloatingDock` floating surface inventory and decide which are
+2. Add a non-`FloatingDock` floating surface inventory and decide which are
    shell overlays, temporary canvas affordances, or retirement candidates.
-4. Complete manual screenshot signoff for shell on/off at desktop and narrow
+3. Complete manual screenshot signoff for shell on/off at desktop and narrow
    widths.
-5. Rerun build, shell units, shell e2e, and review tray e2e as the final
+4. Rerun build, shell units, shell e2e, and review tray e2e as the final
    pre-default verification bundle.
-6. Only after those pass, decide whether to flip the shell default flag. Keep
+5. Only after those pass, decide whether to flip the shell default flag. Keep
    `FloatingDock` retirement as a post-default cleanup track.
 
 #### Deferred Integration: FloatingDock Retirement
