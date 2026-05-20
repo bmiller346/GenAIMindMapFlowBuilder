@@ -928,6 +928,7 @@ const NodeInspector = ({
     );
     const taskProjection = selectedNode.data?.task_projection;
     const checklistProjection = selectedNode.data?.checklist_projection;
+    const showReviewActions = !metadataOnly;
     const isTaskMetadataNode =
         TASK_CAPABLE_TYPES.has(draft.node_type) ||
         Boolean(taskProjection?.accepted) ||
@@ -938,7 +939,7 @@ const NodeInspector = ({
         !draft.due_date ? 'due date' : ''
     ].filter(Boolean);
 
-    if (aiDraftSessionAppliesHere) {
+    if (showReviewActions && aiDraftSessionAppliesHere) {
         return (
             <aside className="node-inspector node-inspector-draft-mode">
                 <div className="node-inspector-header">
@@ -1058,38 +1059,40 @@ const NodeInspector = ({
                         onChange={(e) => updateDraft('owner_id', e.target.value)}
                     />
                 </label>
-                <div className="node-inspector-section node-task-metadata-card">
-                    <p>Task readiness</p>
-                    <div>
-                        <span>
-                            {isTaskMetadataNode
-                                ? 'Confirmed task metadata'
-                                : 'Task candidate'}
-                        </span>
-                        <strong>
-                            {isTaskMetadataNode
-                                ? missingTaskFields.length
-                                    ? `Missing ${missingTaskFields.join(', ')}.`
-                                    : 'Owner, priority, and due date are set.'
-                                : 'Confirm this node when it becomes accountable work.'}
-                        </strong>
+                {showReviewActions ? (
+                    <div className="node-inspector-section node-task-metadata-card">
+                        <p>Task readiness</p>
+                        <div>
+                            <span>
+                                {isTaskMetadataNode
+                                    ? 'Confirmed task metadata'
+                                    : 'Task candidate'}
+                            </span>
+                            <strong>
+                                {isTaskMetadataNode
+                                    ? missingTaskFields.length
+                                        ? `Missing ${missingTaskFields.join(', ')}.`
+                                        : 'Owner, priority, and due date are set.'
+                                    : 'Confirm this node when it becomes accountable work.'}
+                            </strong>
+                        </div>
+                        {taskProjection?.accepted || checklistProjection?.accepted ? (
+                            <small>
+                                {[
+                                    taskProjection?.accepted ? 'Accepted task projection' : '',
+                                    checklistProjection?.accepted ? 'Accepted checklist item' : ''
+                                ]
+                                    .filter(Boolean)
+                                    .join(' | ')}
+                            </small>
+                        ) : null}
+                        {!isTaskMetadataNode ? (
+                            <button type="button" onClick={confirmDraftAsTask}>
+                                Confirm as task
+                            </button>
+                        ) : null}
                     </div>
-                    {taskProjection?.accepted || checklistProjection?.accepted ? (
-                        <small>
-                            {[
-                                taskProjection?.accepted ? 'Accepted task projection' : '',
-                                checklistProjection?.accepted ? 'Accepted checklist item' : ''
-                            ]
-                                .filter(Boolean)
-                                .join(' | ')}
-                        </small>
-                    ) : null}
-                    {!isTaskMetadataNode ? (
-                        <button type="button" onClick={confirmDraftAsTask}>
-                            Confirm as task
-                        </button>
-                    ) : null}
-                </div>
+                ) : null}
                 <label>
                     Confidence
                     <input
@@ -1310,21 +1313,23 @@ const NodeInspector = ({
                                 ))}
                             </div>
                         ) : null}
-                        <div className="ai-action-preview-actions structured-artifact-actions">
-                            <button
-                                type="button"
-                                onClick={acceptStructuredEvidence}
-                                disabled={structuredDataContext.accepted}
-                            >
-                                {structuredDataContext.accepted ? 'Accepted' : 'Mark reviewed'}
-                            </button>
-                            <button type="button" onClick={() => createStructuredDataChild('finding')}>
-                                Create finding
-                            </button>
-                            <button type="button" onClick={() => createStructuredDataChild('task')}>
-                                Create task
-                            </button>
-                        </div>
+                        {showReviewActions ? (
+                            <div className="ai-action-preview-actions structured-artifact-actions">
+                                <button
+                                    type="button"
+                                    onClick={acceptStructuredEvidence}
+                                    disabled={structuredDataContext.accepted}
+                                >
+                                    {structuredDataContext.accepted ? 'Accepted' : 'Mark reviewed'}
+                                </button>
+                                <button type="button" onClick={() => createStructuredDataChild('finding')}>
+                                    Create finding
+                                </button>
+                                <button type="button" onClick={() => createStructuredDataChild('task')}>
+                                    Create task
+                                </button>
+                            </div>
+                        ) : null}
                     </div>
                 ) : null}
 

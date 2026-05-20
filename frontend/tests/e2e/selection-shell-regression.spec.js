@@ -48,6 +48,43 @@ const initialFlow = ({ selectedNodeIds = [] } = {}) =>
                     status: 'reviewed',
                     manual: true
                 }
+            },
+            {
+                id: 'structured-evidence',
+                type: 'response',
+                selected: selectedNodeIds.includes('structured-evidence'),
+                position: { x: 760, y: 20 },
+                data: {
+                    title: 'Structured Evidence',
+                    node_type: 'data',
+                    status: 'needs_review',
+                    manual: true,
+                    artifact_type: 'structured_data_analysis',
+                    metadata: {
+                        table_name: 'Shell QA Rows',
+                        query_id: 'query-shell-qa',
+                        result_hash: 'abcdef1234567890'
+                    },
+                    source_refs: [
+                        {
+                            source_type: 'sql_query',
+                            table_name: 'Shell QA Rows',
+                            query_id: 'query-shell-qa',
+                            result_hash: 'abcdef1234567890'
+                        }
+                    ],
+                    generated_artifacts: [
+                        {
+                            artifact_type: 'data_table',
+                            data: {
+                                table_name: 'Shell QA Rows',
+                                query_id: 'query-shell-qa',
+                                result_hash: 'abcdef1234567890',
+                                row_count: 2
+                            }
+                        }
+                    ]
+                }
             }
         ],
         edges: [
@@ -313,6 +350,7 @@ const expectNoMajorPanelOverlap = async (page) => {
                 '.canvas-lens-floating-dock',
                 '.mindmap-relationship-floating-dock',
                 '.selection-action-bar',
+                '.canvas-scope-banner',
                 '.node-inspector'
             ].join(', ')
         )
@@ -360,7 +398,7 @@ const expectNoMajorPanelOverlap = async (page) => {
     }
 };
 
-test.fixme('shift additive selection and lasso preserve selected nodes', async ({
+test('shift additive selection and lasso preserve selected nodes', async ({
     page
 }) => {
     await setupMockBackend(page);
@@ -570,6 +608,12 @@ test('shell right rail persists node metadata edits', async ({ page }) => {
     await expect(rightRail).toContainText('Node properties');
     await expect(rightRail.locator('.node-inspector')).toBeVisible();
     await expect(page.locator('.metadata-inspector-floating-dock')).toHaveCount(0);
+    await expect(rightRail.getByRole('button', { name: 'Confirm as task' })).toHaveCount(0);
+    await expect(rightRail).not.toContainText('AI action preview');
+    await expect(rightRail).not.toContainText('Workspace preview');
+    await expect(rightRail.getByRole('button', { name: 'Mark reviewed' })).toHaveCount(0);
+    await expect(rightRail.getByRole('button', { name: 'Create finding' })).toHaveCount(0);
+    await expect(rightRail.getByRole('button', { name: 'Create task' })).toHaveCount(0);
 
     await rightRail.getByLabel('Title').fill('Shell rail metadata title');
     await rightRail.getByLabel('Priority').selectOption('high');
@@ -577,6 +621,13 @@ test('shell right rail persists node metadata edits', async ({ page }) => {
 
     await expect(rightRail).toContainText('Applied locally');
     await expect(responseNodeByTitle(page, 'Shell rail metadata title')).toBeVisible();
+
+    await responseNodeByTitle(page, 'Structured Evidence').click();
+    await expect(rightRail).toContainText('Structured evidence');
+    await expect(rightRail).toContainText('Shell QA Rows');
+    await expect(rightRail.getByRole('button', { name: 'Mark reviewed' })).toHaveCount(0);
+    await expect(rightRail.getByRole('button', { name: 'Create finding' })).toHaveCount(0);
+    await expect(rightRail.getByRole('button', { name: 'Create task' })).toHaveCount(0);
 });
 
 test('shell right rail persists relationship metadata edits', async ({ page }) => {
