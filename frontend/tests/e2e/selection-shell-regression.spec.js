@@ -575,6 +575,13 @@ test('shell Outputs ribbon command groups stay scrollable without overlap at nar
                 width: rect.width
             };
         });
+        const commands = [...document.querySelectorAll('.shell-ribbon-command')].map((element) => {
+            const rect = element.getBoundingClientRect();
+            return {
+                height: rect.height,
+                width: rect.width
+            };
+        });
         const overlapPairs = [];
         for (let index = 0; index < groups.length - 1; index += 1) {
             const current = groups[index];
@@ -588,12 +595,16 @@ test('shell Outputs ribbon command groups stay scrollable without overlap at nar
             bodyOverflow: document.documentElement.scrollWidth - window.innerWidth,
             contentClientWidth: content?.clientWidth || 0,
             contentScrollWidth: content?.scrollWidth || 0,
+            maxCommandHeight: Math.max(...commands.map((command) => command.height)),
+            maxCommandWidth: Math.max(...commands.map((command) => command.width)),
             groupCount: groups.length,
             overlapPairs
         };
     });
 
     expect(metrics.bodyOverflow).toBeLessThanOrEqual(2);
+    expect(metrics.maxCommandHeight).toBeLessThanOrEqual(38);
+    expect(metrics.maxCommandWidth).toBeLessThanOrEqual(132);
     expect(metrics.groupCount).toBeGreaterThanOrEqual(4);
     expect(metrics.contentScrollWidth).toBeGreaterThanOrEqual(metrics.contentClientWidth);
     expect(metrics.overlapPairs).toEqual([]);
@@ -609,6 +620,20 @@ test('mind map relationship labels are lens controlled in the shell ribbon', asy
     await page.getByRole('tab', { name: 'Map' }).click();
     await expect(page.getByTestId('shell-ribbon')).toHaveAttribute('data-active-tab', 'map');
     const relationshipLens = page.getByLabel('Mind map relationship lens');
+    const lensMetrics = await relationshipLens.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        const ribbon = document.querySelector('[data-testid="shell-ribbon-content"]')?.getBoundingClientRect();
+        return {
+            height: rect.height,
+            top: rect.top,
+            bottom: rect.bottom,
+            ribbonTop: ribbon?.top || 0,
+            ribbonBottom: ribbon?.bottom || 0
+        };
+    });
+    expect(lensMetrics.height).toBeLessThanOrEqual(58);
+    expect(lensMetrics.top).toBeGreaterThanOrEqual(lensMetrics.ribbonTop - 1);
+    expect(lensMetrics.bottom).toBeLessThanOrEqual(lensMetrics.ribbonBottom + 1);
     await expect(page.locator('.semantic-edge-label--mindmap')).toHaveCount(0);
     await expect(page.locator('.react-flow__edge.canvas-edge-mindmap-relationship')).toHaveCount(0);
 
