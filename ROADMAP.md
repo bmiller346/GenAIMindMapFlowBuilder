@@ -56,6 +56,15 @@ Recently verified:
   context. The server also exposes a source-reconciliation endpoint for adding
   source chunks to an active draft; the draft panel now exposes that
   reconciliation path for loaded sources.
+- Ask AI can already draft multiple output surfaces as proposal state: graph
+  nodes/edges, draft items, review annotations, structured tables, chart
+  artifacts, flow charts, tasks, checklists, executive outputs, and source
+  repair suggestions. The next product gap is orchestration: AI should create
+  connected multi-view packages instead of isolated chart/table/node outputs.
+- Web/current source drafting can request Responses web search and preserve
+  real URL-backed `source_refs` for public-reference questions such as codes,
+  standards, regulations, and current sources. URL intake is treated as a crawl
+  seed/source context, not a one-off chart feature.
 - Real-file backend upload smoke passed for `examples/gpt4all.pdf` and
   `examples/Project-Management-Plan-1.docx` using the real upload, extraction,
   chunking, source metadata, source draft review, save/reopen, JSON export, and
@@ -101,6 +110,11 @@ Known verification gap:
     canonical graph.
 12. Custom prompts may create drafts, but only accepted and validated drafts
     become graph nodes.
+13. Visual outputs such as Sankey, flowcharts, tables, and executive packages
+    should be lenses over the same accepted model, not separate diagram states.
+14. AI may create a coordinated bundle of nodes, edges, structured evidence,
+    tasks, charts, and review findings, but the bundle must remain draft-first
+    until accepted.
 
 ## Implemented
 
@@ -346,6 +360,9 @@ These are the features required to call the core MVP functional.
   document classification, topic coverage, stale signals, duplicate groups, and
   missing expected artifacts. This supports folder-review language without
   implementing native filesystem folder upload.
+- [ ] `ConnectedPicturePackage` contract for multi-view AI output bundles:
+  canonical node/edge proposals, typed relationship layers, structured evidence
+  rows, view lenses, chart artifacts, task/review items, and repair targets.
 
 ## Still Needed For Fully Functional MVP
 
@@ -532,6 +549,140 @@ Acceptance criteria:
   notes-only accept behavior, orphan-edge prevention, duplicate-ID-safe merge,
   unsourced `needs_review`, and undo snapshot creation.
 
+### Connected Picture Packages And Multi-View AI Outputs
+
+Goal: let AI create a coordinated, reviewable system model instead of a single
+isolated output. Sankey may appear inside a node, but it should be one lens in a
+connected package that can also include graph nodes, typed relationships,
+tables, flowcharts, evidence paths, tasks, risks, and source repairs.
+
+Target experience:
+
+```text
+Ask AI: "Turn this messy context into the full picture"
+-> classify intent and target output mix
+-> create a draft connected package
+-> user reviews package summary, graph changes, lenses, evidence, and tasks
+-> user accepts selected parts or the whole package
+-> accepted nodes/edges/artifacts project into Map, Connections, Flowchart,
+   Table, Chart/Sankey, Evidence, Tasks, Kanban, and Executive views
+```
+
+Current implementation slices:
+
+- [x] Ask AI draft sessions can already contain proposed nodes, edges, draft
+  items, annotations, generated artifacts, source refs, assumptions, validation
+  reports, and preview diffs.
+- [x] Accepted draft nodes can preserve structured data fields such as `df`,
+  `query`, `graph`, `artifact_type`, `artifact_ids`, `generated_artifacts`,
+  `review_state`, and `source_refs`.
+- [x] Registered artifact types already cover mind map, knowledge graph,
+  flow chart, table, chart, data table, SQL query, data summary, data insight,
+  tasks, checklist, SME questions, missing info, completeness review, software
+  overlap, team roadmap, executive output, news article, and newsletter.
+- [x] Sankey is implemented as a chart/data lens from structured
+  source/target/value rows and can preserve row-level evidence repair metadata.
+- [x] `Correct evidence` opens item-level repair prompts that can target
+  uploaded sources, selected sources, pasted URLs, or web/current public
+  context.
+- [x] Public-reference prompts for codes, standards, regulations, NFPA, NEC,
+  NJAC, IBC, AHJ, and similar terms infer Web/current sources with citations
+  required.
+- [x] Responses draft requests can include web-search tools when evidence mode
+  is Web/current sources and can preserve real URL-backed `source_refs`.
+- [x] Guided start `Messy context to view` lets users ask for Auto routing
+  rather than choosing Sankey, table, graph, or tasks up front.
+
+Product model:
+
+- [ ] Treat a connected package as a bundle over one canonical graph, not as a
+  new workspace type.
+- [ ] Distinguish package layers:
+  `concept_graph`, `relationship_graph`, `process_graph`,
+  `dependency_graph`, `evidence_graph`, `data_graph`, and `action_graph`.
+- [ ] Let each package layer map to existing views: Map/Outline,
+  Connections, Flowchart, Table, Chart/Sankey, Evidence/Review, Tasks/Kanban,
+  and Executive.
+- [ ] Store package/lens metadata on generated artifacts and accepted nodes so
+  the same accepted model can explain which outputs belong together.
+- [ ] Keep package acceptance selective: user can accept graph structure,
+  structured evidence rows, tasks, chart lenses, review findings, or citations
+  independently.
+
+Backend contract work:
+
+- [ ] Register a `connected_picture_package` artifact type in the Artifact
+  Registry.
+- [ ] Define strict schema fields: `package_id`, `title`, `intent`,
+  `primary_nodes`, `relationship_edges`, `view_lenses`, `structured_evidence`,
+  `evidence_links`, `tasks`, `risks`, `decisions`, `repair_targets`,
+  `source_refs`, `assumptions`, and `acceptance_groups`.
+- [ ] Add package validation: every relationship edge needs source refs or
+  assumptions; every lens must point back to node IDs, row IDs, source refs, or
+  artifact IDs; unsupported package parts must remain `needs_review`.
+- [ ] Extend prompt instructions so broad Auto requests can return a package
+  when multiple views are needed, rather than forcing one `output_shape`.
+- [ ] Add source retrieval/ranking for package generation so large source sets
+  do not overload prompts and package metadata records included/excluded
+  context.
+- [ ] Add package-aware accept behavior that can apply graph nodes/edges and
+  attach generated artifacts in one transaction with undo metadata.
+- [ ] Add package-aware repair behavior so a bad citation, row, edge, task, or
+  finding can be corrected without regenerating the whole package.
+
+Frontend UX work:
+
+- [ ] Add a package preview surface in the draft panel with tabs:
+  Overview, Graph, Connections, Flow, Table, Chart, Evidence, Tasks, Review.
+- [ ] Show a compact package map: hub node, generated lenses, source coverage,
+  unresolved repair targets, and acceptance groups.
+- [ ] Let users accept selected package groups, for example:
+  graph only, evidence rows only, tasks only, chart lens only, cited-only, or
+  notes-only.
+- [ ] Let users jump from a Sankey path, table row, relationship edge, task, or
+  executive finding back to the same evidence item and repair prompt.
+- [ ] Add view readiness indicators that explain which package layers are
+  present or missing for each view.
+- [ ] Make empty/new workspace starts favor `Messy context to view`, Add
+  sources, Ask AI, and Start with node, while keeping specialized recipes
+  available inside Guided starts.
+
+Projection and graph work:
+
+- [ ] Add package projection helpers that build the following from accepted
+  nodes/artifacts: dependency graph, process graph, evidence graph, data graph,
+  and action graph.
+- [ ] Expand Sankey projection beyond structured rows to support:
+  source-to-claim, source-to-node, node-to-output, dependency, handoff,
+  owner/status, risk/mitigation, and evidence-flow paths.
+- [ ] Add relationship-edge projections that can read package edges with
+  typed relationships, rationale, source signal, confidence, and review state.
+- [ ] Add evidence graph projection: source/document/URL/chunk -> claim/row/
+  edge/finding -> accepted node/output.
+- [ ] Add package export shapes for Markdown, JSON, CSV evidence rows, Mermaid
+  flowchart, and optional Miro/monday handoff candidates.
+
+Acceptance criteria:
+
+- [ ] A prompt like "turn this fire alarm design code context into the full
+  picture" can draft a package with code/dependency nodes, relationship edges,
+  source-backed evidence rows, a flow/dependency lens, review tasks, and weak
+  evidence repair targets.
+- [ ] A prompt with no sources can still draft a useful package, but every
+  public/code/reference claim is either web-cited or marked `needs_review`.
+- [ ] A package can be accepted partially without losing source refs or
+  package/lens metadata.
+- [ ] Accepted package content appears coherently in Map, Connections,
+  Flowchart, Table, Chart/Sankey, Evidence/Review, and Tasks where applicable.
+- [ ] Correcting one evidence item can attach an uploaded source, selected
+  source, pasted URL, or web/current citation without regenerating unrelated
+  package parts.
+- [ ] Browser tests cover new workspace -> Messy context to view -> package
+  draft -> accept selected groups -> save/reopen -> verify package projections.
+- [ ] Backend tests cover package schema validation, selective acceptance,
+  URL-backed source refs, unsupported item review flags, and projection
+  eligibility.
+
 ### Canvas-Native Follow-Up Actions And Reviewable Diffs
 
 Goal: make AI follow-up actions feel like part of the workspace instead of a
@@ -599,7 +750,7 @@ Priority work:
 - [x] Extend chart artifacts to support `chart_spec.chart_type = "sankey"`,
   preserving query id, result hash, selected metric, and source refs.
 - [x] Render structured-data Sankey previews with existing Plotly dependencies.
-- [ ] Add click-to-filter behavior from Sankey node/band to represented table
+- [x] Add click-to-filter behavior from Sankey node/band to represented table
   rows and source context.
 - [x] Add a first workspace Sankey projection helper for accepted structured
   evidence source/target/value paths.
