@@ -595,69 +595,70 @@ Current implementation slices:
 
 Product model:
 
-- [ ] Treat a connected package as a bundle over one canonical graph, not as a
+- [x] Treat a connected package as a bundle over one canonical graph, not as a
   new workspace type.
-- [ ] Distinguish package layers:
+- [x] Distinguish package layers:
   `concept_graph`, `relationship_graph`, `process_graph`,
   `dependency_graph`, `evidence_graph`, `data_graph`, and `action_graph`.
 - [ ] Let each package layer map to existing views: Map/Outline,
   Connections, Flowchart, Table, Chart/Sankey, Evidence/Review, Tasks/Kanban,
-  and Executive.
-- [ ] Store package/lens metadata on generated artifacts and accepted nodes so
+  and Executive. Projection helpers exist; final UI consumption pass remains.
+- [x] Store package/lens metadata on generated artifacts and accepted nodes so
   the same accepted model can explain which outputs belong together.
-- [ ] Keep package acceptance selective: user can accept graph structure,
+- [x] Keep package acceptance selective: user can accept graph structure,
   structured evidence rows, tasks, chart lenses, review findings, or citations
   independently.
 
 Backend contract work:
 
-- [ ] Register a `connected_picture_package` artifact type in the Artifact
+- [x] Register a `connected_picture_package` artifact type in the Artifact
   Registry.
-- [ ] Define strict schema fields: `package_id`, `title`, `intent`,
+- [x] Define strict schema fields: `package_id`, `title`, `intent`,
   `primary_nodes`, `relationship_edges`, `view_lenses`, `structured_evidence`,
   `evidence_links`, `tasks`, `risks`, `decisions`, `repair_targets`,
   `source_refs`, `assumptions`, and `acceptance_groups`.
-- [ ] Add package validation: every relationship edge needs source refs or
+- [x] Add package validation: every relationship edge needs source refs or
   assumptions; every lens must point back to node IDs, row IDs, source refs, or
   artifact IDs; unsupported package parts must remain `needs_review`.
-- [ ] Extend prompt instructions so broad Auto requests can return a package
+- [x] Extend prompt instructions so broad Auto requests can return a package
   when multiple views are needed, rather than forcing one `output_shape`.
 - [ ] Add source retrieval/ranking for package generation so large source sets
   do not overload prompts and package metadata records included/excluded
-  context.
-- [ ] Add package-aware accept behavior that can apply graph nodes/edges and
+  context. Public-reference citation policy exists; large-source ranking still
+  needs release verification.
+- [x] Add package-aware accept behavior that can apply graph nodes/edges and
   attach generated artifacts in one transaction with undo metadata.
-- [ ] Add package-aware repair behavior so a bad citation, row, edge, task, or
+- [x] Add package-aware repair behavior so a bad citation, row, edge, task, or
   finding can be corrected without regenerating the whole package.
 
 Frontend UX work:
 
-- [ ] Add a package preview surface in the draft panel with tabs:
+- [x] Add a package preview surface in the draft panel with tabs:
   Overview, Graph, Connections, Flow, Table, Chart, Evidence, Tasks, Review.
-- [ ] Show a compact package map: hub node, generated lenses, source coverage,
+- [x] Show a compact package map: hub node, generated lenses, source coverage,
   unresolved repair targets, and acceptance groups.
-- [ ] Let users accept selected package groups, for example:
+- [x] Let users accept selected package groups, for example:
   graph only, evidence rows only, tasks only, chart lens only, cited-only, or
   notes-only.
-- [ ] Let users jump from a Sankey path, table row, relationship edge, task, or
+- [x] Let users jump from a Sankey path, table row, relationship edge, task, or
   executive finding back to the same evidence item and repair prompt.
-- [ ] Add view readiness indicators that explain which package layers are
+- [x] Add view readiness indicators that explain which package layers are
   present or missing for each view.
-- [ ] Make empty/new workspace starts favor `Messy context to view`, Add
+- [x] Make empty/new workspace starts favor `Messy context to view`, Add
   sources, Ask AI, and Start with node, while keeping specialized recipes
   available inside Guided starts.
 
 Projection and graph work:
 
-- [ ] Add package projection helpers that build the following from accepted
+- [x] Add package projection helpers that build the following from accepted
   nodes/artifacts: dependency graph, process graph, evidence graph, data graph,
   and action graph.
-- [ ] Expand Sankey projection beyond structured rows to support:
+- [x] Expand Sankey projection beyond structured rows to support:
   source-to-claim, source-to-node, node-to-output, dependency, handoff,
   owner/status, risk/mitigation, and evidence-flow paths.
-- [ ] Add relationship-edge projections that can read package edges with
+- [x] Add relationship-edge projections that can read package edges with
   typed relationships, rationale, source signal, confidence, and review state.
-- [ ] Add evidence graph projection: source/document/URL/chunk -> claim/row/
+- [x] Add evidence graph projection: source/document/URL/chunk -> claim/row/
   edge/finding -> accepted node/output.
 - [ ] Add package export shapes for Markdown, JSON, CSV evidence rows, Mermaid
   flowchart, and optional Miro/monday handoff candidates.
@@ -667,21 +668,284 @@ Acceptance criteria:
 - [ ] A prompt like "turn this fire alarm design code context into the full
   picture" can draft a package with code/dependency nodes, relationship edges,
   source-backed evidence rows, a flow/dependency lens, review tasks, and weak
-  evidence repair targets.
-- [ ] A prompt with no sources can still draft a useful package, but every
+  evidence repair targets. Mocked/package contract paths exist; live provider
+  smoke remains the release gate.
+- [x] A prompt with no sources can still draft a useful package, but every
   public/code/reference claim is either web-cited or marked `needs_review`.
-- [ ] A package can be accepted partially without losing source refs or
+- [x] A package can be accepted partially without losing source refs or
   package/lens metadata.
 - [ ] Accepted package content appears coherently in Map, Connections,
   Flowchart, Table, Chart/Sankey, Evidence/Review, and Tasks where applicable.
-- [ ] Correcting one evidence item can attach an uploaded source, selected
+  Projection helpers and e2e coverage exist; final view consumption polish
+  remains.
+- [x] Correcting one evidence item can attach an uploaded source, selected
   source, pasted URL, or web/current citation without regenerating unrelated
   package parts.
-- [ ] Browser tests cover new workspace -> Messy context to view -> package
+- [x] Browser tests cover new workspace -> Messy context to view -> package
   draft -> accept selected groups -> save/reopen -> verify package projections.
-- [ ] Backend tests cover package schema validation, selective acceptance,
+- [x] Backend tests cover package schema validation, selective acceptance,
   URL-backed source refs, unsupported item review flags, and projection
   eligibility.
+
+Pre-package refactor candidates:
+
+Before adding the package contract itself, keep these files from absorbing more
+responsibility. They are already large enough that package work should either
+extract a focused module first or land behind a small adapter in the existing
+file.
+
+| Priority | File | Current size | Why it blocks package work | First extraction |
+| --- | --- | ---: | --- | --- |
+| P0 | `backend/ai_helpers.py` | ~6,014 lines | Owns helper previews, draft sessions, artifact registry/validation, source context, provider prompts, deterministic fallbacks, and accept/apply semantics. A package contract would make this file the backend bottleneck. | Move artifact registry/validators and draft-session accept/apply helpers into `backend/ai/` modules, keeping import-compatible wrappers. |
+| P0 | `frontend/src/utils/aiDraftSessions.js` | ~2,407 lines | Owns frontend draft normalization, generated artifact handling, local fallback accept behavior, preview diffs, and copy/export helpers. Selective package acceptance will otherwise pile into this utility. | Split package/artifact normalization, preview diff helpers, and local accept semantics into separate utilities. |
+| P0 | `frontend/src/views/graphProjection.js` | ~3,460 lines | Already projects table, tasks, Kanban, relationships, repairs, executive views, and Sankey-like lenses. Connected package layers need pure projection modules, not a larger kitchen-sink file. | Create projection modules by domain: tasks, relationships, source repair, flowchart, Sankey, executive, and packages. |
+| P1 | `frontend/src/views/CanvasStructuredView.jsx` | ~3,125 lines | Renders and manages accepted structured outputs: table, flowchart, executive, tasks, Kanban, Sankey, hierarchy actions, exports, and evidence state. Package lenses will need this surface but should not expand it further. | Extract Sankey panel/actions, table hierarchy actions, and per-view sections under `views/structured/`. |
+| P1 | `frontend/src/global-components/AiDraftSessionPanel.jsx` | ~1,665 lines | This is where package preview tabs and group acceptance will appear. It already mixes revision timeline, source coverage, preview outline, publishable artifacts, accept controls, and reports. | Extract revision timeline, artifact previews, draft outline, accept controls, and later `ConnectedPackagePreview`. |
+| P1 | `frontend/src/modals/PromptModal.jsx` | ~2,383 lines | Still owns advanced Ask AI routing, output-shape inference, evidence/citation controls, progress handling, starter recipes, and local fallback draft building. It should launch package drafting, not own package review. | Extract prompt intent/output-shape routing and draft-session controller hooks before adding package-specific controls. |
+| P2 | `backend/app.py` | ~7,604 lines | Route registration, workspace persistence, source handling, AI endpoints, exports, and app orchestration live together. New package endpoints should not be added directly here without a router/module boundary. | Add focused routers for draft/package operations and keep `app.py` as wiring. |
+| P2 | `frontend/src/App.jsx` | ~3,045 lines | Shell routing is better now, but App still coordinates canvas selection, Ask AI entry points, review tray, metadata rail, and output surfaces. Package routing should enter through shell/review abstractions. | Move package route/open/accept callbacks into shell or review controllers. |
+| P2 | `frontend/src/nodes/ResponseNode.jsx` | ~2,485 lines | Node rendering includes structured artifacts, evidence repair, Sankey/card displays, and authoring actions. Package artifact cards and item repair affordances could overload it. | Extract artifact cards and node evidence repair actions under `nodes/artifacts/` and `nodes/actions/`. |
+| P2 | `backend/export/workspace_graph.py` | ~1,148 lines | Backend export/projection logic mixes workspace graph normalization with executive/newsletter/roadmap/export outputs. Package export shapes should not expand this file. | Split accepted artifact/export shapes by output family, adding package exports as a separate module. |
+
+Five lead-agent mission briefs:
+
+Use five lead agents, each with five subagents. The lead agent owns sequencing
+inside its lane, keeps subagent write scopes disjoint, and posts a short
+handoff note listing files changed, tests run, and remaining blockers. Subagents
+should not revert or rewrite work owned by another lane.
+
+1. Lead Agent A: Backend Contract And API Boundaries
+   - Mission: make connected packages a real backend contract while shrinking
+     the current backend AI/API bottlenecks.
+   - Owns: `backend/ai_helpers.py`, `backend/ai/schemas.py`, `backend/app.py`,
+     `backend/export/workspace_graph.py`, backend AI/API/export tests.
+   - Depends on: none. This is the first backend lane.
+   - Done when: `connected_picture_package` can be validated as an artifact,
+     old draft behavior still passes, and package work no longer needs to add
+     more bulk directly to `ai_helpers.py` or `app.py`.
+
+   Subagent A1: AI helper extraction
+   - Write scope: `backend/ai_helpers.py`, new `backend/ai/` modules.
+   - Extract artifact registry helpers, generated artifact validation, and
+     deterministic fallback builders behind compatibility wrappers.
+   - Done when existing backend artifact/draft tests pass unchanged.
+
+   Subagent A2: Draft accept/apply extraction
+   - Write scope: `backend/ai_helpers.py`, new `backend/ai/` accept/apply
+     module, backend draft acceptance tests.
+   - Extract append/replace/merge/selected/cited-only/notes-only accept logic.
+   - Done when acceptance tests prove behavior and undo metadata are unchanged.
+
+   Subagent A3: Connected package schema
+   - Write scope: `backend/ai/schemas.py`, package schema tests.
+   - Register `connected_picture_package` and define strict fields:
+     `package_id`, `primary_nodes`, `relationship_edges`, `view_lenses`,
+     `structured_evidence`, `evidence_links`, `tasks`, `risks`, `decisions`,
+     `repair_targets`, `source_refs`, `assumptions`, and `acceptance_groups`.
+   - Done when invalid refs fail validation and unsupported package parts become
+     `needs_review`.
+
+   Subagent A4: Router and export boundaries
+   - Write scope: `backend/app.py`, `backend/export/workspace_graph.py`, new
+     backend router/export modules.
+   - Move existing draft/export behavior behind smaller modules without adding
+     new package endpoints yet.
+   - Done when API/export tests pass and `app.py` remains wiring-oriented.
+
+   Subagent A5: Backend contract test harness
+   - Write scope: backend tests only, plus fixtures.
+   - Add package registry, schema, URL-backed source refs, selective accept, and
+     unsupported-item review tests.
+   - Done when future backend package work has failing tests before code.
+
+2. Lead Agent B: Frontend Draft And Ask AI Orchestration
+   - Mission: make Ask AI and draft sessions able to preview, refine, and
+     accept a multi-view package without overloading prompt or draft utilities.
+   - Owns: `frontend/src/utils/aiDraftSessions.js`,
+     `frontend/src/modals/PromptModal.jsx`,
+     `frontend/src/global-components/AiDraftSessionPanel.jsx`, related CSS and
+     frontend draft/prompt tests.
+   - Depends on: A3 schema shape for final names; can start extraction earlier.
+   - Done when broad prompts like "turn this mess into the full picture" route
+     to a package-capable draft flow and the draft panel can show package tabs
+     from a mocked artifact.
+
+   Subagent B1: Draft utility extraction
+   - Write scope: `frontend/src/utils/aiDraftSessions.js`, new draft utility
+     modules.
+   - Extract generated artifact normalization, preview diff helpers, local
+     fallback accept helpers, and copy/export helpers.
+   - Done when existing draft utility tests pass with compatibility exports.
+
+   Subagent B2: Prompt routing and starter recipes
+   - Write scope: `frontend/src/modals/PromptModal.jsx`, prompt model/config
+     files, prompt tests.
+   - Extract intent/output-shape routing and make `Messy context to view` the
+     natural starting point for multi-view requests.
+   - Done when Sankey is a recipe/lens choice, not a lonely empty-canvas path.
+
+   Subagent B3: Draft panel shell extraction
+   - Write scope: `AiDraftSessionPanel.jsx`, new draft panel subcomponents,
+     CSS/tests.
+   - Extract revision timeline, artifact previews, draft outline, source
+     coverage, and accept controls.
+   - Done when the panel is ready to host a package preview component without a
+     larger single-file tangle.
+
+   Subagent B4: Connected package preview UI
+   - Write scope: package preview component, `aiDraftSessions` normalizer,
+     draft panel tests.
+   - Build preview tabs: Overview, Graph, Connections, Flow, Table, Chart,
+     Evidence, Tasks, Review.
+   - Done when a mocked package artifact renders acceptance groups, readiness
+     chips, repair targets, and source coverage.
+
+   Subagent B5: Frontend draft regression suite
+   - Write scope: frontend draft/prompt tests and fixtures.
+   - Cover package normalization, selected item IDs, no-source drafts, web
+     citation mode, and existing non-package draft paths.
+   - Done when package preview changes cannot silently break normal Ask AI.
+
+3. Lead Agent C: Projection, Lenses, And Structured Views
+   - Mission: make accepted package content appear coherently across Map,
+     Connections, Flowchart, Table, Chart/Sankey, Evidence, Tasks, Kanban, and
+     Executive views.
+   - Owns: `frontend/src/views/graphProjection.js`,
+     `frontend/src/utils/sankeyFlow.js`,
+     `frontend/src/views/CanvasStructuredView.jsx`,
+     `frontend/src/nodes/ResponseNode.jsx`, projection/view tests.
+   - Depends on: A3 package field names and B1 draft normalization helpers.
+   - Done when package layers project through pure helpers and structured views
+     render them without expanding the god files.
+
+   Subagent C1: Projection module extraction
+   - Write scope: `graphProjection.js`, new projection modules, projection
+     tests.
+   - Split task/Kanban, relationship, source-repair, flowchart, Sankey,
+     executive, and package-ready helpers by domain.
+   - Done when projection tests pass and imports remain stable.
+
+   Subagent C2: Package layer projections
+   - Write scope: package projection module and tests.
+   - Add `concept_graph`, `relationship_graph`, `process_graph`,
+     `dependency_graph`, `evidence_graph`, `data_graph`, and `action_graph`
+     helpers over accepted nodes/artifacts.
+   - Done when IDs are stable, source refs are preserved, and missing evidence
+     yields `needs_review`.
+
+   Subagent C3: Sankey and chart lens expansion
+   - Write scope: `sankeyFlow.js`, chart/lens tests.
+   - Support source-to-claim, source-to-node, node-to-output, dependency,
+     handoff, owner/status, risk/mitigation, and evidence-flow paths.
+   - Done when Sankey remains conservative and does not fabricate unsupported
+     weights.
+
+   Subagent C4: Structured surface extraction
+   - Write scope: `CanvasStructuredView.jsx`, new `views/structured/`
+     components.
+   - Extract Sankey panel/actions, table hierarchy actions, and per-view
+     sections.
+   - Done when visual behavior is unchanged and package lenses can slot in.
+
+   Subagent C5: Node artifact surface extraction
+   - Write scope: `ResponseNode.jsx`, new `nodes/artifacts/` and
+     `nodes/actions/` components.
+   - Extract artifact cards and node evidence repair actions.
+   - Done when package artifact cards can be added without touching the whole
+     node renderer.
+
+4. Lead Agent D: Evidence, Sources, Repair, And Trust
+   - Mission: make citations and correction workflows granular enough that a
+     user can fix one package row, path, edge, task, or finding without
+     regenerating the whole model.
+   - Owns: evidence/source repair code in frontend and backend, source
+     retrieval/ranking rules, repair tests.
+   - Depends on: A3 repair target schema and C2 evidence projection shape.
+   - Done when `Correct evidence` can patch item-level source refs/review state
+     for structured rows and chart/Sankey rows.
+
+   Subagent D1: Source retrieval and citation policy
+   - Write scope: backend AI source context/routing modules and tests.
+   - Ensure public-reference prompts infer web/current sources with citations
+     required, while uploaded/selected sources stay preferred where appropriate.
+   - Done when code/standard/regulation prompts do not produce unsupported
+     public claims silently.
+
+   Subagent D2: Evidence repair target model
+   - Write scope: backend schema/helpers and frontend normalization helpers.
+   - Standardize `evidence_item_id`, `row_id`, represented row indexes,
+     artifact IDs, source refs, and review state for repairable package parts.
+   - Done when repair targets can identify exactly one row/path/edge/finding.
+
+   Subagent D3: Item-level repair write-back
+   - Write scope: frontend repair apply helpers, backend accept/apply support
+     if needed, tests.
+   - Patch row fields, `source_refs`, `review_state`, and citation metadata
+     without regenerating unrelated artifact content.
+   - Done when structured rows and Sankey rows both have write-back tests.
+
+   Subagent D4: URL/source attach workflow
+   - Write scope: source repair UI/backend integration and tests.
+   - Let users upload a source, select an existing source, paste a URL, or use
+     web/current citation mode for one correction.
+   - Done when a correction from a URL produces durable source refs.
+
+   Subagent D5: Evidence trust UX
+   - Write scope: draft panel/package preview/evidence badges.
+   - Show cited, uncited, inferred, web-cited, source-backed, and needs-review
+     states consistently across package preview, node cards, and lenses.
+   - Done when users can see why a Sankey path or relationship is trusted.
+
+5. Lead Agent E: Acceptance, Persistence, QA, And Release
+   - Mission: make package acceptance safe, durable, undoable, and covered by
+     tests before the feature is treated as product-ready.
+   - Owns: package-aware accept semantics, save/reload persistence, e2e tests,
+     release checklist, and cross-lane integration.
+   - Depends on: A3 package schema, B4 preview UI, C2 projections, D3 repair
+     write-back.
+   - Done when a new workspace can draft a package, accept selected groups,
+     save/reopen, and show coherent projections with source refs intact.
+
+   Subagent E1: Package selective acceptance
+   - Write scope: frontend/backend accept helpers and tests.
+   - Add `package_id`, `package_item_id`, acceptance groups, required sibling
+     IDs, dependency links, and filtered `accepted_artifacts`.
+   - Done when graph-only/evidence-only/tasks-only/chart-only accept works
+     without dangling references.
+
+   Subagent E2: Persistence and undo
+   - Write scope: save/reload snapshot helpers, backend persistence, tests.
+   - Preserve package/lens metadata, source refs, review state, and undo
+     metadata after accept.
+   - Done when save/reopen tests prove package identity survives reload.
+
+   Subagent E3: Cross-view integration e2e
+   - Write scope: Playwright/e2e tests and mocked package fixtures.
+   - Cover new workspace -> Messy context to view -> package draft -> selected
+     accept -> Map/Connections/Flowchart/Table/Sankey/Evidence/Tasks.
+   - Done when one mocked happy-path e2e guards the whole workflow.
+
+   Subagent E4: No-source and web-current regressions
+   - Write scope: backend/frontend tests and fixtures.
+   - Cover no-source drafts, web-current public refs, unsupported claims,
+     citation-required prompts, and evidence repair from pasted URLs.
+   - Done when empty workspaces produce useful but clearly marked packages.
+
+   Subagent E5: Release coordination
+   - Write scope: roadmap checklists, regression commands, release notes.
+   - Track lane dependencies, open risks, test commands, screenshots, and
+     manual QA notes.
+   - Done when future agents know exactly which tests to run before merging.
+
+Recommended execution order:
+
+1. Start A1, A2, B1, and C1 in parallel as extraction-only work.
+2. Run A3 once backend helper seams exist; B2 can start at the same time.
+3. Run B3, C4, and C5 to clear UI god-file pressure.
+4. Run C2, C3, and D1/D2 once package field names are stable.
+5. Run B4, D3/D4/D5, and E1/E2 for real package preview, repair, accept, and
+   persistence.
+6. Run E3/E4/E5 last for e2e, release confidence, and documentation cleanup.
 
 ### Canvas-Native Follow-Up Actions And Reviewable Diffs
 
