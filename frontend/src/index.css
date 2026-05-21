@@ -14081,6 +14081,37 @@ img:hover {
   text-align: right;
 }
 
+.canvas-structured-sankey-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.canvas-structured-sankey-actions button {
+  min-height: 1.85rem;
+  border: 1px solid color-mix(in srgb, var(--question-border) 88%, transparent);
+  border-radius: 0.38rem;
+  background: var(--modal-container-color);
+  color: var(--font-color);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 850;
+  padding: 0 0.55rem;
+}
+
+.canvas-structured-sankey-actions button:hover {
+  border-color: color-mix(in srgb, #34d399 50%, var(--question-border));
+}
+
+.canvas-structured-sankey-summary em {
+  color: var(--input-color);
+  font-size: 0.7rem;
+  font-style: normal;
+  line-height: 0.95rem;
+  text-align: right;
+}
+
 .canvas-structured-sankey-body {
   display: grid;
   grid-template-columns: minmax(18rem, 1.45fr) minmax(14rem, 0.75fr);

@@ -607,7 +607,7 @@ Priority work:
   handoff, dependency, owner/status, and evidence-flow paths.
 - [x] Keep inferred paths preview-first and mark unsupported generated weights
   as `needs_review`.
-- [ ] Add Markdown/JSON export of Sankey flow rows, selected metric, review
+- [x] Add Markdown/JSON export of Sankey flow rows, selected metric, review
   state, unsupported paths, and source refs.
 - [x] Add focused tests for structured-data eligibility, Plotly Sankey spec
   generation, and source/ref preservation.

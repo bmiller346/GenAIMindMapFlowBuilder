@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
     buildCompletenessReviewProjection,
     buildGraphProjection,
+    buildSankeyFlowExport,
+    buildSankeyFlowMarkdown,
     buildRelationshipReviewMarkdown,
     getExecutiveOutputProjection,
     getChecklistPreviewRows,
@@ -539,6 +541,30 @@ test('sankey flow projection builds source target value paths from structured ar
     assert.equal(sankey.rows[1].evidence_repair_prompt, 'Correct CRM reporting evidence');
     assert.equal(sankey.rows[1].citation_status, 'source_backed');
     assert.equal(sankey.rows[1].source_repair_prompt, 'Correct CRM reporting citation');
+
+    const exportData = buildSankeyFlowExport({
+        sankeyFlow: sankey,
+        title: 'System Flow',
+        scopeLabel: 'Accepted table'
+    });
+    assert.equal(exportData.export_type, 'sankey_flow_lens');
+    assert.equal(exportData.path_count, 2);
+    assert.equal(exportData.review_summary.source_backed_rows, 2);
+    assert.equal(exportData.review_summary.needs_source_rows, 0);
+    assert.equal(exportData.rows[1].source_refs[0].document_id, 'doc-crm');
+    assert.equal(exportData.rows[1].represented_rows.length, 2);
+
+    const markdown = buildSankeyFlowMarkdown({
+        sankeyFlow: sankey,
+        title: 'System Flow',
+        scopeLabel: 'Accepted table',
+        generatedAt: '2026-05-21T00:00:00.000Z'
+    });
+    assert.match(markdown, /# System Flow/);
+    assert.match(markdown, /Source-backed rows: 2/);
+    assert.match(markdown, /Needs source rows: 0/);
+    assert.match(markdown, /\| ERP \| Finance close \| 22,000 \| Monthly Cost/);
+    assert.doesNotMatch(markdown, /## Unsupported Or Needs-Source Paths/);
 });
 
 test('sankey flow projection does not treat ordinary graph hierarchy as flow data', () => {

@@ -3147,6 +3147,171 @@ export const getSankeyFlowProjection = (projection = {}) => {
     };
 };
 
+const sankeyReviewSummary = (rows = []) => {
+    const sourceBackedRows = rows.filter(
+        (row) =>
+            Array.isArray(row.source_refs) &&
+            row.source_refs.length > 0 &&
+            !['needs_source', 'missing_source'].includes(String(row.evidence_status || '').toLowerCase())
+    ).length;
+    const needsSourceRows = rows.filter(
+        (row) =>
+            !Array.isArray(row.source_refs) ||
+            row.source_refs.length === 0 ||
+            ['needs_source', 'missing_source'].includes(String(row.evidence_status || '').toLowerCase())
+    ).length;
+    const needsReviewRows = rows.filter((row) =>
+        ['needs_review', 'ai_generated', 'draft'].includes(String(row.review_state || '').toLowerCase())
+    ).length;
+
+    return {
+        source_backed_rows: sourceBackedRows,
+        needs_source_rows: needsSourceRows,
+        needs_review_rows: needsReviewRows,
+        unsupported_path_ids: rows
+            .filter((row) => !Array.isArray(row.source_refs) || row.source_refs.length === 0)
+            .map((row) => row.id)
+    };
+};
+
+export const buildSankeyFlowExport = ({
+    sankeyFlow,
+    projection,
+    title = 'Sankey Flow Lens',
+    scopeLabel = 'Workspace',
+    generatedAt = new Date().toISOString()
+} = {}) => {
+    const flow =
+        sankeyFlow ||
+        getSankeyFlowProjection(
+            projection?.nodeLookup
+                ? projection
+                : buildGraphProjection(projection?.nodes || [], projection?.edges || [])
+        );
+    const rows = Array.isArray(flow?.rows) ? flow.rows : [];
+
+    return {
+        export_type: 'sankey_flow_lens',
+        version: 1,
+        title: markdownText(title, 'Sankey Flow Lens'),
+        scope: markdownText(scopeLabel, 'Workspace'),
+        generated_at: generatedAt,
+        eligible: Boolean(flow?.eligible),
+        node_count: flow?.node_count || 0,
+        path_count: flow?.path_count || 0,
+        value_total: flow?.value_total || 0,
+        metric_labels: flow?.metric_labels || [],
+        review_summary: sankeyReviewSummary(rows),
+        nodes: (flow?.nodes || []).map((node) => ({
+            id: node.id,
+            title: node.title,
+            table_name: node.table_name,
+            query_id: node.query_id,
+            result_hash: node.result_hash,
+            metric_label: node.metric_label,
+            path_count: node.path_count,
+            review_state: node.review_state,
+            source_ref_count: Array.isArray(node.source_refs) ? node.source_refs.length : 0
+        })),
+        rows: rows.map((row) => ({
+            id: row.id,
+            evidence_item_id: row.evidence_item_id,
+            evidence_node_id: row.evidence_node_id,
+            evidence_title: row.evidence_title,
+            source: row.source,
+            target: row.target,
+            value: row.value,
+            metric_label: row.metric_label,
+            source_column: row.source_column,
+            target_column: row.target_column,
+            value_column: row.value_column,
+            review_state: row.review_state,
+            evidence_status: row.evidence_status,
+            citation_status: row.citation_status,
+            table_name: row.table_name,
+            query_id: row.query_id,
+            result_hash: row.result_hash,
+            represented_row_indexes: row.represented_row_indexes,
+            represented_rows: row.represented_rows,
+            citation_query: row.citation_query,
+            evidence_repair_prompt: row.evidence_repair_prompt,
+            source_repair_prompt: row.source_repair_prompt,
+            source_refs: row.source_refs || []
+        }))
+    };
+};
+
+export const buildSankeyFlowMarkdown = ({
+    sankeyFlow,
+    projection,
+    title = 'Sankey Flow Lens',
+    scopeLabel = 'Workspace',
+    generatedAt = new Date().toISOString()
+} = {}) => {
+    const exportData = buildSankeyFlowExport({
+        sankeyFlow,
+        projection,
+        title,
+        scopeLabel,
+        generatedAt
+    });
+    const lines = [
+        `# ${markdownText(exportData.title, 'Sankey Flow Lens')}`,
+        '',
+        `- Scope: ${markdownText(exportData.scope, 'Workspace')}`,
+        `- Generated: ${markdownText(exportData.generated_at)}`,
+        `- Eligible: ${exportData.eligible ? 'Yes' : 'No'}`,
+        `- Evidence nodes: ${exportData.node_count}`,
+        `- Flow paths: ${exportData.path_count}`,
+        `- Total value: ${exportData.value_total}`,
+        `- Metrics: ${exportData.metric_labels.length ? exportData.metric_labels.join(', ') : 'Not set'}`,
+        `- Source-backed rows: ${exportData.review_summary.source_backed_rows}`,
+        `- Needs source rows: ${exportData.review_summary.needs_source_rows}`,
+        `- Needs review rows: ${exportData.review_summary.needs_review_rows}`,
+        ''
+    ];
+
+    if (!exportData.rows.length) {
+        lines.push('No accepted source/target/value paths are available for export.');
+        return lines.join('\n');
+    }
+
+    lines.push('## Flow Rows', '');
+    lines.push('| Source | Target | Value | Metric | Review | Evidence | Sources |');
+    lines.push('| --- | --- | ---: | --- | --- | --- | --- |');
+    exportData.rows.forEach((row) => {
+        const refs = Array.isArray(row.source_refs) ? row.source_refs : [];
+        lines.push(
+            [
+                markdownListValue(row.source),
+                markdownListValue(row.target),
+                Number.isFinite(Number(row.value)) ? Number(row.value).toLocaleString() : markdownListValue(row.value),
+                markdownListValue(row.metric_label),
+                markdownListValue(row.review_state),
+                markdownListValue(row.evidence_status || row.citation_status),
+                refs.length ? refs.map(sourceRefLabel).join('<br>') : 'Needs source'
+            ].join(' | ').replace(/^/, '| ') + ' |'
+        );
+    });
+
+    const unsupportedRows = exportData.rows.filter((row) => !Array.isArray(row.source_refs) || row.source_refs.length === 0);
+    if (unsupportedRows.length) {
+        lines.push('', '## Unsupported Or Needs-Source Paths', '');
+        unsupportedRows.forEach((row, index) => {
+            lines.push(`### ${index + 1}. ${markdownText(row.source)} -> ${markdownText(row.target)}`);
+            lines.push(`- Row id: ${markdownListValue(row.id)}`);
+            lines.push(`- Evidence node: ${markdownListValue(row.evidence_title)} (${markdownListValue(row.evidence_node_id)})`);
+            lines.push(`- Review state: ${markdownListValue(row.review_state)}`);
+            lines.push(`- Evidence status: ${markdownListValue(row.evidence_status)}`);
+            lines.push(`- Citation query: ${markdownListValue(row.citation_query, 'Not available')}`);
+            lines.push(`- Repair prompt: ${markdownListValue(row.evidence_repair_prompt || row.source_repair_prompt, 'Not available')}`);
+            lines.push('');
+        });
+    }
+
+    return lines.join('\n').trimEnd();
+};
+
 const structuredEvidenceForTask = (node = {}) => {
     const refs = node.source_refs || [];
     const metadata = node.artifact_metadata || {};

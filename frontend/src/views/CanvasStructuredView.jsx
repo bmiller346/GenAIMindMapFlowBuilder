@@ -9,6 +9,8 @@ import { getSavedTableViews, saveSavedTableViews } from '../config/localSettings
 import { createWorkspaceEdge, createWorkspaceNode, reflowSiblingSubtrees } from '../utils/manualNodes.js';
 import {
     buildFilteredGraphProjection,
+    buildSankeyFlowExport,
+    buildSankeyFlowMarkdown,
     getExecutiveOutputProjection,
     getFlowchartProjection,
     getKanbanColumns,
@@ -63,6 +65,13 @@ const FILTER_LABELS = {
     'low-confidence': 'Low confidence',
     'hidden-from-export': 'Hidden'
 };
+
+const safeDownloadSlug = (value = 'workspace') =>
+    String(value || 'workspace')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 64) || 'workspace';
 const HIERARCHY_EDGE_TYPES = new Set([
     '',
     'contains',
@@ -417,7 +426,15 @@ const ReadinessCallout = ({ title, detail, issues = [], actionLabel, onAction })
     </section>
 );
 
-const SankeyFlowPanel = ({ sankeyFlow, sankeySpec, onOpenNode }) => {
+const SankeyFlowPanel = ({
+    sankeyFlow,
+    sankeySpec,
+    onOpenNode,
+    onCopyMarkdown,
+    onDownloadMarkdown,
+    onDownloadJson,
+    exportStatus = ''
+}) => {
     if (!sankeyFlow?.eligible || !sankeySpec) {
         return null;
     }
@@ -441,6 +458,18 @@ const SankeyFlowPanel = ({ sankeyFlow, sankeySpec, onOpenNode }) => {
                 <small>
                     Source, target, and value rows from accepted structured evidence. Width shows the selected metric.
                 </small>
+                <div className="canvas-structured-sankey-actions">
+                    <button type="button" onClick={onCopyMarkdown}>
+                        Copy Markdown
+                    </button>
+                    <button type="button" onClick={onDownloadMarkdown}>
+                        Download MD
+                    </button>
+                    <button type="button" onClick={onDownloadJson}>
+                        Download JSON
+                    </button>
+                </div>
+                {exportStatus ? <em>{exportStatus}</em> : null}
             </div>
             <div className="canvas-structured-sankey-body">
                 <div className="canvas-structured-sankey-plot">
@@ -761,8 +790,81 @@ const CanvasStructuredView = ({
     const [tableDropTarget, setTableDropTarget] = useState({ rowId: '', position: '' });
     const [expandedCondensedRowIds, setExpandedCondensedRowIds] = useState([]);
     const [hierarchyUndoNotice, setHierarchyUndoNotice] = useState(null);
+    const [sankeyExportStatus, setSankeyExportStatus] = useState('');
     const hierarchyUndoTimerRef = useRef(null);
     const label = VIEW_LABELS[view] || 'Structured view';
+    const buildCurrentSankeyMarkdown = () =>
+        buildSankeyFlowMarkdown({
+            sankeyFlow,
+            title: 'Sankey Flow Lens',
+            scopeLabel: label
+        });
+    const buildCurrentSankeyExport = () =>
+        buildSankeyFlowExport({
+            sankeyFlow,
+            title: 'Sankey Flow Lens',
+            scopeLabel: label
+        });
+    const recordSankeyExport = (method) => {
+        recordActivity({
+            type: 'sankey_flow_exported',
+            title: 'Sankey flow exported',
+            summary: `Exported ${sankeyFlow.path_count} Sankey flow path${sankeyFlow.path_count === 1 ? '' : 's'}.`,
+            metadata: {
+                method,
+                path_count: sankeyFlow.path_count,
+                node_count: sankeyFlow.node_count,
+                view
+            }
+        });
+    };
+    const downloadTextFile = ({ filename, text, type }) => {
+        const blob = new Blob([text], { type });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+    };
+    const copySankeyMarkdown = async () => {
+        if (!sankeyFlow.eligible) {
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(buildCurrentSankeyMarkdown());
+            setSankeyExportStatus('Copied Sankey markdown.');
+            recordSankeyExport('clipboard');
+        } catch {
+            setSankeyExportStatus('Copy unavailable. Download the markdown instead.');
+        }
+    };
+    const downloadSankeyMarkdown = () => {
+        if (!sankeyFlow.eligible) {
+            return;
+        }
+        downloadTextFile({
+            filename: `${safeDownloadSlug(label)}-sankey-flow.md`,
+            text: buildCurrentSankeyMarkdown(),
+            type: 'text/markdown;charset=utf-8'
+        });
+        setSankeyExportStatus('Downloaded Sankey markdown.');
+        recordSankeyExport('markdown');
+    };
+    const downloadSankeyJson = () => {
+        if (!sankeyFlow.eligible) {
+            return;
+        }
+        downloadTextFile({
+            filename: `${safeDownloadSlug(label)}-sankey-flow.json`,
+            text: JSON.stringify(buildCurrentSankeyExport(), null, 2),
+            type: 'application/json;charset=utf-8'
+        });
+        setSankeyExportStatus('Downloaded Sankey JSON.');
+        recordSankeyExport('json');
+    };
     const addFlowchartStep = ({ nodeType = 'process', title = 'New flow step', sourceId = '' } = {}) => {
         const sourceStep = sourceId
             ? flowchart.steps.find((step) => step.id === sourceId)
@@ -2361,6 +2463,10 @@ const CanvasStructuredView = ({
                             sankeyFlow={sankeyFlow}
                             sankeySpec={sankeySpec}
                             onOpenNode={onOpenNode}
+                            onCopyMarkdown={copySankeyMarkdown}
+                            onDownloadMarkdown={downloadSankeyMarkdown}
+                            onDownloadJson={downloadSankeyJson}
+                            exportStatus={sankeyExportStatus}
                         />
                         {hierarchyUndoNotice ? (
                             <div className="canvas-structured-undo-toast" role="status">
