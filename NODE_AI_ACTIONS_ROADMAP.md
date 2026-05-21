@@ -1,5 +1,11 @@
 # Node AI Actions Roadmap
 
+Status: closed reference for the current Node AI Actions scope.
+
+This roadmap is retained as implementation history and validation context. New
+AI action work should be tracked in `ROADMAP.md` or a focused follow-up roadmap,
+with durable product rules kept in the relevant `PRODUCT_GUIDE_*.md` file.
+
 This roadmap restores the original repo's exploratory "pick an agent/persona,
 ask or expand from this node, and create a follow-up subtree" behavior while
 preserving TraceSpace's canonical graph, validation, source-citation, and

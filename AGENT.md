@@ -105,13 +105,17 @@ Use this routing map to keep context use low:
   and gated; do not surface it in default user flows.
 
 When a task names one of the specialized roadmap files, read only that file and
-its explicitly referenced owners/tests:
+its explicitly referenced owners/tests. Several specialized roadmaps are now
+closed references; use `ROADMAP.md` for current delivery status unless a task
+explicitly reopens that lane:
 
-- `NODE_AI_ACTIONS_ROADMAP.md`
-- `WORKSPACE_CONTEXT_ROADMAP.md`
+- `NODE_AI_ACTIONS_ROADMAP.md` - closed reference for the current scope.
+- `WORKSPACE_CONTEXT_ROADMAP.md` - reference roadmap; shell/product status has
+  moved to `ROADMAP.md` and `PRODUCT_GUIDE_WORKSPACE_SHELL.md`.
 - `UX_NUDGES_AND_OUTPUTS_ROADMAP.md`
-- `NODE_AUTHORING_UX_ROADMAP.md`
-- `UI_SHELL_RIBBON_REFACTOR_ROADMAP.md`
+- `NODE_AUTHORING_UX_ROADMAP.md` - closed reference for the current scope.
+- `UI_SHELL_RIBBON_REFACTOR_ROADMAP.md` - shell closeout/reference roadmap;
+  use it for rollback posture and ownership rules, not as a broad active queue.
 
 For workspace shell, ribbon, dock, inspector, map lens, or AI review surface
 changes, also read `PRODUCT_GUIDE_WORKSPACE_SHELL.md`. Treat it as the product

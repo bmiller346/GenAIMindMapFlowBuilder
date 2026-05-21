@@ -2,9 +2,17 @@
 
 Last updated: 2026-05-20
 
+Status: default shell rollout complete; this file is now a closeout/reference
+roadmap. Use it for rollback posture, shell ownership rules, and post-default
+cleanup context. New shell work should be tracked in `ROADMAP.md` or a focused
+follow-up issue/roadmap instead of extending the historical lane log below.
+
 ## Current Progress Snapshot
 
-This refactor is being worked by multiple lanes. Do not treat a partially migrated shell surface as a regression until the owning lane marks the specific work package complete.
+The default shell path is live. The legacy floating layout remains available as
+an explicit rollback path while compatibility is retained. The remaining items
+are post-default polish or retirement decisions, not blockers to using the shell
+as the primary workspace layout.
 
 ### Coordination Checkpoint: 2026-05-20
 
@@ -73,21 +81,19 @@ Ready for agents to build on:
 - Shift additive click/lasso selection has active shell regression coverage.
 - A map readability / lens product guide now documents branch highlighting, relationship-label lenses, and branch color language.
 
-Not ready for broad QA or cleanup:
+Compatibility and cleanup boundaries:
 
-- Do not QA the shell as a finished layout.
-- Do not retire `FloatingDock` yet.
-- Do not expect all output/review surfaces to be final. Connections, task
-  preview, checklist preview, source repair, and Issues review outputs now have
-  direct shell tray routes; accepted/canonical `tasks` remains a structured
-  canvas view. Source and branch properties now have editable shell right-rail
-  MVPs. Output command grouping is improving, but accepted output surfaces,
-  source intake routing, and advanced prompt-builder routing still need visual QA
-  and product polish. Source intake has a shell tray route; deeper upload
-  dialogs are still modal by design until the intake flow is redesigned.
+- Do not retire `FloatingDock` yet. It remains the shell-off rollback path until
+  rollback compatibility is intentionally removed.
 - Do not treat the legacy rollback layout as the primary product path. It is
   compatibility scaffolding while the shell settles.
-- Do not run full visual regression against the shell without checking the lane readiness notes below; several surfaces are scaffolded but not product-complete.
+- Advanced prompt-builder flows may remain modal by design until a focused,
+  tested shell overlay/right-rail migration exists.
+- Source upload dialogs may remain modal by design until source intake is
+  redesigned beyond the current shell tray route.
+- Product polish for map/lens readability, richer source/branch metadata, and
+  rollback retirement should be tracked as follow-up work, not as unfinished
+  default-shell rollout.
 
 Current verification:
 
@@ -126,14 +132,11 @@ is dead in both shell-on and shell-off paths.
 | Richer source/branch metadata | Right rail properties | Default properties are useful but not fully product-complete | Product follow-up with field expansion and persistence tests | Deferred | No |
 | Full map projection helper extraction | Mind map projection/lens internals | Lens work remains harder to evolve but current behavior can ship | Refactor plan after branch/lens styling stabilizes | First extraction landed in `frontend/src/utils/canvasProjection.js` with focused unit coverage; broader density/lens rules deferred | No |
 
-### Current Open Items / Agent Split
+### Historical Lane Archive / Follow-Up Notes
 
-Use this section when splitting the remaining shell work across parallel agents.
-Before any agent starts, check `git status --short`; active work may exist in
-`PRODUCT_GUIDE_MAP_READABILITY_AND_LENSES.md`, `frontend/src/App.jsx`,
-`frontend/src/ribbon/AiRibbonGroups.jsx`, `frontend/src/index.css`,
-`frontend/tests/shellComponents.test.mjs`, and
-`frontend/tests/e2e/selection-shell-regression.spec.js`.
+The sections below are retained as implementation history and context. They are
+not the active place to assign broad parallel shell work anymore. Prefer one
+integration owner plus short read-only audits for any remaining shell cleanup.
 
 #### Landed Shell Lanes
 

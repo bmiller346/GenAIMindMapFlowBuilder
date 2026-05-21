@@ -1,5 +1,11 @@
 # Node Authoring UX Roadmap
 
+Status: closed reference for the current node-authoring UX scope.
+
+This roadmap is retained as implementation history and validation context. Do
+not use it as an active work queue unless a new node-authoring initiative is
+explicitly opened in `ROADMAP.md`.
+
 This roadmap tracks the Taskade-style node authoring work: making manual mind
 map creation feel intentional, compact, branch-based, and durable instead of
 like full editor blocks appearing on the canvas.

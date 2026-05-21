@@ -18,10 +18,12 @@ Read [`AGENT.md`](./AGENT.md) first.
 4. Prefer incremental modernization over risky rewrites.
 5. Treat Miro exports as collaboration artifacts and monday exports as execution artifacts.
 
-## Active UI Shell Refactor
+## Workspace Shell
 - For workspace shell, ribbon, panel, inspector, AI review, or map lens work,
   read `PRODUCT_GUIDE_WORKSPACE_SHELL.md` and
-  `UI_SHELL_RIBBON_REFACTOR_ROADMAP.md` before editing.
+  `UI_SHELL_RIBBON_REFACTOR_ROADMAP.md` before editing. The shell roadmap is
+  now a closeout/reference document; track new shell work in `ROADMAP.md` or a
+  focused follow-up.
 - Preserve the direction: top ribbon for commands, left navigator for
   orientation, right panel for metadata, bottom tray for reviewable AI/output
   work, and canvas overlays kept lightweight.

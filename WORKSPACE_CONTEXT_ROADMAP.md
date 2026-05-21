@@ -1,5 +1,10 @@
 # Workspace Context Roadmap
 
+Status: reference roadmap. Core workspace context concepts have largely landed
+or been absorbed by the workspace shell, review tray, source library, activity,
+and automation surfaces. Use `ROADMAP.md` for current delivery status and
+`PRODUCT_GUIDE_WORKSPACE_SHELL.md` for the current shell layout contract.
+
 This roadmap describes the next product layer for TraceSpace: workspace-native
 context around the canonical graph. The graph remains the source of truth.
 Activity, media, integrations, automations, and agents explain, enrich, or

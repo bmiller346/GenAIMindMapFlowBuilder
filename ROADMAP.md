@@ -604,9 +604,10 @@ Priority work:
 
 ### Node AI Actions And Prompt Profiles
 
-See `NODE_AI_ACTIONS_ROADMAP.md` for the implementation source of truth,
-agent lanes, copy/paste agent prompts, ownership boundaries, and phase
-checklists.
+Status: the current Node AI Actions scope is complete. See
+`NODE_AI_ACTIONS_ROADMAP.md` as a closed reference for the landed implementation
+contract, browser coverage, and historical agent lanes. Track new AI action
+work here or in a new focused follow-up roadmap.
 
 ### Advanced AI Reconfiguration
 
