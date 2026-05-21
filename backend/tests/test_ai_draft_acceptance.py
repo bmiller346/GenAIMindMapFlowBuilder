@@ -63,7 +63,7 @@ def _edge(edge_id, source, target):
     }
 
 
-def _session(draft_nodes, draft_edges=None, draft_annotations=None):
+def _session(draft_nodes, draft_edges=None, draft_annotations=None, generated_artifacts=None):
     session = build_ai_draft_session(
         workspace_id="workspace-1",
         prompt="create a mind map for cereals by manufacturer",
@@ -78,9 +78,69 @@ def _session(draft_nodes, draft_edges=None, draft_annotations=None):
         draft_nodes=draft_nodes,
         draft_edges=draft_edges or [],
         draft_annotations=draft_annotations or [],
+        generated_artifacts=generated_artifacts or [],
         revision_id="revision-cereal-1",
     )
     return append_ai_draft_revision(session, revision)
+
+
+def _source_ref():
+    return {
+        "document_id": "doc-cereal",
+        "page": 1,
+        "chunk_id": "chunk-cereal-1",
+        "quote_snippet": "Approval is required before deployment.",
+    }
+
+
+def _connected_picture_package_artifact():
+    source_ref = _source_ref()
+    metadata = {
+        "source": None,
+        "scope": None,
+        "artifact_type": "connected_picture_package",
+        "layout_hint": None,
+        "rationale": None,
+        "review_reason": None,
+        "source_signal": None,
+    }
+    return {
+        "id": "artifact-connected-package",
+        "artifact_type": "connected_picture_package",
+        "title": "Connected Package",
+        "status": "draft",
+        "data": {
+            "package_id": "connected-package-1",
+            "primary_nodes": [
+                {
+                    "id": "primary-root",
+                    "node_id": "root",
+                    "title": "Deployment procedure",
+                    "summary": "Approval and rollout process.",
+                    "node_type": "procedure",
+                    "status": "reviewed",
+                    "review_state": "reviewed",
+                    "needs_review": False,
+                    "source_refs": [source_ref],
+                    "assumptions": [],
+                    "metadata": metadata,
+                }
+            ],
+            "relationship_edges": [],
+            "view_lenses": [],
+            "structured_evidence": [],
+            "evidence_links": [],
+            "tasks": [],
+            "risks": [],
+            "decisions": [],
+            "repair_targets": [],
+            "source_refs": [source_ref],
+            "assumptions": [],
+            "acceptance_groups": [],
+        },
+        "source_refs": [source_ref],
+        "assumptions": [],
+    }
 
 
 def test_merge_accept_updates_matching_node_without_duplicate_ids():
@@ -218,3 +278,27 @@ def test_unsourced_accepted_nodes_persist_as_needs_review_and_undo_snapshot_is_r
     assert accepted["status"] == "needs_review"
     assert accepted["metadata"]["ai_draft_session_id"] == "session-cereal"
     assert result["undo"]["kind"] == "full_graph_snapshot"
+
+
+def test_connected_picture_package_accept_preserves_artifact_and_undo_snapshot():
+    artifact = _connected_picture_package_artifact()
+    session = _session(
+        [_node("deployment", "Deployment", parent_id="root", source_refs=[_source_ref()])],
+        [_edge("draft-edge-deployment", "root", "deployment")],
+        generated_artifacts=[artifact],
+    )
+
+    accepted_graph, accepted_session, result = accept_ai_draft_revision(
+        _clean_graph(),
+        session,
+        accept_mode="append",
+    )
+
+    assert "deployment" in {node["id"] for node in accepted_graph["nodes"]}
+    assert accepted_session["accept_history"][0]["accepted_artifacts"][0]["artifact_type"] == "connected_picture_package"
+    assert result["accepted_artifacts"][0]["data"]["package_id"] == "connected-package-1"
+    assert result["accepted_artifacts"][0]["metadata"]["ai_draft_revision_id"] == "revision-cereal-1"
+    assert result["accepted_artifacts"][0]["metadata"]["ai_draft_session_id"] == "session-cereal"
+    assert result["metadata"]["undo_kind"] == "full_graph_snapshot"
+    assert result["metadata"]["accepted_artifact_ids"] == ["artifact-connected-package"]
+    assert result["undo"]["before_graph"]["workspace"]["id"] == "workspace-1"

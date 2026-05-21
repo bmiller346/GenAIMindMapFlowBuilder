@@ -382,6 +382,17 @@ def test_intent_classification_maps_output_shapes_and_policy():
     assert news_article["output_shape"] == "news_article"
 
 
+def test_intent_classification_honors_connected_package_desired_output():
+    package = classify_ai_draft_intent(
+        "map fire alarm code dependencies from SD through CA and closeout",
+        desired_outputs=["connected_picture_package"],
+    )
+
+    assert package["output_shape"] == "connected_picture_package"
+    assert package["capability"] == "draft_connected_picture_package"
+    assert package["requested_artifact_types"] == ["connected_picture_package"]
+
+
 def test_intent_classification_maps_enterprise_readiness_findings():
     bottlenecks = classify_ai_draft_intent("find process bottlenecks")
     duplicate_tools = classify_ai_draft_intent("find duplicate tools")

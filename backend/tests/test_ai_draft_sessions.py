@@ -100,6 +100,10 @@ def test_react_node_projection_uses_registered_response_node_shape():
             "summary": "Visible details",
             "node_type": "branch",
             "status": "needs_review",
+            "review_state": "needs_review",
+            "artifact_type": "connected_picture_package",
+            "artifact_ids": ["artifact-connected-package"],
+            "generated_artifacts": [{"id": "artifact-connected-package"}],
             "source_refs": [],
             "metadata": {"position": {"x": 10, "y": 20}},
         },
@@ -110,6 +114,10 @@ def test_react_node_projection_uses_registered_response_node_shape():
     assert react_node["data"]["title"] == "Visible branch"
     assert react_node["data"]["body"] == "Visible details"
     assert react_node["data"]["data"]["summ"] == "Visible details"
+    assert react_node["data"]["review_state"] == "needs_review"
+    assert react_node["data"]["artifact_type"] == "connected_picture_package"
+    assert react_node["data"]["artifact_ids"] == ["artifact-connected-package"]
+    assert react_node["data"]["data"]["generated_artifacts"] == [{"id": "artifact-connected-package"}]
     assert react_node["targetPosition"] == "left"
     assert react_node["sourcePosition"] == "right"
 

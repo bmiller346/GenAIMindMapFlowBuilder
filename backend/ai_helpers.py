@@ -8,30 +8,34 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from ai import draft_acceptance
+from ai.draft_acceptance import DraftAcceptanceDependencies
 from ai.roles import get_prompt_profile, list_prompt_profiles
+from ai.artifacts import (
+    _desired_outputs_from_graph as _artifact_desired_outputs_from_graph,
+    _normalize_flow_chart_data as _artifact_normalize_flow_chart_data,
+    normalize_requested_artifact_types as _normalize_requested_artifact_types,
+    registered_artifact_types as _registered_artifact_types,
+    validate_generated_artifacts as _validate_generated_artifacts,
+)
+from ai.fallbacks import _deterministic_ai_action_drafts as _build_deterministic_ai_action_drafts
 from ai.schemas import (
     AI_ACTION_PREVIEW_CONTRACT_VERSION,
-    ARTIFACT_REGISTRY,
     ARTIFACT_REGISTRY_CONTRACT,
     ARTIFACT_REGISTRY_VERSION,
-    AIDRAFT_ACCEPT_MODES,
     AIDRAFT_SCOPE_TYPES,
     AI_DRAFT_SESSION_CONTRACT_VERSION,
     AI_DRAFT_OUTPUT_SHAPES,
     AI_DRAFT_REVISION_OUTPUT_SCHEMA,
     AI_HELPER_PREVIEW_CONTRACT,
     AI_HELPER_PREVIEW_CONTRACT_VERSION,
-    SOFTWARE_INVENTORY_ENTITY_TYPES,
     json_object_response_format,
 )
 from ai.providers import DocMapAIProvider, DocMapGenerationRequest
 from ai.responses_client import OpenAIResponsesDocMapProvider
 from ai_model_policy import choose_openai_model, normalize_model_policy
 from config import MissingConfigurationError, get_setting
-from graph.ai_contract import validate_knowledge_graph_relationship_edge
-from graph.software_overlap_scoring import enrich_software_overlap_report
 from graph.schemas import GraphSchemaError
-from graph.validation import validate_and_repair_graph
 
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
@@ -104,6 +108,43 @@ AI_ACTIONS_BY_SCOPE = {
 }
 AI_DRAFT_SOURCE_CONTEXT_MAX_CHUNKS = 12
 AI_DRAFT_SOURCE_CONTEXT_MAX_REFS = 36
+PUBLIC_REFERENCE_TERMS = (
+    "ahj",
+    "building code",
+    "electrical code",
+    "energy code",
+    "fire code",
+    "ibc",
+    "icc",
+    "iecc",
+    "ifc",
+    "imc",
+    "ipc",
+    "jurisdictional code",
+    "model code",
+    "national electrical code",
+    "nec",
+    "nfpa",
+    "njac",
+    "public reference",
+    "public references",
+    "regulation",
+    "regulations",
+    "regulatory",
+    "standard",
+    "standards",
+)
+PUBLIC_REFERENCE_CODE_TERMS = (
+    "building",
+    "electrical",
+    "energy",
+    "fire",
+    "jurisdiction",
+    "life safety",
+    "mechanical",
+    "plumbing",
+)
+PASTED_URL_PATTERN = re.compile(r"https?://[^\s<>)\"']+", re.IGNORECASE)
 
 
 def generate_source_librarian_preview(
@@ -900,15 +941,21 @@ def build_ai_draft_preview_diff(
             for item_id in (selected_item_ids or [])
             if isinstance(item_id, str) and item_id.strip()
         }
-        selected_nodes = _selected_draft_nodes(revision, mode, selected_ids)
-        selected_edges = _selected_draft_edges(revision, selected_nodes, mode)
+        selected_nodes = draft_acceptance.selected_draft_nodes(revision, mode, selected_ids)
+        selected_edges = draft_acceptance.selected_draft_edges(revision, selected_nodes, mode)
         selected_annotations = deepcopy(revision.get("draft_annotations", [])) if mode == "notes_only" else []
         report = validate_ai_action_drafts_for_accept(
             deepcopy(selected_nodes),
             deepcopy(selected_edges),
             revision.get("generated_artifacts", []),
         )
-        ids = _accepted_item_ids(revision, selected_nodes, selected_edges, selected_annotations, selected_ids)
+        ids = draft_acceptance.accepted_item_ids_for_revision(
+            revision,
+            selected_nodes,
+            selected_edges,
+            selected_annotations,
+            selected_ids,
+        )
         return _draft_preview_diff_payload(
             selected_nodes,
             selected_edges,
@@ -948,6 +995,12 @@ def _draft_preview_diff_payload(
         for issue in validation_report.get("issues", [])
         if isinstance(issue, dict) and issue.get("code") in {"missing_source_ref", "uncited_ai_node"}
     ] if isinstance(validation_report, dict) else []
+    missing_source_repairs = [
+        issue for issue in needs_review_repairs if issue.get("code") == "missing_source_ref"
+    ]
+    ai_assumption_repairs = [
+        issue for issue in needs_review_repairs if issue.get("code") == "uncited_ai_node"
+    ]
     return {
         "added_nodes": len(added_node_ids),
         "added_edges": len(added_edge_ids),
@@ -968,6 +1021,8 @@ def _draft_preview_diff_payload(
         "updated_nodes": len(updated_node_ids),
         "review_outputs": len([item for item in draft_annotations if isinstance(item, dict)]),
         "needs_review_repairs": len(needs_review_repairs),
+        "missing_source_repairs": len(missing_source_repairs),
+        "ai_assumption_repairs": len(ai_assumption_repairs),
         "added_node_ids": added_node_ids,
         "added_edge_ids": added_edge_ids,
         "updated_node_ids": updated_node_ids,
@@ -984,6 +1039,14 @@ def _draft_preview_diff_payload(
     }
 
 
+def _draft_acceptance_dependencies() -> DraftAcceptanceDependencies:
+    return DraftAcceptanceDependencies(
+        latest_revision=latest_ai_draft_revision,
+        validate_session=validate_ai_draft_session,
+        build_preview_diff=build_ai_draft_preview_diff,
+    )
+
+
 def accept_ai_draft_revision(
     graph: dict[str, Any],
     session: dict[str, Any],
@@ -993,113 +1056,19 @@ def accept_ai_draft_revision(
     selected_item_ids: list[str] | None = None,
     accepted_by: str = "user",
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    if accept_mode not in AIDRAFT_ACCEPT_MODES:
-        raise GraphSchemaError([f"ai_draft_accept.mode: unsupported mode '{accept_mode}'"])
-
-    original_graph = deepcopy(graph)
-    revision = latest_ai_draft_revision(session, revision_id)
-    selected_ids = {
-        item_id
-        for item_id in (selected_item_ids or [])
-        if isinstance(item_id, str) and item_id.strip()
-    }
-    candidate_graph = deepcopy(graph)
-    candidate_graph.setdefault("workspace", {})
-    candidate_graph.setdefault("nodes", [])
-    candidate_graph.setdefault("edges", [])
-    candidate_graph.setdefault("tasks", [])
-
-    accepted_nodes, accepted_edges, review_outputs, patch_operations = _build_ai_draft_graph_patch(
-        candidate_graph,
+    return draft_acceptance.accept_ai_draft_revision(
+        graph,
         session,
-        revision,
+        revision_id=revision_id,
         accept_mode=accept_mode,
-        selected_ids=selected_ids,
+        selected_item_ids=selected_item_ids,
         accepted_by=accepted_by,
+        dependencies=_draft_acceptance_dependencies(),
     )
-
-    if accept_mode != "notes_only":
-        candidate_graph["nodes"] = candidate_graph.get("nodes", []) + accepted_nodes
-        candidate_graph["edges"] = candidate_graph.get("edges", []) + accepted_edges
-    if review_outputs or accept_mode == "notes_only":
-        _attach_ai_draft_revision_notes(
-            candidate_graph,
-            session,
-            revision,
-            review_outputs=review_outputs,
-            accepted_by=accepted_by,
-            patch_operations=patch_operations,
-        )
-
-    repaired_graph = validate_and_repair_graph(candidate_graph)
-    accepted_item_ids = _accepted_item_ids(revision, accepted_nodes, accepted_edges, review_outputs, selected_ids)
-    preview_diff = build_ai_draft_preview_diff(
-        accepted_nodes,
-        accepted_edges,
-        review_outputs,
-        repaired_graph.get("validation_report", {}),
-        accepted_item_ids,
-        revision.get("generated_artifacts", []),
-    )
-    accepted_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    result = {
-        "accept_id": f"ai_draft_accept_{_utc_token()}",
-        "session_id": session.get("session_id", ""),
-        "revision_id": revision.get("revision_id", ""),
-        "workspace_id": session.get("workspace_id", ""),
-        "mode": accept_mode,
-        "accepted_item_ids": accepted_item_ids,
-        "accepted_node_ids": [node.get("id", "") for node in accepted_nodes],
-        "accepted_edge_ids": [edge.get("id", "") for edge in accepted_edges],
-        "review_outputs": review_outputs,
-        "accepted_artifacts": _accepted_artifacts_with_revision_context(revision),
-        "preview_diff": preview_diff,
-        "patch_operations": patch_operations,
-        "validation_report": repaired_graph.get("validation_report", {}),
-        "graph_revision_id": f"graph_revision_{_utc_token()}",
-        "undo": {
-            "kind": "full_graph_snapshot",
-            "before_graph": original_graph,
-        },
-        "accepted_at": accepted_at,
-        "accepted_by": accepted_by or "user",
-        "metadata": {
-            "ai_draft_session_contract_version": AI_DRAFT_SESSION_CONTRACT_VERSION,
-        },
-    }
-    updated_session = validate_ai_draft_session(session)
-    updated_session["status"] = "accepted"
-    updated_session["updated_at"] = accepted_at
-    updated_session["accept_history"].append(result)
-    if isinstance(updated_session.get("ai_action_run"), dict):
-        updated_session["ai_action_run"]["status"] = "accepted"
-        updated_session["ai_action_run"]["generated_node_ids"] = result["accepted_node_ids"]
-    return repaired_graph, validate_ai_draft_session(updated_session), result
 
 
 def _accepted_artifacts_with_revision_context(revision: dict[str, Any]) -> list[dict[str, Any]]:
-    metadata = revision.get("metadata") if isinstance(revision.get("metadata"), dict) else {}
-    evidence_mode = str(metadata.get("evidence_mode") or "").strip()
-    citation_policy = str(metadata.get("citation_policy") or "").strip()
-    artifacts = deepcopy(revision.get("generated_artifacts", []))
-    for artifact in artifacts:
-        if not isinstance(artifact, dict):
-            continue
-        artifact_metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
-        if evidence_mode and not artifact_metadata.get("evidence_mode"):
-            artifact_metadata["evidence_mode"] = evidence_mode
-        if citation_policy and not artifact_metadata.get("citation_policy"):
-            artifact_metadata["citation_policy"] = citation_policy
-        if artifact_metadata:
-            artifact["metadata"] = artifact_metadata
-        provenance = artifact.get("provenance") if isinstance(artifact.get("provenance"), dict) else {}
-        if evidence_mode and not provenance.get("evidence_mode"):
-            provenance["evidence_mode"] = evidence_mode
-        if citation_policy and not provenance.get("citation_policy"):
-            provenance["citation_policy"] = citation_policy
-        if provenance:
-            artifact["provenance"] = provenance
-    return artifacts
+    return draft_acceptance.accepted_artifacts_with_revision_context(revision)
 
 
 def accept_ai_draft_session(
@@ -1111,25 +1080,15 @@ def accept_ai_draft_session(
     accepted_by: str = "user",
     accepted_at: str | None = None,
 ) -> dict[str, Any]:
-    accepted_graph, accepted_session, accept_result = accept_ai_draft_revision(
+    return draft_acceptance.accept_ai_draft_session(
         graph,
         session,
-        accept_mode=mode,
+        mode=mode,
         selected_item_ids=selected_item_ids,
         accepted_by=accepted_by,
+        accepted_at=accepted_at,
+        dependencies=_draft_acceptance_dependencies(),
     )
-    if accepted_at:
-        accept_result["accepted_at"] = accepted_at
-        if accepted_session.get("accept_history"):
-            accepted_session["accept_history"][-1]["accepted_at"] = accepted_at
-    return {
-        "graph": accepted_graph,
-        "session": accepted_session,
-        "accept_result": {
-            **accept_result,
-            "canonical_graph_mutated": mode != "notes_only",
-        },
-    }
 
 
 def discard_ai_draft_session(
@@ -1304,6 +1263,10 @@ def _draft_items_from_revision_parts(
     for artifact in generated_artifacts or []:
         if not isinstance(artifact, dict):
             continue
+        connected_package_items = _connected_package_draft_items_from_artifact(artifact)
+        if connected_package_items:
+            items.extend(connected_package_items)
+            continue
         artifact_id = str(artifact.get("id", ""))
         artifact_type = str(artifact.get("artifact_type") or "artifact")
         relationship_items = _relationship_draft_items_from_artifact(artifact)
@@ -1321,6 +1284,107 @@ def _draft_items_from_revision_parts(
                 "status": artifact.get("status") or "draft",
                 "selected": True,
                 "metadata": {"artifact_id": artifact_id, "artifact_type": artifact_type},
+            }
+        )
+    return items
+
+
+def _connected_package_draft_items_from_artifact(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    if not _is_connected_picture_package_artifact(artifact):
+        return []
+    package = _connected_package_payload(artifact)
+    package_id = str(package.get("package_id") or artifact.get("id") or "connected_picture_package")
+    artifact_id = str(artifact.get("id") or package_id)
+    items: list[dict[str, Any]] = []
+    for collection_key, item_type in (
+        ("primary_nodes", "package_node"),
+        ("relationship_edges", "relationship"),
+        ("view_lenses", "package_lens"),
+        ("structured_evidence", "package_evidence"),
+        ("evidence_links", "package_evidence_link"),
+        ("tasks", "task"),
+        ("risks", "risk"),
+        ("decisions", "decision"),
+        ("repair_targets", "repair_target"),
+    ):
+        for item in _connected_package_collection(package, collection_key):
+            package_item_id = _connected_package_item_id(item)
+            if not package_item_id:
+                continue
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            draft_metadata = {
+                **deepcopy(metadata),
+                "artifact_id": artifact_id,
+                "artifact_type": "connected_picture_package",
+                "package_id": package_id,
+                "package_item_id": package_item_id,
+                "package_collection": collection_key,
+            }
+            if collection_key == "primary_nodes":
+                draft_metadata["node_id"] = str(item.get("node_id") or package_item_id)
+            if collection_key == "relationship_edges":
+                relationship_type = str(item.get("relationship_type") or "related_to")
+                draft_metadata.update(
+                    {
+                        "relationship_edge_id": package_item_id,
+                        "edge_id": package_item_id,
+                        "source_node_id": str(item.get("source_node_id") or ""),
+                        "target_node_id": str(item.get("target_node_id") or ""),
+                        "relationship_type": relationship_type,
+                        "source_signal": item.get("source_signal", ""),
+                        "rationale": item.get("rationale", ""),
+                    }
+                )
+            items.append(
+                {
+                    "id": f"item_{package_item_id}",
+                    "item_type": item_type,
+                    "title": str(item.get("title") or item.get("label") or package_item_id),
+                    "content": str(item.get("summary") or item.get("description") or item.get("rationale") or ""),
+                    "source_refs": deepcopy(item.get("source_refs", []))
+                    if isinstance(item.get("source_refs"), list)
+                    else [],
+                    "assumptions": deepcopy(item.get("assumptions", []))
+                    if isinstance(item.get("assumptions"), list)
+                    else [],
+                    "status": str(item.get("status") or item.get("review_state") or "draft"),
+                    "selected": True,
+                    "metadata": draft_metadata,
+                }
+            )
+    for group in _connected_package_collection(package, "acceptance_groups"):
+        group_id = _connected_package_item_id(group)
+        if not group_id:
+            continue
+        metadata = group.get("metadata") if isinstance(group.get("metadata"), dict) else {}
+        items.append(
+            {
+                "id": f"item_{group_id}",
+                "item_type": "acceptance_group",
+                "title": str(group.get("title") or group.get("label") or group_id),
+                "content": str(group.get("description") or ""),
+                "source_refs": deepcopy(group.get("source_refs", []))
+                if isinstance(group.get("source_refs"), list)
+                else [],
+                "assumptions": deepcopy(group.get("assumptions", []))
+                if isinstance(group.get("assumptions"), list)
+                else [],
+                "status": str(group.get("status") or group.get("review_state") or "draft"),
+                "selected": True,
+                "metadata": {
+                    **deepcopy(metadata),
+                    "artifact_id": artifact_id,
+                    "artifact_type": "connected_picture_package",
+                    "package_id": package_id,
+                    "package_item_id": group_id,
+                    "package_collection": "acceptance_groups",
+                    "acceptance_group_id": group_id,
+                    "package_item_ids": [
+                        str(item_id)
+                        for item_id in group.get("item_ids", [])
+                        if isinstance(item_id, str) and item_id.strip()
+                    ] if isinstance(group.get("item_ids"), list) else [],
+                },
             }
         )
     return items
@@ -1504,6 +1568,15 @@ def _selected_generated_artifacts(
     relationship_edge_ids = _selected_metadata_ids(revision, selected_ids, "relationship_edge_id")
     selected_artifacts: list[dict[str, Any]] = []
     for artifact in artifacts:
+        if _is_connected_picture_package_artifact(artifact):
+            filtered_artifact = _filter_connected_picture_package_artifact(
+                artifact,
+                revision=revision,
+                selected_ids=selected_ids,
+            )
+            if filtered_artifact:
+                selected_artifacts.append(filtered_artifact)
+            continue
         artifact_type = artifact.get("artifact_type")
         artifact_id = str(artifact.get("id") or "")
         if artifact_type not in {"knowledge_graph", "software_overlap_report"}:
@@ -1532,13 +1605,309 @@ def _selected_generated_artifacts(
     return selected_artifacts
 
 
+def _is_connected_picture_package_artifact(artifact: dict[str, Any]) -> bool:
+    if not isinstance(artifact, dict):
+        return False
+    if artifact.get("artifact_type") == "connected_picture_package":
+        return True
+    data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
+    return bool(data.get("package_id") and isinstance(data.get("acceptance_groups"), list))
+
+
+def _connected_package_payload(artifact: dict[str, Any]) -> dict[str, Any]:
+    data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
+    if data.get("package_id") or data.get("primary_nodes") or data.get("acceptance_groups"):
+        return data
+    return artifact
+
+
+def _connected_package_collection(package: dict[str, Any], key: str) -> list[dict[str, Any]]:
+    values = package.get(key)
+    if not isinstance(values, list):
+        return []
+    return [value for value in values if isinstance(value, dict)]
+
+
+def _connected_package_item_id(item: dict[str, Any]) -> str:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    for value in (
+        item.get("package_item_id"),
+        metadata.get("package_item_id"),
+        item.get("id"),
+        metadata.get("id"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _selected_connected_package_ids(
+    artifact: dict[str, Any],
+    *,
+    revision: dict[str, Any],
+    selected_ids: set[str],
+) -> tuple[bool, set[str]]:
+    package = _connected_package_payload(artifact)
+    package_id = str(package.get("package_id") or artifact.get("id") or "").strip()
+    artifact_id = str(artifact.get("id") or package_id).strip()
+    selected_aliases = {item_id for item_id in selected_ids if item_id}
+    selected_aliases.update(
+        item_id[5:]
+        for item_id in selected_ids
+        if isinstance(item_id, str) and item_id.startswith("item_") and len(item_id) > 5
+    )
+    whole_artifact_selected = any(
+        alias and alias in selected_aliases
+        for alias in (artifact_id, package_id, f"item_{artifact_id}", f"item_{package_id}")
+    )
+    package_item_ids = {
+        alias
+        for alias in selected_aliases
+        if alias not in {artifact_id, package_id}
+    }
+    for item in revision.get("draft_items", []):
+        if not isinstance(item, dict) or item.get("id") not in selected_ids:
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+        item_artifact_id = str(metadata.get("artifact_id") or "").strip()
+        item_package_id = str(metadata.get("package_id") or "").strip()
+        if item_artifact_id and item_artifact_id != artifact_id:
+            continue
+        if item_package_id and package_id and item_package_id != package_id:
+            continue
+        metadata_package_item = str(metadata.get("package_item_id") or "").strip()
+        if metadata_package_item:
+            package_item_ids.add(metadata_package_item)
+        for key in ("package_item_ids", "required_sibling_ids", "required_siblings", "dependency_item_ids", "depends_on_item_ids"):
+            values = metadata.get(key)
+            if isinstance(values, list):
+                package_item_ids.update(str(value) for value in values if str(value).strip())
+        if metadata.get("artifact_id") == artifact_id and not metadata_package_item:
+            whole_artifact_selected = True
+    group_ids = {
+        _connected_package_item_id(group)
+        for group in _connected_package_collection(package, "acceptance_groups")
+        if _connected_package_item_id(group) in package_item_ids
+    }
+    for group in _connected_package_collection(package, "acceptance_groups"):
+        group_id = _connected_package_item_id(group)
+        if group_id not in group_ids:
+            continue
+        package_item_ids.update(
+            str(item_id)
+            for item_id in group.get("item_ids", [])
+            if isinstance(item_id, str) and item_id.strip()
+        )
+    package_item_ids = _expand_connected_package_required_ids(package, package_item_ids)
+    return whole_artifact_selected, package_item_ids
+
+
+def _connected_item_dependency_ids(item: dict[str, Any]) -> set[str]:
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    ids: set[str] = set()
+    for key in (
+        "required_sibling_ids",
+        "required_siblings",
+        "dependency_item_ids",
+        "depends_on_item_ids",
+    ):
+        values = item.get(key)
+        if isinstance(values, list):
+            ids.update(str(value) for value in values if str(value).strip())
+        metadata_values = metadata.get(key)
+        if isinstance(metadata_values, list):
+            ids.update(str(value) for value in metadata_values if str(value).strip())
+    dependency_links = item.get("dependency_links") or metadata.get("dependency_links")
+    if isinstance(dependency_links, list):
+        for link in dependency_links:
+            if isinstance(link, str) and link.strip():
+                ids.add(link)
+            elif isinstance(link, dict):
+                ids.update(
+                    str(link.get(key))
+                    for key in ("target_id", "target_item_id", "source_id", "source_item_id")
+                    if str(link.get(key) or "").strip()
+                )
+    return ids
+
+
+def _expand_connected_package_required_ids(package: dict[str, Any], selected_item_ids: set[str]) -> set[str]:
+    if not selected_item_ids:
+        return set()
+    all_items: dict[str, dict[str, Any]] = {}
+    for collection_key in (
+        "primary_nodes",
+        "relationship_edges",
+        "view_lenses",
+        "structured_evidence",
+        "evidence_links",
+        "tasks",
+        "risks",
+        "decisions",
+        "repair_targets",
+    ):
+        for item in _connected_package_collection(package, collection_key):
+            item_id = _connected_package_item_id(item)
+            if item_id:
+                all_items[item_id] = item
+    expanded = set(selected_item_ids)
+    changed = True
+    while changed:
+        changed = False
+        for item_id in list(expanded):
+            for required_id in _connected_item_dependency_ids(all_items.get(item_id, {})):
+                if required_id in all_items and required_id not in expanded:
+                    expanded.add(required_id)
+                    changed = True
+    return expanded
+
+
+def _filter_connected_picture_package_artifact(
+    artifact: dict[str, Any],
+    *,
+    revision: dict[str, Any],
+    selected_ids: set[str],
+) -> dict[str, Any] | None:
+    whole_artifact_selected, package_item_ids = _selected_connected_package_ids(
+        artifact,
+        revision=revision,
+        selected_ids=selected_ids,
+    )
+    if whole_artifact_selected:
+        return deepcopy(artifact)
+    if not package_item_ids:
+        return None
+
+    filtered = deepcopy(artifact)
+    package = _connected_package_payload(filtered)
+    if package is filtered:
+        filtered_package = package
+    else:
+        filtered_package = deepcopy(package)
+        filtered["data"] = filtered_package
+
+    included_item_ids: set[str] = set()
+    for collection_key in (
+        "primary_nodes",
+        "relationship_edges",
+        "structured_evidence",
+        "tasks",
+        "risks",
+        "decisions",
+        "repair_targets",
+    ):
+        values = [
+            item
+            for item in _connected_package_collection(package, collection_key)
+            if _connected_package_item_id(item) in package_item_ids
+        ]
+        filtered_package[collection_key] = values
+        included_item_ids.update(_connected_package_item_id(item) for item in values)
+
+    relationship_ids = {
+        _connected_package_item_id(item)
+        for item in _connected_package_collection(filtered_package, "relationship_edges")
+    }
+    primary_node_ids = {
+        _connected_package_item_id(item)
+        for item in _connected_package_collection(filtered_package, "primary_nodes")
+    }
+    primary_graph_node_ids = {
+        str(item.get("node_id") or "")
+        for item in _connected_package_collection(filtered_package, "primary_nodes")
+        if str(item.get("node_id") or "").strip()
+    }
+    evidence_ids = {
+        _connected_package_item_id(item)
+        for item in _connected_package_collection(filtered_package, "structured_evidence")
+    }
+
+    filtered_package["evidence_links"] = [
+        link
+        for link in _connected_package_collection(package, "evidence_links")
+        if _connected_package_item_id(link) in package_item_ids
+        and str(link.get("source_evidence_id") or "") in evidence_ids
+        and _connected_evidence_link_target_is_included(link, included_item_ids, primary_node_ids, relationship_ids)
+    ]
+    included_item_ids.update(_connected_package_item_id(item) for item in filtered_package["evidence_links"])
+
+    filtered_lenses = []
+    for lens in _connected_package_collection(package, "view_lenses"):
+        lens_selected = _connected_package_item_id(lens) in package_item_ids
+        lens_copy = deepcopy(lens)
+        lens_copy["node_ids"] = [
+            str(node_id)
+            for node_id in lens.get("node_ids", [])
+            if isinstance(node_id, str) and node_id in primary_graph_node_ids
+        ] if isinstance(lens.get("node_ids"), list) else []
+        lens_copy["edge_ids"] = [
+            str(edge_id)
+            for edge_id in lens.get("edge_ids", [])
+            if isinstance(edge_id, str) and edge_id in relationship_ids
+        ] if isinstance(lens.get("edge_ids"), list) else []
+        if lens_selected or lens_copy["node_ids"] or lens_copy["edge_ids"]:
+            filtered_lenses.append(lens_copy)
+    filtered_package["view_lenses"] = filtered_lenses
+    included_item_ids.update(_connected_package_item_id(item) for item in filtered_lenses)
+
+    filtered_groups = []
+    for group in _connected_package_collection(package, "acceptance_groups"):
+        group_item_ids = [
+            str(item_id)
+            for item_id in group.get("item_ids", [])
+            if isinstance(item_id, str) and item_id in included_item_ids
+        ] if isinstance(group.get("item_ids"), list) else []
+        group_selected = _connected_package_item_id(group) in package_item_ids
+        if not group_item_ids and not group_selected:
+            continue
+        group_copy = deepcopy(group)
+        group_copy["item_ids"] = group_item_ids
+        filtered_groups.append(group_copy)
+    filtered_package["acceptance_groups"] = filtered_groups
+
+    if not any(
+        _connected_package_collection(filtered_package, key)
+        for key in (
+            "primary_nodes",
+            "relationship_edges",
+            "view_lenses",
+            "structured_evidence",
+            "evidence_links",
+            "tasks",
+            "risks",
+            "decisions",
+            "repair_targets",
+        )
+    ):
+        return None
+    return filtered
+
+
+def _connected_evidence_link_target_is_included(
+    link: dict[str, Any],
+    included_item_ids: set[str],
+    primary_node_ids: set[str],
+    relationship_ids: set[str],
+) -> bool:
+    target_id = str(link.get("target_id") or "").strip()
+    target_type = str(link.get("target_type") or "").strip()
+    if not target_id:
+        return False
+    if target_type == "primary_node":
+        return target_id in primary_node_ids or target_id in included_item_ids
+    if target_type in {"relationship_edge", "edge"}:
+        return target_id in relationship_ids
+    return target_id in included_item_ids
+
+
 def _knowledge_graph_artifact_edges_for_accept(
     artifacts: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     edges: list[dict[str, Any]] = []
     for artifact in artifacts:
         artifact_type = artifact.get("artifact_type")
-        if artifact_type not in {"knowledge_graph", "software_overlap_report"}:
+        if artifact_type not in {"knowledge_graph", "software_overlap_report", "connected_picture_package"}:
             continue
         data = artifact.get("data") if isinstance(artifact.get("data"), dict) else {}
         relationship_edges = data.get("relationship_edges", [])
@@ -1568,6 +1937,8 @@ def _knowledge_graph_artifact_edges_for_accept(
                         **deepcopy(metadata),
                         "source": f"{artifact_type}_artifact",
                         "artifact_id": artifact_id,
+                        "package_id": data.get("package_id", "") if artifact_type == "connected_picture_package" else metadata.get("package_id", ""),
+                        "package_item_id": edge_id if artifact_type == "connected_picture_package" else metadata.get("package_item_id", ""),
                         "relationship_edge_id": edge_id,
                         "source_signal": relationship.get("source_signal", ""),
                         "confidence": relationship.get("confidence", ""),
@@ -2002,55 +2373,15 @@ def _unique_graph_id(preferred_id: str, existing_ids: set[str]) -> str:
 
 
 def registered_artifact_types() -> list[str]:
-    return sorted(ARTIFACT_REGISTRY)
+    return _registered_artifact_types()
 
 
 def normalize_requested_artifact_types(values: Any) -> list[str]:
-    if not isinstance(values, list):
-        return []
-    aliases = {
-        "handoff_package": "implementation_handoff_package",
-        "rendered_chart": "chart",
-        "missing_information": "missing_info_report",
-        "standards_completeness": "completeness_review",
-        "folder_review": "completeness_review",
-        "roadmap": "team_roadmap",
-        "team_roadmap": "team_roadmap",
-        "software_overlap": "software_overlap_report",
-        "software_rationalization": "software_overlap_report",
-        "application_rationalization": "software_overlap_report",
-        "tool_rationalization": "software_overlap_report",
-        "executive_brief": "executive_summary",
-        "executive_summary": "executive_summary",
-        "news_story": "news_article",
-        "article": "news_article",
-        "newsletter": "newsletter",
-        "newsletter_update": "newsletter",
-        "update_brief": "newsletter",
-        "intranet_update": "newsletter",
-        "sme_question": "sme_questions",
-        "task": "tasks",
-    }
-    normalized: list[str] = []
-    for value in values:
-        if not isinstance(value, str):
-            continue
-        artifact_type = aliases.get(value.strip(), value.strip())
-        if artifact_type in ARTIFACT_REGISTRY and artifact_type not in normalized:
-            normalized.append(artifact_type)
-    return normalized
+    return _normalize_requested_artifact_types(values)
 
 
 def _desired_outputs_from_graph(graph: dict[str, Any]) -> list[str]:
-    if not isinstance(graph, dict):
-        return []
-    brief = graph.get("workspace_brief")
-    if not isinstance(brief, dict):
-        workspace = graph.get("workspace", {})
-        brief = workspace.get("workspace_brief") if isinstance(workspace, dict) else None
-    if isinstance(brief, dict):
-        return normalize_requested_artifact_types(brief.get("desired_outputs", []))
-    return []
+    return _artifact_desired_outputs_from_graph(graph)
 
 
 def validate_generated_artifacts(
@@ -2062,667 +2393,21 @@ def validate_generated_artifacts(
     ai_role: str,
     prompt_profile: str | dict[str, Any],
     input_source_refs: list[dict[str, Any]],
+    allow_external_source_refs: bool = False,
 ) -> list[dict[str, Any]]:
-    if artifacts in (None, []):
-        return []
-    if not isinstance(artifacts, list):
-        raise GraphSchemaError(["generated_artifacts: must be a list"])
-
-    normalized: list[dict[str, Any]] = []
-    errors: list[str] = []
-    for index, artifact in enumerate(artifacts):
-        path = f"generated_artifacts.{index}"
-        if not isinstance(artifact, dict):
-            errors.append(f"{path}: must be an object")
-            continue
-        artifact_type = str(artifact.get("artifact_type") or "").strip()
-        if artifact_type not in ARTIFACT_REGISTRY:
-            errors.append(f"{path}.artifact_type: unsupported artifact type '{artifact_type}'")
-            continue
-        item = deepcopy(artifact)
-        item["artifact_type"] = artifact_type
-        item["id"] = str(item.get("id") or f"draft_artifact_{artifact_type}_{index + 1}")
-        item["title"] = str(item.get("title") or artifact_type.replace("_", " ").title())
-        item["status"] = str(item.get("status") or "draft")
-        item["data"] = item.get("data") if isinstance(item.get("data"), dict) else {}
-        item["source_refs"] = item.get("source_refs") if isinstance(item.get("source_refs"), list) else []
-        item["assumptions"] = [
-            str(assumption)
-            for assumption in item.get("assumptions", [])
-            if isinstance(assumption, str) and assumption.strip()
-        ] if isinstance(item.get("assumptions"), list) else []
-        if not item["source_refs"] and not item["assumptions"]:
-            item["assumptions"] = ["Artifact contains generated or projected content that needs source review."]
-        if not item["source_refs"]:
-            item["status"] = "needs_review"
-
-        if artifact_type == "knowledge_graph":
-            item["data"]["relationship_edges"] = _normalize_relationship_edges(
-                item["data"].get("relationship_edges", []),
-                path=f"{path}.data.relationship_edges",
-                errors=errors,
-            )
-        elif artifact_type == "flow_chart":
-            _validate_flow_chart_artifact(item, path, errors)
-        elif artifact_type == "chart":
-            _validate_chart_artifact(item, path, errors)
-        elif artifact_type == "completeness_review":
-            _validate_completeness_review_artifact(item, path, errors)
-        elif artifact_type == "software_overlap_report":
-            _validate_software_overlap_report_artifact(item, path, errors)
-        elif artifact_type == "team_roadmap":
-            _validate_team_roadmap_artifact(item, path, errors)
-        elif artifact_type == "implementation_handoff_package":
-            _validate_handoff_artifact(item, path, errors)
-        elif artifact_type == "executive_summary":
-            _validate_executive_summary_artifact(item, path, errors)
-        elif artifact_type == "news_article":
-            _validate_news_article_artifact(item, path, errors)
-        elif artifact_type == "newsletter":
-            _validate_newsletter_artifact(item, path, errors)
-
-        validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
-        validation.setdefault("status", "needs_review" if item["status"] == "needs_review" else "valid")
-        validation.setdefault("rules", ARTIFACT_REGISTRY[artifact_type]["validation_rules"])
-        validation.setdefault("issues", [])
-        item["validation"] = validation
-        item["provenance"] = _artifact_provenance(
-            item.get("provenance") if isinstance(item.get("provenance"), dict) else {},
-            scope=scope,
-            model_provider=model_provider,
-            model=model,
-            ai_role=ai_role,
-            prompt_profile=prompt_profile,
-            input_source_refs=input_source_refs,
-            assumptions=item["assumptions"],
-            validation_status=validation["status"],
-        )
-        item["registry"] = {
-            "artifact_registry_version": ARTIFACT_REGISTRY_VERSION,
-            "definition": ARTIFACT_REGISTRY[artifact_type],
-        }
-        normalized.append(item)
-
-    if errors:
-        raise GraphSchemaError(errors)
-    return normalized
-
-
-def _artifact_provenance(
-    provenance: dict[str, Any],
-    *,
-    scope: dict[str, Any],
-    model_provider: str,
-    model: str,
-    ai_role: str,
-    prompt_profile: str | dict[str, Any],
-    input_source_refs: list[dict[str, Any]],
-    assumptions: list[str],
-    validation_status: str,
-) -> dict[str, Any]:
-    confidence_summary = provenance.get("confidence_summary")
-    if not confidence_summary:
-        confidence_summary = "needs_review" if validation_status == "needs_review" else "medium"
-    return {
-        "generated_by": provenance.get("generated_by") or "ai_draft_session",
-        "prompt_profile": provenance.get("prompt_profile") or prompt_profile or "",
-        "ai_role": provenance.get("ai_role") or ai_role or "",
-        "input_scope": provenance.get("input_scope") if isinstance(provenance.get("input_scope"), dict) else normalize_ai_draft_scope(scope),
-        "input_source_refs": provenance.get("input_source_refs") if isinstance(provenance.get("input_source_refs"), list) else deepcopy(input_source_refs or []),
-        "generated_at": provenance.get("generated_at") or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "model_provider": provenance.get("model_provider") or model_provider or "",
-        "model": provenance.get("model") or model or "",
-        "confidence_summary": confidence_summary,
-        "assumptions": provenance.get("assumptions") if isinstance(provenance.get("assumptions"), list) else deepcopy(assumptions),
-        "validation_status": validation_status,
-    }
-
-
-def _normalize_relationship_edges(relationship_edges: Any, *, path: str, errors: list[str]) -> list[dict[str, Any]]:
-    if not isinstance(relationship_edges, list):
-        errors.append(f"{path}: must be a list")
-        return []
-    normalized = []
-    for index, edge in enumerate(relationship_edges):
-        try:
-            normalized.append(validate_knowledge_graph_relationship_edge(edge, f"{path}.{index}"))
-        except GraphSchemaError as exc:
-            errors.extend(exc.errors)
-    return normalized
-
-
-def _coerce_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else []
-
-
-def _normalize_flow_chart_step(value: Any, index: int, *, default_type: str = "process") -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        if isinstance(value, str) and value.strip():
-            value = {"title": value}
-        else:
-            return None
-    metadata = value.get("metadata") if isinstance(value.get("metadata"), dict) else {}
-    node_id = str(value.get("node_id") or value.get("node") or "").strip()
-    if node_id:
-        metadata.setdefault("node_id", node_id)
-    step_type = str(
-        value.get("step_type")
-        or value.get("kind")
-        or value.get("type")
-        or value.get("node_type")
-        or default_type
+    return _validate_generated_artifacts(
+        artifacts,
+        scope=scope,
+        model_provider=model_provider,
+        model=model,
+        ai_role=ai_role,
+        prompt_profile=prompt_profile,
+        input_source_refs=input_source_refs,
     )
-    title = str(value.get("title") or value.get("label") or value.get("name") or f"Step {index}")
-    return {
-        "id": str(value.get("id") or node_id or f"step_{index}"),
-        "title": title,
-        "summary": value.get("summary") if isinstance(value.get("summary"), str) else value.get("description"),
-        "step_type": step_type,
-        "source_refs": deepcopy(value.get("source_refs", [])) if isinstance(value.get("source_refs"), list) else [],
-        "assumptions": deepcopy(value.get("assumptions", [])) if isinstance(value.get("assumptions"), list) else [],
-        "metadata": metadata,
-    }
-
-
-def _normalize_flow_chart_edge(value: Any, index: int, *, default_relationship: str = "next") -> dict[str, Any] | None:
-    if not isinstance(value, dict):
-        return None
-    metadata = value.get("metadata") if isinstance(value.get("metadata"), dict) else {}
-    label = str(
-        value.get("label")
-        or value.get("branch_label")
-        or value.get("condition")
-        or metadata.get("label")
-        or metadata.get("branch_label")
-        or metadata.get("condition")
-        or ""
-    ).strip()
-    condition = str(value.get("condition") or metadata.get("condition") or "").strip()
-    if condition:
-        metadata.setdefault("condition", condition)
-    if label:
-        metadata.setdefault("branch_label", label)
-    source = str(value.get("source_step_id") or value.get("source") or value.get("source_node_id") or "").strip()
-    target = str(value.get("target_step_id") or value.get("target") or value.get("target_node_id") or "").strip()
-    if not source or not target:
-        return None
-    relationship_type = str(value.get("relationship_type") or value.get("type") or default_relationship)
-    return {
-        "id": str(value.get("id") or f"flow_edge_{index}_{source}_{target}"),
-        "source_step_id": source,
-        "target_step_id": target,
-        "label": label or None,
-        "relationship_type": relationship_type,
-        "metadata": metadata,
-    }
 
 
 def _normalize_flow_chart_data(data: Any) -> dict[str, Any]:
-    data = data if isinstance(data, dict) else {}
-    steps = [
-        step
-        for index, value in enumerate(
-            [*_coerce_list(data.get("steps")), *_coerce_list(data.get("nodes"))],
-            start=1,
-        )
-        if (step := _normalize_flow_chart_step(value, index))
-    ]
-    decisions = [
-        step
-        for index, value in enumerate(_coerce_list(data.get("decisions")), start=1)
-        if (step := _normalize_flow_chart_step(value, index, default_type="decision"))
-    ]
-    edges = [
-        edge
-        for index, value in enumerate(_coerce_list(data.get("edges")), start=1)
-        if (edge := _normalize_flow_chart_edge(value, index))
-    ]
-    dependency_start = len(edges) + 1
-    for index, dependency in enumerate(_coerce_list(data.get("dependencies")), start=dependency_start):
-        edge = _normalize_flow_chart_edge(dependency, index, default_relationship="dependency")
-        if edge:
-            edges.append(edge)
-    return {
-        **data,
-        "steps": steps,
-        "decisions": decisions,
-        "edges": edges,
-    }
-
-
-def _validate_flow_chart_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
-    data = _normalize_flow_chart_data(item.get("data", {}))
-    item["data"] = data
-    if not (data.get("steps") or data.get("nodes") or data.get("decisions") or data.get("dependencies")):
-        errors.append(f"{path}.data: flow_chart requires steps, nodes, decisions, or dependencies")
-
-    validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
-    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
-    decision_ids = {
-        str(decision.get("id") or decision.get("node_id") or "").strip()
-        for decision in data.get("decisions", [])
-        if isinstance(decision, dict) and str(decision.get("id") or decision.get("node_id") or "").strip()
-    }
-    labeled_decision_edges: set[str] = set()
-
-    edges = data.get("edges", [])
-    for index, edge in enumerate(edges):
-        if not isinstance(edge, dict):
-            errors.append(f"{path}.data.edges.{index}: must be an object")
-            continue
-        metadata = edge.get("metadata") if isinstance(edge.get("metadata"), dict) else {}
-        if not isinstance(edge.get("metadata"), dict):
-            edge["metadata"] = metadata
-        label = str(
-            edge.get("label")
-            or metadata.get("label")
-            or metadata.get("branch_label")
-            or metadata.get("condition")
-            or ""
-        ).strip()
-        if label:
-            edge["label"] = label
-
-        source_id = str(edge.get("source_step_id") or edge.get("source") or "").strip()
-        relationship_type = str(edge.get("relationship_type") or "").strip().lower().replace("_", "-")
-        if source_id in decision_ids:
-            if label:
-                labeled_decision_edges.add(source_id)
-            elif relationship_type in {"decision-path", "exception"}:
-                issues.append(
-                    f"{path}.data.edges.{index}: decision and exception paths should include label or metadata.branch_label"
-                )
-
-    for decision_id in sorted(decision_ids - labeled_decision_edges):
-        issues.append(f"{path}.data.decisions: decision '{decision_id}' has no labeled outgoing path")
-
-    if issues:
-        validation["issues"] = issues
-        validation["status"] = "needs_review"
-        item["validation"] = validation
-
-
-def _validate_chart_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
-    data = item.get("data", {})
-    if not isinstance(data.get("chart_spec"), dict):
-        errors.append(f"{path}.data.chart_spec: chart requires a chart_spec object")
-    rows = data.get("data_rows") or data.get("rows")
-    if not isinstance(rows, list) or not rows:
-        errors.append(f"{path}.data.data_rows: chart requires source or extracted data rows")
-
-
-def _validate_handoff_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
-    data = item.get("data", {})
-    if not data.get("summary"):
-        errors.append(f"{path}.data.summary: implementation_handoff_package requires a summary")
-    if "recommended_next_actions" in data and not isinstance(data.get("recommended_next_actions"), list):
-        errors.append(f"{path}.data.recommended_next_actions: must be a list when provided")
-
-
-def _validate_completeness_review_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
-    data = item.get("data", {})
-    review_keys = (
-        "covered_areas",
-        "missing_areas",
-        "partial_areas",
-        "duplicate_conflicting_areas",
-        "stale_deprecated_candidates",
-    )
-    if not any(isinstance(data.get(key), list) and data.get(key) for key in review_keys):
-        errors.append(f"{path}.data: completeness_review requires at least one populated review area")
-    for key in (*review_keys, "recommended_roadmap", "sme_questions"):
-        if key in data and not isinstance(data.get(key), list):
-            errors.append(f"{path}.data.{key}: must be a list when provided")
-
-
-def _validate_software_overlap_report_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
-    data = item.get("data", {})
-    if isinstance(data, dict):
-        data = enrich_software_overlap_report(data)
-        item["data"] = data
-    inventory_items = data.get("inventory_items", [])
-    overlap_candidates = data.get("overlap_candidates", [])
-    rationalization_actions = data.get("rationalization_actions", [])
-
-    if not isinstance(inventory_items, list):
-        errors.append(f"{path}.data.inventory_items: must be a list when provided")
-        inventory_items = []
-    if not isinstance(overlap_candidates, list) or not overlap_candidates:
-        errors.append(f"{path}.data.overlap_candidates: software_overlap_report requires at least one overlap candidate")
-        overlap_candidates = []
-    if not isinstance(rationalization_actions, list):
-        errors.append(f"{path}.data.rationalization_actions: must be a list when provided")
-
-    for index, inventory_item in enumerate(inventory_items):
-        if not isinstance(inventory_item, dict):
-            errors.append(f"{path}.data.inventory_items.{index}: must be an object")
-            continue
-        entity_type = str(inventory_item.get("entity_type") or "").strip()
-        if entity_type and entity_type not in SOFTWARE_INVENTORY_ENTITY_TYPES:
-            errors.append(
-                f"{path}.data.inventory_items.{index}.entity_type: must be a registered software inventory entity type"
-            )
-
-    validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
-    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
-    item_needs_review = False
-
-    for index, candidate in enumerate(overlap_candidates):
-        candidate_path = f"{path}.data.overlap_candidates.{index}"
-        if not isinstance(candidate, dict):
-            errors.append(f"{candidate_path}: must be an object")
-            continue
-        application_ids = candidate.get("application_ids")
-        if not isinstance(application_ids, list):
-            application_ids = [
-                str(application.get("id") or application.get("node_id") or "")
-                for application in candidate.get("applications", [])
-                if isinstance(application, dict)
-            ] if isinstance(candidate.get("applications"), list) else []
-            candidate["application_ids"] = [value for value in application_ids if value]
-        if len([value for value in candidate.get("application_ids", []) if str(value).strip()]) < 2:
-            errors.append(f"{candidate_path}.application_ids: must include at least two application ids")
-        scoring_factors = candidate.get("scoring_factors")
-        if not isinstance(scoring_factors, list) or not scoring_factors:
-            errors.append(f"{candidate_path}.scoring_factors: must include score factor evidence")
-
-        source_refs = candidate.get("source_refs", [])
-        assumptions = candidate.get("assumptions", [])
-        if source_refs is None:
-            source_refs = []
-        if assumptions is None:
-            assumptions = []
-        if not isinstance(source_refs, list):
-            errors.append(f"{candidate_path}.source_refs: must be a list when provided")
-            source_refs = []
-        if not isinstance(assumptions, list) or not all(isinstance(value, str) for value in assumptions):
-            errors.append(f"{candidate_path}.assumptions: must be a list of strings when provided")
-            assumptions = []
-        if not source_refs or str(candidate.get("review_state") or "") in {"", "inferred"}:
-            candidate["review_state"] = "needs_review"
-            item_needs_review = True
-            issues.append(
-                {
-                    "code": "software_overlap_candidate_needs_review",
-                    "severity": "warning",
-                    "message": "Software overlap candidate is inferred or missing source evidence and was marked needs_review.",
-                    "candidate_id": str(candidate.get("id") or ""),
-                    "repaired": True,
-                }
-            )
-        candidate["source_refs"] = source_refs
-        candidate["assumptions"] = assumptions
-
-    if "relationship_edges" in data:
-        data["relationship_edges"] = _normalize_relationship_edges(
-            data.get("relationship_edges", []),
-            path=f"{path}.data.relationship_edges",
-            errors=errors,
-        )
-
-    if item_needs_review:
-        item["status"] = "needs_review"
-        validation["status"] = "needs_review"
-    if issues:
-        validation["issues"] = issues
-    item["validation"] = validation
-
-
-def _validate_team_roadmap_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
-    data = item.get("data", {})
-    if not data.get("context"):
-        errors.append(f"{path}.data.context: team_roadmap requires plain-language context")
-    for key in (
-        "workstreams",
-        "milestones",
-        "dependencies",
-        "risks",
-        "required_decisions",
-        "recommended_next_actions",
-        "source_backed_appendix",
-    ):
-        if key in data and not isinstance(data.get(key), list):
-            errors.append(f"{path}.data.{key}: must be a list when provided")
-    has_action_path = any(
-        isinstance(data.get(key), list) and data.get(key)
-        for key in ("workstreams", "milestones", "recommended_next_actions")
-    )
-    if not has_action_path:
-        errors.append(f"{path}.data: team_roadmap requires workstreams, milestones, or recommended_next_actions")
-
-
-def _validate_executive_summary_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
-    data = item.get("data", {})
-    if not isinstance(data.get("summary", ""), str):
-        errors.append(f"{path}.data.summary: must be a string when provided")
-    for key in ("key_points", "recommended_actions", "risks", "source_backed_appendix"):
-        if key in data and not isinstance(data.get(key), list):
-            errors.append(f"{path}.data.{key}: must be a list when provided")
-    if not str(data.get("summary") or "").strip() and not (
-        isinstance(data.get("key_points"), list) and data.get("key_points")
-    ):
-        errors.append(f"{path}.data: executive_summary requires summary or key_points")
-    _mark_unsourced_review_items(
-        item,
-        path,
-        ("key_points", "recommended_actions", "risks"),
-    )
-
-
-def _validate_news_article_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
-    data = item.get("data", {})
-    headline = str(data.get("headline") or data.get("title") or "").strip()
-    if not headline:
-        errors.append(f"{path}.data.headline: news_article requires a headline")
-    for key in ("sections", "quotes", "fact_checks", "source_backed_appendix"):
-        if key in data and not isinstance(data.get(key), list):
-            errors.append(f"{path}.data.{key}: must be a list when provided")
-    has_body = bool(str(data.get("lede") or data.get("body") or "").strip())
-    has_sections = isinstance(data.get("sections"), list) and bool(data.get("sections"))
-    if not has_body and not has_sections:
-        errors.append(f"{path}.data: news_article requires lede, body, or sections")
-    _normalize_news_article_items(item, path)
-
-
-def _validate_newsletter_artifact(item: dict[str, Any], path: str, errors: list[str]) -> None:
-    data = item.get("data", {})
-    title = str(data.get("title") or "").strip()
-    if not title:
-        errors.append(f"{path}.data.title: newsletter requires a title")
-    for key in (
-        "highlights",
-        "sections",
-        "upcoming",
-        "risks",
-        "decisions_needed",
-        "visual_blocks",
-        "source_backed_appendix",
-    ):
-        if key in data and not isinstance(data.get(key), list):
-            errors.append(f"{path}.data.{key}: must be a list when provided")
-    has_content = bool(str(data.get("opening_note") or "").strip()) or any(
-        isinstance(data.get(key), list) and bool(data.get(key))
-        for key in ("highlights", "sections", "upcoming")
-    )
-    if not has_content:
-        errors.append(f"{path}.data: newsletter requires opening_note, highlights, sections, or upcoming")
-    _normalize_news_article_items(
-        item,
-        path,
-        section_keys=(
-            "highlights",
-            "sections",
-            "upcoming",
-            "risks",
-            "decisions_needed",
-            "visual_blocks",
-            "source_backed_appendix",
-        ),
-        missing_source_message="Source evidence is missing for this newsletter item.",
-        issue_code="newsletter_item_needs_review",
-        issue_message="Newsletter item is missing source evidence and was marked needs_review.",
-    )
-
-
-def _normalize_news_article_items(
-    item: dict[str, Any],
-    path: str,
-    *,
-    section_keys: tuple[str, ...] = ("sections", "quotes", "fact_checks", "source_backed_appendix"),
-    missing_source_message: str = "Source evidence is missing for this news article item.",
-    issue_code: str = "news_article_item_needs_review",
-    issue_message: str = "News article item is missing source evidence and was marked needs_review.",
-) -> None:
-    data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
-    validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
-    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
-    item_needs_review = False
-
-    for key in section_keys:
-        values = data.get(key)
-        if not isinstance(values, list):
-            if key == "source_backed_appendix":
-                data[key] = []
-            continue
-        for index, value in enumerate(values):
-            if not isinstance(value, dict):
-                continue
-            item_path = f"{path}.data.{key}.{index}"
-            source_refs = value.get("source_refs", [])
-            assumptions = value.get("assumptions", [])
-            metadata = value.get("metadata") if isinstance(value.get("metadata"), dict) else {}
-            if not isinstance(source_refs, list):
-                source_refs = []
-            if not isinstance(assumptions, list):
-                assumptions = []
-
-            source_backed = any(
-                isinstance(source_ref, dict)
-                and str(source_ref.get("document_id") or "").strip()
-                for source_ref in source_refs
-            )
-            explicit_review_state = str(
-                value.get("review_state") or value.get("status") or ""
-            ).strip()
-            explicit_needs_review = explicit_review_state in {
-                "needs_review",
-                "review",
-                "in_review",
-                "rejected",
-            } or value.get("needs_review") is True
-            if source_backed:
-                value["source_backed"] = True
-                value["needs_review"] = explicit_needs_review
-                value["review_state"] = explicit_review_state or "reviewed"
-                value["status"] = "needs_review" if explicit_needs_review else "reviewed"
-                value["source_signal"] = str(
-                    value.get("source_signal")
-                    or metadata.get("source_signal")
-                    or "explicit_text"
-                )
-                metadata.setdefault("source_signal", value["source_signal"])
-                metadata.setdefault(
-                    "review_reason",
-                    "Source reference supplied; reviewer marked item for review."
-                    if explicit_needs_review
-                    else "Source reference supplied.",
-                )
-                item_needs_review = item_needs_review or explicit_needs_review
-            else:
-                review_assumption = missing_source_message
-                if not any(str(assumption).strip() for assumption in assumptions):
-                    assumptions = [review_assumption]
-                value["source_backed"] = False
-                value["needs_review"] = True
-                value["review_state"] = "needs_review"
-                value["status"] = "needs_review"
-                value["source_signal"] = str(
-                    value.get("source_signal")
-                    or metadata.get("source_signal")
-                    or "missing_source_ref"
-                )
-                value.setdefault("rationale", review_assumption)
-                metadata.setdefault("review_reason", review_assumption)
-                metadata.setdefault("source_signal", value["source_signal"])
-                item_needs_review = True
-                issues.append(
-                    {
-                        "code": issue_code,
-                        "severity": "warning",
-                        "message": issue_message,
-                        "path": item_path,
-                        "repaired": True,
-                    }
-                )
-
-            value["id"] = str(value.get("id") or f"{key}_{index + 1}")
-            value["title"] = str(value.get("title") or value.get("label") or f"{key.replace('_', ' ').title()} {index + 1}")
-            if "description" not in value:
-                value["description"] = value.get("summary")
-            if "content" not in value:
-                value["content"] = value.get("body") or value.get("quote") or value.get("description")
-            value.setdefault("confidence", None)
-            value.setdefault("rationale", None)
-            value["source_refs"] = source_refs
-            value["assumptions"] = [
-                str(assumption)
-                for assumption in assumptions
-                if isinstance(assumption, str) and assumption.strip()
-            ]
-            value["metadata"] = metadata
-
-    item["data"] = data
-    if item_needs_review:
-        item["status"] = "needs_review"
-        validation["status"] = "needs_review"
-    if issues:
-        validation["issues"] = issues
-    item["validation"] = validation
-
-
-def _mark_unsourced_review_items(
-    item: dict[str, Any],
-    path: str,
-    section_keys: tuple[str, ...],
-) -> None:
-    data = item.get("data", {}) if isinstance(item.get("data"), dict) else {}
-    validation = item.get("validation") if isinstance(item.get("validation"), dict) else {}
-    issues = validation.get("issues") if isinstance(validation.get("issues"), list) else []
-    item_needs_review = False
-    for key in section_keys:
-        values = data.get(key)
-        if not isinstance(values, list):
-            continue
-        for index, value in enumerate(values):
-            if not isinstance(value, dict):
-                continue
-            source_refs = value.get("source_refs", [])
-            assumptions = value.get("assumptions", [])
-            if not isinstance(source_refs, list):
-                source_refs = []
-                value["source_refs"] = source_refs
-            if not isinstance(assumptions, list):
-                assumptions = []
-                value["assumptions"] = assumptions
-            if source_refs:
-                continue
-            value["status"] = "needs_review"
-            item_needs_review = True
-            issues.append(
-                {
-                    "code": "artifact_item_needs_review",
-                    "severity": "warning",
-                    "message": "Generated artifact item is missing source evidence and was marked needs_review.",
-                    "path": f"{path}.data.{key}.{index}",
-                    "repaired": True,
-                }
-            )
-    if item_needs_review:
-        item["status"] = "needs_review"
-        validation["status"] = "needs_review"
-    if issues:
-        validation["issues"] = issues
-        item["validation"] = validation
+    return _artifact_normalize_flow_chart_data(data)
 
 
 def validate_ai_action_drafts_for_accept(
@@ -4187,330 +3872,11 @@ def _deterministic_ai_action_drafts(
     action_run: dict[str, Any],
     profile: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[str]]:
-    source_node = _source_node_for_action(graph, action_run.get("source_node_id"))
-    source_node_id = source_node.get("id") if source_node else action_run.get("source_node_id")
-    source_title = source_node.get("title") if source_node else "workspace"
-    source_refs = _collect_source_refs(graph)
-    action = action_run["action"]
-    role = action_run["role"]
-    draft_nodes: list[dict[str, Any]] = []
-    draft_edges: list[dict[str, Any]] = []
-    draft_annotations: list[dict[str, Any]] = []
-    assumptions = [] if source_refs else ["Generated action preview is not source-backed and requires review."]
-
-    if action in {
-        "expand_this_node",
-        "generate_child_nodes",
-        "generate_tasks",
-        "convert_to_checklist",
-        "generate_checklist",
-        "generate_training_outline",
-        "export_branch_as_sop_draft",
-        "create_team_roadmap",
-        "create_30_60_90_day_improvement_plan",
-        "create_stakeholder_review_package",
-        "custom_prompt",
-    }:
-        planned_items = _draft_plan_for_action(
-            action=action,
-            source_title=source_title,
-            custom_prompt=action_run.get("custom_prompt"),
-        )
-        for order, item in enumerate(planned_items, start=1):
-            parent_order = item.get("parent_order")
-            parent_node = (
-                draft_nodes[int(parent_order) - 1]
-                if isinstance(parent_order, int) and 0 < parent_order <= len(draft_nodes)
-                else None
-            )
-            parent_id = parent_node.get("id") if parent_node else source_node_id
-            draft_node = _draft_node(
-                action_run=action_run,
-                order=order,
-                title=item["title"],
-                summary=item["summary"],
-                parent_id=parent_id,
-                node_type=item["node_type"],
-                source_refs=source_refs[:1],
-                profile=profile,
-            )
-            draft_nodes.append(draft_node)
-            if parent_id:
-                draft_edges.append(
-                    {
-                        "id": f"draft_edge_{action_run['ai_action_id']}_{order}",
-                        "source_node_id": parent_id,
-                        "target_node_id": draft_node["id"],
-                        "relationship_type": "contains",
-                        "metadata": {"source": "ai_action_preview", "ai_action_id": action_run["ai_action_id"]},
-                    }
-                )
-
-    if action in {
-        "ask_follow_up",
-        "create_sme_questions",
-        "suggest_follow_up_questions",
-        "find_missing_source_support",
-        "find_gaps",
-        "find_unsupported_assumptions",
-        "find_duplicate_overlapping_nodes",
-        "assess_standards_completeness",
-        "find_process_bottlenecks",
-        "find_duplicate_tools",
-        "find_ownership_gaps",
-        "find_unsupported_business_critical_systems",
-        "interpret_table_data",
-        "summarize_branch",
-        "reorganize_branch",
-        "split_branch_into_categories",
-    }:
-        draft_annotations.append(
-            {
-                "id": f"draft_annotation_{action_run['ai_action_id']}_1",
-                "type": _annotation_type(action),
-                "node_id": source_node_id,
-                "title": _annotation_title(action, source_title),
-                "body": _annotation_body(action, source_title, role, action_run.get("custom_prompt")),
-                "source_refs": source_refs[:1],
-                "assumptions": assumptions,
-                "metadata": {"source": "ai_action_preview", "ai_action_id": action_run["ai_action_id"]},
-            }
-        )
-
-    return draft_nodes, draft_edges, draft_annotations, source_refs, assumptions
-
-
-def _source_node_for_action(graph: dict[str, Any], node_id: str | None) -> dict[str, Any] | None:
-    nodes = [node for node in graph.get("nodes", []) if isinstance(node, dict)]
-    if node_id:
-        for node in nodes:
-            if node.get("id") == node_id:
-                return node
-    return nodes[0] if nodes else None
-
-
-def _draft_node(
-    *,
-    action_run: dict[str, Any],
-    order: int,
-    title: str,
-    summary: str,
-    parent_id: str | None,
-    node_type: str,
-    source_refs: list[dict[str, Any]],
-    profile: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "id": f"draft_node_{action_run['ai_action_id']}_{order}",
-        "title": title,
-        "parent_id": parent_id,
-        "summary": summary,
-        "node_type": node_type,
-        "status": "ai_generated",
-        "priority": "medium" if node_type == "task" else "",
-        "owner_id": "",
-        "due_date": "",
-        "confidence": source_refs[0].get("confidence") if source_refs else None,
-        "source_refs": deepcopy(source_refs),
-        "external_refs": {},
-        "metadata": {
-            "source": "ai_action_preview",
-            "ai_action_id": action_run["ai_action_id"],
-            "prompt_profile_id": profile["role_id"],
-        },
-    }
-
-
-def _draft_plan_for_action(
-    *,
-    action: str,
-    source_title: str,
-    custom_prompt: str | None,
-) -> list[dict[str, Any]]:
-    target = source_title or "workspace"
-    prompt = (custom_prompt or "").strip()
-    if action == "custom_prompt" and prompt:
-        return _custom_prompt_draft_plan(prompt)
-
-    plans: dict[str, list[tuple[str, str, str]]] = {
-        "expand_this_node": [
-            ("Key details", f"Add the most important details that clarify {target}.", "concept"),
-            ("Related considerations", f"Capture adjacent ideas, risks, or decisions connected to {target}.", "concept"),
-        ],
-        "generate_child_nodes": [
-            ("Main branches", f"Create editable child branches under {target}.", "category"),
-            ("Definitions and references", f"Separate definitions, references, or examples related to {target}.", "reference"),
-            ("Open questions", f"Flag unresolved questions that need user or SME review for {target}.", "question"),
-        ],
-        "generate_tasks": [
-            ("Prepare task breakdown", f"Turn {target} into accountable work items.", "task"),
-            ("Assign review owner", "Identify who should validate or complete this work.", "task"),
-            ("Confirm acceptance criteria", "Define what done means before the branch is accepted.", "task"),
-        ],
-        "convert_to_checklist": [
-            ("Checklist setup", f"Convert {target} into a scannable checklist structure.", "task"),
-            ("Verification step", "Add a check for evidence, owner, and completion status.", "task"),
-            ("Exception handling", "Capture what to do when a checklist item cannot be verified.", "task"),
-        ],
-        "generate_checklist": [
-            ("Checklist setup", f"Create checklist items for {target}.", "task"),
-            ("Evidence check", "Confirm source support or mark the item for review.", "task"),
-            ("Completion check", "Add a clear done/not-done review step.", "task"),
-        ],
-        "generate_training_outline": [
-            ("Learning goals and audience", f"Define who the training is for and what {target} should teach.", "concept"),
-            ("Module sequence", "Draft the section/module flow the learner should follow.", "workflow"),
-            ("Practice and assessment", "Add exercises, checks for understanding, and review prompts.", "task"),
-        ],
-        "export_branch_as_sop_draft": [
-            ("Purpose and scope", f"Describe when the SOP for {target} applies.", "concept"),
-            ("Procedure steps", "Draft ordered steps, decisions, and handoffs.", "workflow"),
-            ("Controls and evidence", "List review checkpoints, source evidence, and exception handling.", "requirement"),
-        ],
-        "create_team_roadmap": [
-            ("Plain-language context", f"Explain the issue behind {target} in terms the team can use.", "concept"),
-            ("Workstreams and dependencies", "Group the work into practical streams, dependencies, decisions, and risks.", "workflow"),
-            ("Milestones and next actions", "Create a sequenced roadmap with milestones, owner placeholders, and review checkpoints.", "task"),
-        ],
-        "create_30_60_90_day_improvement_plan": [
-            ("30 day stabilization plan", f"Identify urgent fixes, owners, and evidence needed to stabilize {target}.", "task"),
-            ("60 day operating improvements", "Sequence process, tooling, and ownership improvements that reduce repeated friction.", "task"),
-            ("90 day governance checkpoint", "Define durable controls, success measures, and stakeholder review gates.", "task"),
-        ],
-        "create_stakeholder_review_package": [
-            ("Executive summary", f"Summarize the enterprise readiness findings for {target}.", "concept"),
-            ("Decision and risk register", "List decisions needed, open risks, owners, and unsupported assumptions.", "requirement"),
-            ("Review agenda and asks", "Package stakeholder questions, evidence requests, and next actions.", "task"),
-        ],
-    }
-    return [
-        {"title": f"{title} for {target}", "summary": summary, "node_type": node_type}
-        for title, summary, node_type in plans.get(
-            action,
-            [("AI draft", f"Create a reviewable draft for {target}.", "concept")],
-        )
-    ]
-
-
-def _custom_prompt_draft_plan(prompt: str) -> list[dict[str, Any]]:
-    normalized_prompt = prompt.rstrip(".?!").strip()
-    topic = _topic_from_custom_prompt(normalized_prompt)
-    return _generic_custom_prompt_plan(topic or normalized_prompt or "AI draft")
-
-
-def _topic_from_custom_prompt(prompt: str) -> str:
-    cleaned = re.sub(r"\s+", " ", prompt).strip(" .?!")
-    patterns = [
-        r"^(?:please\s+)?(?:show|map|layout|lay out|create|build|draft|make|generate|outline)\s+(?:me\s+)?(?:a|an|the|typical\s+)?(.+)$",
-        r"^(?:what\s+is|explain|describe)\s+(?:a|an|the\s+)?(.+)$",
-    ]
-    for pattern in patterns:
-        match = re.match(pattern, cleaned, flags=re.IGNORECASE)
-        if match:
-            cleaned = match.group(1).strip(" .?!")
-            break
-    cleaned = re.sub(r"^(?:typical|standard|basic)\s+", "", cleaned, flags=re.IGNORECASE)
-    if re.search(r"\bsaas\b", cleaned, flags=re.IGNORECASE):
-        cleaned = re.sub(r"\bSAAS\b", "SaaS", cleaned, flags=re.IGNORECASE)
-    return cleaned[:96].replace("business model model", "business model")
-
-
-def _generic_custom_prompt_plan(topic: str) -> list[dict[str, Any]]:
-    return [
-        {
-            "title": topic[:80],
-            "summary": f"Draft a reviewable structure for: {topic[:180]}",
-            "node_type": "concept",
-        },
-        {
-            "title": "Core components",
-            "summary": f"Break {topic[:140] or 'the request'} into its main parts, decisions, and dependencies.",
-            "node_type": "category",
-            "parent_order": 1,
-        },
-        {
-            "title": "Workflow or sequence",
-            "summary": "Show the practical order of operations, handoffs, or lifecycle stages.",
-            "node_type": "category",
-            "parent_order": 1,
-        },
-        {
-            "title": "Metrics and evidence",
-            "summary": "Identify the signals, examples, or source support needed to validate the draft.",
-            "node_type": "reference",
-            "parent_order": 1,
-        },
-        {
-            "title": "Open questions",
-            "summary": "Flag assumptions, missing context, risks, and choices to confirm before accepting.",
-            "node_type": "question",
-            "parent_order": 1,
-        },
-    ]
-
-
-def _annotation_type(action: str) -> str:
-    if "question" in action or action == "ask_follow_up":
-        return "sme_question"
-    if action == "assess_standards_completeness":
-        return "completeness_review"
-    if "business_critical" in action:
-        return "business_critical_system_gap"
-    if "source" in action or "unsupported" in action:
-        return "source_gap"
-    if "duplicate" in action:
-        return "overlap_review"
-    if "bottleneck" in action:
-        return "process_bottleneck"
-    if "ownership" in action:
-        return "ownership_gap"
-    if "table" in action:
-        return "table_interpretation"
-    return "ai_note"
-
-
-def _annotation_title(action: str, source_title: str) -> str:
-    labels = {
-        "ask_follow_up": "Follow-up question",
-        "create_sme_questions": "SME question",
-        "suggest_follow_up_questions": "Suggested follow-up",
-        "find_missing_source_support": "Missing source support",
-        "find_gaps": "Gap finding",
-        "find_unsupported_assumptions": "Unsupported assumption",
-        "find_duplicate_overlapping_nodes": "Potential overlap",
-        "assess_standards_completeness": "Standards completeness review",
-        "find_process_bottlenecks": "Process bottleneck",
-        "find_duplicate_tools": "Duplicate tool",
-        "find_ownership_gaps": "Ownership gap",
-        "find_unsupported_business_critical_systems": "Unsupported business-critical system",
-        "interpret_table_data": "Table interpretation",
-        "summarize_branch": "Branch summary",
-        "reorganize_branch": "Branch reorganization note",
-        "split_branch_into_categories": "Branch category split",
-    }
-    return f"{labels.get(action, 'AI note')} for {source_title}"
-
-
-def _annotation_body(action: str, source_title: str, role: str, custom_prompt: str | None) -> str:
-    if action == "custom_prompt" and custom_prompt:
-        return custom_prompt.strip()
-    if action == "assess_standards_completeness":
-        return f"{role} should review {source_title} for documented, missing, partial, stale, duplicate, and conflicting standards coverage, with assumptions separated from source-backed findings."
-    if "question" in action or action == "ask_follow_up":
-        return f"What decision or source evidence is needed to finalize {source_title}?"
-    if "business_critical" in action:
-        return f"{role} should identify business-critical systems in {source_title} that lack source support, ownership, recovery notes, or integration coverage."
-    if "source" in action or "unsupported" in action:
-        return f"{role} should verify source support before accepting generated content for {source_title}."
-    if "duplicate" in action:
-        return f"{role} should compare nearby nodes for overlapping meaning before merging or accepting changes."
-    if "bottleneck" in action:
-        return f"{role} should identify process delays, handoff friction, missing decision gates, and measurable symptoms for {source_title}."
-    if "ownership" in action:
-        return f"{role} should flag systems, tasks, and decisions in {source_title} that lack a clear accountable owner or review cadence."
-    if "table" in action:
-        return f"{role} should review table-derived claims and mark inferred conclusions for review."
-    return f"{role} generated a preview note for {source_title}."
+    return _build_deterministic_ai_action_drafts(
+        graph,
+        action_run=action_run,
+        profile=profile,
+    )
 
 
 def normalize_ai_draft_scope(scope: dict[str, Any] | None) -> dict[str, Any]:
@@ -4626,7 +3992,7 @@ def _normalize_draft_items(
 
 
 def _normalize_draft_item(item: dict[str, Any]) -> dict[str, Any]:
-    return {
+    normalized = {
         "id": str(item.get("id") or f"draft_item_{_utc_token()}"),
         "item_type": str(item.get("item_type") or item.get("type") or "node"),
         "title": str(item.get("title") or item.get("id") or "Draft item"),
@@ -4637,6 +4003,71 @@ def _normalize_draft_item(item: dict[str, Any]) -> dict[str, Any]:
         "selected": bool(item.get("selected", True)),
         "metadata": deepcopy(item.get("metadata", {})) if isinstance(item.get("metadata"), dict) else {},
     }
+    if normalized["item_type"] in {"row", "path", "edge", "finding", "task", "source_repair"} or any(
+        key in item
+        for key in (
+            "evidence_item_id",
+            "row_id",
+            "represented_row_indexes",
+            "representedRowIndexes",
+            "row_indexes",
+            "rowIndexes",
+            "artifact_id",
+            "artifact_ids",
+            "review_state",
+        )
+    ):
+        evidence_item_id = str(
+            item.get("evidence_item_id")
+            or item.get("row_id")
+            or item.get("path_id")
+            or item.get("edge_id")
+            or item.get("task_id")
+            or item.get("finding_id")
+            or normalized["id"]
+        )
+        normalized["evidence_item_id"] = evidence_item_id
+        if normalized["item_type"] == "row" or item.get("row_id"):
+            normalized["row_id"] = str(item.get("row_id") or evidence_item_id)
+        row_indexes = (
+            item.get("represented_row_indexes")
+            if "represented_row_indexes" in item
+            else item.get("representedRowIndexes")
+            if "representedRowIndexes" in item
+            else item.get("row_indexes")
+            if "row_indexes" in item
+            else item.get("rowIndexes")
+        )
+        normalized["represented_row_indexes"] = _coerce_represented_row_indexes(row_indexes)
+        artifact_ids = [
+            str(value)
+            for value in item.get("artifact_ids", [])
+            if str(value).strip()
+        ] if isinstance(item.get("artifact_ids"), list) else []
+        artifact_id = str(item.get("artifact_id") or "").strip()
+        if artifact_id and artifact_id not in artifact_ids:
+            artifact_ids.insert(0, artifact_id)
+        normalized["artifact_ids"] = artifact_ids
+        normalized["review_state"] = str(
+            item.get("review_state")
+            or ("source_backed" if normalized["source_refs"] else "needs_review")
+        )
+    return normalized
+
+
+def _coerce_represented_row_indexes(value: Any) -> list[int]:
+    if value is None:
+        return []
+    values = value if isinstance(value, list) else [value]
+    indexes: list[int] = []
+    for item in values:
+        try:
+            index = int(item)
+        except (TypeError, ValueError):
+            continue
+        if index not in indexes:
+            indexes.append(index)
+    return indexes
 
 
 def _normalize_draft_node(node: dict[str, Any]) -> dict[str, Any]:
@@ -5053,6 +4484,64 @@ def _should_include_library_sources(
     )
 
 
+def _mentions_public_reference(prompt: str) -> bool:
+    text = f" {str(prompt or '').lower()} "
+    if any(term in text for term in PUBLIC_REFERENCE_TERMS):
+        return True
+    return " code " in text and any(term in text for term in PUBLIC_REFERENCE_CODE_TERMS)
+
+
+def _mentions_pasted_url(prompt: str) -> bool:
+    return bool(PASTED_URL_PATTERN.search(str(prompt or "")))
+
+
+def _selected_or_uploaded_sources_requested(
+    *,
+    scope: dict[str, Any],
+    source_chunks: list[dict[str, Any]] | None,
+) -> bool:
+    return bool(source_chunks) or scope.get("type") == "source"
+
+
+def _draft_preference_metadata(
+    *,
+    metadata: dict[str, Any] | None,
+    prompt: str,
+    scope: dict[str, Any],
+    source_chunks: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    resolved = deepcopy(metadata) if isinstance(metadata, dict) else {}
+    evidence_mode = str(resolved.get("evidence_mode") or "").strip().lower()
+    citation_policy = str(resolved.get("citation_policy") or "").strip().lower()
+    public_reference_requested = _mentions_public_reference(prompt)
+    pasted_url_requested = _mentions_pasted_url(prompt)
+    if public_reference_requested or pasted_url_requested:
+        if not evidence_mode:
+            evidence_mode = (
+                "uploaded_sources"
+                if _selected_or_uploaded_sources_requested(scope=scope, source_chunks=source_chunks)
+                else "web_sources"
+            )
+        if not citation_policy:
+            citation_policy = "required"
+        source_preference = (
+            "selected_or_uploaded_sources"
+            if evidence_mode == "uploaded_sources"
+            else "web_current_sources"
+        )
+        if public_reference_requested:
+            resolved["public_reference_policy"] = "current_public_sources_required"
+            resolved["public_reference_source_preference"] = source_preference
+        if pasted_url_requested:
+            resolved["pasted_url_policy"] = "web_current_sources_required"
+            resolved["pasted_url_source_preference"] = source_preference
+    if evidence_mode:
+        resolved["evidence_mode"] = evidence_mode
+    if citation_policy:
+        resolved["citation_policy"] = citation_policy
+    return resolved
+
+
 def _draft_preferences_from_metadata(metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     source = metadata if isinstance(metadata, dict) else {}
     expansion_mode = str(source.get("expansion_mode") or "").strip().lower()
@@ -5141,7 +4630,13 @@ def generate_ai_draft_session_with_provider(
     requested_outputs = desired_outputs if desired_outputs is not None else _desired_outputs_from_graph(graph)
     classification = classify_ai_draft_intent(prompt, scope=normalized_scope, desired_outputs=requested_outputs)
     policy = normalize_model_policy(model_policy or classification["model_policy"], requested_model=model)
-    draft_preferences = _draft_preferences_from_metadata(metadata)
+    preference_metadata = _draft_preference_metadata(
+        metadata=metadata,
+        prompt=prompt,
+        scope=normalized_scope,
+        source_chunks=source_chunks,
+    )
+    draft_preferences = _draft_preferences_from_metadata(preference_metadata)
     include_library_sources = _should_include_library_sources(
         classification=classification,
         prompt=prompt,
@@ -5177,6 +4672,7 @@ def generate_ai_draft_session_with_provider(
         provider=provider,
     )
     metadata = _draft_generation_metadata(result, classification, decision, policy)
+    metadata.update(preference_metadata)
     metadata.update(draft_preferences)
     metadata["source_context"] = _source_context_metadata(source_context)
     metadata.update(_source_context_budget_metadata(source_context))
@@ -5358,7 +4854,13 @@ def revise_ai_draft_session_with_provider(
         prompt=prompt,
         source_chunks=source_chunks,
     )
-    draft_preferences = _draft_preferences_from_metadata(normalized_session.get("metadata"))
+    preference_metadata = _draft_preference_metadata(
+        metadata=normalized_session.get("metadata"),
+        prompt=prompt,
+        scope=normalized_scope,
+        source_chunks=source_chunks,
+    )
+    draft_preferences = _draft_preferences_from_metadata(preference_metadata)
     source_context = build_ai_draft_source_context(
         graph,
         scope=normalized_scope,
@@ -5391,6 +4893,7 @@ def revise_ai_draft_session_with_provider(
         prior_session=normalized_session,
     )
     metadata = _draft_generation_metadata(result, classification, decision, policy)
+    metadata.update(preference_metadata)
     metadata.update(draft_preferences)
     metadata["source_context"] = _source_context_metadata(source_context)
     metadata.update(_source_context_budget_metadata(source_context))
@@ -5595,6 +5098,11 @@ def parse_ai_draft_revision_response(
         if not projection_consumed:
             merged_artifacts.append(projection_artifact)
         raw_generated_artifacts = merged_artifacts
+    raw_generated_artifacts = _filter_generated_artifact_source_refs(
+        raw_generated_artifacts,
+        allowed_source_refs=allowed_source_refs,
+        allow_external_source_refs=allow_external_source_refs,
+    )
     generated_artifacts = validate_generated_artifacts(
         raw_generated_artifacts,
         scope=scope,
@@ -5605,7 +5113,7 @@ def parse_ai_draft_revision_response(
         input_source_refs=allowed_source_refs,
     )
     if isinstance(raw_draft_items, list) and raw_draft_items:
-        draft_items = raw_draft_items
+        draft_items = _normalize_draft_items(raw_draft_items, draft_nodes, draft_annotations)
     else:
         draft_items = _items_from_model_output(parsed, draft_nodes, draft_annotations, shape)
         if generated_artifacts:
@@ -5742,11 +5250,15 @@ Output requirements:
 - Respect source_context.draft_preferences.expansion_mode. Strict mode means avoid extra subtree depth/count beyond the user's requested level. Exploratory mode means useful child and descendant structure is welcome when it improves completeness.
 - Respect source_context.draft_preferences.expansion_target. Preserve existing canonical nodes as anchors; do not rewrite them unless the user explicitly asks for update/rewrite. For existing_children, leaves, and whole_branch targets, connect new draft_nodes to existing node IDs with draft_edges so accepted output expands the existing branch instead of replacing it.
 - Respect source_context.draft_preferences.evidence_mode and citation_policy. Required citations means claims based on supplied documents/web/internal sources must copy allowed source_refs, or cite a real web-search result URL when web_sources mode is active. If evidence is not supplied, not in allowed source_refs, and not backed by a web-search result, leave source_refs empty and mark the item as an assumption/needs_review. Never fabricate URLs, SharePoint links, source refs, quotes, or current facts.
+- For public code, standard, regulation, NFPA, NEC, NJAC, IBC, AHJ, jurisdiction, or similar public-reference claims, cite selected/uploaded source_refs first when provided; otherwise cite current web-search result URLs in web_sources mode. Any such claim without a citation must be source_refs: [] and needs_review.
 - For broad mind_map or graph_draft requests, create a useful 2-4 level hierarchy instead of only top-level labels.
 - For broad conceptual, business, operating model, GTM, strategy, or learning-map requests, choose enough nodes for the subject to be genuinely useful, usually 20-40 draft_nodes unless the user asks for a quick/simple sketch.
 - Silently self-review before returning JSON: if the draft only contains generic category labels, is missing obvious domain-standard subtopics, or has fewer than 3 useful child branches under major concepts, revise it internally before finalizing.
 - Use your model knowledge of the requested domain to choose depth and subtopics; do not rely on hardcoded examples or stop at framework headings.
 - Populate generated_artifacts for visual or review outputs such as knowledge_graph, flow_chart, chart, checklist, tasks, source_coverage, software_overlap_report, and implementation_handoff_package.
+- For connected_picture_package outputs, create a coordinated package artifact and, when graph structure is useful, also populate draft_nodes and draft_edges. Treat the package as the review wrapper over map nodes, relationships, evidence rows, flow/chart lenses, tasks, risks, decisions, assumptions, and repair targets; do not reduce it to only a checklist or generic review notes.
+- For AEC, code, standard, AHJ, permitting, design phase, construction administration, testing, or closeout lifecycle requests, prefer a connected package/lifecycle dependency model over a generic gap review. Use phases such as code basis, SD/DD/CD or design development when relevant, permit/AHJ review, installation or CA, pretest, acceptance testing, and closeout/owner handoff.
+- For source_repair outputs, repair exactly one evidence item per target row/path/edge/finding/task. Each target must carry evidence_item_id, source_refs, review_state, represented_row_indexes, and artifact_ids; row targets must also carry row_id. Do not broaden one repair across an entire package.
 - If Intent classification.requested_artifact_types lists multiple outputs, keep output_shape as the primary lens but also fill any relevant secondary publishable top-level projections, such as executive_summary, news_article, or newsletter, so they can be reviewed as generated artifacts after the graph is accepted.
 - For executive_summary outputs, write a leadership business case / decision memo, not a generic summary. Lead with the recommendation or decision requested, then explain why now, proposed scope, business value, governance/risk controls, investment/resource assumptions, success metrics, and the go/no-go decision gate. Distinguish existing capability from new investment. Use calm executive language such as controlled pilot, governed deployment, planning-level estimate, approval-gated, auditability, measured adoption, and operational leverage. Avoid hype and implementation minutiae.
 - Executive summaries should connect capabilities to measurable operational impact: time saved, rework reduced, standardization improved, support dependency lowered, scalability increased, risk reduced, or governance strengthened. When exact numbers are unavailable, use planning-level ranges only if the prompt/source supports them; otherwise identify the missing baseline metric as an assumption or review item.
@@ -5756,7 +5268,7 @@ Output requirements:
 - Use stable draft IDs prefixed with draft_.
 - Use source_refs only by copying from Allowed source_refs.
 - For unsourced generated nodes, set source_refs: [] and add an assumption.
-- Strict schema mode requires every declared field. Include generated_artifacts, source_coverage, tasks, checklist, outline, table, kanban, presentation_sections, and review_annotations as arrays even when empty.
+- Strict schema mode requires every declared field. Include generated_artifacts, source_coverage, source_repair, tasks, checklist, outline, table, kanban, presentation_sections, and review_annotations as arrays or null objects as appropriate even when empty.
 - For typed object projections that are not relevant to the request, return null for flow_chart, knowledge_graph, chart, software_overlap_report, executive_output, executive_summary, news_article, and newsletter. When they are relevant, fill their required arrays and use [] for empty nested lists.
 
 {ARTIFACT_REGISTRY_CONTRACT.strip()}
@@ -5868,7 +5380,7 @@ def _artifact_from_top_level_projection(
     parsed: dict[str, Any],
     shape: str,
 ) -> dict[str, Any] | None:
-    if shape not in {"software_overlap_report", "flow_chart", "executive_output", "executive_summary", "news_article", "newsletter"}:
+    if shape not in {"software_overlap_report", "source_repair", "flow_chart", "executive_output", "executive_summary", "news_article", "newsletter", "connected_picture_package"}:
         return None
     data = parsed.get(shape)
     if not isinstance(data, dict) or not data:
@@ -5877,6 +5389,9 @@ def _artifact_from_top_level_projection(
         data = _normalize_flow_chart_data(data)
         title = "Flowchart"
         artifact_id = str(data.get("id") or "artifact-flow-chart")
+    elif shape == "source_repair":
+        title = str(data.get("title") or "Source Repair")
+        artifact_id = str(data.get("id") or "artifact-source-repair")
     elif shape == "executive_output":
         title = str(data.get("title") or "Executive Output")
         artifact_id = str(data.get("id") or "artifact-executive-output")
@@ -5889,6 +5404,9 @@ def _artifact_from_top_level_projection(
     elif shape == "newsletter":
         title = str(data.get("title") or "Newsletter")
         artifact_id = str(data.get("id") or "artifact-newsletter")
+    elif shape == "connected_picture_package":
+        title = str(data.get("title") or "Connected Picture Package")
+        artifact_id = str(data.get("id") or data.get("package_id") or "artifact-connected-picture-package")
     else:
         title = str(data.get("title") or "Software Overlap Report")
         artifact_id = str(data.get("id") or "artifact-software-overlap-report")
@@ -5908,7 +5426,7 @@ def _artifact_from_top_level_projection(
 
 
 def _top_level_projection_artifact_shapes(shape: str, classification: dict[str, Any] | None) -> list[str]:
-    supported_shapes = {"software_overlap_report", "flow_chart", "executive_output", "executive_summary", "news_article", "newsletter"}
+    supported_shapes = {"software_overlap_report", "source_repair", "flow_chart", "executive_output", "executive_summary", "news_article", "newsletter", "connected_picture_package"}
     requested_shapes = []
     if isinstance(classification, dict):
         requested_shapes = classification.get("requested_artifact_types", [])
@@ -5953,6 +5471,12 @@ def _filter_allowed_source_refs(
     if not isinstance(source_refs, list):
         return []
     allowed_by_key = {json.dumps(ref, sort_keys=True): ref for ref in allowed_source_refs if isinstance(ref, dict)}
+    allowed_url_refs_by_document_id = {
+        str(ref.get("document_id") or "").strip(): ref
+        for ref in allowed_source_refs
+        if isinstance(ref, dict)
+        and str(ref.get("document_id") or "").strip().startswith(("http://", "https://"))
+    }
     filtered = []
     for source_ref in source_refs:
         if not isinstance(source_ref, dict) or not source_ref.get("document_id"):
@@ -5962,6 +5486,20 @@ def _filter_allowed_source_refs(
             filtered.append(deepcopy(allowed_by_key[key]))
             continue
         document_id = str(source_ref.get("document_id") or "").strip()
+        if document_id in allowed_url_refs_by_document_id:
+            allowed_ref = deepcopy(allowed_url_refs_by_document_id[document_id])
+            filtered.append(
+                {
+                    **allowed_ref,
+                    "document_id": document_id,
+                    "chunk_id": source_ref.get("chunk_id") or allowed_ref.get("chunk_id"),
+                    "page": source_ref.get("page") or allowed_ref.get("page"),
+                    "section": source_ref.get("section") or allowed_ref.get("section"),
+                    "quote_snippet": source_ref.get("quote_snippet") or allowed_ref.get("quote_snippet"),
+                    "confidence": source_ref.get("confidence") or allowed_ref.get("confidence") or "medium",
+                }
+            )
+            continue
         if allow_external_source_refs and document_id.startswith(("http://", "https://")):
             filtered.append(
                 {
@@ -5974,6 +5512,31 @@ def _filter_allowed_source_refs(
                 }
             )
     return _merge_source_refs([], filtered)
+
+
+def _filter_generated_artifact_source_refs(
+    artifacts: Any,
+    *,
+    allowed_source_refs: list[dict[str, Any]],
+    allow_external_source_refs: bool = False,
+) -> list[dict[str, Any]]:
+    if not isinstance(artifacts, list):
+        return []
+
+    def visit(value: Any) -> Any:
+        if isinstance(value, list):
+            if all(isinstance(item, dict) and "document_id" in item for item in value):
+                return _filter_allowed_source_refs(
+                    value,
+                    allowed_source_refs,
+                    allow_external_source_refs=allow_external_source_refs,
+                )
+            return [visit(item) for item in value]
+        if isinstance(value, dict):
+            return {key: visit(child) for key, child in value.items()}
+        return value
+
+    return [visit(artifact) for artifact in artifacts if isinstance(artifact, dict)]
 
 
 def _source_refs_from_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:

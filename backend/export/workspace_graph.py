@@ -1,5 +1,4 @@
 import json
-from copy import deepcopy
 from collections import defaultdict
 from html import escape as html_escape
 from xml.sax.saxutils import escape as xml_escape
@@ -15,6 +14,17 @@ from export.markdown import (
     export_newsletter_markdown,
     export_team_roadmap_markdown,
 )
+from export.package_projections import (
+    action_graph,
+    concept_graph,
+    connected_picture_package_projections,
+    data_graph,
+    dependency_graph,
+    evidence_graph,
+    process_graph,
+    relationship_graph,
+)
+from export.ai_draft_artifacts import artifact_export_data, select_latest_ai_draft_artifact
 from export.source_library import build_source_library
 from graph.enterprise_scoring import build_enterprise_scoring
 from graph.validation import validate_and_repair_graph
@@ -182,53 +192,12 @@ def graph_to_executive_markdown(graph: dict) -> str:
     return export_executive_output_markdown(graph_to_executive_output(graph))
 
 
-def artifact_export_data(artifact: dict) -> dict:
-    data = deepcopy(artifact.get("data")) if isinstance(artifact.get("data"), dict) else {}
-    for key in ("metadata", "provenance"):
-        value = artifact.get(key)
-        if value is not None and key not in data:
-            data[key] = deepcopy(value)
-    for key in ("source_refs", "assumptions"):
-        value = artifact.get(key)
-        if value is not None and not data.get(key):
-            data[key] = deepcopy(value)
-    return data
-
-
 def artifact_to_news_article_markdown(artifact: dict) -> str:
     return export_news_article_markdown(artifact_export_data(artifact))
 
 
 def artifact_to_newsletter_markdown(artifact: dict) -> str:
     return export_newsletter_markdown(artifact_export_data(artifact))
-
-
-def select_latest_ai_draft_artifact(
-    sessions: list[dict],
-    artifact_types: set[str],
-) -> dict | None:
-    candidates: list[tuple[int, str, dict]] = []
-    for session in sessions:
-        if not isinstance(session, dict):
-            continue
-        for acceptance in session.get("accept_history", []):
-            if not isinstance(acceptance, dict):
-                continue
-            accepted_at = str(acceptance.get("accepted_at") or session.get("updated_at") or "")
-            for artifact in acceptance.get("accepted_artifacts", []):
-                if _artifact_type_matches(artifact, artifact_types):
-                    candidates.append((1, accepted_at, artifact))
-        for revision in session.get("revisions", []):
-            if not isinstance(revision, dict):
-                continue
-            created_at = str(revision.get("created_at") or session.get("updated_at") or "")
-            for artifact in revision.get("generated_artifacts", []):
-                if _artifact_type_matches(artifact, artifact_types):
-                    candidates.append((0, created_at, artifact))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: (item[0], item[1]))
-    return candidates[-1][2]
 
 
 def graph_to_news_article(graph: dict) -> dict:
@@ -534,6 +503,8 @@ def _normalize_node(raw_node: dict, parent_id: str | None) -> dict:
     node_type = _semantic_node_type(raw_node, data, nested_data)
     source_refs = _source_refs(data, nested_data)
     monday_selection_input = _monday_selection_input(data, nested_data)
+    artifact_ids = _list_value(data, nested_data, "artifact_ids")
+    generated_artifacts = _list_value(data, nested_data, "generated_artifacts")
 
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
     enterprise_fields = _enterprise_fields(data, nested_data)
@@ -550,12 +521,19 @@ def _normalize_node(raw_node: dict, parent_id: str | None) -> dict:
         "confidence": _first_value(data, nested_data, "confidence") or _first_source_confidence(source_refs),
         "source_refs": source_refs,
         "external_refs": _external_refs(data, nested_data),
+        "review_state": _first_value(data, nested_data, "review_state"),
+        "artifact_type": _first_value(data, nested_data, "artifact_type"),
+        "artifact_ids": artifact_ids,
+        "generated_artifacts": generated_artifacts,
         "metadata": {
             **metadata,
             "react_flow_type": raw_node.get("type", ""),
             "position": raw_node.get("position", {}),
             "component_id": data.get("component_id") or nested_data.get("component_id", ""),
             "component_type": data.get("name") or nested_data.get("component_type", ""),
+            "review_state": _first_value(data, nested_data, "review_state"),
+            "artifact_type": _first_value(data, nested_data, "artifact_type"),
+            "artifact_ids": artifact_ids,
             "task_fields": {
                 "priority": _first_value(data, nested_data, "priority"),
                 "owner_id": _first_value(data, nested_data, "owner_id", "assignee", "owner"),
@@ -690,6 +668,13 @@ def _first_value(*sources_and_keys) -> str:
                 return value
 
     return ""
+
+
+def _list_value(data: dict, nested_data: dict, key: str) -> list:
+    value = data.get(key)
+    if not isinstance(value, list):
+        value = nested_data.get(key)
+    return value if isinstance(value, list) else []
 
 
 def _first_source_confidence(source_refs: list[dict]) -> str:
@@ -929,13 +914,6 @@ def _newsletter_visual_blocks(graph: dict, nodes: list[dict]) -> list[dict]:
             }
         )
     return blocks
-
-
-def _artifact_type_matches(artifact: dict, artifact_types: set[str]) -> bool:
-    return (
-        isinstance(artifact, dict)
-        and str(artifact.get("artifact_type") or "") in artifact_types
-    )
 
 
 def _team_roadmap_context(
