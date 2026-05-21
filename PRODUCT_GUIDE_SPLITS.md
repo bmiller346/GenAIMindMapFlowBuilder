@@ -1,5 +1,11 @@
 # Product Guide Splits
 
+Status: closed governance memo.
+
+This note records why the current product guides were split out. It is not the
+active guide index and should not be used as a roadmap. Use `PRODUCT_GUIDES.md`
+for the current product guide list and `ROADMAP.md` for delivery status.
+
 This note identifies where TraceSpace needs a product guide versus where the
 engineering roadmap is enough.
 

@@ -31,7 +31,11 @@ and how future validation should prove the capability.
   evidence flow, handoffs, dependencies, ownership, and structured query data.
 - `PRODUCT_GUIDE_WORKSPACE_SHELL.md` - controlled workspace shell, top ribbon,
   left navigator, right properties panel, and bottom review tray.
-- `PRODUCT_GUIDE_SPLITS.md` - guide-versus-roadmap boundaries.
+
+## Governance Notes
+
+- `PRODUCT_GUIDE_SPLITS.md` - closed guide-versus-roadmap split memo. Use this
+  as background only; this index is the active list of product guides.
 
 ## User Help Articles
 
