@@ -3,7 +3,6 @@ import axios from 'axios';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import {
     FiCalendar,
-    FiBarChart2,
     FiCheckSquare,
     FiChevronRight,
     FiCopy,
@@ -28,6 +27,9 @@ import useStore from '../stores/store';
 import modalStore from '../stores/modalStore';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
+import { createStructuredEvidenceNodeActions } from './actions/structuredEvidenceActions';
+import StructuredEvidenceCard from './artifacts/StructuredEvidenceCard';
+import StructuredSankeyCard from './artifacts/StructuredSankeyCard';
 import {
     getActionsForProfileAndScope,
     getDefaultActionForProfile,
@@ -50,11 +52,7 @@ import {
     layoutDirectChildren,
     reflowSiblingSubtrees
 } from '../utils/manualNodes';
-import {
-    getStructuredDataArtifactContext,
-    structuredDataAcceptance,
-    structuredDataChildData
-} from '../utils/structuredDataArtifacts';
+import { getStructuredDataArtifactContext } from '../utils/structuredDataArtifacts';
 import { buildSankeyPlotlySpec } from '../utils/sankeyFlow';
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from '../utils/askAiGenerationProgress';
 import { NODE_EMPHASIS_OPTIONS } from '../utils/mapStyles';
@@ -627,124 +625,6 @@ const ResponseNode = ({ id, data }) => {
         setActiveSlashIndex(0);
     };
 
-    const acceptStructuredEvidence = () => {
-        const acceptedData = structuredDataAcceptance(data, structuredDataContext);
-        setNodes(
-            nodes.map((node) =>
-                node.id === id
-                    ? updateWorkspaceNode({ ...node, data: acceptedData }, { data: acceptedData })
-                    : node
-            )
-        );
-        recordActivity({
-            type: 'structured_data_preview_accepted',
-            title: 'Accepted structured evidence',
-            summary: `Accepted ${structuredDataContext.tableName || displayTitle || id} as source-backed structured evidence.`,
-            node_ids: [id],
-            metadata: {
-                query_id: structuredDataContext.queryId,
-                table_name: structuredDataContext.tableName,
-                artifact_types: structuredDataContext.artifactTypes
-            }
-        });
-        setSaveStatus('dirty');
-        setActiveView('table');
-    };
-
-    const createStructuredDataChild = (kind) => {
-        const childData = structuredDataChildData({
-            kind,
-            parentTitle: displayTitle || summary || id,
-            context: structuredDataContext,
-            summary: kind === 'finding' ? summary : '',
-            evidenceNodeId: id
-        });
-        const childNode = createWorkspaceNode({
-            ...childData,
-            position: getChildPosition(nodes, edges, id)
-        });
-        const acceptedData = structuredDataContext.accepted
-            ? data
-            : structuredDataAcceptance(data, structuredDataContext);
-
-        const nextEdges = [...edges, createWorkspaceEdge(id, childNode.id)];
-        const parentEdge = edges.find((edge) => edge.target === id);
-        const nextNodes = [
-            ...nodes.map((node) =>
-                node.id === id
-                    ? updateWorkspaceNode({ ...node, data: acceptedData }, { data: acceptedData })
-                    : node
-            ),
-            childNode
-        ];
-        setNodes(
-            parentEdge
-                ? reflowSiblingSubtrees({
-                      nodes: nextNodes,
-                      edges: nextEdges,
-                      parentId: parentEdge.source,
-                      anchorNodeId: id
-                  })
-                : nextNodes
-        );
-        setEdges(nextEdges);
-        recordActivity({
-            type: kind === 'task' ? 'structured_data_task_created' : 'structured_data_finding_created',
-            title: kind === 'task' ? 'Created data-backed task' : 'Created data-backed finding',
-            summary: `${childData.title} was created from structured evidence.`,
-            node_ids: [id, childNode.id],
-            metadata: {
-                query_id: structuredDataContext.queryId,
-                table_name: structuredDataContext.tableName,
-                artifact_type: childData.artifactType
-            }
-        });
-        setSaveStatus('dirty');
-        setActiveView(kind === 'task' ? 'tasks' : 'knowledgeGraph');
-    };
-
-    const openStructuredEvidenceRepair = (row) => {
-        const currentRefs = Array.isArray(row.source_refs) ? row.source_refs : [];
-        const representedRows = Array.isArray(row.represented_rows) ? row.represented_rows : [];
-        const sourceRepairPrompt =
-            row.evidence_repair_prompt ||
-            row.source_repair_prompt ||
-            [
-                'Correct and cite this output item.',
-                `Current source: ${row.source}`,
-                `Current target: ${row.target}`,
-                `Value: ${row.value}`,
-                row.metric_label ? `Metric: ${row.metric_label}` : '',
-                representedRows[0]?.notes ? `Notes: ${representedRows[0].notes}` : '',
-                `Current source refs: ${currentRefs.length}`,
-                'Use uploaded sources, selected sources, pasted URLs, or web search/public context when available. If the current citation is weak, random, or missing, replace it with better evidence. Return only the corrected item fields plus source_refs and review_state.'
-            ]
-                .filter(Boolean)
-                .join('\n');
-
-        openAskAi('node', {
-            initialRoleId: 'research-assistant',
-            initialActionId: 'custom_prompt',
-            initialVisual: structuredDataContext.chartType || 'table',
-            initialPrompt: sourceRepairPrompt,
-            intent: 'structured_evidence_repair'
-        });
-        recordActivity({
-            type: 'structured_evidence_repair_opened',
-            title: 'Opened evidence repair',
-            summary: `Opened evidence repair for ${row.source} -> ${row.target}.`,
-            node_ids: [id],
-            metadata: {
-                evidence_item_id: row.evidence_item_id || row.id || '',
-                row_id: row.id || '',
-                query_id: structuredDataContext.queryId,
-                source: row.source,
-                target: row.target,
-                source_ref_count: currentRefs.length
-            }
-        });
-    };
-
     const addSibling = (direction = 'below') => {
         const siblingNode = createWorkspaceNode({
             title: 'New task',
@@ -1163,6 +1043,12 @@ const ResponseNode = ({ id, data }) => {
             initialActionId: options.initialActionId,
             initialPrompt: options.initialPrompt || '',
             initialVisual: options.initialVisual || 'auto',
+            initialExpansionMode: options.initialExpansionMode,
+            initialExpansionTarget: options.initialExpansionTarget,
+            initialEvidenceMode: options.initialEvidenceMode,
+            initialCitationPolicy: options.initialCitationPolicy,
+            initialChangeIntent: options.initialChangeIntent,
+            initialSourceRefs: options.initialSourceRefs || [],
             initialPromptPlaceholder: options.initialPromptPlaceholder || ''
         });
         recordActivity({
@@ -1199,6 +1085,26 @@ const ResponseNode = ({ id, data }) => {
                 'Describe the domain, audience, product line, standard, or implementation context to specialize this branch for.',
             intent: 'specialize_branch'
         });
+
+    const {
+        acceptStructuredEvidence,
+        createStructuredDataChild,
+        openStructuredEvidenceRepair
+    } = createStructuredEvidenceNodeActions({
+        id,
+        data,
+        nodes,
+        edges,
+        setNodes,
+        setEdges,
+        setSaveStatus,
+        setActiveView,
+        recordActivity,
+        openAskAi,
+        structuredDataContext,
+        displayTitle,
+        summary
+    });
 
     const submitInlineAiPrompt = async ({ prompt, route = inlineAiRoute }) => {
         const localPrompt = String(prompt || '').trim();
@@ -2408,66 +2314,12 @@ const ResponseNode = ({ id, data }) => {
                     </button>
                 )
             ) : null}
-            {structuredDataContext.hasStructuredData ? (
-                <section className="structured-evidence-card nodrag">
-                    <div className="structured-evidence-header">
-                        <span className="structured-evidence-icon">
-                            <FiBarChart2 />
-                        </span>
-                        <div>
-                            <h3>Structured evidence</h3>
-                            <p>
-                                {[
-                                    structuredDataContext.tableName || 'Data table',
-                                    structuredDataContext.rowCount
-                                        ? `${structuredDataContext.rowCount} rows`
-                                        : '',
-                                    structuredDataContext.artifactTypes.length
-                                        ? `${structuredDataContext.artifactTypes.length} artifacts`
-                                        : ''
-                                ]
-                                    .filter(Boolean)
-                                    .join(' | ')}
-                            </p>
-                        </div>
-                    </div>
-                    <dl className="structured-evidence-meta">
-                        {structuredDataContext.queryId ? (
-                            <>
-                                <dt>Query</dt>
-                                <dd>{structuredDataContext.queryId}</dd>
-                            </>
-                        ) : null}
-                        {structuredDataContext.resultHash ? (
-                            <>
-                                <dt>Result</dt>
-                                <dd>{structuredDataContext.resultHash.slice(0, 12)}</dd>
-                            </>
-                        ) : null}
-                        {structuredDataContext.columns.length ? (
-                            <>
-                                <dt>Columns</dt>
-                                <dd>{structuredDataContext.columns.slice(0, 4).join(', ')}</dd>
-                            </>
-                        ) : null}
-                    </dl>
-                    <div className="structured-evidence-actions">
-                        <button
-                            type="button"
-                            onClick={acceptStructuredEvidence}
-                            disabled={structuredDataContext.accepted}
-                        >
-                            {structuredDataContext.accepted ? 'Evidence accepted' : 'Accept evidence'}
-                        </button>
-                        <button type="button" onClick={() => createStructuredDataChild('finding')}>
-                            Create finding
-                        </button>
-                        <button type="button" onClick={() => createStructuredDataChild('task')}>
-                            Create task
-                        </button>
-                    </div>
-                </section>
-            ) : null}
+            <StructuredEvidenceCard
+                context={structuredDataContext}
+                onAccept={acceptStructuredEvidence}
+                onCreateFinding={() => createStructuredDataChild('finding')}
+                onCreateTask={() => createStructuredDataChild('task')}
+            />
             {query.length > 0 && (
                 <div className="query-block">
                     <img
@@ -2525,45 +2377,12 @@ const ResponseNode = ({ id, data }) => {
                 </Suspense>
             )}
             {shouldShowStructuredSankey ? (
-                <section className="structured-sankey-card nodrag">
-                    <div className="structured-sankey-header">
-                        <div>
-                            <h3>Flow lens</h3>
-                            <p>
-                                {[
-                                    structuredSankey.flow.metricLabel,
-                                    structuredSankey.flow.rows.length
-                                        ? `${structuredSankey.flow.rows.length} paths`
-                                        : '',
-                                    structuredDataContext.queryId ? `Query ${structuredDataContext.queryId}` : ''
-                                ]
-                                    .filter(Boolean)
-                                    .join(' | ')}
-                            </p>
-                        </div>
-                    </div>
-                    <div className="structured-sankey-path-review">
-                        {structuredSankey.flow.rows.slice(0, 4).map((row) => (
-                            <div key={row.id} className="structured-sankey-path-review-row">
-                                <div>
-                                    <strong>{row.source}</strong>
-                                    <span>{row.target}</span>
-                                    <small>
-                                        {Array.isArray(row.source_refs) && row.source_refs.length
-                                            ? `${row.source_refs.length} source ref${row.source_refs.length === 1 ? '' : 's'}`
-                                            : 'Needs source'}
-                                    </small>
-                                </div>
-                                <button type="button" onClick={() => openStructuredEvidenceRepair(row)}>
-                                    Correct evidence
-                                </button>
-                            </div>
-                        ))}
-                    </div>
-                    <Suspense fallback={<div className="lazy-block">Loading flow...</div>}>
-                        <Graph data={structuredSankey.spec} />
-                    </Suspense>
-                </section>
+                <StructuredSankeyCard
+                    context={structuredDataContext}
+                    structuredSankey={structuredSankey}
+                    GraphComponent={Graph}
+                    onRepairEvidence={openStructuredEvidenceRepair}
+                />
             ) : null}
             {Object.keys(graph).length !== 0 && (
                 <Suspense fallback={<div className="lazy-block">Loading chart...</div>}>
