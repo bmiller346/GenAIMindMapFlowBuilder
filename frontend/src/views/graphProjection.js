@@ -3052,6 +3052,21 @@ const structuredFlowRowsForNode = (node = {}) => {
           : node.table_rows || [];
 };
 
+const rowSourceRefs = (flowRow = {}, fallbackRefs = []) => {
+    const refs = [];
+    (flowRow.rows || []).forEach((row) => {
+        if (Array.isArray(row?.source_refs)) {
+            refs.push(...row.source_refs);
+        }
+    });
+    return refs.length ? refs : fallbackRefs;
+};
+
+const firstRepresentedRowValue = (flowRow = {}, key = '') =>
+    (flowRow.rows || [])
+        .map((row) => row?.[key])
+        .find((value) => value !== undefined && value !== null && value !== '') || '';
+
 export const getSankeyFlowProjection = (projection = {}) => {
     const nodes = projection.nodes || [];
     const flowNodes = [];
@@ -3066,7 +3081,7 @@ export const getSankeyFlowProjection = (projection = {}) => {
         }
         const structuredEvidence = structuredEvidenceForTask(node) || {};
         const nodeFlowRows = flow.rows.map((row, index) => ({
-            id: `${node.id}:sankey:${index}`,
+            id: firstRepresentedRowValue(row, 'row_id') || `${node.id}:sankey:${index}`,
             evidence_node_id: node.id,
             evidence_title: node.title,
             source: row.source,
@@ -3078,8 +3093,30 @@ export const getSankeyFlowProjection = (projection = {}) => {
             value_column: flow.valueColumn,
             represented_row_indexes: row.rowIndexes,
             represented_rows: row.rows,
-            source_refs: node.source_refs || [],
-            review_state: node.review_state || node.status || 'needs_review',
+            source_refs: rowSourceRefs(row, node.source_refs || []),
+            evidence_item_id: firstRepresentedRowValue(row, 'evidence_item_id'),
+            review_state:
+                firstRepresentedRowValue(row, 'review_state') ||
+                node.review_state ||
+                node.status ||
+                'needs_review',
+            evidence_status:
+                firstRepresentedRowValue(row, 'evidence_status') ||
+                firstRepresentedRowValue(row, 'citation_status') ||
+                (rowSourceRefs(row, node.source_refs || []).length ? 'source_backed' : 'needs_source'),
+            citation_status:
+                firstRepresentedRowValue(row, 'citation_status') ||
+                firstRepresentedRowValue(row, 'evidence_status') ||
+                (rowSourceRefs(row, node.source_refs || []).length ? 'source_backed' : 'needs_source'),
+            evidence_repair_prompt: firstRepresentedRowValue(row, 'evidence_repair_prompt'),
+            source_repair_prompt:
+                firstRepresentedRowValue(row, 'source_repair_prompt') ||
+                firstRepresentedRowValue(row, 'evidence_repair_prompt'),
+            evidence_input_hint: firstRepresentedRowValue(row, 'evidence_input_hint'),
+            source_input_hint:
+                firstRepresentedRowValue(row, 'source_input_hint') ||
+                firstRepresentedRowValue(row, 'evidence_input_hint'),
+            citation_query: firstRepresentedRowValue(row, 'citation_query'),
             table_name: structuredEvidence.table_name || '',
             query_id: structuredEvidence.query_id || '',
             result_hash: structuredEvidence.result_hash || ''

@@ -36,6 +36,7 @@ import {
 import { createAIActionRun } from "../utils/aiActionRuns";
 import { buildSourceLibraryProjection, WORKSPACE_BRIEF_SOURCE_ID } from "../views/graphProjection";
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from "../utils/askAiGenerationProgress";
+import { buildLocalGuidedFallbackDraft, isSankeyDraftRequest } from "../utils/localSankeyDraft";
 
 const viewForAction = (actionId) => {
     if (actionId.includes('question')) {
@@ -144,6 +145,9 @@ const starterGroupId = (starter = {}) => {
     if (SPECIALIZED_STARTER_IDS.has(starter.id)) {
         return 'specialized_work';
     }
+    if (starter.visual === 'auto') {
+        return 'workspace_views';
+    }
     if (CHART_DATA_OUTPUTS.has(starter.visual)) {
         return 'charts_data';
     }
@@ -172,6 +176,9 @@ const starterSurfaceLabel = (starter = {}) => {
     }
     if (groupId === 'specialized_work') {
         return 'Specialized';
+    }
+    if (starter.visual === 'auto') {
+        return 'Auto';
     }
     return 'View';
 };
@@ -1592,6 +1599,7 @@ const PromptModal = ({
         ]);
         let draftNodes = [];
         let draftEdges = [];
+        let localGuidedDraft = null;
         try {
             ({ draftNodes, draftEdges } = buildFallbackDraftGraph({
                 shouldDraftNode,
@@ -1604,19 +1612,39 @@ const PromptModal = ({
                 sourceRefs,
                 selectedVisual
             }));
+            localGuidedDraft = buildLocalGuidedFallbackDraft({
+                prompt: promptText,
+                outputShape: inferredShape,
+                requestedVisual: selectedVisual,
+                sourceRefs
+            });
+            if (localGuidedDraft?.draftNodes?.length) {
+                draftNodes = localGuidedDraft.draftNodes;
+                draftEdges = localGuidedDraft.draftEdges;
+            }
         } catch (error) {
             failPreflight(error);
             return;
         }
-        const draftAnnotations =
-            effectiveAction.id === 'custom_prompt'
-                ? []
-                : compactSuggestions.map((suggestion, index) => ({
-                      id: `suggestion-${index + 1}`,
-                      type: 'follow_up_suggestion',
-                      title: suggestion,
-                      body: suggestion
-                  }));
+        const draftAnnotations = localGuidedDraft
+            ? localGuidedDraft.draftAnnotations
+            : effectiveAction.id === 'custom_prompt'
+              ? []
+              : compactSuggestions.map((suggestion, index) => ({
+                    id: `suggestion-${index + 1}`,
+                    type: 'follow_up_suggestion',
+                    title: suggestion,
+                    body: suggestion
+                }));
+        const localFallbackMode = isSankeyDraftRequest({ prompt: promptText })
+            ? localGuidedDraft?.draftNodes?.length
+                ? 'sankey_structured_rows'
+                : 'sankey_context_needed'
+            : localGuidedDraft?.draftNodes?.length
+              ? 'guided_start_scaffold'
+              : localGuidedDraft
+                ? 'guided_context_needed'
+                : 'generic';
         const fallbackSession = createAIDraftSession({
             workspaceId: flowId || '',
             scope: normalizedScope,
@@ -1645,6 +1673,7 @@ const PromptModal = ({
                 citation_policy: selectedCitationPolicy,
                 source_policy_requires_citation: selectedCitationPolicy === 'required',
                 preview_mode: 'local_fallback',
+                local_fallback_mode: localFallbackMode,
                 change_intent: changeIntent,
                 follow_up_memory: memoryContext,
                 source_node_id:
@@ -1698,6 +1727,7 @@ const PromptModal = ({
                 citation_policy: selectedCitationPolicy,
                 source_policy_requires_citation: selectedCitationPolicy === 'required',
                 change_intent: changeIntent,
+                local_fallback_mode: localFallbackMode,
                 follow_up_memory: memoryContext,
                 model: selectedModel === 'auto' ? 'auto' : selectedModel,
                 model_tier: selectedModel === 'auto' ? 'auto' : 'explicit',

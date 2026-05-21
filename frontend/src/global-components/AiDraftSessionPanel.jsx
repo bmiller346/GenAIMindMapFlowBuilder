@@ -30,6 +30,7 @@ import {
 } from '../utils/aiDraftSessions';
 import { buildSourceLibraryProjection } from '../views/graphProjection';
 import { PreviewDiffSummary, previewDiffToChanges } from '../views/previewDiffSummary';
+import { buildLocalGuidedFallbackDraft, isSankeyDraftRequest } from '../utils/localSankeyDraft';
 
 const ACCEPT_MODE_LABELS = {
     append: getAIDraftAcceptModeDetail('append').label,
@@ -734,9 +735,21 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 prior_revision_id: revision.revision_id
             }
         };
+        const priorPrompt = visibleAIDraftPromptText(revision.prompt || '') || visiblePromptTitle;
+        const localGuidedDraft = buildLocalGuidedFallbackDraft({
+            prompt: revisionPrompt,
+            priorPrompt,
+            session,
+            revision,
+            sourceRefs: revisionSourceRefs
+        });
+        const shouldReviseLocally =
+            session.metadata?.preview_mode === 'local_fallback' ||
+            revision.metadata?.preview_mode === 'local_fallback' ||
+            Boolean(localGuidedDraft?.draftNodes?.length);
         try {
             const response =
-                flowId && session.session_id
+                flowId && session.session_id && !shouldReviseLocally
                     ? await axios.post(
                           revisionEndpoint({ flowId, sessionId: session.session_id }),
                           revisionRequestPayload
@@ -749,22 +762,39 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 response?.data ||
                 reviseAIDraftSession(session, {
                     prompt: revisionPrompt,
-                    draftNodes: revision.draft_nodes || [],
-                    draftEdges: revision.draft_edges || [],
-                    draftAnnotations: [
-                        ...asArray(revision.draft_annotations),
-                        {
-                            id: `local-revision-${Date.now()}`,
-                            type: 'revision_note',
-                            title: revisionPrompt,
-                            body: revisionPrompt
-                        }
-                    ],
+                    draftNodes: localGuidedDraft?.draftNodes?.length
+                        ? localGuidedDraft.draftNodes
+                        : revision.draft_nodes || [],
+                    draftEdges: localGuidedDraft?.draftNodes?.length
+                        ? localGuidedDraft.draftEdges
+                        : revision.draft_edges || [],
+                    draftAnnotations: localGuidedDraft
+                        ? localGuidedDraft.draftAnnotations
+                        : [
+                              ...asArray(revision.draft_annotations),
+                              {
+                                  id: `local-revision-${Date.now()}`,
+                                  type: 'revision_note',
+                                  title: revisionPrompt,
+                                  body: revisionPrompt
+                              }
+                          ],
                     model: session.selected_model || revision.model || 'auto',
                     metadata: {
                         change_intent: changeIntent,
                         follow_up_memory: memoryContext,
-                        model_reason: 'Local draft revision staged while backend generation is unavailable.'
+                        local_fallback_mode: localGuidedDraft?.draftNodes?.length
+                            ? isSankeyDraftRequest({ prompt: revisionPrompt, session, revision })
+                                ? 'sankey_structured_rows'
+                                : 'guided_start_scaffold'
+                            : localGuidedDraft
+                              ? 'guided_context_needed'
+                              : 'generic',
+                        output_shape: localGuidedDraft ? revision.metadata?.output_shape || session.metadata?.output_shape : revision.metadata?.output_shape,
+                        requested_visual: localGuidedDraft ? revision.metadata?.requested_visual || session.metadata?.requested_visual : revision.metadata?.requested_visual,
+                        model_reason: localGuidedDraft?.draftNodes?.length
+                            ? 'Local guided-start scaffold was drafted from the revision while backend generation is unavailable.'
+                            : 'Local draft revision staged while backend generation is unavailable.'
                     }
                 });
             updateActiveAIDraftSession(nextSession);
@@ -783,30 +813,62 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             });
         } catch (error) {
             setProgressMessage('Preserving the revision locally.');
+            const fallbackGuidedDraft =
+                localGuidedDraft ||
+                (isSankeyDraftRequest({ prompt: revisionPrompt, session, revision })
+                    ? buildLocalGuidedFallbackDraft({
+                          prompt: revisionPrompt,
+                          priorPrompt,
+                          session,
+                          revision,
+                          sourceRefs: revisionSourceRefs
+                      })
+                    : null);
             const nextSession = reviseAIDraftSession(session, {
                 prompt: revisionPrompt,
-                draftNodes: revision.draft_nodes || [],
-                draftEdges: revision.draft_edges || [],
-                draftAnnotations: [
-                    ...asArray(revision.draft_annotations),
-                    {
-                        id: `local-revision-${Date.now()}`,
-                        type: 'revision_note',
-                        title: revisionPrompt,
-                        body: error.message || revisionPrompt
-                    }
-                ],
+                draftNodes: fallbackGuidedDraft?.draftNodes?.length
+                    ? fallbackGuidedDraft.draftNodes
+                    : revision.draft_nodes || [],
+                draftEdges: fallbackGuidedDraft?.draftNodes?.length
+                    ? fallbackGuidedDraft.draftEdges
+                    : revision.draft_edges || [],
+                draftAnnotations: fallbackGuidedDraft
+                    ? fallbackGuidedDraft.draftAnnotations
+                    : [
+                          ...asArray(revision.draft_annotations),
+                          {
+                              id: `local-revision-${Date.now()}`,
+                              type: 'revision_note',
+                              title: revisionPrompt,
+                              body: error.message || revisionPrompt
+                          }
+                      ],
                 model: session.selected_model || revision.model || 'auto',
                 metadata: {
                     change_intent: changeIntent,
                     follow_up_memory: memoryContext,
-                    model_reason: 'Backend revision was unavailable; preserved the request locally.'
+                    local_fallback_mode: fallbackGuidedDraft?.draftNodes?.length
+                        ? isSankeyDraftRequest({ prompt: revisionPrompt, session, revision })
+                            ? 'sankey_structured_rows'
+                            : 'guided_start_scaffold'
+                        : fallbackGuidedDraft
+                          ? 'guided_context_needed'
+                          : 'generic',
+                    output_shape: fallbackGuidedDraft ? revision.metadata?.output_shape || session.metadata?.output_shape : revision.metadata?.output_shape,
+                    requested_visual: fallbackGuidedDraft ? revision.metadata?.requested_visual || session.metadata?.requested_visual : revision.metadata?.requested_visual,
+                    model_reason: fallbackGuidedDraft?.draftNodes?.length
+                        ? 'Local guided-start scaffold was drafted from the revision while backend generation is unavailable.'
+                        : 'Backend revision was unavailable; preserved the request locally.'
                 }
             });
             updateActiveAIDraftSession(nextSession);
             setPrompt('');
             setSelectedItemIds([]);
-            setMessage('Backend revision is unavailable, so the request was preserved in the draft history.');
+            setMessage(
+                fallbackGuidedDraft?.draftNodes?.length
+                    ? 'Backend revision is unavailable, so TraceSpace drafted a local scaffold for review.'
+                    : 'Backend revision is unavailable, so the request was preserved in the draft history.'
+            );
         } finally {
             setProgressMessage('');
             setIsRevising(false);
@@ -912,9 +974,12 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             !graphHasRenderableContent(graph) &&
             nodes.length > 0 &&
             !acceptResultHasGraphMutation(acceptResultFromResponse(result));
+        const shouldAcceptLocally =
+            session.metadata?.preview_mode === 'local_fallback' ||
+            revision.metadata?.preview_mode === 'local_fallback';
         try {
             const response =
-                flowId && session.session_id
+                flowId && session.session_id && !shouldAcceptLocally
                     ? await axios.post(acceptEndpoint({ flowId, sessionId: session.session_id }), {
                           mode,
                           selected_item_ids: effectiveSelectedIds,

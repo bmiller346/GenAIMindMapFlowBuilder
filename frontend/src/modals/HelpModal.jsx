@@ -27,6 +27,17 @@ const HELP_ARTICLES = [
         ]
     },
     {
+        id: 'messy-context',
+        title: 'Turn Context Into A View',
+        summary: 'Start with the question first; TraceSpace can route it into the right graph, table, chart, or review surface.',
+        sections: [
+            'Use Ask AI or Guided starts / Messy context to view when you have rough notes, pasted text, a URL, source files, or a half-formed idea.',
+            'Target Output Auto can choose a useful shape: Map, Connections, Flowchart, Outline, Table, Chart, Checklist, Tasks, Kanban, Executive output, or Review packet.',
+            'For public code, standards, regulations, or current-reference questions, use Web/current sources with Citations required. TraceSpace should use model knowledge to shape the draft, then attach citable evidence or keep unsupported items needs-review.',
+            'When one row, path, node, or finding has a bad citation, use Correct evidence. You can upload a source, select an existing source, paste a URL, or ask for public web evidence for that specific item.'
+        ]
+    },
+    {
         id: 'sankey-flow-lens',
         title: 'Sankey Flow Lens',
         summary: 'Use source, target, and value rows to see evidence, handoffs, effort, or dependencies as weighted flow paths.',
@@ -67,7 +78,8 @@ const HELP_ARTICLES = [
         sections: [
             'Nodes, relationships, and generated artifacts can carry source references, confidence, rationale, assumptions, source signals, and review state.',
             'Source-backed means the item has a concrete source reference. Inferred or uncited content stays needs-review until a reviewer accepts it, cites it, or rewrites it.',
-            'Use Missing source, Needs review, Source repair, and relationship review packets to find weak spots before publishing or handing work to another tool.'
+            'Use Missing source, Needs review, Correct evidence, Source repair, and relationship review packets to find weak spots before publishing or handing work to another tool.',
+            'URL sources are crawl seeds. Add a URL as source context, or use Web/current sources for public citations when the draft needs citable external references.'
         ]
     },
     {

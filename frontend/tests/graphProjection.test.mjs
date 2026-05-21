@@ -470,7 +470,12 @@ test('sankey flow projection builds source target value paths from structured ar
                                     {
                                         source_system: 'CRM',
                                         target_process: 'Sales reporting',
-                                        monthly_cost: 12000
+                                        monthly_cost: 12000,
+                                        source_refs: [{ document_id: 'doc-crm', quote_snippet: 'CRM reporting cost' }],
+                                        evidence_status: 'source_backed',
+                                        evidence_repair_prompt: 'Correct CRM reporting evidence',
+                                        citation_status: 'source_backed',
+                                        source_repair_prompt: 'Correct CRM reporting citation'
                                     },
                                     {
                                         source_system: 'CRM',
@@ -529,7 +534,11 @@ test('sankey flow projection builds source target value paths from structured ar
     assert.equal(sankey.rows[0].target, 'Finance close');
     assert.equal(sankey.rows[0].value, 22000);
     assert.deepEqual(sankey.rows[1].represented_row_indexes, [0, 1]);
-    assert.equal(sankey.rows[1].source_refs[0].result_hash, 'flowhash123');
+    assert.equal(sankey.rows[1].source_refs[0].document_id, 'doc-crm');
+    assert.equal(sankey.rows[1].evidence_status, 'source_backed');
+    assert.equal(sankey.rows[1].evidence_repair_prompt, 'Correct CRM reporting evidence');
+    assert.equal(sankey.rows[1].citation_status, 'source_backed');
+    assert.equal(sankey.rows[1].source_repair_prompt, 'Correct CRM reporting citation');
 });
 
 test('sankey flow projection does not treat ordinary graph hierarchy as flow data', () => {

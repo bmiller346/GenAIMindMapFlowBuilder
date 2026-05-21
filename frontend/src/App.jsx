@@ -45,6 +45,7 @@ import ShellOverlayHost from './shell/ShellOverlayHost.jsx';
 import ShellStatusBar from './shell/ShellStatusBar.jsx';
 import ShellWorkspaceNavigatorHost from './shell/ShellWorkspaceNavigatorHost.jsx';
 import WorkspaceShellAdapter from './shell/WorkspaceShellAdapter.jsx';
+import { DEFAULT_SHELL_RIBBON_TABS } from './shell/ShellRibbon.jsx';
 import useShellLayoutState from './shell/useShellLayoutState.js';
 import useWorkspaceShellRouter from './shell/useWorkspaceShellRouter.js';
 import useShellStore, { SHELL_LOCAL_OUTPUT_TRAY_BY_VIEW } from './stores/shellStore.js';
@@ -1442,14 +1443,15 @@ const App = () => {
     );
 
     const openWorkspaceDockTab = useCallback((tab) => {
+        const dockTab = tab === 'workspace' ? 'guidance' : tab;
         shellActions.openWorkspaceNavigation('workspace', {
-            tab,
+            tab: dockTab,
             collapsed: false,
             width: workspaceDockWidth
         });
         window.dispatchEvent(
             new CustomEvent(WORKSPACE_DOCK_OPEN_TAB_EVENT, {
-                detail: { tab }
+                detail: { tab: dockTab }
             })
         );
     }, [shellActions, workspaceDockWidth]);
@@ -2554,6 +2556,7 @@ const App = () => {
             }
         />
     );
+    const shellLeftPanel = useWorkspaceShell && isFocusPanelOpen ? null : workspaceNavigator;
     const workspaceBody = (
         <>
             <Drawer
@@ -3117,6 +3120,9 @@ const App = () => {
                 lightMode={lightMode}
                 setLightMode={setLightMode}
                 onWorkspaceAskAi={useWorkspaceShell ? openShellWorkspaceAskAi : undefined}
+                workspaceNavigationTabs={useWorkspaceShell ? DEFAULT_SHELL_RIBBON_TABS : []}
+                activeWorkspaceNavigationTab={shellActions.activeRibbonTab}
+                onWorkspaceNavigationChange={shellActions.setRibbonTab}
             />
             {useWorkspaceShell ? (
                 <WorkspaceShellAdapter
@@ -3124,7 +3130,7 @@ const App = () => {
                     onRibbonTabChange={shellActions.setRibbonTab}
                     renderRibbonContent={renderShellRibbonContent}
                     leftWidth={workspaceShellLeftWidth}
-                    leftPanel={workspaceNavigator}
+                    leftPanel={shellLeftPanel}
                     centerCanvas={workspaceBody}
                     statusBar={shellStatusBar}
                     rightPanel={shellRightPanel}

@@ -84,6 +84,9 @@ export const inferAIDraftEvidencePreferences = ({
     fallbackCitationPolicy = ''
 } = {}) => {
     const text = String(prompt || '').toLowerCase();
+    const asksForPublicReferenceEvidence =
+        /\b(code references?|applicable codes?|standards?|regulations?|statutes?|authority|authorities|public references?|citeable|citable)\b/.test(text) ||
+        /\b(nfpa|nec|njac|ucc|ibc|ifc|imc|ipc|ashrae|asme|osha|ul|ieee|ansi|ada|fema|ahj)\b/.test(text);
     const normalizedScope = normalizeAIDraftScope(scope);
     let evidenceMode = normalizeAIDraftEvidenceMode(
         fallbackEvidenceMode ||
@@ -91,7 +94,10 @@ export const inferAIDraftEvidencePreferences = ({
                 ? 'uploaded_sources'
                 : 'workspace')
     );
-    if (/\b(web|online|internet|current news|latest news|news article|urls?|links?|public sources?)\b/.test(text)) {
+    if (
+        /\b(web|online|internet|current news|latest news|news article|urls?|links?|public sources?)\b/.test(text) ||
+        asksForPublicReferenceEvidence
+    ) {
         evidenceMode = 'web_sources';
     } else if (/\b(sharepoint|internal article|intranet|intranet update|announcement|internal comms?|internal communications?|release notes?|stakeholder updates?|monthly update|monthly news)\b/.test(text)) {
         evidenceMode = 'sharepoint';
@@ -1510,6 +1516,13 @@ export const normalizeAIDraftNode = (node = {}) => ({
     node_type: firstText(node.node_type, node.type, 'concept'),
     status: firstText(node.status, 'ai_generated'),
     source_refs: asArray(node.source_refs),
+    df: asArray(node.df || node.table_rows),
+    graph: node.graph && typeof node.graph === 'object' ? { ...node.graph } : undefined,
+    query: firstText(node.query),
+    artifact_type: firstText(node.artifact_type),
+    artifact_ids: asArray(node.artifact_ids),
+    review_state: firstText(node.review_state, node.reviewState),
+    generated_artifacts: asArray(node.generated_artifacts),
     external_refs:
         node.external_refs && typeof node.external_refs === 'object'
             ? { ...node.external_refs }
@@ -1555,6 +1568,7 @@ export const createAIDraftRevision = ({
     draftNodes = [],
     draftEdges = [],
     draftAnnotations = [],
+    generatedArtifacts = [],
     revisionId = `ai_draft_revision_${nanoid(10)}`,
     createdAt = new Date().toISOString(),
     model = '',
@@ -1562,6 +1576,7 @@ export const createAIDraftRevision = ({
 } = {}) => {
     const nodes = asArray(draftNodes).map(normalizeAIDraftNode);
     const annotations = asArray(draftAnnotations);
+    const artifacts = asArray(generatedArtifacts);
     const items =
         asArray(draftItems).length > 0
             ? asArray(draftItems).map(normalizeAIDraftItem)
@@ -1588,6 +1603,20 @@ export const createAIDraftRevision = ({
                           selected: true,
                           metadata: { draft_annotation_id: annotation.id }
                       })
+                  ),
+                  ...artifacts.map((artifact, index) =>
+                      normalizeAIDraftItem({
+                          id: firstText(artifact.id, artifact.artifact_id, `draft-artifact-${index + 1}`),
+                          item_type: artifact.artifact_type || 'artifact',
+                          title: firstText(artifact.title, artifact.label, artifact.data?.title, `Artifact ${index + 1}`),
+                          content: firstText(artifact.summary, artifact.description, artifact.data?.summary),
+                          source_refs: artifact.source_refs,
+                          selected: true,
+                          metadata: {
+                              artifact_id: firstText(artifact.id, artifact.artifact_id, `draft-artifact-${index + 1}`),
+                              artifact_type: artifact.artifact_type || 'artifact'
+                          }
+                      })
                   )
               ];
     const revision = {
@@ -1598,6 +1627,7 @@ export const createAIDraftRevision = ({
         draft_nodes: nodes,
         draft_edges: asArray(draftEdges).map(normalizeAIDraftEdge),
         draft_annotations: annotations,
+        generated_artifacts: artifacts,
         preview_diff: {},
         validation_report: validateAIDraftRevision({ draft_nodes: nodes, draft_edges: draftEdges }),
         created_at: createdAt,
@@ -2395,7 +2425,14 @@ const createAcceptedNode = ({ draft, session, revision, nodes, edges, parentId }
         body: draft.summary || draft.body,
         nodeType: draft.node_type,
         status,
+        df: draft.df,
+        graph: draft.graph,
+        query: draft.query,
         sourceRefs,
+        artifactType: draft.artifact_type,
+        artifactIds: draft.artifact_ids,
+        reviewState: draft.review_state,
+        generatedArtifacts: draft.generated_artifacts,
         position: position || { x: nodes.length * 320, y: nodes.length * 120 },
         metadata: {
             ...(draft.metadata || {}),

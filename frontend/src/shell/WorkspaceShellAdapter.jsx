@@ -26,6 +26,7 @@ const WorkspaceShellAdapter = ({
                 activeTab={activeRibbonTab}
                 onTabChange={onRibbonTabChange}
                 renderContent={renderRibbonContent}
+                showTabs={false}
             />
         }
         leftPanel={leftPanel}

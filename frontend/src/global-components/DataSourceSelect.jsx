@@ -36,7 +36,7 @@ const DOCUMENT_SOURCES = [
 ];
 
 const WEB_SOURCES = [
-	{ img: WEBSvg, content: "Enter URL", name: "web", mode: "AI draft", detail: "Single URL; creates a reviewable draft." },
+	{ img: WEBSvg, content: "Add web source / URL", name: "web", mode: "Crawl seed", detail: "Use a URL as source context for review, repair, and citation-backed drafts." },
 	{ img: YOUTUBESvg, content: "Connect YouTube", name: "youtube", mode: "AI draft", detail: "Single URL; creates a reviewable draft." },
 ];
 

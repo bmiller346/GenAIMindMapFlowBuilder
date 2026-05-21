@@ -703,6 +703,48 @@ const ResponseNode = ({ id, data }) => {
         setActiveView(kind === 'task' ? 'tasks' : 'knowledgeGraph');
     };
 
+    const openStructuredEvidenceRepair = (row) => {
+        const currentRefs = Array.isArray(row.source_refs) ? row.source_refs : [];
+        const representedRows = Array.isArray(row.represented_rows) ? row.represented_rows : [];
+        const sourceRepairPrompt =
+            row.evidence_repair_prompt ||
+            row.source_repair_prompt ||
+            [
+                'Correct and cite this output item.',
+                `Current source: ${row.source}`,
+                `Current target: ${row.target}`,
+                `Value: ${row.value}`,
+                row.metric_label ? `Metric: ${row.metric_label}` : '',
+                representedRows[0]?.notes ? `Notes: ${representedRows[0].notes}` : '',
+                `Current source refs: ${currentRefs.length}`,
+                'Use uploaded sources, selected sources, pasted URLs, or web search/public context when available. If the current citation is weak, random, or missing, replace it with better evidence. Return only the corrected item fields plus source_refs and review_state.'
+            ]
+                .filter(Boolean)
+                .join('\n');
+
+        openAskAi('node', {
+            initialRoleId: 'research-assistant',
+            initialActionId: 'custom_prompt',
+            initialVisual: structuredDataContext.chartType || 'table',
+            initialPrompt: sourceRepairPrompt,
+            intent: 'structured_evidence_repair'
+        });
+        recordActivity({
+            type: 'structured_evidence_repair_opened',
+            title: 'Opened evidence repair',
+            summary: `Opened evidence repair for ${row.source} -> ${row.target}.`,
+            node_ids: [id],
+            metadata: {
+                evidence_item_id: row.evidence_item_id || row.id || '',
+                row_id: row.id || '',
+                query_id: structuredDataContext.queryId,
+                source: row.source,
+                target: row.target,
+                source_ref_count: currentRefs.length
+            }
+        });
+    };
+
     const addSibling = (direction = 'below') => {
         const siblingNode = createWorkspaceNode({
             title: 'New task',
@@ -2499,6 +2541,24 @@ const ResponseNode = ({ id, data }) => {
                                     .join(' | ')}
                             </p>
                         </div>
+                    </div>
+                    <div className="structured-sankey-path-review">
+                        {structuredSankey.flow.rows.slice(0, 4).map((row) => (
+                            <div key={row.id} className="structured-sankey-path-review-row">
+                                <div>
+                                    <strong>{row.source}</strong>
+                                    <span>{row.target}</span>
+                                    <small>
+                                        {Array.isArray(row.source_refs) && row.source_refs.length
+                                            ? `${row.source_refs.length} source ref${row.source_refs.length === 1 ? '' : 's'}`
+                                            : 'Needs source'}
+                                    </small>
+                                </div>
+                                <button type="button" onClick={() => openStructuredEvidenceRepair(row)}>
+                                    Correct evidence
+                                </button>
+                            </div>
+                        ))}
                     </div>
                     <Suspense fallback={<div className="lazy-block">Loading flow...</div>}>
                         <Graph data={structuredSankey.spec} />

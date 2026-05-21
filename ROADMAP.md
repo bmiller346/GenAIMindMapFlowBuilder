@@ -31,9 +31,18 @@ verification and live integration handoffs are still incomplete.
 Recently verified:
 
 - Backend roadmap-relevant targeted tests pass: 71 passed.
+- Responses provider and web-source draft payload tests pass with
+  `python -m pytest backend/tests/test_ai_provider_foundation.py backend/tests/test_ai_draft_web_sources.py`:
+  11 passed.
 - Frontend production build passes with `npm run build`.
 - AI draft-session frontend contract tests pass with
   `node --test frontend/tests/aiDraftSessions.test.mjs`.
+- AI draft-session plus graph projection contract tests pass together with
+  `node --test tests/aiDraftSessions.test.mjs tests/graphProjection.test.mjs`
+  from `frontend/`: 65 passed.
+- Default shell regression coverage passes with
+  `npx playwright test tests/e2e/shell-foundation-smoke.spec.js tests/e2e/review-tray-regression.spec.js tests/e2e/selection-shell-regression.spec.js --workers=1`
+  from `frontend/`: 28 passed, 1 intentional legacy floating-panel skip.
 - Source draft review frontend contract tests pass with
   `node --test frontend/tests/sourceDraftReview.test.mjs`.
 - Browser-level Ask AI regression paths pass for selected node, selected
@@ -375,7 +384,7 @@ Core product rules:
   graph mutation.
 - [x] `AIDraftSession` and `AIDraftRevision` are not canonical graph state;
   they are temporary/reviewable proposal state until explicit acceptance.
-- [ ] A draft session may contain proposed nodes, edges, annotations, tasks,
+- [x] A draft session may contain proposed nodes, edges, annotations, tasks,
   checklist items, outline sections, table rows, kanban cards, charts, flow
   charts, presentation sections, handoff packages, SME questions, and
   source-repair suggestions.
@@ -383,7 +392,10 @@ Core product rules:
   selected branch, selected node, or multi-selected nodes.
 - [ ] Users can refine a draft with follow-up prompts such as "add this
   manufacturer", "split by product line", "make this a checklist", "append only
-  cited items", or "compare this to the new document".
+  cited items", or "compare this to the new document". Backend revision exists;
+  local guided fallback now preserves/refines reviewable scaffolds when backend
+  generation is unavailable. Browser coverage for the richer prompt set remains
+  open.
 - [ ] Users can add sources mid-session; the draft session can re-run coverage,
   citation repair, contradiction checks, and append proposals against the new
   context. Backend helper, endpoint, tests, and draft-panel source
@@ -593,14 +605,13 @@ Priority work:
   evidence source/target/value paths.
 - [ ] Expand workspace Sankey projection to source-to-node, node-to-output,
   handoff, dependency, owner/status, and evidence-flow paths.
-- [ ] Keep inferred paths preview-first and mark unsupported generated weights
+- [x] Keep inferred paths preview-first and mark unsupported generated weights
   as `needs_review`.
 - [ ] Add Markdown/JSON export of Sankey flow rows, selected metric, review
   state, unsupported paths, and source refs.
 - [x] Add focused tests for structured-data eligibility, Plotly Sankey spec
   generation, and source/ref preservation.
-- [ ] Add tests for workspace projection purity, click filtering, and export
-  shape.
+- [ ] Add tests for click filtering and export shape.
 
 ### Node AI Actions And Prompt Profiles
 

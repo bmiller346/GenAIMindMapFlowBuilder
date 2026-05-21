@@ -5114,6 +5114,12 @@ def _draft_preferences_from_metadata(metadata: dict[str, Any] | None = None) -> 
     }
 
 
+def _ai_draft_tools_for_preferences(draft_preferences: dict[str, Any]) -> list[dict[str, Any]]:
+    if draft_preferences.get("evidence_mode") == "web_sources":
+        return [{"type": "web_search"}]
+    return []
+
+
 def generate_ai_draft_session_with_provider(
     graph: dict[str, Any],
     *,
@@ -5156,6 +5162,7 @@ def generate_ai_draft_session_with_provider(
         content=f"{prompt}\n{json.dumps(source_context)[:6000]}",
         source_chunks=source_context["source_chunks"],
         requires_source_grounding=bool(source_refs) or classification["output_shape"] == "source_coverage",
+        requires_tools=bool(_ai_draft_tools_for_preferences(draft_preferences)),
     )
     result = _generate_ai_draft_revision_payload(
         prompt=prompt,
@@ -5351,6 +5358,7 @@ def revise_ai_draft_session_with_provider(
         prompt=prompt,
         source_chunks=source_chunks,
     )
+    draft_preferences = _draft_preferences_from_metadata(normalized_session.get("metadata"))
     source_context = build_ai_draft_source_context(
         graph,
         scope=normalized_scope,
@@ -5358,6 +5366,7 @@ def revise_ai_draft_session_with_provider(
         prior_session=normalized_session,
         include_source_library=include_library_sources,
     )
+    source_context["draft_preferences"] = draft_preferences
     source_refs = source_context["source_refs"]
     decision = choose_openai_model(
         requested_model=model,
@@ -5366,6 +5375,7 @@ def revise_ai_draft_session_with_provider(
         content=f"{prompt}\n{json.dumps(source_context)[:6000]}",
         source_chunks=source_context["source_chunks"],
         requires_source_grounding=bool(source_refs) or classification["output_shape"] == "source_coverage",
+        requires_tools=bool(_ai_draft_tools_for_preferences(draft_preferences)),
     )
     result = _generate_ai_draft_revision_payload(
         prompt=prompt,
@@ -5381,6 +5391,7 @@ def revise_ai_draft_session_with_provider(
         prior_session=normalized_session,
     )
     metadata = _draft_generation_metadata(result, classification, decision, policy)
+    metadata.update(draft_preferences)
     metadata["source_context"] = _source_context_metadata(source_context)
     metadata.update(_source_context_budget_metadata(source_context))
     generated_artifacts = validate_generated_artifacts(
@@ -5461,6 +5472,11 @@ def build_ai_draft_generation_request(
     source_context: dict[str, Any] | None = None,
     prior_session: dict[str, Any] | None = None,
 ) -> DocMapGenerationRequest:
+    draft_preferences = (
+        source_context.get("draft_preferences")
+        if isinstance(source_context, dict) and isinstance(source_context.get("draft_preferences"), dict)
+        else {}
+    )
     return DocMapGenerationRequest(
         model=model,
         instructions=_ai_draft_system_prompt(role),
@@ -5487,6 +5503,7 @@ def build_ai_draft_generation_request(
             "output_shape": classification["output_shape"],
             "scope_type": scope.get("type", "workspace"),
         },
+        tools=_ai_draft_tools_for_preferences(draft_preferences),
         store=False,
     )
 
@@ -5498,6 +5515,7 @@ def parse_ai_draft_revision_response(
     scope: dict[str, Any],
     source_refs: list[dict[str, Any]] | None = None,
     classification: dict[str, Any] | None = None,
+    allow_external_source_refs: bool = False,
 ) -> dict[str, Any]:
     if isinstance(raw_response, dict):
         parsed = deepcopy(raw_response)
@@ -5517,7 +5535,11 @@ def parse_ai_draft_revision_response(
         shape = "graph_draft"
     allowed_source_refs = source_refs or []
     draft_nodes = [
-        _normalize_model_draft_node(node, allowed_source_refs=allowed_source_refs)
+        _normalize_model_draft_node(
+            node,
+            allowed_source_refs=allowed_source_refs,
+            allow_external_source_refs=allow_external_source_refs,
+        )
         for node in parsed.get("draft_nodes", [])
         if isinstance(node, dict)
     ]
@@ -5527,7 +5549,11 @@ def parse_ai_draft_revision_response(
         if isinstance(edge, dict)
     ]
     draft_annotations = [
-        _normalize_model_annotation(annotation, allowed_source_refs=allowed_source_refs)
+        _normalize_model_annotation(
+            annotation,
+            allowed_source_refs=allowed_source_refs,
+            allow_external_source_refs=allow_external_source_refs,
+        )
         for annotation in (
             list(parsed.get("draft_annotations", []))
             + list(parsed.get("review_annotations", []))
@@ -5586,7 +5612,11 @@ def parse_ai_draft_revision_response(
             draft_items.extend(
                 _draft_items_from_revision_parts([], [], [], generated_artifacts)
             )
-    response_source_refs = _filter_allowed_source_refs(parsed.get("source_refs", []), allowed_source_refs)
+    response_source_refs = _filter_allowed_source_refs(
+        parsed.get("source_refs", []),
+        allowed_source_refs,
+        allow_external_source_refs=allow_external_source_refs,
+    )
     if not response_source_refs:
         response_source_refs = _source_refs_from_draft_parts(draft_nodes, draft_annotations)
     return {
@@ -5645,6 +5675,11 @@ def _generate_ai_draft_revision_payload(
         scope=scope,
         source_refs=source_refs,
         classification=classification,
+        allow_external_source_refs=bool(
+            isinstance(source_context, dict)
+            and isinstance(source_context.get("draft_preferences"), dict)
+            and source_context["draft_preferences"].get("evidence_mode") == "web_sources"
+        ),
     )
     parsed["provider"] = generated.provider
     parsed["actual_model"] = generated.model or _model_from_raw_response(generated.raw_response) or request.model
@@ -5657,7 +5692,8 @@ def _ai_draft_system_prompt(role: str) -> str:
         f"You are TraceSpace's {role or 'Ask AI'} drafting agent. Return only strict JSON "
         "matching the provided schema. Draft sessions are preview-only and non-canonical. "
         "TraceSpace is a source-grounded think space; mind_map is only one possible artifact. "
-        "Do not claim source support unless a source_ref appears in the provided source_refs. "
+        "Do not claim source support unless a source_ref appears in the provided source_refs "
+        "or, when web/current evidence mode is active, is supported by a web-search result URL. "
         "Unsourced generated graph nodes and inferred artifact items must keep source_refs empty, "
         "include an assumption, and be marked needs_review."
     )
@@ -5690,7 +5726,8 @@ Scope:
 Canonical graph context. Do not mutate it directly:
 {json.dumps(graph, indent=2)[:12000]}
 
-Allowed source_refs. Use only these exact source refs; otherwise return []:
+Allowed source_refs. Use only these exact source refs; otherwise return [].
+Exception: when source_context.draft_preferences.evidence_mode is web_sources and a web-search tool result supports the claim, you may return a source_ref with document_id set to the cited URL, a short section/title if known, and a brief quote_snippet. Do not invent URLs:
 {json.dumps(source_refs, indent=2)[:6000]}
 
 Source chunks:
@@ -5704,7 +5741,7 @@ Output requirements:
 - Respect explicit user quantities. If the user asks for exactly N more nodes/items, return exactly N relevant draft_nodes/items for that request unless they explicitly ask for nested descendants too.
 - Respect source_context.draft_preferences.expansion_mode. Strict mode means avoid extra subtree depth/count beyond the user's requested level. Exploratory mode means useful child and descendant structure is welcome when it improves completeness.
 - Respect source_context.draft_preferences.expansion_target. Preserve existing canonical nodes as anchors; do not rewrite them unless the user explicitly asks for update/rewrite. For existing_children, leaves, and whole_branch targets, connect new draft_nodes to existing node IDs with draft_edges so accepted output expands the existing branch instead of replacing it.
-- Respect source_context.draft_preferences.evidence_mode and citation_policy. Required citations means claims based on supplied documents/web/internal sources must copy allowed source_refs; if evidence is not supplied or not in allowed source_refs, leave source_refs empty and mark the item as an assumption/needs_review. Never fabricate URLs, SharePoint links, source refs, quotes, or current facts.
+- Respect source_context.draft_preferences.evidence_mode and citation_policy. Required citations means claims based on supplied documents/web/internal sources must copy allowed source_refs, or cite a real web-search result URL when web_sources mode is active. If evidence is not supplied, not in allowed source_refs, and not backed by a web-search result, leave source_refs empty and mark the item as an assumption/needs_review. Never fabricate URLs, SharePoint links, source refs, quotes, or current facts.
 - For broad mind_map or graph_draft requests, create a useful 2-4 level hierarchy instead of only top-level labels.
 - For broad conceptual, business, operating model, GTM, strategy, or learning-map requests, choose enough nodes for the subject to be genuinely useful, usually 20-40 draft_nodes unless the user asks for a quick/simple sketch.
 - Silently self-review before returning JSON: if the draft only contains generic category labels, is missing obvious domain-standard subtopics, or has fewer than 3 useful child branches under major concepts, revise it internally before finalizing.
@@ -5751,11 +5788,13 @@ def _normalize_model_draft_node(
     node: dict[str, Any],
     *,
     allowed_source_refs: list[dict[str, Any]],
+    allow_external_source_refs: bool = False,
 ) -> dict[str, Any]:
     normalized = _normalize_draft_node(node)
     normalized["source_refs"] = _filter_allowed_source_refs(
         normalized.get("source_refs", []),
         allowed_source_refs,
+        allow_external_source_refs=allow_external_source_refs,
     )
     normalized["metadata"].setdefault("source", "responses_ai_draft")
     if not normalized["source_refs"] and normalized.get("node_type") != "reference":
@@ -5773,6 +5812,7 @@ def _normalize_model_annotation(
     annotation: dict[str, Any],
     *,
     allowed_source_refs: list[dict[str, Any]],
+    allow_external_source_refs: bool = False,
 ) -> dict[str, Any]:
     normalized = deepcopy(annotation)
     normalized["id"] = str(normalized.get("id") or f"draft_annotation_{_utc_token()}")
@@ -5782,6 +5822,7 @@ def _normalize_model_annotation(
     normalized["source_refs"] = _filter_allowed_source_refs(
         normalized.get("source_refs", []),
         allowed_source_refs,
+        allow_external_source_refs=allow_external_source_refs,
     )
     normalized["assumptions"] = normalized.get("assumptions", []) if isinstance(normalized.get("assumptions"), list) else []
     normalized["metadata"] = normalized.get("metadata", {}) if isinstance(normalized.get("metadata"), dict) else {}
@@ -5906,6 +5947,8 @@ def _items_from_model_output(
 def _filter_allowed_source_refs(
     source_refs: Any,
     allowed_source_refs: list[dict[str, Any]],
+    *,
+    allow_external_source_refs: bool = False,
 ) -> list[dict[str, Any]]:
     if not isinstance(source_refs, list):
         return []
@@ -5917,6 +5960,19 @@ def _filter_allowed_source_refs(
         key = json.dumps(source_ref, sort_keys=True)
         if key in allowed_by_key:
             filtered.append(deepcopy(allowed_by_key[key]))
+            continue
+        document_id = str(source_ref.get("document_id") or "").strip()
+        if allow_external_source_refs and document_id.startswith(("http://", "https://")):
+            filtered.append(
+                {
+                    "document_id": document_id,
+                    "chunk_id": source_ref.get("chunk_id"),
+                    "page": source_ref.get("page"),
+                    "section": source_ref.get("section"),
+                    "quote_snippet": source_ref.get("quote_snippet"),
+                    "confidence": source_ref.get("confidence") or "medium",
+                }
+            )
     return _merge_source_refs([], filtered)
 
 

@@ -107,7 +107,10 @@ const Header = ({
     setFlowList,
     lightMode,
     setLightMode,
-    onWorkspaceAskAi
+    onWorkspaceAskAi,
+    workspaceNavigationTabs = [],
+    activeWorkspaceNavigationTab = '',
+    onWorkspaceNavigationChange
 }) => {
     const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
     const [isUtilityMenuOpen, setIsUtilityMenuOpen] = useState(false);
@@ -1429,6 +1432,28 @@ const Header = ({
                     aria-label="Workspace name"
                 />
             </div>
+            {workspaceNavigationTabs.length > 0 ? (
+                <div
+                    className="header-workspace-tabs"
+                    role="tablist"
+                    aria-label="Workspace sections"
+                >
+                    {workspaceNavigationTabs.map((tab) => (
+                        <button
+                            key={tab.id}
+                            type="button"
+                            id={`shell-ribbon-tab-${tab.id}`}
+                            className={activeWorkspaceNavigationTab === tab.id ? 'active' : ''}
+                            role="tab"
+                            aria-controls={`shell-ribbon-panel-${tab.id}`}
+                            aria-selected={activeWorkspaceNavigationTab === tab.id}
+                            onClick={() => onWorkspaceNavigationChange?.(tab.id)}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
+            ) : null}
             <div className="button header-actions">
                 {canSave ? (
                     <button

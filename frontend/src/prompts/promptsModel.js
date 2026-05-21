@@ -191,6 +191,16 @@ export const SANKEY_FLOW_LENS_PROMPT =
 
 export const starterTransformations = [
     {
+        id: 'messy_context_to_best_view',
+        label: 'Messy context to view',
+        description: 'Let TraceSpace choose graph, table, chart, task, or review shape.',
+        prompt: 'Turn this messy context into the most useful reviewable TraceSpace output. Choose the best shape from graph, flowchart, table, chart, checklist, tasks, Kanban, executive output, or source review. Keep source-backed items cited, mark assumptions needs_review, and include repair prompts for any weak or missing evidence.',
+        visual: 'auto',
+        roleId: 'workflow-mapper',
+        actionId: 'custom_prompt',
+        scopes: ['node', 'branch', 'workspace', 'source']
+    },
+    {
         id: 'sop_to_checklist',
         label: 'SOP to checklist',
         description: 'Convert procedure language into verification-ready checks.',

@@ -64,6 +64,19 @@ def test_build_responses_payload_uses_structured_outputs_shape():
     }
 
 
+def test_build_responses_payload_preserves_tools():
+    request = DocMapGenerationRequest(
+        model="gpt-5.5",
+        instructions="Return JSON.",
+        input="Draft with web evidence.",
+        tools=[{"type": "web_search"}],
+    )
+
+    payload = build_responses_create_payload(request)
+
+    assert payload["tools"] == [{"type": "web_search"}]
+
+
 def test_ai_draft_revision_schema_is_strict_for_responses_api():
     object_schemas = list(_object_schema_paths(AI_DRAFT_REVISION_OUTPUT_SCHEMA))
 

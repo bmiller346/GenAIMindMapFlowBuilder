@@ -32,6 +32,8 @@ import {
     starterTransformations
 } from '../src/prompts/promptsModel.js';
 import { createWorkspaceEdge, createWorkspaceNode } from '../src/utils/manualNodes.js';
+import { buildLocalGuidedFallbackDraft, buildLocalSankeyDraft } from '../src/utils/localSankeyDraft.js';
+import { buildGraphProjection, getSankeyFlowProjection } from '../src/views/graphProjection.js';
 
 const draftNodes = () => [
     {
@@ -945,6 +947,16 @@ test('inferAIDraftEvidencePreferences maps source intent to evidence gates', () 
     );
     assert.deepEqual(
         inferAIDraftEvidencePreferences({
+            prompt: 'Use your knowledge to map fire alarm design code references for NFPA 72, NFPA 70, and NJAC.',
+            scope: { type: 'workspace' }
+        }),
+        {
+            evidenceMode: 'web_sources',
+            citationPolicy: 'required'
+        }
+    );
+    assert.deepEqual(
+        inferAIDraftEvidencePreferences({
             prompt: 'Draft this from general knowledge with no citations.',
             scope: { type: 'node', node_id: 'root' }
         }),
@@ -1135,7 +1147,7 @@ test('follow-up intent preserves supplement and compare prompts over update word
 test('starter transformation catalog includes operational prompt defaults', () => {
     const ids = new Set(starterTransformations.map((starter) => starter.id));
 
-    assert.equal(starterTransformations.length, 27);
+    assert.equal(starterTransformations.length, 28);
     assert.ok(ids.has('sop_to_checklist'));
     assert.ok(ids.has('pdf_to_training_outline'));
     assert.ok(ids.has('requirements_to_tasks'));
@@ -1204,6 +1216,14 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.match(newsletter.prompt, /visual blocks/i);
     assert.match(newsletter.prompt, /map\/flow\/table\/status/i);
 
+    const messyContext = starterTransformations.find(
+        (starter) => starter.id === 'messy_context_to_best_view'
+    );
+    assert.equal(messyContext.visual, 'auto');
+    assert.equal(messyContext.roleId, 'workflow-mapper');
+    assert.match(messyContext.prompt, /best shape/i);
+    assert.match(messyContext.prompt, /repair prompts/i);
+
     const aecSowPlan = starterTransformations.find(
         (starter) => starter.id === 'aec_sow_to_delivery_graph'
     );
@@ -1220,6 +1240,146 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.equal(sankeyFlowLens.actionId, 'interpret_table_data');
     assert.match(sankeyFlowLens.prompt, /source, target, value/i);
     assert.match(sankeyFlowLens.prompt, /chart_type=sankey/i);
+});
+
+test('local sankey fallback revision creates accept-ready structured rows', () => {
+    const localDraft = buildLocalSankeyDraft({
+        priorPrompt: 'Create a source-backed Sankey flow lens from this workspace or source context.',
+        prompt: 'for fire alarm design using code knowledge in New Jersey NFPA 72 and NFPA 70'
+    });
+
+    assert.equal(localDraft.draftNodes.length, 1);
+    assert.equal(localDraft.draftNodes[0].artifact_type, 'structured_data_analysis');
+    assert.equal(localDraft.draftNodes[0].generated_artifacts[1].data.chart_spec.chart_type, 'sankey');
+    assert.match(localDraft.draftNodes[0].title, /Review-only Sankey starter/i);
+    assert.equal(localDraft.draftNodes[0].df.length, 10);
+    assert.ok(
+        localDraft.draftNodes[0].df.some((row) => row.target === 'NFPA 72 system requirements')
+    );
+    assert.ok(
+        localDraft.draftNodes[0].df.some(
+            (row) => row.target === 'NFPA 70 circuit and power requirements'
+        )
+    );
+    assert.ok(
+        localDraft.draftNodes[0].df.some(
+            (row) => row.target === 'AHJ review, inspection, and acceptance testing'
+        )
+    );
+    assert.ok(localDraft.draftNodes[0].df.every((row) => row.row_id));
+    assert.ok(localDraft.draftNodes[0].df.every((row) => row.evidence_item_id));
+    assert.ok(localDraft.draftNodes[0].df.every((row) => row.evidence_status === 'needs_source'));
+    assert.ok(localDraft.draftNodes[0].df.every((row) => row.citation_status === 'needs_source'));
+    assert.match(localDraft.draftNodes[0].df[0].evidence_repair_prompt, /Correct and cite this output item/i);
+    assert.match(localDraft.draftNodes[0].df[0].source_repair_prompt, /web search\/public context/i);
+
+    const session = createAIDraftSession({
+        workspaceId: 'flow-sankey',
+        scope: { type: 'workspace' },
+        role: 'Data/Table Interpreter',
+        intent: 'interpret_table_data',
+        prompt: 'for fire alarm design using code knowledge in New Jersey NFPA 72 and NFPA 70',
+        draftNodes: localDraft.draftNodes,
+        draftAnnotations: localDraft.draftAnnotations,
+        metadata: {
+            output_shape: 'chart',
+            requested_visual: 'chart',
+            preview_mode: 'local_fallback',
+            local_fallback_mode: 'sankey_structured_rows'
+        }
+    });
+    const accepted = acceptAIDraftSession({ session, nodes: [], edges: [], mode: 'append' });
+    const projection = buildGraphProjection(accepted.nodes, accepted.edges);
+    const sankey = getSankeyFlowProjection(projection);
+
+    assert.equal(accepted.accept_result.accepted_node_ids.length, 1);
+    assert.equal(sankey.eligible, true);
+    assert.equal(sankey.path_count, 10);
+    assert.equal(sankey.rows[0].value_column, 'value');
+    assert.equal(sankey.rows[0].review_state, 'needs_review');
+    assert.equal(sankey.rows[0].evidence_status, 'needs_source');
+    assert.equal(sankey.rows[0].citation_status, 'needs_source');
+    assert.match(sankey.rows[0].evidence_repair_prompt, /uploaded sources, selected sources, pasted URLs/i);
+});
+
+test('local sankey fallback extracts dependency rows from pasted Power BI context', () => {
+    const localDraft = buildLocalSankeyDraft({
+        priorPrompt: 'Create a source-backed Sankey flow lens from this workspace or source context.',
+        prompt: [
+            'Create a dependency sankey from this context.',
+            'Code/Standard\tEdition\tTriggering Code/Section\tDependency Code/Section\tNotes',
+            'IMC 2015\t2015\tMechanical Equipment\tSection 606\tDuct smoke detectors required',
+            'IMC 2015\t2015\tSection 606\tChapter 10\tInterdependency with Boilers/Plumbing Code',
+            '',
+            'dependency_id,triggering_code,triggering_edition,triggering_section,dependency_code,dependency_edition,dependency_section,notes',
+            '1,IMC,2015,Mechanical Equipment,IMC,2015,Section 606,"Duct smoke detectors required"',
+            '2,IMC,2015,Chapter 10,NFPA 85,TBD,Specific Sections,"Boiler safety"',
+            '3,ASME CSD-1,TBD,CE-110(A),NEC,2014,Specific Articles,"Electrical for emergency shutdown"'
+        ].join('\n')
+    });
+
+    const rows = localDraft.draftNodes[0].df;
+    assert.ok(rows.length >= 4);
+    assert.ok(
+        rows.some(
+            (row) =>
+                row.source === 'IMC 2015 Mechanical Equipment' &&
+                row.target === 'IMC 2015 Section 606'
+        )
+    );
+    assert.ok(
+        rows.some(
+            (row) =>
+                row.source === 'IMC 2015 Chapter 10' &&
+                row.target === 'NFPA 85 Specific Sections'
+        )
+    );
+    assert.ok(
+        rows.some(
+            (row) =>
+                row.source === 'ASME CSD-1 CE-110(A)' &&
+                row.target === 'NEC 2014 Specific Articles'
+        )
+    );
+    assert.equal(localDraft.draftNodes[0].status, 'needs_review');
+    assert.match(localDraft.draftNodes[0].title, /Review-only Sankey starter/i);
+    assert.ok(rows.every((row) => row.evidence_input_hint));
+});
+
+test('local guided fallback creates reviewable scaffold for non-sankey starters', () => {
+    const localDraft = buildLocalGuidedFallbackDraft({
+        priorPrompt: 'Create a stakeholder review package for enterprise readiness.',
+        prompt: 'for fire alarm design review in New Jersey',
+        outputShape: 'presentation_sections',
+        requestedVisual: 'presentation_sections'
+    });
+
+    assert.equal(localDraft.draftNodes.length, 5);
+    assert.match(localDraft.draftNodes[0].title, /Stakeholder package: fire alarm design review/i);
+    assert.equal(localDraft.draftNodes[0].status, 'needs_review');
+    assert.equal(localDraft.draftEdges.length, 4);
+
+    const session = createAIDraftSession({
+        workspaceId: 'flow-guided',
+        scope: { type: 'workspace' },
+        role: 'Enterprise Readiness Planner',
+        intent: 'create_stakeholder_review_package',
+        prompt: 'for fire alarm design review in New Jersey',
+        draftNodes: localDraft.draftNodes,
+        draftEdges: localDraft.draftEdges,
+        draftAnnotations: localDraft.draftAnnotations,
+        metadata: {
+            output_shape: 'presentation_sections',
+            requested_visual: 'presentation_sections',
+            preview_mode: 'local_fallback',
+            local_fallback_mode: 'guided_start_scaffold'
+        }
+    });
+    const accepted = acceptAIDraftSession({ session, nodes: [], edges: [], mode: 'append' });
+
+    assert.equal(accepted.accept_result.accepted_node_ids.length, 5);
+    assert.equal(accepted.nodes[0].data.title, localDraft.draftNodes[0].title);
+    assert.equal(accepted.nodes[0].data.status, 'needs_review');
 });
 
 test('publishable draft artifacts normalize executive summary preview fields', () => {

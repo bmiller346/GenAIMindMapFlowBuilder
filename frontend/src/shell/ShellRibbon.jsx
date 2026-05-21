@@ -10,6 +10,7 @@ export const DEFAULT_SHELL_RIBBON_TABS = [
 const ShellRibbon = ({
     activeTab = 'home',
     onTabChange,
+    showTabs = true,
     tabs = DEFAULT_SHELL_RIBBON_TABS,
     renderContent,
     children
@@ -25,27 +26,31 @@ const ShellRibbon = ({
 
     return (
         <nav
-            className="shell-ribbon"
+            className={['shell-ribbon', showTabs ? '' : 'shell-ribbon--content-only']
+                .filter(Boolean)
+                .join(' ')}
             aria-label="Workspace command ribbon"
             data-testid="shell-ribbon"
             data-active-tab={activeTabId}
         >
-            <div className="shell-ribbon__tabs" role="tablist" aria-label="Ribbon tabs">
-                {tabs.map((tab) => (
-                    <button
-                        key={tab.id}
-                        type="button"
-                        id={`shell-ribbon-tab-${tab.id}`}
-                        className={activeTabId === tab.id ? 'active' : ''}
-                        role="tab"
-                        aria-controls={`shell-ribbon-panel-${tab.id}`}
-                        aria-selected={activeTabId === tab.id}
-                        onClick={() => onTabChange?.(tab.id)}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
-            </div>
+            {showTabs ? (
+                <div className="shell-ribbon__tabs" role="tablist" aria-label="Ribbon tabs">
+                    {tabs.map((tab) => (
+                        <button
+                            key={tab.id}
+                            type="button"
+                            id={`shell-ribbon-tab-${tab.id}`}
+                            className={activeTabId === tab.id ? 'active' : ''}
+                            role="tab"
+                            aria-controls={`shell-ribbon-panel-${tab.id}`}
+                            aria-selected={activeTabId === tab.id}
+                            onClick={() => onTabChange?.(tab.id)}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
+            ) : null}
             <div
                 id={activePanelId}
                 className="shell-ribbon__content"

@@ -12,6 +12,7 @@ class DocMapGenerationRequest:
     response_schema: dict[str, Any] | None = None
     schema_name: str = "docmap_generation"
     metadata: dict[str, str] = field(default_factory=dict)
+    tools: list[dict[str, Any]] = field(default_factory=list)
     store: bool = False
 
 

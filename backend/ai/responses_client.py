@@ -19,6 +19,8 @@ def build_responses_create_payload(request: DocMapGenerationRequest) -> dict[str
     }
     if request.metadata:
         payload["metadata"] = request.metadata
+    if request.tools:
+        payload["tools"] = request.tools
     if request.response_schema:
         payload["text"] = json_schema_response_format(
             name=request.schema_name,

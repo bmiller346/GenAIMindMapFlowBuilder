@@ -11,6 +11,7 @@ const STATUS_LABELS = {
 };
 
 const DETAIL_KEYS = ['actor', 'integration', 'node_ids', 'source_ids'];
+const CATEGORY_FILTERS = ACTIVITY_FILTERS.filter((filter) => filter.id !== 'all');
 
 const ActivityPanel = ({ embedded = false }) => {
     const activities = useActivityStore((s) => s.activities);
@@ -20,13 +21,31 @@ const ActivityPanel = ({ embedded = false }) => {
     const setInspectorNodeId = useStore((s) => s.setInspectorNodeId);
     const [activeFilter, setActiveFilter] = useState('all');
     const [expandedId, setExpandedId] = useState('');
+    const visibleFilters = useMemo(() => {
+        const activeCategories = new Set(activities.map((activity) => activity.category).filter(Boolean));
+        return [
+            ACTIVITY_FILTERS.find((filter) => filter.id === 'all'),
+            ...CATEGORY_FILTERS.filter((filter) => activeCategories.has(filter.id))
+        ].filter(Boolean);
+    }, [activities]);
+    const effectiveFilter = useMemo(
+        () =>
+            activeFilter === 'all' || visibleFilters.some((filter) => filter.id === activeFilter)
+                ? activeFilter
+                : 'all',
+        [activeFilter, visibleFilters]
+    );
     const filteredActivities = useMemo(
         () =>
-            activeFilter === 'all'
+            effectiveFilter === 'all'
                 ? activities
-                : activities.filter((activity) => activity.category === activeFilter),
-        [activeFilter, activities]
+                : activities.filter((activity) => activity.category === effectiveFilter),
+        [effectiveFilter, activities]
     );
+    const emptyMessage =
+        activities.length === 0
+            ? 'No workspace activity yet. Add sources, ask AI, create nodes, or run a review to start the timeline.'
+            : 'No matching activity yet.';
 
     if (!embedded && !isActivityOpen) {
         return null;
@@ -51,12 +70,12 @@ const ActivityPanel = ({ embedded = false }) => {
                 </div>
             </div>
             <div className="activity-panel-filters">
-                {ACTIVITY_FILTERS.map((filter) => (
+                {visibleFilters.map((filter) => (
                     <button
                         key={filter.id}
                         type="button"
                         className={
-                            activeFilter === filter.id
+                            effectiveFilter === filter.id
                                 ? 'activity-panel-filter-active'
                                 : ''
                         }
@@ -68,7 +87,10 @@ const ActivityPanel = ({ embedded = false }) => {
             </div>
             <div className="activity-panel-list">
                 {filteredActivities.length === 0 ? (
-                    <p className="activity-panel-empty">No matching activity yet.</p>
+                    <div className="activity-panel-empty">
+                        <strong>{activities.length === 0 ? 'No events yet' : 'Nothing in this filter'}</strong>
+                        <p>{emptyMessage}</p>
+                    </div>
                 ) : (
                     filteredActivities.map((activity) => {
                         const isExpanded = expandedId === activity.id;
@@ -92,10 +114,13 @@ const ActivityPanel = ({ embedded = false }) => {
                                     }
                                     aria-expanded={isExpanded}
                                 >
-                                    <span>
-                                        {STATUS_LABELS[activity.status] ||
-                                            activity.category ||
-                                            'Event'}
+                                    <span className="activity-item-meta">
+                                        <span>
+                                            {STATUS_LABELS[activity.status] ||
+                                                activity.category ||
+                                                'Event'}
+                                        </span>
+                                        <time>{activityTimeLabel(activity.updated_at)}</time>
                                     </span>
                                     <strong>{activity.title}</strong>
                                     {activity.summary ? <p>{activity.summary}</p> : null}
@@ -105,7 +130,6 @@ const ActivityPanel = ({ embedded = false }) => {
                                         <small>{activity.context}</small>
                                     ) : null}
                                 </button>
-                                <time>{activityTimeLabel(activity.updated_at)}</time>
                                 {isExpanded ? (
                                     <div className="activity-item-detail">
                                         {DETAIL_KEYS.map((key) => {
