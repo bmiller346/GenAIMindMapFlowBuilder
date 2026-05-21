@@ -94,13 +94,13 @@ Current verification:
 - `npm run build` from `frontend/`: passing.
 - `node --test tests/shellComponents.test.mjs tests/shellStore.test.mjs tests/shellLayoutState.test.mjs tests/uiShellFeatureFlag.test.mjs tests/canvasProjection.test.mjs` from `frontend/`: passing, 41 tests.
 - `npx playwright test tests/e2e/shell-foundation-smoke.spec.js` from `frontend/`: passing, includes shell status-bar progress, source-intake tray routing, and shell-off rollback edit/save/reopen coverage.
-- `npx playwright test tests/e2e/selection-shell-regression.spec.js tests/e2e/review-tray-regression.spec.js tests/e2e/shell-foundation-smoke.spec.js --workers=1` from `frontend/`: passing, 25 passed and 1 intentional `fixme` skip after the shell-off rollback edit/save/reopen slice.
+- `npx playwright test tests/e2e/selection-shell-regression.spec.js tests/e2e/review-tray-regression.spec.js tests/e2e/shell-foundation-smoke.spec.js --workers=1` from `frontend/`: passing, 28 passed and 1 intentional `fixme` skip after the shell-off rollback edit/save/reopen slice.
 
 Known active QA gaps:
 
 - Legacy floating panel overlap in the old layout is documented as a `fixme`; the shell migration is the intended long-term fix.
 - Screenshot QA captured shell on/off at 1600x1000, 1440x900, and 390x844. That pass found and fixed a narrow collapsed-left-rail hitbox issue; map/lens product signoff remains separate.
-- Branch highlighting and relationship-label lenses are documented and have e2e coverage for default-off / toggle-on label behavior plus projection-level unit coverage for structural-only traversal and semantic edge exclusion from strong branch emphasis. Manual visual QA is still needed before default-shell rollout.
+- Branch highlighting and relationship-label lenses are documented and have e2e coverage for default-off / toggle-on label behavior plus projection-level unit coverage for structural-only traversal and semantic edge exclusion from strong branch emphasis. Manual visual QA is still needed before rollback retirement.
 
 ### Default Shell Follow-Up Gate
 
@@ -115,7 +115,7 @@ is dead in both shell-on and shell-off paths.
 | Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Default shell feels crowded or hides controls at common desktop/narrow sizes | Run shell e2e geometry coverage plus manual screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Screenshot matrix captured and inspected; narrow collapsed-left-rail hitbox fixed and covered. Human/product visual signoff remains recommended before rollback retirement | Yes |
 | Accepted output surfaces need verification | Outputs ribbon and accepted workspace views | Accepted Table/Executive/Flowchart/Tasks/Kanban commands route to an invisible surface or wrong tray workflow | Verify Table, Executive, Flowchart, Tasks, and Kanban open accepted canvas/output surfaces; verify Checklist Preview opens the Review Tray | E2E route coverage passing for Table, Executive, Flowchart, Tasks, Kanban, Implementation, Status, and Checklist Preview | Yes |
 | Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Preview candidates become canonical work before acceptance, or accepted artifacts remain trapped in preview UI | E2E or component coverage for Table/Kanban not opening tray, Checklist Preview opening tray, accepted tasks staying in structured canvas, and checklist artifact persistence | Route split covered; accepted checklist artifact persistence covered by review-tray save/reopen regression | Yes |
-| Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 25 serialized shell e2e passed, 1 intentional skip | Yes |
+| Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with an untested shell route or stale fixture | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 28 serialized shell e2e passed, 1 intentional skip | Yes |
 | Map readability and relationship lenses are visually verified | Map ribbon, branch scope, relationship labels | Branch focus, selected nodes, and relationship labels compete visually or confuse review | Visual QA plus coverage that mind map relationship labels default off and can be toggled on intentionally | Default-off / toggle-on e2e, branch-lens e2e, and projection unit coverage passing; manual visual QA still open | Yes |
 | Preview-first graph mutation remains safe | Connections review and generated previews | Find Connections or related candidate acceptance mutates canonical graph without review | Verify generated connection candidates enter Review Tray first and accept/reject preserves existing mutation behavior | Review Tray regression now covers connection candidate visibility before mutation and selected accept creating the canonical relationship edge; broader reject/discard UX polish remains follow-up | Yes |
 | Legacy overlap `fixme` has disposition | Shell-off FloatingDock compatibility layout | Known overlap remains ambiguous when shell becomes default and rollback is needed | Either keep skipped with explicit shell-off waiver/manual screenshot gate, narrow to shell-only geometry, or replace with stable bounding-box coverage | Disposition documented: skipped as shell-off compatibility territory while shell slot geometry guards default readiness | Yes |
@@ -230,13 +230,21 @@ Non-`FloatingDock` floating surface inventory:
 | Surface | Current classification | Disposition |
 | --- | --- | --- |
 | Legacy modal host and upload/settings/help dialogs | Modal by design | Keep while shell settles; individual upload flows can stay modal unless a shell-specific route is designed. |
-| Advanced Ask AI / prompt-builder modal | Migration candidate | Highest prompt-routing gap. It still owns role/action inference, model/evidence/citation controls, progress handoff, and draft-session metadata. |
+| Advanced Ask AI / prompt-builder modal | Acceptable advanced modal for now; future shell overlay/right-rail candidate by entry point | Deliberately deferred. Quick Ask AI, Guided starts, source Ask AI, and reviewable generated work are shell-aware; the full advanced builder still owns role/action inference, model/evidence/citation controls, progress handoff, and draft-session metadata. Keep shell-off and advanced-builder `PromptModal` routes until a small, tested shell route exists. |
 | Shell output surface React Flow panel for chart/monday views | Migration candidate | Not a shell slot yet; audit before moving execution/handoff outputs into shell-owned surfaces. |
 | Shell-off AI generation progress dock | Shell-off compatibility | Keep until rollback path is retired; shell-on progress is already in the status bar. |
 | Empty-canvas start panel | Canvas affordance | Ask AI and Guided starts are shell-aware; remaining work is product polish for how starter presets appear inside the shell guide. |
 | Branch lens banner, selection action bar, legacy AI Helpers panel, and source draft review panel | Shell-off compatibility | Keep as rollback surfaces while default shell matures. |
 | Anchored popovers from local views and node controls | Canvas affordance | Accept as small menus for now; document separately from modal/panel retirement. |
 | Shell overlay host | Shell-owned placeholder | Store state and slot exist, but `ShellOverlayHost` renders no real overlay content yet. |
+
+Prompt-builder entry-point disposition:
+
+- Selection action bar advanced Ask AI: acceptable advanced modal for now; quick selected-node Ask AI remains lightweight and inline.
+- Header/Home/general Ask AI and empty-canvas Ask AI/Guided starts: shell right-rail guide in shell mode; shell-off rollback keeps `PromptModal`.
+- Source-library Ask AI: shell right-rail guide with source scope in shell mode; shell-off rollback keeps `PromptModal`.
+- Reviewable generated work, including connections/tasks/checklist/source repair/issues: should continue opening or returning to the bottom Review Tray; any "generate more" advanced builder action may remain modal until the prompt builder has a tested tray/overlay migration.
+- Output-builder advanced presets and legacy AI Helpers panel actions: future shell overlay or right-rail guide candidates, not blockers for default-on readiness.
 
 #### Landed Agent C: Map Readability And Lenses
 
@@ -354,9 +362,9 @@ Next sequence:
 2. Continue non-`FloatingDock` floating surface disposition and decide which are
    shell overlays, temporary canvas affordances, or retirement candidates.
 3. Rerun build, shell units, shell e2e, and review tray e2e as the final
-   pre-default verification bundle.
-4. Only after those pass, decide whether to flip the shell default flag. Keep
-   `FloatingDock` retirement as a post-default cleanup track.
+   rollback-retirement readiness bundle.
+4. Keep `FloatingDock` retirement as a post-default cleanup track until the
+   shell-off compatibility path has an explicit replacement or removal plan.
 
 #### Deferred Integration: FloatingDock Retirement
 
