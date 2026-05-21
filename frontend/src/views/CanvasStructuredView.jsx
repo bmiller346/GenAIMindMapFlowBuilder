@@ -430,6 +430,10 @@ const SankeyFlowPanel = ({
     sankeyFlow,
     sankeySpec,
     onOpenNode,
+    onSelectPath,
+    selectedPathId = '',
+    selectedPath,
+    onClearPath,
     onCopyMarkdown,
     onDownloadMarkdown,
     onDownloadJson,
@@ -482,7 +486,8 @@ const SankeyFlowPanel = ({
                         <button
                             type="button"
                             key={row.id}
-                            onClick={() => onOpenNode?.(row.evidence_node_id)}
+                            className={selectedPathId === row.id ? 'active' : ''}
+                            onClick={() => onSelectPath?.(row)}
                         >
                             <span>{row.source}</span>
                             <span>{row.target}</span>
@@ -493,6 +498,61 @@ const SankeyFlowPanel = ({
                     ))}
                 </div>
             </div>
+            {selectedPath ? (
+                <div className="canvas-structured-sankey-detail">
+                    <div className="canvas-structured-sankey-detail-header">
+                        <div>
+                            <strong>{`${selectedPath.source} -> ${selectedPath.target}`}</strong>
+                            <span>
+                                {`${selectedPath.metric_label}: ${Number(selectedPath.value || 0).toLocaleString()} - ${selectedPath.review_state || 'needs_review'}`}
+                            </span>
+                        </div>
+                        <div>
+                            <button type="button" onClick={() => onOpenNode?.(selectedPath.evidence_node_id)}>
+                                Open evidence node
+                            </button>
+                            <button type="button" onClick={onClearPath}>
+                                Clear
+                            </button>
+                        </div>
+                    </div>
+                    <div className="canvas-structured-sankey-detail-grid">
+                        <section>
+                            <strong>Represented rows</strong>
+                            {(selectedPath.represented_rows || []).slice(0, 6).map((row, index) => (
+                                <dl key={`${selectedPath.id}-represented-${index}`}>
+                                    {Object.entries(row || {})
+                                        .filter(([, value]) => value !== undefined && value !== null && value !== '')
+                                        .slice(0, 6)
+                                        .map(([key, value]) => (
+                                            <Fragment key={key}>
+                                                <dt>{key.replaceAll('_', ' ')}</dt>
+                                                <dd>{Array.isArray(value) ? `${value.length} item${value.length === 1 ? '' : 's'}` : String(value)}</dd>
+                                            </Fragment>
+                                        ))}
+                                </dl>
+                            ))}
+                        </section>
+                        <section>
+                            <strong>Sources</strong>
+                            {(selectedPath.source_refs || []).length ? (
+                                <ul>
+                                    {selectedPath.source_refs.slice(0, 5).map((sourceRef, index) => (
+                                        <li key={`${selectedPath.id}-source-${index}`}>
+                                            {sourceRef.title || sourceRef.document_title || sourceRef.document_id || sourceRef.source_id || `Source ${index + 1}`}
+                                        </li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <p>Needs source support before this path should be treated as evidence.</p>
+                            )}
+                            {selectedPath.evidence_repair_prompt || selectedPath.source_repair_prompt ? (
+                                <small>{selectedPath.evidence_repair_prompt || selectedPath.source_repair_prompt}</small>
+                            ) : null}
+                        </section>
+                    </div>
+                </div>
+            ) : null}
         </section>
     );
 };
@@ -791,8 +851,18 @@ const CanvasStructuredView = ({
     const [expandedCondensedRowIds, setExpandedCondensedRowIds] = useState([]);
     const [hierarchyUndoNotice, setHierarchyUndoNotice] = useState(null);
     const [sankeyExportStatus, setSankeyExportStatus] = useState('');
+    const [selectedSankeyPathId, setSelectedSankeyPathId] = useState('');
     const hierarchyUndoTimerRef = useRef(null);
     const label = VIEW_LABELS[view] || 'Structured view';
+    const selectedSankeyPath = useMemo(
+        () => sankeyFlow.rows.find((row) => row.id === selectedSankeyPathId) || null,
+        [sankeyFlow.rows, selectedSankeyPathId]
+    );
+    useEffect(() => {
+        if (selectedSankeyPathId && !selectedSankeyPath) {
+            setSelectedSankeyPathId('');
+        }
+    }, [selectedSankeyPath, selectedSankeyPathId]);
     const buildCurrentSankeyMarkdown = () =>
         buildSankeyFlowMarkdown({
             sankeyFlow,
@@ -864,6 +934,33 @@ const CanvasStructuredView = ({
         });
         setSankeyExportStatus('Downloaded Sankey JSON.');
         recordSankeyExport('json');
+    };
+    const inspectSankeyPath = (row) => {
+        if (!row?.id) {
+            return;
+        }
+        setSelectedSankeyPathId(row.id);
+        if (row.evidence_node_id) {
+            setTableMode('evidence');
+            setSelectedTableRowIds([row.evidence_node_id]);
+        }
+        recordActivity({
+            type: 'sankey_path_inspected',
+            title: 'Inspected Sankey path',
+            summary: `Inspected ${row.source} -> ${row.target}.`,
+            node_ids: [row.evidence_node_id].filter(Boolean),
+            metadata: {
+                path_id: row.id,
+                evidence_item_id: row.evidence_item_id || '',
+                represented_rows: Array.isArray(row.represented_rows) ? row.represented_rows.length : 0,
+                source_ref_count: Array.isArray(row.source_refs) ? row.source_refs.length : 0
+            },
+            status: 'completed'
+        });
+    };
+    const clearSankeyPath = () => {
+        setSelectedSankeyPathId('');
+        setSelectedTableRowIds([]);
     };
     const addFlowchartStep = ({ nodeType = 'process', title = 'New flow step', sourceId = '' } = {}) => {
         const sourceStep = sourceId
@@ -2463,6 +2560,10 @@ const CanvasStructuredView = ({
                             sankeyFlow={sankeyFlow}
                             sankeySpec={sankeySpec}
                             onOpenNode={onOpenNode}
+                            onSelectPath={inspectSankeyPath}
+                            selectedPathId={selectedSankeyPathId}
+                            selectedPath={selectedSankeyPath}
+                            onClearPath={clearSankeyPath}
                             onCopyMarkdown={copySankeyMarkdown}
                             onDownloadMarkdown={downloadSankeyMarkdown}
                             onDownloadJson={downloadSankeyJson}

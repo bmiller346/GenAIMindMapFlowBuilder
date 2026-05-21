@@ -14154,6 +14154,11 @@ img:hover {
   border-color: color-mix(in srgb, #34d399 48%, var(--question-border));
 }
 
+.canvas-structured-sankey-paths button.active {
+  border-color: color-mix(in srgb, #34d399 68%, var(--question-border));
+  background-color: color-mix(in srgb, #34d399 12%, var(--modal-container-color));
+}
+
 .canvas-structured-sankey-paths span,
 .canvas-structured-sankey-paths strong {
   min-width: 0;
@@ -14167,6 +14172,109 @@ img:hover {
   color: var(--input-color);
   font-size: 0.72rem;
   line-height: 1rem;
+}
+
+.canvas-structured-sankey-detail {
+  display: grid;
+  gap: 0.65rem;
+  border: 1px solid color-mix(in srgb, #34d399 35%, var(--question-border));
+  border-radius: 0.5rem;
+  background-color: color-mix(in srgb, var(--modal-container-color) 78%, transparent);
+  padding: 0.7rem;
+}
+
+.canvas-structured-sankey-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.canvas-structured-sankey-detail-header > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.canvas-structured-sankey-detail-header > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.canvas-structured-sankey-detail-header strong,
+.canvas-structured-sankey-detail-grid strong {
+  color: var(--font-color);
+  font-size: 0.82rem;
+  line-height: 1.05rem;
+}
+
+.canvas-structured-sankey-detail-header span {
+  color: var(--input-color);
+  font-size: 0.72rem;
+  line-height: 1rem;
+}
+
+.canvas-structured-sankey-detail button {
+  min-height: 1.85rem;
+  border: 1px solid var(--question-border);
+  border-radius: 0.38rem;
+  background-color: var(--input-bar-color);
+  color: var(--font-color);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 850;
+  padding: 0 0.55rem;
+}
+
+.canvas-structured-sankey-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(13rem, 0.7fr);
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.canvas-structured-sankey-detail-grid section {
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.canvas-structured-sankey-detail-grid dl {
+  display: grid;
+  grid-template-columns: minmax(6rem, 0.42fr) minmax(0, 1fr);
+  gap: 0.22rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--question-border) 72%, transparent);
+  border-radius: 0.4rem;
+  margin: 0;
+  padding: 0.5rem;
+}
+
+.canvas-structured-sankey-detail-grid dt,
+.canvas-structured-sankey-detail-grid dd,
+.canvas-structured-sankey-detail-grid li,
+.canvas-structured-sankey-detail-grid p,
+.canvas-structured-sankey-detail-grid small {
+  color: var(--input-color);
+  font-size: 0.7rem;
+  line-height: 1rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.canvas-structured-sankey-detail-grid dt {
+  color: var(--font-color);
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.canvas-structured-sankey-detail-grid ul {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding-left: 1rem;
 }
 
 .canvas-structured-table-mode {
