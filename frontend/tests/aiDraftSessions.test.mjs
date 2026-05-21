@@ -9,6 +9,7 @@ import {
     buildSelectedSourceDraftPayload,
     buildSelectedSourcesDraftPayload,
     buildAIDraftPreviewDiff,
+    createAIDraftRevision,
     createAIDraftSession,
     formatAIDraftPreviewDiffSummary,
     getAIDraftAcceptModeDetail,
@@ -19,10 +20,12 @@ import {
     inferAIDraftEvidencePreferences,
     inferAIDraftExpansionPreferences,
     draftArtifactPreviewToMarkdown,
+    normalizeAcceptedDraftArtifacts,
     normalizePublishableDraftArtifacts,
     normalizeSoftwareOverlapReports,
     rejectAIDraftSession,
     reviseAIDraftSession,
+    sourceRefsFromPastedUrls,
     visibleAIDraftPromptText
 } from '../src/utils/aiDraftSessions.js';
 import {
@@ -498,6 +501,55 @@ test('acceptAIDraftSession supports accept all and reject preserves noncanonical
     assert.equal(rejected.metadata.rejection_reason, 'Try a narrower prompt.');
 });
 
+test('acceptAIDraftSession preserves connected package artifacts and undo metadata locally', () => {
+    const root = createWorkspaceNode({ id: 'root', title: 'Deployment' });
+    const session = createAIDraftSession({
+        workspaceId: 'workspace-1',
+        scope: { type: 'branch', node_id: 'root' },
+        prompt: 'Create connected picture package',
+        draftNodes: [],
+        draftEdges: [],
+        generatedArtifacts: [
+            {
+                id: 'artifact-connected-package',
+                artifact_type: 'connected_picture_package',
+                title: 'Connected package',
+                status: 'needs_review',
+                data: {
+                    package_id: 'connected-package-1',
+                    view_lenses: [{ id: 'lens-review', lens_type: 'review', source_refs: [] }],
+                    source_refs: [{ document_id: 'doc-1' }]
+                },
+                source_refs: [{ document_id: 'doc-1' }]
+            }
+        ],
+        sessionId: 'session-connected-package',
+        revisionId: 'revision-connected-package'
+    });
+
+    const result = acceptAIDraftSession({
+        session,
+        nodes: [root],
+        edges: [],
+        mode: 'append',
+        acceptedAt: '2026-05-20T23:00:00.000Z'
+    });
+
+    assert.equal(result.accept_result.accepted_artifacts[0].artifact_type, 'connected_picture_package');
+    assert.equal(result.accept_result.accepted_artifacts[0].data.package_id, 'connected-package-1');
+    assert.equal(result.accept_result.accepted_artifacts[0].metadata.ai_draft_revision_id, 'revision-connected-package');
+    assert.equal(result.accept_result.accepted_artifacts[0].metadata.accepted_at, '2026-05-20T23:00:00.000Z');
+    assert.equal(result.accept_result.undo.kind, 'react_flow_snapshot');
+    assert.equal(result.session.accept_history[0].metadata.undo_kind, 'react_flow_snapshot');
+
+    const [artifact] = normalizeAcceptedDraftArtifacts(session.revisions[0], {
+        session,
+        acceptedAt: '2026-05-20T23:00:00.000Z'
+    });
+    assert.equal(artifact.data.view_lenses[0].id, 'lens-review');
+    assert.equal(artifact.metadata.ai_draft_session_id, 'session-connected-package');
+});
+
 test('acceptAIDraftSession places branch supplements locally and preserves non-hierarchy edges as relationships', () => {
     const root = createWorkspaceNode({ id: 'root', title: 'Business plan', position: { x: 120, y: 120 } });
     const risk = createWorkspaceNode({ id: 'risk', title: 'Risk management', position: { x: 560, y: 120 } });
@@ -957,6 +1009,16 @@ test('inferAIDraftEvidencePreferences maps source intent to evidence gates', () 
     );
     assert.deepEqual(
         inferAIDraftEvidencePreferences({
+            prompt: 'Correct evidence for this row from https://example.com/current-code-reference.',
+            scope: { type: 'workspace' }
+        }),
+        {
+            evidenceMode: 'web_sources',
+            citationPolicy: 'required'
+        }
+    );
+    assert.deepEqual(
+        inferAIDraftEvidencePreferences({
             prompt: 'Draft this from general knowledge with no citations.',
             scope: { type: 'node', node_id: 'root' }
         }),
@@ -977,6 +1039,25 @@ test('inferAIDraftEvidencePreferences maps source intent to evidence gates', () 
             citationPolicy: 'required'
         }
     );
+    assert.deepEqual(
+        inferAIDraftEvidencePreferences({
+            prompt: 'Check NFPA 72 and NEC requirements against the selected source.',
+            scope: { type: 'source', source_id: 'doc-code' },
+            selectedSourceCount: 1,
+            loadedSourceCount: 1
+        }),
+        {
+            evidenceMode: 'uploaded_sources',
+            citationPolicy: 'required'
+        }
+    );
+    assert.deepEqual(sourceRefsFromPastedUrls('Correct from https://example.com/code#section.')[0], {
+        document_id: 'https://example.com/code',
+        section: 'Pasted URL',
+        quote_snippet: '',
+        confidence: 'medium',
+        source_type: 'url'
+    });
 });
 
 test('inferAIDraftExpansionPreferences maps plain-language growth intent', () => {
@@ -1147,7 +1228,7 @@ test('follow-up intent preserves supplement and compare prompts over update word
 test('starter transformation catalog includes operational prompt defaults', () => {
     const ids = new Set(starterTransformations.map((starter) => starter.id));
 
-    assert.equal(starterTransformations.length, 28);
+    assert.equal(starterTransformations.length, 29);
     assert.ok(ids.has('sop_to_checklist'));
     assert.ok(ids.has('pdf_to_training_outline'));
     assert.ok(ids.has('requirements_to_tasks'));
@@ -1157,6 +1238,7 @@ test('starter transformation catalog includes operational prompt defaults', () =
     assert.ok(ids.has('sme_review_packet'));
     assert.ok(ids.has('implementation_handoff_package'));
     assert.ok(ids.has('aec_sow_to_delivery_graph'));
+    assert.ok(ids.has('aec_code_lifecycle_package'));
     assert.ok(ids.has('executive_summary'));
     assert.ok(ids.has('news_article'));
     assert.ok(ids.has('newsletter'));
@@ -1380,6 +1462,331 @@ test('local guided fallback creates reviewable scaffold for non-sankey starters'
     assert.equal(accepted.accept_result.accepted_node_ids.length, 5);
     assert.equal(accepted.nodes[0].data.title, localDraft.draftNodes[0].title);
     assert.equal(accepted.nodes[0].data.status, 'needs_review');
+});
+
+test('local guided fallback creates connected package artifacts for package requests', () => {
+    const localDraft = buildLocalGuidedFallbackDraft({
+        prompt: 'Map this fire alarm design code context from SD through CA and closeout.',
+        outputShape: 'graph_draft',
+        requestedVisual: 'auto',
+        requestedOutputs: ['connected_picture_package']
+    });
+
+    assert.equal(localDraft.draftNodes.length, 5);
+    assert.match(localDraft.draftNodes[1].title, /Code basis and phases/i);
+    assert.equal(localDraft.generatedArtifacts.length, 1);
+    assert.equal(localDraft.generatedArtifacts[0].artifact_type, 'connected_picture_package');
+    assert.equal(localDraft.generatedArtifacts[0].data.primary_nodes.length, 5);
+    assert.equal(localDraft.generatedArtifacts[0].data.relationship_edges.length, 4);
+    assert.equal(localDraft.generatedArtifacts[0].data.view_lenses.length, 2);
+    assert.ok(localDraft.generatedArtifacts[0].data.repair_targets.length >= 1);
+
+    const session = createAIDraftSession({
+        workspaceId: 'flow-connected-fallback',
+        scope: { type: 'workspace' },
+        role: 'Workflow Mapper',
+        intent: 'custom_prompt',
+        prompt: 'Map this fire alarm design code context from SD through CA and closeout.',
+        draftNodes: localDraft.draftNodes,
+        draftEdges: localDraft.draftEdges,
+        draftAnnotations: localDraft.draftAnnotations,
+        generatedArtifacts: localDraft.generatedArtifacts,
+        metadata: {
+            output_shape: 'graph_draft',
+            requested_visual: 'auto',
+            requested_output_shapes: ['connected_picture_package'],
+            preview_mode: 'local_fallback',
+            local_fallback_mode: 'guided_start_scaffold'
+        }
+    });
+
+    assert.equal(session.revisions[0].generated_artifacts[0].artifact_type, 'connected_picture_package');
+    assert.ok(
+        session.revisions[0].draft_items.some(
+            (item) => item.metadata?.artifact_type === 'connected_picture_package'
+        )
+    );
+    const accepted = acceptAIDraftSession({ session, nodes: [], edges: [], mode: 'append' });
+    assert.equal(accepted.accept_result.accepted_artifacts[0].artifact_type, 'connected_picture_package');
+});
+
+test('connected picture package revision normalizes package artifacts into selectable draft items', () => {
+    const revision = createAIDraftRevision({
+        sessionId: 'session-connected-package',
+        prompt: 'Create an implementation handoff package from this connected picture.',
+        draftNodes: [
+            {
+                id: 'package-root',
+                title: 'Connected picture package',
+                summary: 'Review package that connects scope, blockers, owners, and next actions.',
+                node_type: 'task',
+                artifact_type: 'implementation_handoff_package',
+                artifact_ids: ['handoff-package-1'],
+                source_refs: [{ document_id: 'workspace-brief', chunk_id: 'scope' }]
+            }
+        ],
+        generatedArtifacts: [
+            {
+                id: 'handoff-package-1',
+                artifact_type: 'implementation_handoff_package',
+                title: 'Implementation handoff package',
+                summary: 'Scope, ready items, blockers, dependencies, owners, and next actions.',
+                source_refs: [{ document_id: 'workspace-brief', chunk_id: 'scope' }]
+            }
+        ],
+        metadata: {
+            output_shape: 'implementation_handoff_package',
+            requested_visual: 'implementation_handoff_package'
+        }
+    });
+
+    assert.equal(revision.draft_nodes[0].artifact_type, 'implementation_handoff_package');
+    assert.deepEqual(revision.draft_nodes[0].artifact_ids, ['handoff-package-1']);
+    assert.equal(revision.generated_artifacts.length, 1);
+    assert.equal(revision.draft_items.length, 2);
+    assert.deepEqual(
+        revision.draft_items.map((item) => item.id),
+        ['package-root', 'handoff-package-1']
+    );
+    assert.equal(revision.draft_items[1].item_type, 'implementation_handoff_package');
+    assert.equal(revision.draft_items[1].metadata.artifact_type, 'implementation_handoff_package');
+    assert.equal(revision.preview_diff.added_nodes, 1);
+});
+
+const connectedPackageArtifact = () => ({
+    id: 'connected-package-artifact',
+    artifact_type: 'connected_picture_package',
+    title: 'Connected package',
+    data: {
+        package_id: 'connected-package-1',
+        primary_nodes: [
+            { id: 'primary-root', node_id: 'root', title: 'Root', source_refs: [{ document_id: 'doc-1' }] }
+        ],
+        relationship_edges: [
+            {
+                id: 'edge-root-approval',
+                source_node_id: 'root',
+                target_node_id: 'approval',
+                relationship_type: 'depends_on',
+                source_refs: [{ document_id: 'doc-1' }]
+            }
+        ],
+        view_lenses: [{ id: 'lens-graph', lens_type: 'graph', title: 'Graph', edge_ids: ['edge-root-approval'] }],
+        structured_evidence: [{ id: 'evidence-approval', title: 'Approval evidence', source_refs: [{ document_id: 'doc-1' }] }],
+        evidence_links: [
+            {
+                id: 'link-approval',
+                source_evidence_id: 'evidence-approval',
+                target_package_item_id: 'primary-root',
+                target_id: 'primary-root'
+            }
+        ],
+        tasks: [
+            {
+                id: 'task-1',
+                title: 'Confirm owner',
+                metadata: { required_sibling_ids: ['evidence-approval'] }
+            }
+        ],
+        risks: [],
+        decisions: [],
+        repair_targets: [],
+        acceptance_groups: [{ id: 'graph-only', title: 'Graph', item_ids: ['edge-root-approval'] }],
+        source_refs: [{ document_id: 'doc-1' }],
+        assumptions: []
+    },
+    source_refs: [{ document_id: 'doc-1' }]
+});
+
+test('connected picture package items can be accepted selectively without dangling artifact refs', () => {
+    const session = createAIDraftSession({
+        sessionId: 'session-connected-selective',
+        revisionId: 'revision-connected-selective',
+        prompt: 'Create a connected picture package.',
+        generatedArtifacts: [connectedPackageArtifact()]
+    });
+
+    assert.ok(session.revisions[0].draft_items.some((item) => item.id === 'item_edge-root-approval'));
+    assert.ok(session.revisions[0].draft_items.some((item) => item.id === 'item_evidence-approval'));
+
+    const evidenceOnly = acceptAIDraftSession({
+        session,
+        nodes: [],
+        edges: [],
+        mode: 'selected',
+        selectedItemIds: ['item_evidence-approval']
+    });
+    const evidencePackage = evidenceOnly.accept_result.accepted_artifacts[0].data;
+    assert.deepEqual(evidencePackage.structured_evidence.map((item) => item.id), ['evidence-approval']);
+    assert.deepEqual(evidencePackage.evidence_links, []);
+    assert.deepEqual(evidencePackage.relationship_edges, []);
+
+    const taskOnly = acceptAIDraftSession({
+        session,
+        nodes: [],
+        edges: [],
+        mode: 'selected',
+        selectedItemIds: ['item_task-1']
+    });
+    const taskPackage = taskOnly.accept_result.accepted_artifacts[0].data;
+    assert.deepEqual(taskPackage.tasks.map((item) => item.id), ['task-1']);
+    assert.deepEqual(taskPackage.structured_evidence.map((item) => item.id), ['evidence-approval']);
+    assert.deepEqual(taskPackage.relationship_edges, []);
+});
+
+test('selected package item ids stay review-only when no graph node is selected', () => {
+    const session = createAIDraftSession({
+        sessionId: 'session-selected-package',
+        revisionId: 'revision-selected-package',
+        prompt: 'Create a handoff package.',
+        draftNodes: [],
+        draftEdges: [],
+        generatedArtifacts: [
+            {
+                id: 'handoff-package-1',
+                artifact_type: 'implementation_handoff_package',
+                title: 'Implementation handoff package',
+                source_refs: [{ document_id: 'doc-handoff', chunk_id: 'summary' }],
+                metadata: {
+                    package_id: 'handoff-package-1',
+                    review_state: 'needs_review'
+                }
+            }
+        ],
+        draftItems: [
+            {
+                id: 'handoff-package-1',
+                item_type: 'implementation_handoff_package',
+                title: 'Implementation handoff package',
+                content: 'Review-only package artifact.',
+                source_refs: [{ document_id: 'doc-handoff', chunk_id: 'summary' }],
+                metadata: {
+                    artifact_id: 'handoff-package-1',
+                    artifact_type: 'implementation_handoff_package'
+                }
+            }
+        ],
+        metadata: {
+            output_shape: 'implementation_handoff_package',
+            requested_visual: 'implementation_handoff_package'
+        }
+    });
+
+    const diff = buildAIDraftPreviewDiff(session, {
+        mode: 'selected',
+        selectedItemIds: ['handoff-package-1']
+    });
+    const accepted = acceptAIDraftSession({
+        session,
+        nodes: [],
+        edges: [],
+        mode: 'selected',
+        selectedItemIds: ['handoff-package-1']
+    });
+
+    assert.deepEqual(diff.accepted_item_ids, ['handoff-package-1']);
+    assert.equal(diff.added_nodes, 0);
+    assert.equal(diff.added_edges, 0);
+    assert.deepEqual(accepted.accept_result.preview_diff.accepted_item_ids, ['handoff-package-1']);
+    assert.deepEqual(accepted.session.accept_history[0].selected_item_ids, ['handoff-package-1']);
+    assert.deepEqual(
+        accepted.accept_result.accepted_artifacts.map((artifact) => artifact.id),
+        ['handoff-package-1']
+    );
+    assert.equal(accepted.accept_result.undo.kind, 'react_flow_snapshot');
+    assert.deepEqual(accepted.session.accept_history[0].undo.before_graph, { nodes: [], edges: [] });
+    assert.equal(accepted.accept_result.canonical_graph_mutated, true);
+    assert.equal(accepted.nodes.length, 0);
+});
+
+test('no-source package drafts preserve missing citation provenance for review', () => {
+    const [preview] = normalizePublishableDraftArtifacts({
+        metadata: {
+            evidence_mode: 'uploaded_sources',
+            citation_policy: 'required'
+        },
+        generated_artifacts: [
+            {
+                id: 'exec-no-source',
+                artifact_type: 'executive_summary',
+                title: 'Package readiness summary',
+                summary: 'The package can be reviewed before publication.',
+                key_points: ['Confirm source support before sharing'],
+                assumptions: ['Owner and timing still need confirmation.']
+            }
+        ]
+    });
+
+    assert.equal(preview.provenance.evidenceMode, 'uploaded_sources');
+    assert.equal(preview.provenance.citationPolicy, 'required');
+    assert.equal(preview.provenance.sourceRefCount, 0);
+    assert.equal(preview.provenance.assumptionCount, 1);
+    assert.equal(preview.provenance.tone, 'warn');
+    assert.equal(
+        preview.provenance.summary,
+        'Uploaded sources, Citations required, No source references yet, 1 assumption'
+    );
+});
+
+test('web citation mode keeps URL-backed package provenance source-backed', () => {
+    const [preview] = normalizePublishableDraftArtifacts({
+        metadata: {
+            evidence_mode: 'web_sources',
+            citation_policy: 'required'
+        },
+        generated_artifacts: [
+            {
+                id: 'news-web-package',
+                artifact_type: 'news_article',
+                title: 'Code update review package',
+                lede: 'A package for checking current public code references.',
+                source_refs: [
+                    {
+                        title: 'NFPA public reference',
+                        url: 'https://www.nfpa.org/',
+                        quote_snippet: 'Public code and standards reference.'
+                    }
+                ],
+                assumptions: ['Applicability must be checked by the responsible reviewer.']
+            }
+        ]
+    });
+
+    assert.equal(preview.provenance.evidenceMode, 'web_sources');
+    assert.equal(preview.provenance.evidenceLabel, 'Web/current sources');
+    assert.equal(preview.provenance.citationLabel, 'Citations required');
+    assert.equal(preview.provenance.sourceRefCount, 1);
+    assert.equal(preview.provenance.tone, 'good');
+    assert.equal(
+        preview.provenance.summary,
+        'Web/current sources, Citations required, 1 source reference, 1 assumption'
+    );
+});
+
+test('existing non-package draft paths still accept selected graph nodes and edges', () => {
+    const root = createWorkspaceNode({ id: 'root', title: 'Workspace root' });
+    const session = createAIDraftSession({
+        sessionId: 'session-non-package',
+        revisionId: 'revision-non-package',
+        scope: { type: 'branch', node_id: 'root' },
+        prompt: 'Add source-backed child nodes.',
+        draftNodes: draftNodes(),
+        draftEdges: draftEdges()
+    });
+
+    const result = acceptAIDraftSession({
+        session,
+        nodes: [root],
+        edges: [],
+        mode: 'selected',
+        selectedItemIds: ['draft-kellogg']
+    });
+
+    assert.deepEqual(result.accept_result.accepted_node_ids, ['draft-kellogg']);
+    assert.deepEqual(result.accept_result.preview_diff.accepted_item_ids, ['draft-kellogg']);
+    assert.equal(result.nodes.length, 2);
+    assert.equal(result.edges.length, 1);
+    assert.equal(result.nodes.find((node) => node.id === 'draft-kellogg').data.status, 'ai_generated');
 });
 
 test('publishable draft artifacts normalize executive summary preview fields', () => {
@@ -1731,6 +2138,27 @@ test('multi-source draft payload bounds workspace request to selected chunks', (
         'doc-kellogg'
     ]);
     assert.equal(request.metadata.source_context.source_context_mode, 'bounded_multi_source');
+});
+
+test('pasted URL source refs are carried into correction draft requests', () => {
+    const [urlRef] = sourceRefsFromPastedUrls(
+        'Correct this row using https://example.com/source?chapter=1#notes.'
+    );
+    const request = buildAIDraftSessionRequestPayload({
+        role: { id: 'research-assistant', label: 'Research Assistant' },
+        action: { id: 'custom_prompt', label: 'Correct evidence' },
+        scope: { type: 'node', node_id: 'node-1' },
+        prompt: 'Correct and cite this output item with the pasted URL.',
+        adHocSourceRefs: [urlRef],
+        evidenceMode: 'web_sources',
+        citationPolicy: 'required'
+    });
+
+    assert.equal(urlRef.document_id, 'https://example.com/source?chapter=1');
+    assert.equal(request.source_refs[0].document_id, 'https://example.com/source?chapter=1');
+    assert.equal(request.source_refs[0].source_type, 'url');
+    assert.equal(request.metadata.evidence_mode, 'web_sources');
+    assert.equal(request.metadata.source_policy_requires_citation, true);
 });
 
 test('selected relationship draft items accept only chosen semantic edges locally', () => {

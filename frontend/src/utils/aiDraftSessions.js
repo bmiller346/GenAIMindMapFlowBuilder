@@ -1,10 +1,34 @@
 import { nanoid } from 'nanoid';
+import { asArray, collectScopedNodeIds, edgeSourceId, edgeTargetId, firstText, mergeSourceRefs, sourceRefsFromNode } from './aiDraftSessionCommon.js';
+import { normalizeAIDraftScope } from './aiDraftSessionScopes.js';
 import {
-    createWorkspaceEdge,
-    createWorkspaceNode,
-    getChildPosition,
-    reflowSiblingSubtrees
-} from './manualNodes.js';
+    draftArtifactPreviewToMarkdown,
+    normalizeAcceptedDraftArtifacts,
+    normalizePublishableDraftArtifacts,
+    normalizeSoftwareOverlapReports
+} from './aiDraftArtifacts.js';
+import {
+    buildAIDraftPreviewDiff,
+    formatAIDraftPreviewDiffSummary,
+    getAIDraftItemBadges,
+    selectedDraftNodes
+} from './aiDraftPreviewDiff.js';
+import { acceptAIDraftSession, rejectAIDraftSession } from './aiDraftAcceptance.js';
+
+export { normalizeAIDraftScope };
+export {
+    draftArtifactPreviewToMarkdown,
+    normalizeAcceptedDraftArtifacts,
+    normalizePublishableDraftArtifacts,
+    normalizeSoftwareOverlapReports
+};
+export {
+    buildAIDraftPreviewDiff,
+    formatAIDraftPreviewDiffSummary,
+    getAIDraftItemBadges,
+    selectedDraftNodes
+};
+export { acceptAIDraftSession, rejectAIDraftSession };
 
 export const AI_DRAFT_SESSION_CONTRACT_VERSION = '1';
 export const AI_DRAFT_ACCEPT_MODES = [
@@ -75,6 +99,42 @@ export const AI_DRAFT_CITATION_POLICY_LABELS = {
 export const aiDraftCitationPolicyLabel = (policy = '') =>
     AI_DRAFT_CITATION_POLICY_LABELS[normalizeAIDraftCitationPolicy(policy)] || 'Citations preferred';
 
+const URL_PATTERN = /\bhttps?:\/\/[^\s<>"')\]}]+/gi;
+
+const normalizePastedSourceUrl = (value = '') => {
+    const trimmed = String(value || '').trim().replace(/[.,;:!?]+$/g, '');
+    try {
+        const parsed = new URL(trimmed);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            return '';
+        }
+        parsed.hash = '';
+        return parsed.toString();
+    } catch {
+        return '';
+    }
+};
+
+export const sourceRefsFromPastedUrls = (text = '') => {
+    const refs = [];
+    const seen = new Set();
+    String(text || '').replace(URL_PATTERN, (match) => {
+        const url = normalizePastedSourceUrl(match);
+        if (url && !seen.has(url)) {
+            refs.push({
+                document_id: url,
+                section: 'Pasted URL',
+                quote_snippet: '',
+                confidence: 'medium',
+                source_type: 'url'
+            });
+            seen.add(url);
+        }
+        return match;
+    });
+    return refs;
+};
+
 export const inferAIDraftEvidencePreferences = ({
     prompt = '',
     scope = { type: 'node' },
@@ -84,6 +144,7 @@ export const inferAIDraftEvidencePreferences = ({
     fallbackCitationPolicy = ''
 } = {}) => {
     const text = String(prompt || '').toLowerCase();
+    const hasPastedUrl = /https?:\/\/[^\s<>)"']+/i.test(String(prompt || ''));
     const asksForPublicReferenceEvidence =
         /\b(code references?|applicable codes?|standards?|regulations?|statutes?|authority|authorities|public references?|citeable|citable)\b/.test(text) ||
         /\b(nfpa|nec|njac|ucc|ibc|ifc|imc|ipc|ashrae|asme|osha|ul|ieee|ansi|ada|fema|ahj)\b/.test(text);
@@ -94,7 +155,12 @@ export const inferAIDraftEvidencePreferences = ({
                 ? 'uploaded_sources'
                 : 'workspace')
     );
-    if (
+    const hasChosenSources =
+        normalizedScope.type === 'source' || selectedSourceCount > 0 || loadedSourceCount > 0;
+    if (asksForPublicReferenceEvidence && hasChosenSources) {
+        evidenceMode = 'uploaded_sources';
+    } else if (
+        hasPastedUrl ||
         /\b(web|online|internet|current news|latest news|news article|urls?|links?|public sources?)\b/.test(text) ||
         asksForPublicReferenceEvidence
     ) {
@@ -220,9 +286,6 @@ export const getAIDraftAcceptModeDetail = (mode = 'append') =>
         user_choice: firstText(mode, 'accept')
     };
 
-const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
-const firstText = (...values) =>
-    values.find((value) => typeof value === 'string' && value.trim()) || '';
 const INTERNAL_AI_DRAFT_PROMPT_MARKERS = [
     'Use this follow-up AI memory while answering.',
     'Follow-up memory context JSON:',
@@ -272,24 +335,6 @@ export const visibleAIDraftPromptText = (value = '', fallback = '') => {
     }
 
     return safeFallback;
-};
-
-const numericConfidence = (value) => {
-    if (typeof value === 'number') {
-        return value;
-    }
-    const normalized = String(value || '').trim().toLowerCase();
-    if (normalized === 'high') {
-        return 0.9;
-    }
-    if (normalized === 'medium') {
-        return 0.65;
-    }
-    if (normalized === 'low') {
-        return 0.35;
-    }
-    const parsed = Number.parseFloat(normalized);
-    return Number.isFinite(parsed) ? parsed : null;
 };
 
 const sourcePolicyRequiresCitation = ({ metadata = {}, status = '', type = '' } = {}) =>
@@ -359,23 +404,6 @@ const truncateMemoryText = (value, limit = 480) => {
     return `${text.slice(0, Math.max(0, limit - 3))}...`;
 };
 
-const edgeSourceId = (edge = {}) => firstText(edge.source, edge.source_node_id, edge.parent_id);
-const edgeTargetId = (edge = {}) => firstText(edge.target, edge.target_node_id, edge.child_id);
-
-const sourceRefsFromNode = (node = {}) => {
-    const data = node.data || {};
-    const nestedData = data.data || {};
-    return mergeSourceRefs(
-        mergeSourceRefs(asArray(data.source_refs), asArray(data.sourceRefs)),
-        mergeSourceRefs(asArray(nestedData.source_refs), asArray(nestedData.sourceRefs))
-    );
-};
-
-const sourceRefsFromDraftItem = (item = {}) =>
-    mergeSourceRefs(asArray(item.source_refs), asArray(item.metadata?.source_refs));
-
-const hasSourceRefs = (item = {}) => sourceRefsFromDraftItem(item).length > 0;
-
 const normalizeMemorySourceRef = (ref = {}) => {
     if (!ref || typeof ref !== 'object') {
         return {};
@@ -386,7 +414,9 @@ const normalizeMemorySourceRef = (ref = {}) => {
         page: ref.page ?? ref.page_number ?? '',
         section: firstText(ref.section, ref.heading),
         quote_snippet: truncateMemoryText(firstText(ref.quote_snippet, ref.snippet, ref.text), 240),
-        confidence: firstText(ref.confidence)
+        confidence: firstText(ref.confidence),
+        source_type: firstText(ref.source_type, ref.sourceType, ref.type),
+        url: firstText(ref.url)
     };
 };
 
@@ -399,103 +429,6 @@ const normalizeMemorySourceRefs = (...refLists) => {
         .map(normalizeMemorySourceRef)
         .filter((ref) => ref.document_id || ref.chunk_id || ref.quote_snippet)
         .slice(0, AI_DRAFT_MEMORY_SOURCE_REF_LIMIT);
-};
-
-const sourceRefMatchesSourceId = (ref = {}, sourceId = '') => {
-    const normalizedSourceId = String(sourceId || '').trim();
-    if (!normalizedSourceId) {
-        return false;
-    }
-    return [
-        ref.document_id,
-        ref.documentId,
-        ref.source_id,
-        ref.sourceId,
-        ref.normalized_document_id
-    ].some((value) => String(value || '').trim() === normalizedSourceId);
-};
-
-const collectBranchNodeIds = (edges = [], rootId = '') => {
-    const root = String(rootId || '').trim();
-    if (!root) {
-        return new Set();
-    }
-    const childIdsByParent = new Map();
-    asArray(edges).forEach((edge) => {
-        const source = edgeSourceId(edge);
-        const target = edgeTargetId(edge);
-        if (!source || !target) {
-            return;
-        }
-        childIdsByParent.set(source, [...(childIdsByParent.get(source) || []), target]);
-    });
-
-    const ids = new Set([root]);
-    const queue = [root];
-    while (queue.length) {
-        const parentId = queue.shift();
-        asArray(childIdsByParent.get(parentId)).forEach((childId) => {
-            if (ids.has(childId)) {
-                return;
-            }
-            ids.add(childId);
-            queue.push(childId);
-        });
-    }
-    return ids;
-};
-
-const collectScopedNodeIds = ({ nodes = [], edges = [], scope = {} } = {}) => {
-    const normalizedScope = normalizeAIDraftScope(scope);
-    if (normalizedScope.type === 'branch' && normalizedScope.node_id) {
-        return collectBranchNodeIds(edges, normalizedScope.node_id);
-    }
-    if (normalizedScope.type === 'node' && normalizedScope.node_id) {
-        return new Set([normalizedScope.node_id]);
-    }
-    if (normalizedScope.type === 'nodes') {
-        return new Set(asArray(normalizedScope.node_ids));
-    }
-    if (normalizedScope.type === 'source' && normalizedScope.source_id) {
-        const sourceMatchedIds = asArray(nodes)
-            .filter((node) =>
-                sourceRefsFromNode(node).some((ref) =>
-                    sourceRefMatchesSourceId(ref, normalizedScope.source_id)
-                )
-            )
-            .map((node) => node.id)
-            .filter(Boolean);
-        return new Set(sourceMatchedIds.length ? sourceMatchedIds : asArray(nodes).map((node) => node.id));
-    }
-    return new Set(asArray(nodes).map((node) => node.id).filter(Boolean));
-};
-
-const collectReplacementNodeIds = ({ nodes = [], edges = [], scope = {} } = {}) => {
-    const normalizedScope = normalizeAIDraftScope(scope);
-    if ((normalizedScope.type === 'branch' || normalizedScope.type === 'node') && normalizedScope.node_id) {
-        const scopedNodeIds = collectBranchNodeIds(edges, normalizedScope.node_id);
-        scopedNodeIds.delete(normalizedScope.node_id);
-        return scopedNodeIds;
-    }
-    if (normalizedScope.type === 'nodes') {
-        return new Set(asArray(normalizedScope.node_ids));
-    }
-    return collectScopedNodeIds({ nodes, edges, scope });
-};
-
-const graphAfterReplacementRemoval = ({ nodes = [], edges = [], scope = {} } = {}) => {
-    const removedNodeIds = collectReplacementNodeIds({ nodes, edges, scope });
-    const removedEdgeIds = new Set(
-        asArray(edges)
-            .filter((edge) => removedNodeIds.has(edgeSourceId(edge)) || removedNodeIds.has(edgeTargetId(edge)))
-            .map((edge) => firstText(edge.id, `${edgeSourceId(edge)}->${edgeTargetId(edge)}`))
-    );
-    return {
-        nodes: asArray(nodes).filter((node) => !removedNodeIds.has(node.id)),
-        edges: asArray(edges).filter((edge) => !removedEdgeIds.has(firstText(edge.id, `${edgeSourceId(edge)}->${edgeTargetId(edge)}`))),
-        removed_node_ids: [...removedNodeIds],
-        removed_edge_ids: [...removedEdgeIds]
-    };
 };
 
 const memoryNodeRecord = (node = {}) => {
@@ -607,6 +540,7 @@ export const buildAIDraftMemoryContext = ({
     edges = [],
     scope = { type: 'workspace' },
     sourceRefs = [],
+    adHocSourceRefs = [],
     selectedSourcePayload = null,
     activeDraftSession = null,
     prompt = '',
@@ -658,6 +592,7 @@ export const buildAIDraftMemoryContext = ({
         },
         source_refs: normalizeMemorySourceRefs(
             sourceRefs,
+            adHocSourceRefs,
             selectedSourcePayload?.source_refs,
             nodeSourceRefs,
             revisionSourceRefs,
@@ -681,27 +616,6 @@ export const buildAIDraftMemoryContext = ({
               }
             : null
     };
-};
-
-export const normalizeAIDraftScope = (scope = {}) => {
-    const type = ['workspace', 'source', 'branch', 'node', 'nodes'].includes(scope.type)
-        ? scope.type
-        : 'workspace';
-    if ((type === 'branch' || type === 'node') && scope.node_id) {
-        return { type, node_id: String(scope.node_id).trim() };
-    }
-    if (type === 'source' && scope.source_id) {
-        return { type, source_id: String(scope.source_id).trim() };
-    }
-    if (type === 'nodes') {
-        return {
-            type,
-            node_ids: asArray(scope.node_ids)
-                .map((nodeId) => String(nodeId).trim())
-                .filter(Boolean)
-        };
-    }
-    return { type };
 };
 
 export const normalizeAIDraftSourceChunk = (chunk = {}, source = {}) => {
@@ -804,6 +718,7 @@ export const buildAIDraftSessionRequestPayload = ({
     createdBy = 'user',
     selectedModel = 'auto',
     selectedSourcePayload = null,
+    adHocSourceRefs = [],
     desiredOutputs = [],
     workspaceBrief = {},
     metadata = {},
@@ -850,7 +765,7 @@ export const buildAIDraftSessionRequestPayload = ({
         workspace_brief: workspaceBrief && typeof workspaceBrief === 'object' ? workspaceBrief : {},
         change_intent: normalizedChangeIntent,
         memory_context: normalizedMemory || undefined,
-        source_refs: normalizedMemory?.source_refs || normalizeMemorySourceRefs(selectedSourcePayload?.source_refs),
+        source_refs: normalizedMemory?.source_refs || normalizeMemorySourceRefs(selectedSourcePayload?.source_refs, adHocSourceRefs),
         metadata: {
             ...metadata,
             change_intent: normalizedChangeIntent,
@@ -882,632 +797,6 @@ export const normalizeAIDraftItem = (item = {}) => {
     };
 };
 
-const softwareOverlapArtifactTypes = new Set([
-    'software_overlap_report',
-    'software_overlap_candidate',
-    'overlap_candidate',
-    'tool_overlap',
-    'duplicate_tool',
-    'software_rationalization'
-]);
-
-const normalizeSoftwareFactor = (factor = {}, index = 0) => {
-    if (typeof factor === 'string') {
-        return {
-            id: `factor-${index + 1}`,
-            label: factor,
-            value: ''
-        };
-    }
-    return {
-        id: firstText(factor.id, factor.key, factor.name, `factor-${index + 1}`),
-        label: firstText(factor.label, factor.name, factor.key, factor.factor, `Factor ${index + 1}`),
-        value: firstText(factor.value, factor.score, factor.weight, factor.detail, factor.summary)
-    };
-};
-
-const normalizeSoftwareEvidence = (evidence = {}, index = 0) => {
-    if (typeof evidence === 'string') {
-        return {
-            id: `evidence-${index + 1}`,
-            label: evidence,
-            source: ''
-        };
-    }
-    return {
-        id: firstText(evidence.id, evidence.source_id, evidence.document_id, `evidence-${index + 1}`),
-        label: firstText(
-            evidence.label,
-            evidence.quote_snippet,
-            evidence.snippet,
-            evidence.text,
-            evidence.summary,
-            evidence.title,
-            `Evidence ${index + 1}`
-        ),
-        source: [
-            firstText(evidence.document_id, evidence.source_id, evidence.source),
-            evidence.page ? `p. ${evidence.page}` : '',
-            firstText(evidence.section)
-        ]
-            .filter(Boolean)
-            .join(' | ')
-    };
-};
-
-const collectSoftwareOverlapCandidates = (artifact = {}) =>
-    [
-        artifact.candidates,
-        artifact.overlap_candidates,
-        artifact.software_overlap_candidates,
-        artifact.items,
-        artifact.findings,
-        artifact.matches,
-        artifact.metadata?.candidates,
-        artifact.metadata?.overlap_candidates,
-        artifact.metadata?.software_overlap_candidates
-    ].find((value) => Array.isArray(value) && value.length) || [];
-
-const artifactType = (item = {}) =>
-    firstText(
-        item.artifact_type,
-        item.candidate_type,
-        item.item_type,
-        item.type,
-        item.metadata?.artifact_type,
-        item.metadata?.candidate_type,
-        item.metadata?.type
-    ).toLowerCase();
-
-const isSoftwareOverlapArtifact = (item = {}) => {
-    const type = artifactType(item);
-    const title = firstText(item.title, item.label).toLowerCase();
-    return (
-        softwareOverlapArtifactTypes.has(type) ||
-        type.includes('software_overlap') ||
-        type.includes('tool_overlap') ||
-        (type.includes('overlap') && /\b(software|tool|application|app|system)\b/.test(title))
-    );
-};
-
-const publishableArtifactTypes = new Set([
-    'executive_summary',
-    'executive_output',
-    'news_article',
-    'newsletter'
-]);
-
-const artifactPayload = (artifact = {}) =>
-    artifact.data && typeof artifact.data === 'object'
-        ? { ...artifact.data, ...artifact }
-        : artifact;
-
-const collectTextList = (...values) =>
-    [
-        ...new Set(
-            values
-                .flatMap((value) => asArray(value))
-                .map((value) =>
-                    typeof value === 'string'
-                        ? value.trim()
-                        : firstText(value?.text, value?.content, value?.summary, value?.title, value?.label)
-                )
-                .filter(Boolean)
-        )
-    ];
-
-const normalizeArtifactSection = (section = {}, index = 0) => {
-    if (typeof section === 'string') {
-        return {
-            id: `section-${index + 1}`,
-            title: `Section ${index + 1}`,
-            body: section.trim(),
-            bullets: []
-        };
-    }
-    return {
-        id: firstText(section.id, section.section_id, section.title, `section-${index + 1}`),
-        title: firstText(section.title, section.heading, section.label, `Section ${index + 1}`),
-        body: firstText(section.body, section.content, section.text, section.summary),
-        bullets: collectTextList(section.bullets, section.points, section.key_points)
-    };
-};
-
-const publishableArtifactType = (artifact = {}) => {
-    const type = artifactType(artifact);
-    if (publishableArtifactTypes.has(type)) {
-        return type;
-    }
-    if (type.includes('executive')) {
-        return 'executive_summary';
-    }
-    if (type.includes('news') || type.includes('article')) {
-        return 'news_article';
-    }
-    if (type.includes('newsletter') || type.includes('update_brief')) {
-        return 'newsletter';
-    }
-    return '';
-};
-
-const artifactSourceRefs = (payload = {}) =>
-    mergeSourceRefs(
-        mergeSourceRefs(asArray(payload.source_refs), asArray(payload.sourceRefs)),
-        mergeSourceRefs(
-            asArray(payload.data?.source_refs),
-            mergeSourceRefs(
-                asArray(payload.provenance?.input_source_refs),
-                asArray(payload.metadata?.source_refs)
-            )
-        )
-    );
-
-const artifactAssumptions = (payload = {}) =>
-    collectTextList(
-        payload.assumptions,
-        payload.data?.assumptions,
-        payload.provenance?.assumptions,
-        payload.metadata?.assumptions
-    );
-
-const normalizeSourceNote = (note = {}, index = 0) => {
-    if (typeof note === 'string') {
-        return note.trim();
-    }
-    const sourceLabel = firstText(note.source, note.document_id, note.documentId, note.source_id);
-    const detail = firstText(note.note, note.text, note.content, note.summary, note.quote_snippet, note.snippet);
-    return [sourceLabel, detail].filter(Boolean).join(': ') || `Source note ${index + 1}`;
-};
-
-const normalizeFactCheckNote = (note = {}, index = 0) => {
-    if (typeof note === 'string') {
-        return note.trim();
-    }
-    const claim = firstText(note.claim, note.title, note.label, `Check ${index + 1}`);
-    const status = firstText(note.status, note.review_state, note.reviewState);
-    const detail = firstText(note.note, note.result, note.finding, note.text, note.content, note.summary);
-    return [claim, status, detail].filter(Boolean).join(' - ');
-};
-
-const normalizeSourceRefLabel = (ref = {}, index = 0) => {
-    if (typeof ref === 'string') {
-        return ref.trim();
-    }
-    const source = firstText(ref.document_id, ref.documentId, ref.source_id, ref.sourceId, ref.title, ref.label);
-    const locator = [
-        ref.page || ref.page_number ? `p. ${ref.page || ref.page_number}` : '',
-        firstText(ref.section, ref.heading),
-        firstText(ref.chunk_id, ref.chunkId)
-    ].filter(Boolean).join(' | ');
-    const quote = firstText(ref.quote_snippet, ref.snippet, ref.text);
-    const prefix = [source || `Source ${index + 1}`, locator].filter(Boolean).join(' | ');
-    return quote ? `${prefix}: ${quote}` : prefix;
-};
-
-const normalizePublishableArtifactProvenance = (payload = {}, revision = {}) => {
-    const metadata = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
-    const revisionMetadata =
-        revision.metadata && typeof revision.metadata === 'object' ? revision.metadata : {};
-    const provenance =
-        payload.provenance && typeof payload.provenance === 'object' ? payload.provenance : {};
-    const evidenceMode = normalizeAIDraftEvidenceMode(
-        firstText(
-            metadata.evidence_mode,
-            metadata.evidenceMode,
-            provenance.evidence_mode,
-            provenance.evidenceMode,
-            revisionMetadata.evidence_mode,
-            revisionMetadata.evidenceMode
-        )
-    );
-    const citationPolicy = normalizeAIDraftCitationPolicy(
-        firstText(
-            metadata.citation_policy,
-            metadata.citationPolicy,
-            provenance.citation_policy,
-            provenance.citationPolicy,
-            revisionMetadata.citation_policy,
-            revisionMetadata.citationPolicy
-        )
-    );
-    const sourceRefs = artifactSourceRefs(payload);
-    const assumptions = artifactAssumptions(payload);
-    const confidence = firstText(
-        provenance.confidence_summary,
-        metadata.confidence_summary,
-        payload.review_state,
-        payload.review_status,
-        payload.status
-    );
-    const parts = [
-        aiDraftEvidenceModeLabel(evidenceMode),
-        aiDraftCitationPolicyLabel(citationPolicy),
-        sourceRefs.length
-            ? `${sourceRefs.length} source ${sourceRefs.length === 1 ? 'reference' : 'references'}`
-            : 'No source references yet',
-        assumptions.length
-            ? `${assumptions.length} ${assumptions.length === 1 ? 'assumption' : 'assumptions'}`
-            : ''
-    ].filter(Boolean);
-
-    return {
-        evidenceMode,
-        evidenceLabel: aiDraftEvidenceModeLabel(evidenceMode),
-        citationPolicy,
-        citationLabel: aiDraftCitationPolicyLabel(citationPolicy),
-        sourceRefCount: sourceRefs.length,
-        assumptionCount: assumptions.length,
-        confidence,
-        tone:
-            citationPolicy === 'required' && !sourceRefs.length
-                ? 'warn'
-                : sourceRefs.length
-                  ? 'good'
-                  : 'neutral',
-        summary: parts.join(', ')
-    };
-};
-
-export const normalizePublishableDraftArtifacts = (revision = {}) => {
-    const artifacts = [
-        ...asArray(revision.generated_artifacts),
-        ...asArray(revision.artifacts),
-        ...asArray(revision.draft_items)
-    ];
-
-    return artifacts
-        .map((artifact, index) => {
-            const payload = artifactPayload(artifact);
-            const type = publishableArtifactType(payload);
-            if (!type) {
-                return null;
-            }
-            const provenance = normalizePublishableArtifactProvenance(payload, revision);
-            const sections = [
-                ...asArray(payload.sections),
-                ...asArray(payload.body_sections),
-                ...asArray(payload.article_sections),
-                ...asArray(payload.issue_sections)
-            ].map(normalizeArtifactSection);
-            const newsletterHighlights = asArray(payload.highlights).map(normalizeArtifactSection);
-            const newsletterUpcoming = asArray(payload.upcoming).map(normalizeArtifactSection);
-            const newsletterRisks = asArray(payload.risks).map(normalizeArtifactSection);
-            const newsletterDecisions = asArray(payload.decisions_needed || payload.required_decisions).map(normalizeArtifactSection);
-            const visualBlocks = asArray(payload.visual_blocks || payload.visualBlocks).map(normalizeArtifactSection);
-            const keyPoints = collectTextList(
-                payload.key_points,
-                payload.key_takeaways,
-                payload.takeaways,
-                payload.highlights,
-                payload.recommendations
-            );
-            const recommendedActions = collectTextList(
-                payload.recommended_actions,
-                payload.actions,
-                payload.next_actions,
-                payload.recommended_next_actions
-            );
-            const risks = collectTextList(payload.risks, payload.risk_items);
-            const sourceBackedAppendix = collectTextList(
-                payload.source_backed_appendix,
-                payload.source_appendix,
-                payload.appendix,
-                payload.source_backed_facts,
-                payload.verified_facts
-            );
-            const assumptions = artifactAssumptions(payload);
-            const sourceRefs = artifactSourceRefs(payload);
-            const factChecks = [
-                ...asArray(payload.fact_checks),
-                ...asArray(payload.fact_check_notes),
-                ...asArray(payload.factcheck_notes),
-                ...asArray(payload.metadata?.fact_checks)
-            ]
-                .map(normalizeFactCheckNote)
-                .filter(Boolean);
-            const sourceNotes = [
-                ...asArray(payload.source_notes),
-                ...asArray(payload.sourceNotes),
-                ...asArray(payload.quote_notes),
-                ...asArray(payload.quotes),
-                ...asArray(payload.attribution_notes),
-                ...asArray(payload.metadata?.source_notes)
-            ]
-                .map(normalizeSourceNote)
-                .filter(Boolean);
-            return {
-                id: firstText(payload.id, payload.artifact_id, `draft-artifact-${index + 1}`),
-                artifactType: type,
-                label: type === 'newsletter' ? 'Newsletter' : type === 'news_article' ? 'News article' : 'Executive summary',
-                title: firstText(
-                    payload.headline,
-                    payload.title,
-                    payload.label,
-                    type === 'newsletter' ? 'Draft newsletter' : '',
-                    type === 'news_article' ? 'Draft news article' : 'Draft executive summary'
-                ),
-                dek: firstText(payload.dek, payload.subhead, payload.subtitle, payload.summary),
-                lede: firstText(payload.lede, payload.lead, payload.intro, payload.opening),
-                issueLabel: firstText(payload.issue_label, payload.issueLabel, payload.issue, payload.date_label),
-                cadence: firstText(payload.cadence, payload.frequency),
-                openingNote: firstText(payload.opening_note, payload.openingNote, payload.editor_note, payload.intro),
-                body: firstText(payload.body, payload.content, payload.text, payload.narrative),
-                keyPoints,
-                sections,
-                audience: firstText(payload.audience, payload.metadata?.audience),
-                publishTarget: firstText(
-                    payload.publish_target,
-                    payload.channel,
-                    payload.metadata?.publish_target,
-                    payload.metadata?.channel
-                ),
-                summary: firstText(payload.summary, payload.abstract),
-                reviewState: firstText(
-                    payload.review_state,
-                    payload.reviewState,
-                    payload.review_status,
-                    payload.status,
-                    payload.metadata?.reviewState,
-                    payload.metadata?.review_state,
-                    'needs_review'
-                ),
-                confidence: firstText(
-                    payload.confidence,
-                    payload.confidence_summary,
-                    payload.metadata?.confidence,
-                    payload.provenance?.confidence
-                ),
-                recommendedActions,
-                risks,
-                sourceBackedAppendix,
-                factChecks,
-                sourceNotes,
-                sourceRefs,
-                newsletterHighlights,
-                newsletterUpcoming,
-                newsletterRisks,
-                newsletterDecisions,
-                visualBlocks,
-                assumptions,
-                provenance
-            };
-        })
-        .filter(Boolean);
-};
-
-export const draftArtifactPreviewToMarkdown = (artifact = {}) => {
-    const lines = [];
-    if (artifact.title) {
-        lines.push(`# ${artifact.title}`);
-    }
-    if (artifact.dek) {
-        lines.push('', `_${artifact.dek}_`);
-    }
-    if (artifact.artifactType === 'news_article') {
-        if (artifact.lede) {
-            lines.push('', artifact.lede);
-        }
-        if (artifact.body) {
-            lines.push('', artifact.body);
-        }
-        asArray(artifact.sections).forEach((section) => {
-            lines.push('', `## ${section.title}`);
-            if (section.body) {
-                lines.push('', section.body);
-            }
-            if (section.bullets?.length) {
-                lines.push('', ...section.bullets.map((point) => `- ${point}`));
-            }
-        });
-        if (artifact.audience || artifact.publishTarget || artifact.provenance?.summary) {
-            lines.push('', '## Editorial notes');
-            if (artifact.audience || artifact.publishTarget) {
-                lines.push(
-                    [artifact.audience ? `Audience: ${artifact.audience}` : '', artifact.publishTarget ? `Channel: ${artifact.publishTarget}` : '']
-                        .filter(Boolean)
-                        .join(' | ')
-                );
-            }
-            if (artifact.provenance?.summary) {
-                lines.push(`Evidence: ${artifact.provenance.summary}`);
-            }
-        }
-        if (artifact.factChecks?.length) {
-            lines.push('', '## Fact-check notes', ...artifact.factChecks.map((point) => `- ${point}`));
-        }
-        if (artifact.sourceNotes?.length) {
-            lines.push('', '## Source notes', ...artifact.sourceNotes.map((point) => `- ${point}`));
-        }
-        const appendix = artifact.sourceBackedAppendix?.length
-            ? artifact.sourceBackedAppendix
-            : asArray(artifact.sourceRefs).map(normalizeSourceRefLabel).filter(Boolean);
-        if (appendix.length) {
-            lines.push('', '## Source-backed appendix', ...appendix.map((point) => `- ${point}`));
-        }
-        if (artifact.assumptions?.length) {
-            lines.push('', '## Assumptions', ...artifact.assumptions.map((point) => `- ${point}`));
-        }
-        return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    }
-    if (artifact.artifactType === 'newsletter') {
-        if (artifact.issueLabel || artifact.cadence || artifact.audience) {
-            lines.push(
-                '',
-                [
-                    artifact.issueLabel ? `Issue: ${artifact.issueLabel}` : '',
-                    artifact.cadence ? `Cadence: ${artifact.cadence}` : '',
-                    artifact.audience ? `Audience: ${artifact.audience}` : ''
-                ]
-                    .filter(Boolean)
-                    .join(' | ')
-            );
-        }
-        if (artifact.openingNote || artifact.lede || artifact.body) {
-            lines.push('', artifact.openingNote || artifact.lede || artifact.body);
-        }
-        const renderSections = (heading, sections) => {
-            if (!sections?.length) {
-                return;
-            }
-            lines.push('', `## ${heading}`);
-            sections.forEach((section) => {
-                lines.push('', `### ${section.title}`);
-                if (section.body) {
-                    lines.push(section.body);
-                }
-                if (section.bullets?.length) {
-                    lines.push(...section.bullets.map((point) => `- ${point}`));
-                }
-            });
-        };
-        renderSections('Top highlights', artifact.newsletterHighlights);
-        renderSections('In this issue', artifact.sections);
-        renderSections('Upcoming', artifact.newsletterUpcoming);
-        renderSections('Risks and watch items', artifact.newsletterRisks);
-        renderSections('Decisions needed', artifact.newsletterDecisions);
-        renderSections('Visual blocks', artifact.visualBlocks);
-        if (artifact.provenance?.summary) {
-            lines.push('', '## Editor notes', `Evidence: ${artifact.provenance.summary}`);
-        }
-        const appendix = artifact.sourceBackedAppendix?.length
-            ? artifact.sourceBackedAppendix
-            : asArray(artifact.sourceRefs).map(normalizeSourceRefLabel).filter(Boolean);
-        if (appendix.length) {
-            lines.push('', '## Source-backed appendix', ...appendix.map((point) => `- ${point}`));
-        }
-        if (artifact.assumptions?.length) {
-            lines.push('', '## Assumptions', ...artifact.assumptions.map((point) => `- ${point}`));
-        }
-        return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-    }
-    if (artifact.audience || artifact.publishTarget) {
-        lines.push(
-            '',
-            [artifact.audience ? `Audience: ${artifact.audience}` : '', artifact.publishTarget ? `Channel: ${artifact.publishTarget}` : '']
-                .filter(Boolean)
-                .join(' | ')
-        );
-    }
-    if (artifact.provenance?.summary) {
-        lines.push('', `Evidence: ${artifact.provenance.summary}`);
-    }
-    if (artifact.summary) {
-        lines.push('', '## Summary', '', artifact.summary);
-    }
-    if (artifact.keyPoints?.length) {
-        lines.push('', '## Key points', ...artifact.keyPoints.map((point) => `- ${point}`));
-    }
-    if (artifact.recommendedActions?.length) {
-        lines.push('', '## Recommended actions', ...artifact.recommendedActions.map((point) => `- ${point}`));
-    }
-    if (artifact.risks?.length) {
-        lines.push('', '## Risks', ...artifact.risks.map((point) => `- ${point}`));
-    }
-    if (artifact.body) {
-        lines.push('', artifact.body);
-    }
-    asArray(artifact.sections).forEach((section) => {
-        lines.push('', `## ${section.title}`);
-        if (section.body) {
-            lines.push('', section.body);
-        }
-        if (section.bullets?.length) {
-            lines.push('', ...section.bullets.map((point) => `- ${point}`));
-        }
-    });
-    if (artifact.sourceBackedAppendix?.length) {
-        lines.push('', '## Source-backed appendix', ...artifact.sourceBackedAppendix.map((point) => `- ${point}`));
-    }
-    if (artifact.assumptions?.length) {
-        lines.push('', '## Assumptions', ...artifact.assumptions.map((point) => `- ${point}`));
-    }
-    return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-};
-
-const normalizeSoftwareOverlapCandidate = (candidate = {}, index = 0) => {
-    const metadata = candidate.metadata && typeof candidate.metadata === 'object' ? candidate.metadata : {};
-    const applications = [
-        ...asArray(candidate.applications),
-        ...asArray(candidate.tools),
-        ...asArray(candidate.systems),
-        candidate.source_application,
-        candidate.target_application,
-        candidate.source_tool,
-        candidate.target_tool
-    ]
-        .map((value) =>
-            typeof value === 'string'
-                ? value
-                : firstText(value?.name, value?.title, value?.label, value?.id)
-        )
-        .filter(Boolean);
-    const evidence = [
-        ...asArray(candidate.evidence),
-        ...asArray(candidate.evidence_refs),
-        ...asArray(candidate.source_refs),
-        ...asArray(metadata.evidence)
-    ].map(normalizeSoftwareEvidence);
-    const factors = [
-        ...asArray(candidate.factors),
-        ...asArray(candidate.scoring_factors),
-        ...asArray(metadata.factors)
-    ].map(normalizeSoftwareFactor);
-
-    return {
-        id: firstText(candidate.id, candidate.candidate_id, `software-overlap-${index + 1}`),
-        title: firstText(candidate.title, candidate.label, applications.join(' / '), `Potential overlap ${index + 1}`),
-        applications,
-        score: candidate.score ?? candidate.overlap_score ?? candidate.similarity_score ?? metadata.score ?? '',
-        confidence: firstText(candidate.confidence, metadata.confidence),
-        reviewState: firstText(
-            candidate.review_state,
-            candidate.review_status,
-            candidate.status,
-            metadata.review_state,
-            'needs_review'
-        ),
-        recommendation: firstText(
-            candidate.recommendation,
-            candidate.recommended_action,
-            candidate.owner_review,
-            metadata.recommendation
-        ),
-        rationale: firstText(candidate.rationale, candidate.reason, candidate.summary, candidate.content),
-        factors,
-        evidence
-    };
-};
-
-export const normalizeSoftwareOverlapReports = (revision = {}) => {
-    const artifacts = [
-        ...asArray(revision.generated_artifacts),
-        ...asArray(revision.artifacts),
-        ...asArray(revision.draft_items),
-        ...asArray(revision.draft_annotations)
-    ].filter(isSoftwareOverlapArtifact);
-
-    return artifacts.map((artifact, artifactIndex) => {
-        const candidates = collectSoftwareOverlapCandidates(artifact);
-        const fallbackCandidate =
-            candidates.length === 0 && isSoftwareOverlapArtifact(artifact)
-                ? [artifact]
-                : candidates;
-        return {
-            id: firstText(artifact.id, artifact.artifact_id, `software-overlap-report-${artifactIndex + 1}`),
-            title: firstText(artifact.title, artifact.label, 'Software overlap report'),
-            summary: firstText(artifact.summary, artifact.content, artifact.body, artifact.description),
-            reviewState: firstText(
-                artifact.review_state,
-                artifact.review_status,
-                artifact.status,
-                artifact.metadata?.review_state,
-                'needs_review'
-            ),
-            candidates: fallbackCandidate.map(normalizeSoftwareOverlapCandidate)
-        };
-    });
-};
-
 export const normalizeAIDraftNode = (node = {}) => ({
     ...node,
     id: firstText(node.id, node.node_id, `draft_node_${nanoid(8)}`),
@@ -1529,6 +818,119 @@ export const normalizeAIDraftNode = (node = {}) => ({
             : {},
     metadata: node.metadata && typeof node.metadata === 'object' ? { ...node.metadata } : {}
 });
+
+const connectedPackagePayload = (artifact = {}) =>
+    artifact.data && typeof artifact.data === 'object' && (artifact.data.package_id || artifact.data.acceptance_groups)
+        ? artifact.data
+        : artifact;
+
+const connectedPackageItemId = (item = {}) =>
+    firstText(item.package_item_id, item.metadata?.package_item_id, item.id, item.node_id);
+
+const connectedPackageCollection = (packageData = {}, key = '') =>
+    asArray(packageData[key]).filter((item) => item && typeof item === 'object');
+
+const connectedPackageDraftItemsFromArtifact = (artifact = {}, artifactIndex = 0) => {
+    const artifactType = firstText(artifact.artifact_type, artifact.type);
+    if (artifactType !== 'connected_picture_package') {
+        const artifactId = firstText(artifact.id, artifact.artifact_id, `draft-artifact-${artifactIndex + 1}`);
+        return [
+            normalizeAIDraftItem({
+                id: artifactId,
+                item_type: artifactType || 'artifact',
+                title: firstText(artifact.title, artifact.label, artifact.data?.title, `Artifact ${artifactIndex + 1}`),
+                content: firstText(artifact.summary, artifact.description, artifact.data?.summary),
+                source_refs: artifact.source_refs,
+                selected: true,
+                metadata: {
+                    artifact_id: artifactId,
+                    artifact_type: artifactType || 'artifact'
+                }
+            })
+        ];
+    }
+
+    const packageData = connectedPackagePayload(artifact);
+    const packageId = firstText(packageData.package_id, artifact.id, `connected-package-${artifactIndex + 1}`);
+    const artifactId = firstText(artifact.id, packageId);
+    const itemSpecs = [
+        ['primary_nodes', 'package_node'],
+        ['relationship_edges', 'relationship'],
+        ['view_lenses', 'package_lens'],
+        ['structured_evidence', 'package_evidence'],
+        ['evidence_links', 'package_evidence_link'],
+        ['tasks', 'task'],
+        ['risks', 'risk'],
+        ['decisions', 'decision'],
+        ['repair_targets', 'repair_target']
+    ];
+    const items = itemSpecs.flatMap(([collectionKey, itemType]) =>
+        connectedPackageCollection(packageData, collectionKey)
+            .map((item) => {
+                const packageItemId = connectedPackageItemId(item);
+                if (!packageItemId) {
+                    return null;
+                }
+                return normalizeAIDraftItem({
+                    id: `item_${packageItemId}`,
+                    item_type: itemType,
+                    title: firstText(item.title, item.label, packageItemId),
+                    content: firstText(item.summary, item.description, item.rationale),
+                    source_refs: item.source_refs,
+                    assumptions: item.assumptions,
+                    status: firstText(item.status, item.review_state, 'draft'),
+                    selected: true,
+                    metadata: {
+                        ...(item.metadata || {}),
+                        artifact_id: artifactId,
+                        artifact_type: 'connected_picture_package',
+                        package_id: packageId,
+                        package_item_id: packageItemId,
+                        package_collection: collectionKey,
+                        node_id: collectionKey === 'primary_nodes' ? firstText(item.node_id, packageItemId) : undefined,
+                        relationship_edge_id: collectionKey === 'relationship_edges' ? packageItemId : undefined,
+                        edge_id: collectionKey === 'relationship_edges' ? packageItemId : undefined,
+                        source_node_id: collectionKey === 'relationship_edges' ? firstText(item.source_node_id) : undefined,
+                        target_node_id: collectionKey === 'relationship_edges' ? firstText(item.target_node_id) : undefined,
+                        relationship_type:
+                            collectionKey === 'relationship_edges'
+                                ? firstText(item.relationship_type, 'related_to')
+                                : undefined
+                    }
+                });
+            })
+            .filter(Boolean)
+    );
+    connectedPackageCollection(packageData, 'acceptance_groups').forEach((group) => {
+        const groupId = connectedPackageItemId(group);
+        if (!groupId) {
+            return;
+        }
+        items.push(
+            normalizeAIDraftItem({
+                id: `item_${groupId}`,
+                item_type: 'acceptance_group',
+                title: firstText(group.title, group.label, groupId),
+                content: firstText(group.description, group.summary),
+                source_refs: group.source_refs,
+                assumptions: group.assumptions,
+                status: firstText(group.status, group.review_state, 'draft'),
+                selected: true,
+                metadata: {
+                    ...(group.metadata || {}),
+                    artifact_id: artifactId,
+                    artifact_type: 'connected_picture_package',
+                    package_id: packageId,
+                    package_item_id: groupId,
+                    package_collection: 'acceptance_groups',
+                    acceptance_group_id: groupId,
+                    package_item_ids: asArray(group.item_ids)
+                }
+            })
+        );
+    });
+    return items;
+};
 
 export const normalizeAIDraftEdge = (edge = {}) => ({
     id: firstText(edge.id, edge.edge_id, `draft_edge_${nanoid(8)}`),
@@ -1604,20 +1006,7 @@ export const createAIDraftRevision = ({
                           metadata: { draft_annotation_id: annotation.id }
                       })
                   ),
-                  ...artifacts.map((artifact, index) =>
-                      normalizeAIDraftItem({
-                          id: firstText(artifact.id, artifact.artifact_id, `draft-artifact-${index + 1}`),
-                          item_type: artifact.artifact_type || 'artifact',
-                          title: firstText(artifact.title, artifact.label, artifact.data?.title, `Artifact ${index + 1}`),
-                          content: firstText(artifact.summary, artifact.description, artifact.data?.summary),
-                          source_refs: artifact.source_refs,
-                          selected: true,
-                          metadata: {
-                              artifact_id: firstText(artifact.id, artifact.artifact_id, `draft-artifact-${index + 1}`),
-                              artifact_type: artifact.artifact_type || 'artifact'
-                          }
-                      })
-                  )
+                  ...artifacts.flatMap(connectedPackageDraftItemsFromArtifact)
               ];
     const revision = {
         revision_id: revisionId,
@@ -1652,6 +1041,7 @@ export const createAIDraftSession = ({
     draftEdges = [],
     draftItems,
     draftAnnotations = [],
+    generatedArtifacts = [],
     modelPolicy = 'balanced',
     selectedModel = '',
     modelReason = '',
@@ -1667,6 +1057,7 @@ export const createAIDraftSession = ({
         draftNodes,
         draftEdges,
         draftAnnotations,
+        generatedArtifacts,
         revisionId,
         createdAt,
         model: selectedModel,
@@ -1787,591 +1178,6 @@ export const getAIDraftModelMetadata = (session = {}, revision = latestAIDraftRe
     };
 };
 
-export const formatAIDraftPreviewDiffSummary = (diff = {}) => ({
-    nodes: Number(diff.added_nodes || diff.nodes || 0),
-    edges: Number(diff.added_edges || diff.edges || 0),
-    updates: Number(diff.updated_nodes || diff.updates || 0),
-    removals: Number(diff.removed_nodes || diff.removals || 0),
-    removedEdges: Number(diff.removed_edges || 0),
-    needsReview: Number(diff.needs_review_repairs || diff.needs_review_items || 0),
-    reviewOutputs: Number(diff.review_outputs || 0),
-    text: [
-        `+${Number(diff.added_nodes || diff.nodes || 0)} nodes`,
-        `+${Number(diff.added_edges || diff.edges || 0)} edges`,
-        `~${Number(diff.updated_nodes || diff.updates || 0)} updates`,
-        `-${Number(diff.removed_nodes || diff.removals || 0)} removals`,
-        `!${Number(diff.needs_review_repairs || diff.needs_review_items || 0)} needs_review items`
-    ].join('  ')
-});
-
-export const getAIDraftItemBadges = (item = {}) => {
-    const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
-    const assumptions = asArray(item.assumptions);
-    const confidence = numericConfidence(item.confidence ?? metadata.confidence);
-    const status = firstText(item.status, metadata.status).toLowerCase();
-    const type = firstText(item.item_type, metadata.node_type, metadata.type).toLowerCase();
-    const sourceStatus = getAIDraftSourceStatus(item);
-    const badges = [];
-
-    badges.push({ id: sourceStatus.badgeId, label: sourceStatus.label, tone: sourceStatus.tone });
-    if (sourceStatus.reviewable) {
-        badges.push({ id: 'needs-review', label: 'Needs review', tone: 'warn' });
-    }
-    if (status === 'needs_review' || type === 'needs_review' || metadata.needs_review === true) {
-        if (!badges.some((badge) => badge.id === 'needs-review')) {
-            badges.push({ id: 'needs-review', label: 'Needs review', tone: 'warn' });
-        }
-    }
-    if (
-        sourceStatus.id !== 'ai_assumption_uncited' &&
-        (assumptions.length > 0 ||
-            metadata.assumption === true ||
-            metadata.assumptions === true ||
-            type === 'assumption')
-    ) {
-        badges.push({ id: 'assumption', label: 'Assumption', tone: 'neutral' });
-    }
-    if (confidence !== null && confidence < 0.6) {
-        badges.push({ id: 'low-confidence', label: 'Low confidence', tone: 'warn' });
-    }
-    if (metadata.duplicate === true || metadata.duplicate_of || type.includes('duplicate')) {
-        badges.push({ id: 'duplicate', label: 'Duplicate', tone: 'caution' });
-    }
-    if (isSoftwareOverlapArtifact(item)) {
-        badges.push({ id: 'potential-overlap', label: 'Potential overlap', tone: 'caution' });
-    }
-    if (metadata.conflict === true || metadata.conflicts || type.includes('conflict')) {
-        badges.push({ id: 'conflict', label: 'Conflict', tone: 'danger' });
-    }
-    return badges;
-};
-
-export const selectedDraftNodes = ({ revision = {}, mode = 'append', selectedItemIds = [] } = {}) => {
-    const selected = new Set(asArray(selectedItemIds));
-    let nodes = asArray(revision.draft_nodes).map(normalizeAIDraftNode);
-    if (mode === 'selected') {
-        return selected.size > 0 ? nodes.filter((node) => selected.has(node.id)) : [];
-    }
-    if (selected.size > 0) {
-        nodes = nodes.filter((node) => selected.has(node.id));
-    }
-    if (mode === 'cited_only') {
-        return nodes.filter((node) => asArray(node.source_refs).length > 0);
-    }
-    if (mode === 'notes_only') {
-        return [];
-    }
-    return nodes;
-};
-
-const selectedRelationshipDraftItems = ({ revision = {}, mode = 'append', selectedItemIds = [] } = {}) => {
-    if (mode === 'notes_only') {
-        return [];
-    }
-    const selected = new Set(asArray(selectedItemIds));
-    return asArray(revision.draft_items)
-        .map(normalizeAIDraftItem)
-        .filter((item) => {
-            const metadata = item.metadata || {};
-            const relationshipType = firstText(metadata.relationship_type, item.relationship_type);
-            if (!metadata.source_node_id || !metadata.target_node_id || !relationshipType) {
-                return false;
-            }
-            if (['contains', 'child', 'parent'].includes(relationshipType)) {
-                return false;
-            }
-            if (mode === 'selected') {
-                return selected.size > 0 && selected.has(item.id);
-            }
-            if (mode === 'cited_only') {
-                return hasSourceRefs(item);
-            }
-            return true;
-        });
-};
-
-const relationshipEndpointIds = (item = {}) => {
-    const metadata = item.metadata || {};
-    return {
-        sourceId: firstText(metadata.source_node_id, metadata.source, item.source_node_id),
-        targetId: firstText(metadata.target_node_id, metadata.target, item.target_node_id)
-    };
-};
-
-const filterRelationshipsForAcceptedDraftNodes = ({
-    revision = {},
-    relationshipItems = [],
-    acceptedNodeIds = new Set()
-} = {}) => {
-    const draftNodeIds = new Set(
-        asArray(revision.draft_nodes)
-            .map((node) => firstText(node.id, node.node_id))
-            .filter(Boolean)
-    );
-    return asArray(relationshipItems).filter((item) => {
-        const { sourceId, targetId } = relationshipEndpointIds(item);
-        return [sourceId, targetId].every((nodeId) => !draftNodeIds.has(nodeId) || acceptedNodeIds.has(nodeId));
-    });
-};
-
-const scopedRemovalCounts = ({ mode = 'append', nodes = [], edges = [], scope = {} } = {}) => {
-    if (mode !== 'replace') {
-        return { removed_nodes: 0, removed_edges: 0, removed_node_ids: [], removed_edge_ids: [] };
-    }
-    const removal = graphAfterReplacementRemoval({ nodes, edges, scope });
-    return {
-        removed_nodes: removal.removed_node_ids.length,
-        removed_edges: removal.removed_edge_ids.length,
-        removed_node_ids: removal.removed_node_ids,
-        removed_edge_ids: removal.removed_edge_ids
-    };
-};
-
-const describeAIDraftPreviewDiff = ({
-    mode = 'append',
-    nodes = [],
-    edges = [],
-    relationshipItems = [],
-    reviewOutputs = 0,
-    removedNodes = 0,
-    removedEdges = 0,
-    needsReviewRepairs = 0,
-    assumptionRepairs = 0,
-    missingSourceRepairs = 0,
-    updatedNodes = 0
-} = {}) => {
-    const draftItemCount = nodes.length + relationshipItems.length;
-    if (mode === 'notes_only') {
-        return [
-            'Graph will not change.',
-            reviewOutputs
-                ? `${reviewOutputs} review artifact${reviewOutputs === 1 ? '' : 's'} stay available for reference.`
-                : 'Draft notes stay available for review.'
-        ];
-    }
-    if (mode === 'merge') {
-        return [
-            updatedNodes
-                ? `${updatedNodes} matching node${updatedNodes === 1 ? '' : 's'} will be updated.`
-                : 'No matching node updates are selected yet.',
-            'Existing content outside matching draft items stays in place.'
-        ];
-    }
-    if (mode === 'replace') {
-        return [
-            removedNodes || removedEdges
-                ? `${removedNodes} scoped node${removedNodes === 1 ? '' : 's'} and ${removedEdges} connected edge${removedEdges === 1 ? '' : 's'} may be removed before the draft is applied.`
-                : 'Selected scope will be replaced by the reviewed draft.',
-            `${nodes.length} draft node${nodes.length === 1 ? '' : 's'} and ${edges.length + relationshipItems.length} edge${edges.length + relationshipItems.length === 1 ? '' : 's'} will be added.`
-        ];
-    }
-    if (mode === 'selected') {
-        return [
-            draftItemCount
-                ? `${draftItemCount} checked draft item${draftItemCount === 1 ? '' : 's'} will be accepted.`
-                : 'No checked draft items will be accepted yet.',
-            'Unchecked draft items remain draft-only.'
-        ];
-    }
-    if (mode === 'cited_only') {
-        return [
-            draftItemCount
-                ? `${draftItemCount} source-backed draft item${draftItemCount === 1 ? '' : 's'} will be accepted.`
-                : 'No source-backed draft items are available to accept.',
-            needsReviewRepairs
-                ? `${needsReviewRepairs} uncited item${needsReviewRepairs === 1 ? '' : 's'} stay draft-only (${missingSourceRepairs} missing citation${missingSourceRepairs === 1 ? '' : 's'}, ${assumptionRepairs} AI assumption${assumptionRepairs === 1 ? '' : 's'}).`
-                : 'Uncited draft items stay out of the graph.'
-        ];
-    }
-    return [
-        `${nodes.length} draft node${nodes.length === 1 ? '' : 's'} will be added as supporting content.`,
-        'Existing workspace content stays in place.'
-    ];
-};
-
-const reviewSourceStatusCounts = (items = []) =>
-    asArray(items).reduce(
-        (counts, item) => {
-            const sourceStatus = getAIDraftSourceStatus(item);
-            if (sourceStatus.id === 'missing_required_source') {
-                counts.missing_required_source += 1;
-            } else if (sourceStatus.id === 'ai_assumption_uncited') {
-                counts.ai_assumption_uncited += 1;
-            }
-            return counts;
-        },
-        { ai_assumption_uncited: 0, missing_required_source: 0 }
-    );
-
-export const buildAIDraftPreviewDiff = (
-    session = {},
-    { mode = 'append', selectedItemIds = [], currentNodes = [], currentEdges = [] } = {}
-) => {
-    const revision = latestAIDraftRevision(session);
-    const changeIntent = changeIntentFromAIDraftSession(session, revision);
-    const acceptModeDetail = getAIDraftAcceptModeDetail(mode);
-    const nodes = selectedDraftNodes({ revision, mode, selectedItemIds });
-    const nodeIds = new Set(nodes.map((node) => node.id));
-    const edges =
-        mode === 'notes_only'
-            ? []
-            : asArray(revision.draft_edges).filter((edge) => nodeIds.has(edge.target_node_id));
-    const relationshipItems = filterRelationshipsForAcceptedDraftNodes({
-        revision,
-        relationshipItems: selectedRelationshipDraftItems({ revision, mode, selectedItemIds }),
-        acceptedNodeIds: nodeIds
-    });
-    const removals = scopedRemovalCounts({
-        mode,
-        nodes: currentNodes,
-        edges: currentEdges,
-        scope: session.scope
-    });
-    const needsReviewNodes =
-        mode === 'notes_only'
-            ? []
-            : mode === 'cited_only'
-              ? asArray(revision.draft_nodes).filter(
-                    (node) => node.node_type !== 'reference' && asArray(node.source_refs).length === 0
-                )
-              : nodes.filter((node) => node.node_type !== 'reference' && asArray(node.source_refs).length === 0);
-    const needsReviewRepairs = needsReviewNodes.length;
-    const sourceStatusCounts = reviewSourceStatusCounts(needsReviewNodes);
-    const updatedNodes = mode === 'merge' ? nodes.length : 0;
-    const addedEdges = mode === 'merge' ? 0 : edges.length + relationshipItems.length;
-    const previewLines = describeAIDraftPreviewDiff({
-        mode,
-        nodes,
-        edges,
-        relationshipItems,
-        reviewOutputs: asArray(revision.draft_annotations).length,
-        removedNodes: removals.removed_nodes,
-        removedEdges: removals.removed_edges,
-        needsReviewRepairs,
-        assumptionRepairs: sourceStatusCounts.ai_assumption_uncited,
-        missingSourceRepairs: sourceStatusCounts.missing_required_source,
-        updatedNodes
-    });
-    const diff = {
-        mode,
-        added_nodes: mode === 'merge' ? 0 : nodes.length,
-        added_edges: addedEdges,
-        updated_nodes: updatedNodes,
-        removed_nodes: removals.removed_nodes,
-        removed_edges: removals.removed_edges,
-        review_outputs: asArray(revision.draft_annotations).length,
-        needs_review_repairs: needsReviewRepairs,
-        ai_assumption_repairs: sourceStatusCounts.ai_assumption_uncited,
-        missing_source_repairs: sourceStatusCounts.missing_required_source,
-        accepted_item_ids: asArray(selectedItemIds).length
-            ? asArray(selectedItemIds)
-            : [...nodes.map((node) => node.id), ...relationshipItems.map((item) => item.id)],
-        preview_lines: previewLines,
-        metadata: {
-            change_intent: changeIntent,
-            accept_mode: mode,
-            accept_mode_label: acceptModeDetail.label,
-            accept_mode_help: acceptModeDetail.help,
-            user_choice: acceptModeDetail.user_choice,
-            preview_lines: previewLines,
-            source_status_counts: sourceStatusCounts,
-            removed_node_ids: removals.removed_node_ids,
-            removed_edge_ids: removals.removed_edge_ids,
-            follow_up_semantics: {
-                change_intent: changeIntent,
-                accept_mode: mode,
-                accept_mode_label: acceptModeDetail.label,
-                accept_mode_help: acceptModeDetail.help,
-                user_choice: acceptModeDetail.user_choice,
-                preserves_existing: mode !== 'replace',
-                canonical_graph_mutated: mode !== 'notes_only',
-                selected_only: mode === 'selected',
-                adds_as_alternate: mode === 'append',
-                source_backed_only: mode === 'cited_only'
-            }
-        }
-    };
-    diff.summary = [
-        `+${diff.added_nodes} nodes`,
-        `+${diff.added_edges} edges`,
-        diff.updated_nodes ? `~${diff.updated_nodes} nodes updated` : '',
-        diff.removed_nodes ? `-${diff.removed_nodes} scoped nodes` : '',
-        diff.needs_review_repairs
-            ? `!${diff.needs_review_repairs} reviewable (${diff.missing_source_repairs} missing citation, ${diff.ai_assumption_repairs} AI assumption)`
-            : ''
-    ]
-        .filter(Boolean)
-        .join(', ');
-    return diff;
-};
-
-export const rejectAIDraftSession = (
-    session = {},
-    { rejectedAt = new Date().toISOString(), rejectedBy = 'user', reason = 'Rejected by user' } = {}
-) => ({
-    ...session,
-    status: 'discarded',
-    accept_history: asArray(session.accept_history),
-    metadata: {
-        ...(session.metadata || {}),
-        ai_draft_session_contract_version: AI_DRAFT_SESSION_CONTRACT_VERSION,
-        canonical: false,
-        rejected_at: rejectedAt,
-        rejected_by: rejectedBy,
-        rejection_reason: reason
-    }
-});
-
-export const acceptAIDraftSession = ({
-    session = {},
-    nodes = [],
-    edges = [],
-    mode = 'append',
-    selectedItemIds = [],
-    acceptedAt = new Date().toISOString()
-} = {}) => {
-    const revision = latestAIDraftRevision(session);
-    const acceptedDrafts = selectedDraftNodes({ revision, mode, selectedItemIds });
-    const acceptedDraftIds = new Set(acceptedDrafts.map((draft) => draft.id));
-    const acceptedRelationships = filterRelationshipsForAcceptedDraftNodes({
-        revision,
-        relationshipItems: selectedRelationshipDraftItems({ revision, mode, selectedItemIds }),
-        acceptedNodeIds: acceptedDraftIds
-    });
-    const baseGraph =
-        mode === 'replace'
-            ? graphAfterReplacementRemoval({ nodes, edges, scope: session.scope })
-            : { nodes: asArray(nodes), edges: asArray(edges), removed_node_ids: [], removed_edge_ids: [] };
-    const existingIds = new Set(baseGraph.nodes.map((node) => node.id));
-    const normalizedDraftEdges = asArray(revision.draft_edges).map(normalizeAIDraftEdge);
-    const hierarchyDraftEdges = normalizedDraftEdges.filter(isHierarchyDraftEdge);
-    const relationshipDraftEdges = normalizedDraftEdges.filter((edge) => !isHierarchyDraftEdge(edge));
-    const parentIdByDraftId = new Map(
-        hierarchyDraftEdges
-            .filter((edge) => edge.source_node_id && edge.target_node_id)
-            .map((edge) => [edge.target_node_id, edge.source_node_id])
-    );
-    const generatedNodes = [];
-    const workingHierarchyEdges = [...baseGraph.edges];
-    if (mode !== 'notes_only') {
-        acceptedDrafts.forEach((draft) => {
-            if (existingIds.has(draft.id)) {
-                return;
-            }
-            const node = createAcceptedNode({
-                draft,
-                session,
-                revision,
-                nodes: [...baseGraph.nodes, ...generatedNodes],
-                edges: workingHierarchyEdges,
-                parentId: parentIdByDraftId.get(draft.id)
-            });
-            generatedNodes.push(node);
-            existingIds.add(node.id);
-            const parentId = parentIdByDraftId.get(draft.id) || draft.parent_id || session.scope?.node_id || '';
-            if (parentId) {
-                workingHierarchyEdges.push({
-                    id: `draft_position_edge_${parentId}_${node.id}`,
-                    source: parentId,
-                    target: node.id
-                });
-            }
-        });
-    }
-    const generatedIds = new Set(generatedNodes.map((node) => node.id));
-    const acceptedOrExistingIds = new Set([
-        ...baseGraph.nodes.map((node) => node.id),
-        ...generatedIds
-    ]);
-    const existingEdgeKeys = new Set(baseGraph.edges.map((edge) => `${edge.source}->${edge.target}`));
-    const generatedHierarchyEdges =
-        mode === 'notes_only'
-            ? []
-            : hierarchyDraftEdges
-                  .filter((edge) => generatedIds.has(edge.target_node_id))
-                  .filter((edge) => acceptedOrExistingIds.has(edge.source_node_id))
-                  .map((edge) => {
-                      const relationshipType = normalizeHierarchyRelationshipType(edge);
-                      return {
-                          ...createWorkspaceEdge(edge.source_node_id, edge.target_node_id, {
-                          id: edge.id,
-                          animated: true
-                          }),
-                          relationship_type: relationshipType,
-                          metadata: {
-                              ...(edge.metadata || {}),
-                              relationship_type: relationshipType,
-                              source: firstText(edge.metadata?.source, 'ai_draft_hierarchy')
-                          },
-                          data: {
-                              relationship_type: relationshipType,
-                              source: firstText(edge.metadata?.source, 'ai_draft_hierarchy')
-                          }
-                      };
-                  })
-                  .filter((edge) => {
-                      const key = `${edge.source}->${edge.target}`;
-                      if (existingEdgeKeys.has(key)) {
-                          return false;
-                      }
-                      existingEdgeKeys.add(key);
-                      return true;
-                  });
-    const generatedRelationshipEdges =
-        mode === 'notes_only'
-            ? []
-            : [
-                  ...acceptedRelationships.map((item) => ({
-                      id: item.id,
-                      source_node_id: item.metadata?.source_node_id,
-                      target_node_id: item.metadata?.target_node_id,
-                      relationship_type: firstText(item.metadata?.relationship_type, item.relationship_type, 'related_to'),
-                      source_refs: asArray(item.source_refs),
-                      confidence: item.confidence,
-                      status: item.status,
-                      content: item.content,
-                      metadata: item.metadata || {}
-                  })),
-                  ...relationshipDraftEdges.map((edge) => ({
-                      id: edge.id,
-                      source_node_id: edge.source_node_id,
-                      target_node_id: edge.target_node_id,
-                      relationship_type: edge.relationship_type,
-                      source_refs: [],
-                      metadata: edge.metadata || {}
-                  }))
-              ]
-                  .map((item) => {
-                      const metadata = item.metadata || {};
-                      const relationshipType = firstText(metadata.relationship_type, item.relationship_type, 'related_to');
-                      return {
-                          id: firstText(metadata.relationship_edge_id, metadata.edge_id, item.id),
-                          source: firstText(metadata.source_node_id, item.source_node_id),
-                          target: firstText(metadata.target_node_id, item.target_node_id),
-                          type: 'smoothstep',
-                          animated: false,
-                          relationship_type: relationshipType,
-                          source_refs: asArray(item.source_refs),
-                          metadata: {
-                              ...metadata,
-                              source: metadata.source || 'ai_draft_relationship',
-                              confidence: item.confidence ?? metadata.confidence ?? '',
-                              rationale: firstText(metadata.rationale, item.content),
-                              review_state: firstText(item.status, metadata.review_state, 'needs_review')
-                          },
-                          data: {
-                              relationship_type: relationshipType,
-                              confidence: item.confidence ?? metadata.confidence ?? '',
-                              rationale: firstText(metadata.rationale, item.content),
-                              review_state: firstText(item.status, metadata.review_state, 'needs_review')
-                          }
-                      };
-                  })
-                  .filter((edge) => edge.source && edge.target)
-                  .filter((edge) => acceptedOrExistingIds.has(edge.source) && acceptedOrExistingIds.has(edge.target))
-                  .filter((edge) => {
-                      const key = `${edge.source}->${edge.target}->${edge.relationship_type}`;
-                      if (existingEdgeKeys.has(key)) {
-                          return false;
-                      }
-                      existingEdgeKeys.add(key);
-                      return true;
-                  });
-    const generatedEdges = [...generatedHierarchyEdges, ...generatedRelationshipEdges];
-    const nextEdges = [...baseGraph.edges, ...generatedEdges];
-    const normalizedScope = normalizeAIDraftScope(session.scope);
-    const existingNodeIds = new Set(baseGraph.nodes.map((node) => node.id));
-    const reflowedExistingSources = new Set();
-    const internallyReseatedNodes = generatedHierarchyEdges.reduce((nextNodes, edge) => {
-        const sourceId = edgeSourceId(edge);
-        if (!sourceId || !existingNodeIds.has(sourceId) || reflowedExistingSources.has(sourceId)) {
-            return nextNodes;
-        }
-        const parentId = edgeSourceId(nextEdges.find((candidate) => edgeTargetId(candidate) === sourceId));
-        if (!parentId) {
-            return nextNodes;
-        }
-        reflowedExistingSources.add(sourceId);
-        return reflowSiblingSubtrees({
-            nodes: nextNodes,
-            edges: nextEdges,
-            parentId,
-            anchorNodeId: sourceId
-        });
-    }, [...baseGraph.nodes, ...generatedNodes]);
-    const scopeParentId =
-        ['branch', 'node'].includes(normalizedScope.type) && normalizedScope.node_id
-            ? edgeSourceId(nextEdges.find((edge) => edgeTargetId(edge) === normalizedScope.node_id))
-            : '';
-    const reseatedNodes = scopeParentId
-        ? reflowSiblingSubtrees({
-              nodes: internallyReseatedNodes,
-              edges: nextEdges,
-              parentId: scopeParentId,
-              anchorNodeId: normalizedScope.node_id
-          })
-        : internallyReseatedNodes;
-    const nextNodes = attachDraftNotes({
-        nodes: reseatedNodes,
-        session,
-        revision,
-        mode,
-        acceptedAt
-    });
-    const previewDiff = buildAIDraftPreviewDiff(session, {
-        mode,
-        selectedItemIds,
-        currentNodes: nodes,
-        currentEdges: edges
-    });
-    const acceptedSession = {
-        ...session,
-        status: 'accepted',
-        accept_history: [
-            ...asArray(session.accept_history),
-            {
-                session_id: session.session_id,
-                revision_id: revision.revision_id,
-                mode,
-                selected_item_ids: asArray(selectedItemIds),
-                accepted_node_ids: [...generatedIds],
-                preview_diff: previewDiff,
-                accepted_at: acceptedAt
-            }
-        ]
-    };
-
-    return {
-        nodes: nextNodes,
-        edges: nextEdges,
-        session: acceptedSession,
-        accept_result: {
-            session_id: session.session_id,
-            revision_id: revision.revision_id,
-            mode,
-            accepted_node_ids: [...generatedIds],
-            accepted_edge_ids: generatedEdges.map((edge) => edge.id),
-            preview_diff: previewDiff,
-            patch_operations: [
-                ...baseGraph.removed_edge_ids.map((edgeId) => ({
-                    op: 'remove_edge',
-                    edge_id: edgeId,
-                    metadata: { mode: 'replace' }
-                })),
-                ...baseGraph.removed_node_ids.map((nodeId) => ({
-                    op: 'remove_node',
-                    node_id: nodeId,
-                    metadata: {
-                        mode: 'replace',
-                        scope_node_id: session.scope?.node_id || ''
-                    }
-                }))
-            ],
-            canonical_graph_mutated: mode !== 'notes_only'
-        }
-    };
-};
-
 export const validateAIDraftRevision = ({ draft_nodes = [], draft_edges = [] } = {}) => {
     const nodeIds = new Set(asArray(draft_nodes).map((node) => node.id));
     const issues = [
@@ -2401,110 +1207,6 @@ export const validateAIDraftRevision = ({ draft_nodes = [], draft_edges = [] } =
     };
 };
 
-const createAcceptedNode = ({ draft, session, revision, nodes, edges, parentId }) => {
-    const preferredParentId = parentId || draft.parent_id || session.scope?.node_id || '';
-    const resolvedParentId = nodes.some((node) => node.id === preferredParentId)
-        ? preferredParentId
-        : session.scope?.node_id || '';
-    const sourceRefs = asArray(draft.source_refs);
-    const sourceStatus = getAIDraftSourceStatus(draft);
-    const position = resolvedParentId ? getChildPosition(nodes, edges, resolvedParentId) : undefined;
-    const assumption =
-        draft.assumption ?? draft.metadata?.assumption ?? draft.metadata?.assumptions ?? false;
-    const confidence = draft.confidence ?? draft.metadata?.confidence ?? '';
-    const duplicate = draft.duplicate ?? draft.metadata?.duplicate ?? draft.metadata?.duplicate_of ?? '';
-    const conflict = draft.conflict ?? draft.metadata?.conflict ?? draft.metadata?.conflicts ?? '';
-    const status =
-        draft.node_type !== 'reference' && sourceRefs.length === 0
-            ? 'needs_review'
-            : draft.status || 'ai_generated';
-
-    const node = createWorkspaceNode({
-        id: draft.id,
-        title: draft.title,
-        body: draft.summary || draft.body,
-        nodeType: draft.node_type,
-        status,
-        df: draft.df,
-        graph: draft.graph,
-        query: draft.query,
-        sourceRefs,
-        artifactType: draft.artifact_type,
-        artifactIds: draft.artifact_ids,
-        reviewState: draft.review_state,
-        generatedArtifacts: draft.generated_artifacts,
-        position: position || { x: nodes.length * 320, y: nodes.length * 120 },
-        metadata: {
-            ...(draft.metadata || {}),
-            source_status: sourceStatus.id,
-            source_required: sourceStatus.source_required,
-            reviewable_unsourced: sourceStatus.reviewable && sourceRefs.length === 0
-        },
-        display: draft.display || {}
-    });
-    const provenance = {
-            ...(draft.metadata || {}),
-            source: 'ai_draft_session',
-            source_status: sourceStatus.id,
-            source_status_label: sourceStatus.label,
-            source_required: sourceStatus.source_required,
-            reviewable_unsourced: sourceStatus.reviewable && sourceRefs.length === 0,
-            ai_draft_session_id: session.session_id,
-            ai_draft_revision_id: revision.revision_id,
-            ai_draft_intent: session.intent,
-            ai_draft_role: session.role
-    };
-    return {
-        ...node,
-        data: {
-            ...node.data,
-            assumption,
-            confidence,
-            duplicate,
-            conflict,
-            metadata: provenance,
-            ai_draft_session_id: session.session_id,
-            ai_draft_revision_id: revision.revision_id,
-            data: {
-                ...node.data.data,
-                assumption,
-                confidence,
-                duplicate,
-                conflict,
-                metadata: provenance
-            }
-        }
-    };
-};
-
-const attachDraftNotes = ({ nodes = [], session = {}, revision = {}, mode, acceptedAt }) => {
-    const annotations = asArray(revision.draft_annotations);
-    if (annotations.length === 0 && mode !== 'notes_only') {
-        return nodes;
-    }
-    const targetId = session.scope?.node_id || nodes[0]?.id;
-    return nodes.map((node) =>
-        node.id === targetId
-            ? {
-                  ...node,
-                  data: {
-                      ...(node.data || {}),
-                      ai_draft_outputs: [
-                          ...asArray(node.data?.ai_draft_outputs),
-                          {
-                              session_id: session.session_id,
-                              revision_id: revision.revision_id,
-                              mode,
-                              accepted_at: acceptedAt,
-                              outputs: annotations
-                          }
-                      ]
-                  }
-              }
-            : node
-    );
-};
-
 const collectRevisionSourceRefs = (revision = {}) =>
     mergeSourceRefs(
         mergeSourceRefs(
@@ -2513,16 +1215,3 @@ const collectRevisionSourceRefs = (revision = {}) =>
         ),
         asArray(revision.draft_annotations).flatMap((annotation) => asArray(annotation.source_refs))
     );
-
-const mergeSourceRefs = (current = [], next = []) => {
-    const refs = [...asArray(current)];
-    const seen = new Set(refs.map((ref) => JSON.stringify(ref)));
-    asArray(next).forEach((ref) => {
-        const key = JSON.stringify(ref);
-        if (!seen.has(key)) {
-            refs.push(ref);
-            seen.add(key);
-        }
-    });
-    return refs;
-};

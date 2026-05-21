@@ -1,4 +1,7 @@
 /* eslint-disable react/prop-types */
+import TrustStateBadges from '../components/TrustStateBadges';
+import { trustStatesForSubject } from '../utils/trustStates';
+
 const REVIEW_LABELS = {
     ai_generated: 'AI generated',
     needs_review: 'Needs review',
@@ -80,6 +83,7 @@ const formatConfidence = (value) => {
 
 const NodeMetadataBadges = ({ data }) => {
     const nestedData = getNestedData(data);
+    const trustStates = trustStatesForSubject(data || {});
     const nodeType = firstValue(data, nestedData, ['node_type', 'component_type', 'name']);
     const status = firstValue(data, nestedData, ['status']) || 'ai_generated';
     const confidence = formatConfidence(
@@ -105,7 +109,7 @@ const NodeMetadataBadges = ({ data }) => {
         !sourceBacked
             ? {
                   id: 'missing-source',
-                  label: 'No citation',
+                  label: trustStates.find((state) => ['uncited', 'inferred'].includes(state.id))?.label || 'Uncited',
                   className: 'node-review-indicator-source'
               }
             : undefined,
@@ -216,13 +220,9 @@ const NodeMetadataBadges = ({ data }) => {
                     </span>
                 ) : null}
                 <span
-                    className={`node-metadata-badge ${
-                        sourceBacked
-                            ? 'node-metadata-badge-source'
-                            : 'node-metadata-badge-missing-source'
-                    }`}
+                    className="node-metadata-badge node-metadata-badge-trust"
                 >
-                    {sourceBacked ? 'Source cited' : 'No citation'}
+                    <TrustStateBadges states={trustStates} />
                 </span>
             </span>
         </div>
