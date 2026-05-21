@@ -31,6 +31,12 @@ Scope: selection, relationship lenses, metadata editing, AI preview-first flows,
   - Accepted Checklist Preview data persists through save and reopen.
   - Shell slot bounding-box coverage for ribbon, left rail, right rail, bottom review tray, and status bar at desktop and narrow widths.
 
+- `shell-visual-signoff.spec.js`
+  - Shell on/off screenshot attachments at 1600x1000, 1440x900, and 390x844.
+  - Shell-on default, collapsed narrow navigator, right rail, and bottom Review Tray states.
+  - Shell-off rollback `FloatingDock` visibility across the same viewport matrix.
+  - Guards for header/ribbon overlap, slot bounds, and collapsed narrow left-rail width.
+
 - `shellStore.test.mjs`
   - Shell panel exclusivity rules.
   - Source and branch metadata routes opening the right panel and clearing review trays.
@@ -161,7 +167,7 @@ be resolved before retiring the shell-off compatibility path.
 
 | Blocker | Surface | Risk | Required verification | Status | Pre-default required? |
 | --- | --- | --- | --- | --- | --- |
-| Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Crowded default UI or hidden controls | Shell geometry e2e plus screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | Screenshot matrix captured and inspected; narrow collapsed-left-rail hitbox fixed and covered. Human/product visual signoff remains recommended before rollback retirement | Yes |
+| Visual density QA for ribbon, right rail, review tray, and status bar | Shell geometry | Crowded default UI or hidden controls | Shell geometry e2e plus screenshots at 1600x1000, 1440x900, and 390x844 with shell on/off | `shell-visual-signoff.spec.js` captures screenshot attachments and guards shell slot/header overlap; narrow collapsed-left-rail and narrow header/ribbon hitboxes are fixed and covered. Human/product visual signoff remains recommended before rollback retirement | Yes |
 | Accepted output surfaces need verification | Outputs ribbon and accepted workspace views | Accepted outputs open the wrong surface or no visible surface | Verify accepted Table/Executive/Flowchart/Tasks/Kanban routes do not open the tray; verify Checklist Preview does open the tray | E2E route coverage passing for Table, Executive, Flowchart, Tasks, Kanban, Implementation, Status, and Checklist Preview | Yes |
 | Preview vs accepted artifact split stays intact | Review Tray, structured canvas, checklist artifacts | Candidate previews become canonical before acceptance | Coverage for accepted tasks in structured canvas, Checklist Preview in tray, and accepted checklist artifact persistence | Route split covered; accepted checklist artifact persistence covered by review-tray save/reopen regression | Yes |
 | Automated shell verification is green | Build, unit, and e2e suite | Default-on ships with stale fixtures or untested routes | Run `npm run build`, shell unit tests, shell foundation smoke, selection shell regression, and review tray regression after all active shell edits land | Current bundle passing: build, 41 shell/unit projection tests, 28 serialized shell e2e passed, 1 intentional skip | Yes |
@@ -177,7 +183,7 @@ be resolved before retiring the shell-off compatibility path.
 
 - `selection-shell-regression.spec.js`, `review-tray-regression.spec.js`, `shell-foundation-smoke.spec.js`, `shellStore.test.mjs`, `shellLayoutState.test.mjs`, and `shellComponents.test.mjs` pass.
 - Shell-critical `test.fixme` coverage is either fixed or explicitly waived with a manual screenshot gate.
-- Screenshot matrix has been captured at 1600x1000, 1440x900, and 390x844 with shell disabled and enabled; human/product signoff remains recommended before rollback retirement.
+- Screenshot matrix is covered by `shell-visual-signoff.spec.js` at 1600x1000, 1440x900, and 390x844 with shell disabled and enabled; human/product review of those attachments remains recommended before rollback retirement.
 - With shell enabled, WorkspaceDock, source library, Activity, AI Helpers, metadata properties, and review workflows route to shell slots without duplicate primary floating chrome.
 - Right rail node, edge, branch, and source property edits apply and persist where expected; metadata-only right rail does not expose AI draft accept/reject or action-creation controls.
 - Bottom review tray hosts Drafts, Sources/source repair, Issues, Connections, Tasks preview, and Checklist Preview without opening legacy local-output bridge surfaces.

@@ -317,12 +317,6 @@
   stroke-width: 2.5;
 }
 
-.semantic-edge-label--mindmap {
-  opacity: 0.86;
-  font-size: 0.6rem;
-  box-shadow: 0 0.35rem 0.8rem rgba(0, 0, 0, 0.18);
-}
-
 .canvas-scope-banner {
   display: grid;
   gap: 0.15rem;
@@ -454,6 +448,12 @@
   box-shadow: 0 0.45rem 1.15rem rgba(0, 0, 0, 0.18);
   cursor: pointer;
   transition: opacity 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.semantic-edge-label--mindmap {
+  opacity: 0.86;
+  font-size: 0.6rem;
+  box-shadow: 0 0.35rem 0.8rem rgba(0, 0, 0, 0.18);
 }
 
 .semantic-edge-label:focus-visible {
@@ -16556,8 +16556,16 @@ img:hover {
 }
 
 @media (max-width: 720px) {
+  .app.ui-shell-ribbon-enabled {
+    --workspace-shell-header-height: 8.25rem;
+  }
+
   .header {
     padding: 0.45rem 0.65rem;
+  }
+
+  .app.ui-shell-ribbon-enabled .header {
+    gap: 0.45rem;
   }
 
   .header-action {
