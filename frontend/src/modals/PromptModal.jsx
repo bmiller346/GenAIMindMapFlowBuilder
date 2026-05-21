@@ -37,6 +37,20 @@ import { createAIActionRun } from "../utils/aiActionRuns";
 import { buildSourceLibraryProjection, WORKSPACE_BRIEF_SOURCE_ID } from "../views/graphProjection";
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from "../utils/askAiGenerationProgress";
 import { buildLocalGuidedFallbackDraft, isSankeyDraftRequest } from "../utils/localSankeyDraft";
+import {
+    desiredOutputsForPrompt,
+    inferOutputShape,
+    routeForOutputShape,
+    viewForOutputShape as viewForOutputShapeRoute
+} from "../utils/promptRouting";
+import {
+    STARTER_GROUPS,
+    VISUAL_OPTIONS,
+    sortStarterRecipes,
+    starterGroupId,
+    starterSurfaceLabel,
+    visualLabel
+} from "../utils/promptStarterRecipes";
 
 const viewForAction = (actionId) => {
     if (actionId.includes('question')) {
@@ -55,132 +69,6 @@ const viewForAction = (actionId) => {
         return 'gaps';
     }
     return 'preview';
-};
-
-const VISUAL_OPTIONS = [
-    { id: 'auto', label: 'Auto' },
-    { id: 'mind_map', label: 'Mind Map' },
-    { id: 'outline', label: 'Outline' },
-    { id: 'tasks', label: 'Tasks' },
-    { id: 'checklist', label: 'Checklist' },
-    { id: 'table', label: 'Table' },
-    { id: 'flow_chart', label: 'Flowchart' },
-    { id: 'knowledge_graph', label: 'Knowledge Graph' },
-    { id: 'chart', label: 'Chart' },
-    { id: 'kanban', label: 'Kanban' },
-    { id: 'executive_summary', label: 'Executive Summary' },
-    { id: 'news_article', label: 'News Article' },
-    { id: 'newsletter', label: 'Newsletter' },
-    { id: 'sme_questions', label: 'SME Questions' },
-    { id: 'software_overlap_report', label: 'Software Overlap' },
-    { id: 'implementation_handoff_package', label: 'Handoff' },
-    { id: 'no_visual', label: 'Text only' }
-];
-
-const visualLabel = (visualId) =>
-    VISUAL_OPTIONS.find((option) => option.id === visualId)?.label || visualId;
-
-const WORKSPACE_VIEW_OUTPUTS = new Set([
-    'mind_map',
-    'knowledge_graph',
-    'flow_chart',
-    'outline',
-    'executive_summary',
-    'tasks',
-    'kanban',
-    'table'
-]);
-const CHART_DATA_OUTPUTS = new Set(['chart']);
-const REVIEW_PACKET_OUTPUTS = new Set([
-    'checklist',
-    'source_coverage',
-    'review_annotations',
-    'sme_questions',
-    'software_overlap_report',
-    'missing_info_report'
-]);
-const HANDOFF_OUTPUTS = new Set(['implementation_handoff_package']);
-const PUBLISHABLE_OUTPUTS = new Set(['news_article', 'newsletter']);
-const SPECIALIZED_STARTER_IDS = new Set([
-    'aec_sow_to_delivery_graph',
-    'standards_completeness_review',
-    'complex_issue_team_roadmap',
-    'specialize_branch',
-    'find_process_bottlenecks',
-    'find_duplicate_tools',
-    'find_ownership_gaps',
-    'find_unsupported_business_critical_systems',
-    'create_30_60_90_day_improvement_plan'
-]);
-
-const STARTER_GROUPS = [
-    {
-        id: 'workspace_views',
-        label: 'Workspace views',
-        detail: 'Build data for Map, Connections, Flowchart, Outline, Executive, Table, Tasks, or Kanban.'
-    },
-    {
-        id: 'charts_data',
-        label: 'Charts and data',
-        detail: 'Create structured rows, tables, chart artifacts, and query-style views.'
-    },
-    {
-        id: 'review_packets',
-        label: 'Review packets',
-        detail: 'Find gaps, weak evidence, source repairs, SME questions, and overlap signals.'
-    },
-    {
-        id: 'handoff_publish',
-        label: 'Handoff and publishing',
-        detail: 'Package accepted structure for implementation, stakeholder review, or readable updates.'
-    },
-    {
-        id: 'specialized_work',
-        label: 'Specialized work',
-        detail: 'Use domain-specific recipes for AEC, standards, enterprise operations, and branch specialization.'
-    }
-];
-
-const starterGroupId = (starter = {}) => {
-    if (SPECIALIZED_STARTER_IDS.has(starter.id)) {
-        return 'specialized_work';
-    }
-    if (starter.visual === 'auto') {
-        return 'workspace_views';
-    }
-    if (CHART_DATA_OUTPUTS.has(starter.visual)) {
-        return 'charts_data';
-    }
-    if (HANDOFF_OUTPUTS.has(starter.visual) || PUBLISHABLE_OUTPUTS.has(starter.visual)) {
-        return 'handoff_publish';
-    }
-    if (REVIEW_PACKET_OUTPUTS.has(starter.visual)) {
-        return 'review_packets';
-    }
-    if (WORKSPACE_VIEW_OUTPUTS.has(starter.visual)) {
-        return 'workspace_views';
-    }
-    return 'review_packets';
-};
-
-const starterSurfaceLabel = (starter = {}) => {
-    const groupId = starterGroupId(starter);
-    if (groupId === 'charts_data') {
-        return 'Chart/data';
-    }
-    if (groupId === 'review_packets') {
-        return 'Review';
-    }
-    if (groupId === 'handoff_publish') {
-        return 'Handoff';
-    }
-    if (groupId === 'specialized_work') {
-        return 'Specialized';
-    }
-    if (starter.visual === 'auto') {
-        return 'Auto';
-    }
-    return 'View';
 };
 
 const EXPANSION_TARGET_OPTIONS = [
@@ -233,158 +121,14 @@ const CITATION_POLICY_OPTIONS = [
     { id: 'not_required', label: 'Not required' }
 ];
 
-const SUMMARY_COMPANION_OUTPUTS = [
-    {
-        shape: 'executive_summary',
-        pattern: /\b(executive summary|exec summary|leadership summary|board summary|briefing memo|decision brief)\b/
-    },
-    {
-        shape: 'news_article',
-        pattern: /\b(news article|article draft|press release|current news|latest news)\b/
-    },
-    {
-        shape: 'newsletter',
-        pattern: /\b(newsletter|monthly update|weekly update|quarterly update|update brief|intranet update|intranet article|announcement|internal comms?|internal communications?|release notes?|stakeholder updates?)\b/
-    }
-];
-
 const evidenceModeLabel = (mode = '') =>
     EVIDENCE_MODE_OPTIONS.find((option) => option.id === mode)?.label || 'Workspace only';
 
 const citationPolicyLabel = (policy = '') =>
     CITATION_POLICY_OPTIONS.find((option) => option.id === policy)?.label || 'Preferred';
 
-const OUTPUT_SHAPE_VIEW = {
-    mind_map: 'mindmap',
-    graph_draft: 'mindmap',
-    knowledge_graph: 'knowledgeGraph',
-    outline: 'outline',
-    tasks: 'tasks',
-    table: 'table',
-    checklist: 'checklist',
-    flow_chart: 'flowchart',
-    chart: 'chartData',
-    kanban: 'kanban',
-    executive_summary: 'executive',
-    executive_output: 'executive',
-    news_article: 'outline',
-    newsletter: 'outline',
-    review_annotations: 'gaps',
-    sme_questions: 'sme',
-    source_coverage: 'sources',
-    software_overlap_report: 'gaps',
-    implementation_handoff_package: 'preview',
-    no_visual: 'mindmap'
-};
-
-const OUTPUT_SHAPE_ROUTE = {
-    tasks: { roleId: 'task-planner', actionId: 'generate_tasks' },
-    checklist: { roleId: 'training-guide-builder', actionId: 'generate_checklist' },
-    table: { roleId: 'data-table-interpreter', actionId: 'interpret_table_data' },
-    chart: { roleId: 'data-table-interpreter', actionId: 'interpret_table_data' },
-    flow_chart: { roleId: 'workflow-mapper', actionId: 'custom_prompt' },
-    knowledge_graph: { roleId: 'standards-extractor', actionId: 'custom_prompt' },
-    outline: { roleId: 'training-guide-builder', actionId: 'generate_training_outline' },
-    kanban: { roleId: 'task-planner', actionId: 'generate_tasks' },
-    executive_summary: { roleId: 'enterprise-readiness-planner', actionId: 'create_stakeholder_review_package' },
-    executive_output: { roleId: 'enterprise-readiness-planner', actionId: 'create_stakeholder_review_package' },
-    news_article: { roleId: 'research-assistant', actionId: 'custom_prompt' },
-    newsletter: { roleId: 'research-assistant', actionId: 'custom_prompt' },
-    sme_questions: { roleId: 'sme-question-generator', actionId: 'create_sme_questions' },
-    source_coverage: { roleId: 'source-ref-repair', actionId: 'find_missing_source_support' },
-    software_overlap_report: { roleId: 'enterprise-tool-rationalization', actionId: 'find_duplicate_tools' },
-    implementation_handoff_package: { roleId: 'integration-readiness-reviewer', actionId: 'custom_prompt' },
-    review_annotations: { roleId: 'gap-analyst', actionId: 'find_gaps' },
-    no_visual: { roleId: 'custom', actionId: 'custom_prompt' },
-    mind_map: { roleId: 'workflow-mapper', actionId: 'custom_prompt' },
-    graph_draft: { roleId: 'workflow-mapper', actionId: 'custom_prompt' }
-};
-
-const inferOutputShape = (prompt, actionId = '') => {
-    const text = `${prompt || ''} ${actionId || ''}`.toLowerCase();
-    if (
-        actionId === 'find_duplicate_tools' ||
-        /\b(software|tool|application|app|system)s?\b.*\b(overlap|duplicate|rationali[sz]ation|redundant)\b/.test(text) ||
-        /\b(overlap|duplicate|rationali[sz]ation|redundant)\b.*\b(software|tool|application|app|system)s?\b/.test(text)
-    ) {
-        return 'software_overlap_report';
-    }
-    if (/\b(knowledge graph|relationship|relationships|connections|dependencies)\b/.test(text)) {
-        return 'knowledge_graph';
-    }
-    if (/\b(mind map|brainstorm|cluster|map out)\b/.test(text)) {
-        return 'mind_map';
-    }
-    if (/\b(executive summary|exec summary|leadership summary|board summary|briefing memo|decision brief)\b/.test(text)) {
-        return 'executive_summary';
-    }
-    if (/\b(newsletter|monthly update|weekly update|quarterly update|update brief|intranet update|intranet article|announcement|internal comms?|internal communications?|release notes?|stakeholder updates?)\b/.test(text)) {
-        return 'newsletter';
-    }
-    if (/\b(news article|article draft|press release|current news|latest news)\b/.test(text)) {
-        return 'news_article';
-    }
-    if (/\b(kanban|board|columns)\b/.test(text)) {
-        return 'kanban';
-    }
-    if (/\b(table|matrix|spreadsheet|rows|columns|compare)\b/.test(text)) {
-        return 'table';
-    }
-    if (/\b(sankey|flow lens|source[- ]?target[- ]?value|source to target|source-to-target)\b/.test(text)) {
-        return 'chart';
-    }
-    if (/\b(chart|graph this|visualize data|plot)\b/.test(text)) {
-        return 'chart';
-    }
-    if (/\b(flowchart|flow chart|process map|swimlane|decision tree)\b/.test(text)) {
-        return 'flow_chart';
-    }
-    if (/\b(handoff package|implementation package|implementation handoff|handoff readiness)\b/.test(text)) {
-        return 'implementation_handoff_package';
-    }
-    if (/\b(sme|subject matter expert|review packet|review questions?)\b/.test(text)) {
-        return 'sme_questions';
-    }
-    if (
-        /\b(checklist|check list|steps|step[- ]by[- ]step|recipe|instructions?|walkthrough)\b/.test(text) ||
-        /\bhow\s+(to|do\s+i|can\s+i|should\s+i|would\s+i)\b/.test(text) ||
-        /\b(cook|bake|prepare|make)\b.*\b(grilled cheese|sandwich|meal|dish|recipe)\b/.test(text)
-    ) {
-        return 'checklist';
-    }
-    if (/\b(task|todo|to-do|owner|due date|assign)\b/.test(text)) {
-        return 'tasks';
-    }
-    if (/\b(outline|agenda|sections|training outline)\b/.test(text)) {
-        return 'outline';
-    }
-    if (/\b(source|citation|cite|unsupported|coverage)\b/.test(text)) {
-        return 'source_coverage';
-    }
-    if (/\b(gap|missing|risk|question|review)\b/.test(text)) {
-        return 'review_annotations';
-    }
-    return 'graph_draft';
-};
-
-const desiredOutputsForPrompt = ({ inferredShape, prompt }) => {
-    if (['graph_draft', 'no_visual'].includes(inferredShape)) {
-        return [];
-    }
-    const outputs = [inferredShape];
-    if (['knowledge_graph', 'mind_map'].includes(inferredShape)) {
-        const text = String(prompt || '').toLowerCase();
-        SUMMARY_COMPANION_OUTPUTS.forEach(({ shape, pattern }) => {
-            if (shape !== inferredShape && pattern.test(text)) {
-                outputs.push(shape);
-            }
-        });
-    }
-    return [...new Set(outputs)];
-};
-
 const viewForOutputShape = (shape, actionId) =>
-    OUTPUT_SHAPE_VIEW[shape] || viewForAction(actionId || 'custom_prompt');
+    viewForOutputShapeRoute(shape, actionId, viewForAction);
 
 const MAP_REVIEW_SCOPES = new Set(['workspace', 'source', 'nodes']);
 const MAP_CANVAS_VIEWS = new Set(['mindmap', 'knowledgeGraph']);
@@ -595,25 +339,6 @@ const nodeTypeForShape = (shape, actionId) => {
         return 'reference';
     }
     return 'concept';
-};
-
-const routeForOutputShape = ({ outputShape, profiles, promptScope, fallbackRole, fallbackAction }) => {
-    const route = OUTPUT_SHAPE_ROUTE[outputShape] || OUTPUT_SHAPE_ROUTE.graph_draft;
-    const nextRole =
-        profiles.find((profile) => profile.id === route.roleId) ||
-        fallbackRole ||
-        profiles[0];
-    const roleActions = getActionsForProfileAndScope(nextRole, promptScope);
-    const fallbackActionForRole = roleActions.find((action) => action.id === fallbackAction?.id);
-    const shouldKeepSopAction =
-        outputShape === 'outline' && fallbackActionForRole?.id === 'export_branch_as_sop_draft';
-    const nextAction = shouldKeepSopAction
-        ? fallbackActionForRole
-        : roleActions.find((action) => action.id === route.actionId) ||
-        roleActions.find((action) => action.id === 'custom_prompt') ||
-        fallbackActionForRole ||
-        roleActions[0];
-    return { role: nextRole, action: nextAction };
 };
 
 const rootTitleFromPrompt = (prompt, fallbackTitle) => {
@@ -921,6 +646,7 @@ const PromptModal = ({
     initialEvidenceMode = '',
     initialCitationPolicy = '',
     initialChangeIntent = '',
+    initialSourceRefs = [],
     initialPromptPlaceholder = '',
     initialContextSourceId = '',
     initialContextSourceIds,
@@ -1040,6 +766,9 @@ const PromptModal = ({
     const selectedContextSources = loadedSources.filter((source) =>
         selectedContextSourceIds.includes(source.id)
     );
+    const adHocSourceRefs = Array.isArray(initialSourceRefs)
+        ? initialSourceRefs.filter((ref) => ref && typeof ref === 'object')
+        : [];
     const selectedSourcePayload =
         scope === 'source'
             ? Array.isArray(sources) && sources.length > 1
@@ -1089,11 +818,6 @@ const PromptModal = ({
             actions[0],
         [actions, role, promptScope, selectedActionId]
     );
-    const suggestions = useMemo(
-        () => getFollowUpSuggestions(role, selectedAction, targetLabel, promptScope),
-        [role, promptScope, selectedAction, targetLabel]
-    );
-    const compactSuggestions = useMemo(() => suggestions.slice(0, 3), [suggestions]);
     const expansionTargetOptions = useMemo(() => {
         const options = EXPANSION_TARGET_OPTIONS.filter((option) =>
             option.scopes.includes(promptScope)
@@ -1113,8 +837,10 @@ const PromptModal = ({
         () =>
             STARTER_GROUPS.map((group) => ({
                 ...group,
-                starters: scopedStarterTransformations.filter(
-                    (starter) => starterGroupId(starter) === group.id
+                starters: sortStarterRecipes(
+                    scopedStarterTransformations.filter(
+                        (starter) => starterGroupId(starter) === group.id
+                    )
                 )
             })).filter((group) => group.starters.length > 0),
         [scopedStarterTransformations]
@@ -1168,9 +894,31 @@ const PromptModal = ({
             promptOverridesAction
         };
     }, [customPrompt, profiles, promptScope, role, selectedAction, selectedVisual]);
+    const plannedDesiredOutputs = useMemo(
+        () =>
+            desiredOutputsForPrompt({
+                inferredShape: plannedRoute.outputShape,
+                prompt: customPrompt.trim()
+            }),
+        [customPrompt, plannedRoute.outputShape]
+    );
+    const isConnectedPackagePlanned = plannedDesiredOutputs.includes('connected_picture_package');
+    const resolvedOutputLabel = isConnectedPackagePlanned
+        ? selectedVisual === 'connected_picture_package'
+            ? 'Connected package'
+            : 'Auto -> connected package'
+        : selectedVisual === 'auto'
+          ? `Auto -> ${visualLabel(plannedRoute.outputShape)}`
+          : visualLabel(selectedVisual);
+    const suggestions = useMemo(
+        () => getFollowUpSuggestions(plannedRoute.role || role, plannedRoute.action || selectedAction, targetLabel, promptScope),
+        [plannedRoute.role, plannedRoute.action, role, promptScope, selectedAction, targetLabel]
+    );
+    const compactSuggestions = useMemo(() => suggestions.slice(0, 3), [suggestions]);
     const willSeedInitialGraph =
         scope === 'workspace' &&
         nodes.length === 0 &&
+        !isConnectedPackagePlanned &&
         selectedVisual !== 'no_visual' &&
         actionsThatDraftNodes.has(plannedRoute.action?.id);
     const contextUsedLabel = useMemo(() => {
@@ -1375,6 +1123,7 @@ const PromptModal = ({
                 initialEvidenceMode: selectedEvidenceMode,
                 initialCitationPolicy: selectedCitationPolicy,
                 initialChangeIntent,
+                initialSourceRefs: adHocSourceRefs,
                 initialContextSourceIds: selectedContextSourceIds,
                 initialContextSourceId: selectedContextSourceIds[0] || '',
                 onGenerationProgress
@@ -1475,6 +1224,8 @@ const PromptModal = ({
             action: effectiveAction,
             outputShape: inferredShape
         } = plannedRoute;
+        const desiredOutputs = desiredOutputsForPrompt({ inferredShape, prompt: localPrompt || effectiveAction.label });
+        const isConnectedPackageRequest = desiredOutputs.includes('connected_picture_package');
 
         if (effectiveAction.id === 'custom_prompt' && !localPrompt) {
             setStageMessage('Add a custom instruction before generating this preview.');
@@ -1495,7 +1246,14 @@ const PromptModal = ({
         updateStageContext([
             { label: 'Prompt', value: localPrompt || effectiveAction.label },
             { label: 'Role', value: effectiveRole.label },
-            { label: 'Output', value: visualLabel(selectedVisual) }
+            {
+                label: 'Output',
+                value: isConnectedPackageRequest
+                    ? 'Connected package'
+                    : selectedVisual === 'auto'
+                      ? visualLabel(inferredShape)
+                      : visualLabel(selectedVisual)
+            }
         ]);
         setStageDebug(null);
         const failPreflight = (error) => {
@@ -1525,7 +1283,7 @@ const PromptModal = ({
             sourceRefs =
                 scope === 'source'
                     ? selectedSourcePayload?.source_refs || []
-                    : targetData.sourceRefs || [];
+                    : [...(targetData.sourceRefs || []), ...adHocSourceRefs];
         } catch (error) {
             failPreflight(error);
             return;
@@ -1543,6 +1301,7 @@ const PromptModal = ({
             scope === 'workspace' &&
             nodes.length === 0 &&
             shouldDraftNode &&
+            !isConnectedPackageRequest &&
             selectedVisual !== 'no_visual';
         const promptText = localPrompt || effectiveAction.label;
         const changeIntent =
@@ -1558,6 +1317,7 @@ const PromptModal = ({
                 edges,
                 scope: normalizedScope,
                 sourceRefs,
+                adHocSourceRefs,
                 selectedSourcePayload,
                 activeDraftSession: activeAIDraftSession,
                 prompt: promptText,
@@ -1616,6 +1376,7 @@ const PromptModal = ({
                 prompt: promptText,
                 outputShape: inferredShape,
                 requestedVisual: selectedVisual,
+                requestedOutputs: desiredOutputs,
                 sourceRefs
             });
             if (localGuidedDraft?.draftNodes?.length) {
@@ -1654,6 +1415,7 @@ const PromptModal = ({
             draftNodes,
             draftEdges,
             draftAnnotations,
+            generatedArtifacts: localGuidedDraft?.generatedArtifacts || [],
             modelPolicy: selectedModel === 'auto' ? 'balanced' : 'explicit',
             selectedModel: selectedModel === 'auto' ? 'auto' : selectedModel,
             modelReason:
@@ -1665,7 +1427,7 @@ const PromptModal = ({
                 routed_role_id: effectiveRole.id,
                 action_label: effectiveAction.label,
                 output_shape: inferredShape,
-                requested_output_shapes: desiredOutputsForPrompt({ inferredShape, prompt: promptText }),
+                requested_output_shapes: desiredOutputs,
                 requested_visual: selectedVisual,
                 expansion_mode: selectedExpansionMode,
                 expansion_target: selectedExpansionTarget,
@@ -1708,6 +1470,7 @@ const PromptModal = ({
             draft_nodes: draftNodes,
             draft_edges: draftEdges,
             draft_annotations: draftAnnotations,
+            generated_artifacts: localGuidedDraft?.generatedArtifacts || [],
             validation_report: {
                 status: 'not_run',
                 message: 'Waiting for Agent A/C preview contract integration.'
@@ -1719,7 +1482,7 @@ const PromptModal = ({
             metadata: {
                 preview_mode: 'local_fallback',
                 output_shape: inferredShape,
-                requested_output_shapes: desiredOutputsForPrompt({ inferredShape, prompt: promptText }),
+                requested_output_shapes: desiredOutputs,
                 requested_visual: selectedVisual,
                 expansion_mode: selectedExpansionMode,
                 expansion_target: selectedExpansionTarget,
@@ -1882,7 +1645,6 @@ const PromptModal = ({
 
         try {
             const endpoint = flowId ? draftSessionEndpoint({ flowId }) : '';
-            const desiredOutputs = desiredOutputsForPrompt({ inferredShape, prompt: promptText });
             const requestPayload = buildAIDraftSessionRequestPayload({
                 role: effectiveRole,
                 action: effectiveAction,
@@ -1890,6 +1652,7 @@ const PromptModal = ({
                 prompt: promptText,
                 selectedModel,
                 selectedSourcePayload,
+                adHocSourceRefs,
                 desiredOutputs,
                 workspaceBrief: effectiveWorkspaceBrief,
                 memoryContext,
@@ -1959,7 +1722,6 @@ const PromptModal = ({
         } catch (error) {
             const detail = messageFromGenerationError(error);
             const endpoint = flowId ? draftSessionEndpoint({ flowId }) : '';
-            const desiredOutputs = desiredOutputsForPrompt({ inferredShape, prompt: promptText });
             updateGenerationProgress('Validating draft', 'The request returned an error; preparing the debug details.');
             const requestPayload = buildAIDraftSessionRequestPayload({
                 role: effectiveRole,
@@ -1968,6 +1730,7 @@ const PromptModal = ({
                 prompt: promptText,
                 selectedModel,
                 selectedSourcePayload,
+                adHocSourceRefs,
                 desiredOutputs,
                 workspaceBrief: effectiveWorkspaceBrief,
                 memoryContext,
@@ -2156,6 +1919,10 @@ const PromptModal = ({
                     </strong>
                 </div>
                 <div>
+                    <span>Output mode</span>
+                    <strong>{resolvedOutputLabel}</strong>
+                </div>
+                <div>
                     <span>Expansion plan</span>
                     <strong>{expansionPlanLabel}</strong>
                 </div>
@@ -2240,7 +2007,7 @@ const PromptModal = ({
                     />
                 </label>
                 <label>
-                    Target output
+                    Output mode
                     <select
                         value={selectedVisual}
                         onChange={(event) => setSelectedVisual(event.target.value)}
@@ -2251,6 +2018,11 @@ const PromptModal = ({
                             </option>
                         ))}
                     </select>
+                    {isConnectedPackagePlanned ? (
+                        <small className="ai-action-output-hint">
+                            Auto will stage a connected package: map, relationships, evidence, tasks, and repair targets.
+                        </small>
+                    ) : null}
                 </label>
                 <label>
                     Expansion
@@ -2456,6 +2228,8 @@ const PromptModal = ({
                 >
                     {isGeneratingPreview
                         ? generationStage || 'Preparing request'
+                        : isConnectedPackagePlanned
+                          ? 'Preview package'
                         : willSeedInitialGraph
                           ? 'Create initial graph'
                           : 'Preview changes'}

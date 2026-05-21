@@ -48,6 +48,19 @@ const ShellStatusBar = ({ actions = [], items = [], overrides = [], progress = n
                 <div
                     className={`shell-status-bar__progress shell-status-bar__progress--${visibleProgress.status || 'running'}`}
                     aria-label="AI generation progress"
+                    role={visibleProgress.onExpand ? 'button' : undefined}
+                    tabIndex={visibleProgress.onExpand ? 0 : undefined}
+                    title={visibleProgress.onExpand ? 'Double-click to expand AI progress' : undefined}
+                    onDoubleClick={visibleProgress.onExpand}
+                    onKeyDown={(event) => {
+                        if (!visibleProgress.onExpand) {
+                            return;
+                        }
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            visibleProgress.onExpand();
+                        }
+                    }}
                 >
                     <div className="shell-status-bar__progress-copy">
                         <span>{visibleProgress.scopeLabel || 'AI draft'}</span>
@@ -57,11 +70,26 @@ const ShellStatusBar = ({ actions = [], items = [], overrides = [], progress = n
                     <div className="shell-status-bar__progress-meter" aria-hidden="true">
                         <span style={{ width: `${Math.max(0, Math.min(Number(visibleProgress.progress) || 0, 100))}%` }} />
                     </div>
+                    {visibleProgress.onExpand ? (
+                        <button
+                            type="button"
+                            aria-label="Expand AI generation progress"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                visibleProgress.onExpand();
+                            }}
+                        >
+                            ^
+                        </button>
+                    ) : null}
                     {visibleProgress.onDismiss ? (
                         <button
                             type="button"
                             aria-label="Dismiss AI generation progress"
-                            onClick={visibleProgress.onDismiss}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                visibleProgress.onDismiss();
+                            }}
                         >
                             x
                         </button>

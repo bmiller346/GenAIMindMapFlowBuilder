@@ -523,6 +523,7 @@ const App = () => {
     const [isSourcesOpen, setIsSourcesOpen] = useState(false);
     const [isAiHelpersOpen, setIsAiHelpersOpen] = useState(false);
     const [aiGenerationProgress, setAiGenerationProgress] = useState(null);
+    const [isAiProgressExpanded, setIsAiProgressExpanded] = useState(false);
     const {
         leftPanelKind,
         workspaceDockActiveTab,
@@ -1490,39 +1491,37 @@ const App = () => {
         setSelectedBranchId(undefined);
         setInspectorNodeId(undefined);
         setInspectorEdgeId(undefined);
-        if (useWorkspaceShell) {
-            openShellAiGuide({
-                source: 'emptyCanvas',
-                initialPrompt: options?.initialPrompt || '',
-                initialVisual: options?.initialVisual || 'auto',
-                summary: 'Opened shell AI guide from the empty canvas.'
-            });
-            return;
-        }
         setIsAiHelpersOpen(false);
         shellActions.setRibbonTab('ai', { source: 'emptyCanvas' });
         shellActions.setActiveScope({ type: 'workspace' });
         pushNode(PromptModal, {
             scope: 'workspace',
             initialPrompt: options?.initialPrompt,
-            initialVisual: options?.initialVisual
+            initialVisual: options?.initialVisual || 'auto',
+            initialEvidenceMode: sourceLibrary.length ? 'uploaded_sources' : 'workspace',
+            initialCitationPolicy: sourceLibrary.length ? 'required' : 'preferred',
+            initialPromptPlaceholder:
+                'Describe what you want TraceSpace to build, explain, connect, or turn into a reviewable package.'
         });
         recordActivity({
             type: 'ai_action_picker_opened',
             title: 'Workspace Ask AI opened',
-            summary: 'Opened preview-first AI actions from the empty canvas.',
+            summary: useWorkspaceShell
+                ? 'Opened the freeform Ask AI composer from the empty canvas.'
+                : 'Opened preview-first AI actions from the empty canvas.',
             metadata: {
-                scope: 'workspace'
+                scope: 'workspace',
+                surface: useWorkspaceShell ? 'shell_prompt_modal' : 'modal'
             }
         });
     }, [
-        openShellAiGuide,
         pushNode,
         recordActivity,
         setInspectorEdgeId,
         setInspectorNodeId,
         setSelectedBranchId,
         shellActions,
+        sourceLibrary.length,
         useWorkspaceShell
     ]);
 
@@ -1600,8 +1599,8 @@ const App = () => {
     );
 
     const openShellWorkspaceAskAi = useCallback(() => {
-        openShellAiGuide({ source: 'header' });
-    }, [openShellAiGuide]);
+        openEmptyCanvasAskAi();
+    }, [openEmptyCanvasAskAi]);
 
     const openShellSourceAskAi = useCallback(
         (options = {}) => {
@@ -2268,6 +2267,7 @@ const App = () => {
                 title: aiProgressTitle,
                 latestStatus: aiGenerationProgress?.detail || aiGenerationProgress?.message,
                 scopeLabel: aiProgressScopeLabel,
+                onExpand: () => setIsAiProgressExpanded(true),
                 onDismiss: () => setAiGenerationProgress(null)
             } : null}
         />
@@ -2628,7 +2628,7 @@ const App = () => {
                     color={backgroundGridColor}
                     style={{ backgroundColor: canvasBackgroundColor }}
                 />
-                {aiGenerationProgress && !useWorkspaceShell ? (
+                {aiGenerationProgress && (!useWorkspaceShell || isAiProgressExpanded) ? (
                     <Panel
                         position="bottom-center"
                         className="ai-generation-progress-dock"
@@ -2648,6 +2648,7 @@ const App = () => {
                             contextItems={aiProgressContextItems}
                             events={aiProgressEvents}
                             showEventFeed
+                            defaultEventFeedOpen={useWorkspaceShell}
                             scopeLabel={aiProgressScopeLabel}
                             draftStateLabel={
                                 aiProgressStatus === 'failed'
@@ -2657,7 +2658,15 @@ const App = () => {
                                       : 'Pending review'
                             }
                             scopeDescription={aiProgressDescription}
-                            onDismiss={() => setAiGenerationProgress(null)}
+                            dismissLabel={useWorkspaceShell ? 'Back to status bar' : 'Dismiss progress'}
+                            dismissWhileRunning={useWorkspaceShell}
+                            onDismiss={() => {
+                                if (useWorkspaceShell) {
+                                    setIsAiProgressExpanded(false);
+                                    return;
+                                }
+                                setAiGenerationProgress(null);
+                            }}
                         />
                     </Panel>
                 ) : null}

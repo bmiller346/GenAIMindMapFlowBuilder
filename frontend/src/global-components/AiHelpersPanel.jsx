@@ -41,6 +41,13 @@ const SCOPE_OPTIONS = [
 ];
 
 const OUTPUT_PROMPT_DEFAULTS = {
+    'messy-context-to-view': {
+        role: 'workflow-mapper',
+        action: 'custom_prompt',
+        visual: 'auto',
+        prompt:
+            'Turn this messy context into the most useful connected picture package. Choose the right mix of map nodes, relationship edges, dependency flow, table rows, Sankey or chart lens, evidence rows, review tasks, source refs, assumptions, and repair targets. Keep source-backed items cited, mark weak or prompt-only paths needs_review, and make the result reviewable before acceptance.'
+    },
     'create-knowledge-graph': {
         role: 'standards-extractor',
         action: 'custom_prompt',
@@ -316,6 +323,17 @@ const AiHelpersPanel = ({
             name: 'AI Output Builder',
             permission: 'Creates new artifact previews; nothing is accepted until review.',
             actions: [
+                helperAction(
+                    'messy-context-to-view',
+                    'Messy context to view',
+                    'preview',
+                    'Ask',
+                    'Opened Ask AI with a connected picture package starter.',
+                    undefined,
+                    undefined,
+                    undefined,
+                    { allowEmptyWorkspace: true }
+                ),
                 helperAction(
                     'create-knowledge-graph',
                     'Create knowledge graph',

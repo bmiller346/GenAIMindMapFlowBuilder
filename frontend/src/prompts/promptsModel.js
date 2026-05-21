@@ -271,6 +271,16 @@ export const starterTransformations = [
         scopes: ['branch', 'workspace', 'source']
     },
     {
+        id: 'aec_code_lifecycle_package',
+        label: 'Code lifecycle map',
+        description: 'Connect codes, design phases, AHJ review, construction, testing, and closeout.',
+        prompt: 'Map this AEC code or standards context as a connected lifecycle model from early code basis through design, permitting, AHJ review, installation or CA, testing, and closeout. Show the dependencies among requirements, governing codes or standards, disciplines, deliverables, decisions, evidence, review tasks, assumptions, and source/citation repair targets. Use a connected picture package when multiple views are useful, and keep unsupported public code or standard claims marked needs_review until cited.',
+        visual: 'auto',
+        roleId: 'workflow-mapper',
+        actionId: 'custom_prompt',
+        scopes: ['branch', 'workspace', 'source']
+    },
+    {
         id: 'process_to_flowchart',
         label: 'Process to flowchart',
         description: 'Map steps, decisions, dependencies, and handoffs.',

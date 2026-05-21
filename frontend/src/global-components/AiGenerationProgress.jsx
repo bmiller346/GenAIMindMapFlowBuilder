@@ -102,6 +102,8 @@ const AiGenerationProgress = ({
     onRetry,
     retryLabel = 'Retry',
     onDismiss,
+    dismissLabel = 'Dismiss progress',
+    dismissWhileRunning = false,
     className = ''
 }) => {
     const [internalCollapsed, setInternalCollapsed] = useState(defaultCollapsed);
@@ -147,7 +149,9 @@ const AiGenerationProgress = ({
         'Preparing a draft for review.';
     const statusLabel = STATUS_LABELS[status] || STATUS_LABELS.running;
     const canShowFeed = showEventFeed && visibleEvents.length > 0;
-    const canDismiss = typeof onDismiss === 'function' && ['completed', 'failed', 'canceled'].includes(status);
+    const canDismiss =
+        typeof onDismiss === 'function' &&
+        (dismissWhileRunning || ['completed', 'failed', 'canceled'].includes(status));
     const canRetry = typeof onRetry === 'function' && status === 'failed';
 
     const setCollapsed = (nextCollapsed) => {
@@ -222,11 +226,11 @@ const AiGenerationProgress = ({
                             type="button"
                             className="ai-generation-progress__dismiss"
                             onClick={onDismiss}
-                            title="Dismiss progress"
+                            title={dismissLabel}
                             aria-label="Dismiss AI progress"
                         >
                             <FiX />
-                            <span>Dismiss</span>
+                            <span>{dismissLabel}</span>
                         </button>
                     ) : null}
                 </div>
