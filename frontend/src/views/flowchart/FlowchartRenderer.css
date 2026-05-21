@@ -3,8 +3,9 @@
 }
 
 .canvas-flowchart-diagram-canvas {
+  position: relative;
   min-height: 100%;
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--question-border) 82%, transparent);
   border-radius: 0.5rem;
   background:
@@ -12,12 +13,20 @@
     linear-gradient(90deg, color-mix(in srgb, var(--question-border) 28%, transparent) 1px, transparent 1px),
     color-mix(in srgb, var(--modal-container-color) 72%, var(--bg-color, #111827));
   background-size: 28px 28px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.canvas-flowchart-diagram-canvas:active {
+  cursor: grabbing;
 }
 
 .canvas-flowchart-diagram-stage {
   position: relative;
   min-width: 100%;
   isolation: isolate;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .canvas-flowchart-diagram-svg {
@@ -180,6 +189,76 @@
   text-decoration: underline;
 }
 
+.canvas-flowchart-viewport-controls {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 8;
+  display: grid;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--question-border) 72%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--modal-container-color) 92%, #000);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
+.canvas-flowchart-viewport-controls button {
+  display: grid;
+  width: 2.1rem;
+  height: 2.1rem;
+  place-items: center;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--question-border) 56%, transparent);
+  background: transparent;
+  color: var(--font-color);
+  cursor: pointer;
+}
+
+.canvas-flowchart-viewport-controls button:last-child {
+  border-bottom: 0;
+}
+
+.canvas-flowchart-viewport-controls button:hover,
+.canvas-flowchart-viewport-controls button:focus-visible {
+  background: color-mix(in srgb, #58a6ff 18%, transparent);
+}
+
+.canvas-flowchart-minimap {
+  position: absolute;
+  right: 1rem;
+  bottom: 8rem;
+  z-index: 7;
+  width: 11rem;
+  height: 7.25rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--question-border) 62%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--modal-container-color) 94%, #000);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
+  pointer-events: none;
+}
+
+.canvas-flowchart-minimap svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-flowchart-minimap-bg {
+  fill: color-mix(in srgb, var(--input-bar-color) 72%, #000);
+}
+
+.canvas-flowchart-minimap-node {
+  fill: color-mix(in srgb, #b77bff 82%, #58a6ff);
+  opacity: 0.92;
+}
+
+.canvas-flowchart-minimap-window {
+  fill: color-mix(in srgb, #58a6ff 12%, transparent);
+  stroke: color-mix(in srgb, #58a6ff 82%, var(--font-color));
+  stroke-width: 1.6;
+}
+
 .canvas-flowchart-diagram-edge-label {
   position: absolute;
   z-index: 3;
@@ -235,5 +314,9 @@
 
   .canvas-flowchart-diagram-canvas {
     min-height: 24rem;
+  }
+
+  .canvas-flowchart-minimap {
+    display: none;
   }
 }

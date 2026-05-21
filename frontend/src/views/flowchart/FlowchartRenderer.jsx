@@ -1,6 +1,8 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FiMaximize, FiMinus, FiPlus } from 'react-icons/fi';
 import FlowchartShape from './FlowchartShape.jsx';
 import { createFlowchartLayout, summaryText } from './flowchartLayout.js';
+import TrustStateBadges from '../../components/TrustStateBadges';
 import './FlowchartRenderer.css';
 
 const IMPROVE_FLOW_PROMPT =
@@ -13,6 +15,10 @@ const connectorTitle = (connector = {}) =>
 
 const branchClass = (connector = {}) =>
     `canvas-flowchart-diagram-edge-label canvas-flowchart-diagram-edge-label-${connector.branch_kind || 'default'}`;
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 1.6;
 
 const FlowchartNode = ({ step, onOpenNode, onAddStep, onAddDecisionBranch }) => {
     const description = summaryText(step);
@@ -48,7 +54,15 @@ const FlowchartNode = ({ step, onOpenNode, onAddStep, onAddDecisionBranch }) => 
                 <button type="button" onClick={() => onOpenNode?.(step.id)}>
                     {step.title}
                 </button>
-                <small>{step.source_backed ? 'Source-backed' : 'Needs source review'}</small>
+                <small>
+                    <TrustStateBadges
+                        subject={{
+                            ...step,
+                            source_backed: step.source_backed,
+                            status: step.review_state || step.status
+                        }}
+                    />
+                </small>
                 <div className="canvas-flowchart-diagram-node-actions">
                     <button
                         type="button"
@@ -97,6 +111,119 @@ const FlowchartRenderer = ({
 }) => {
     const steps = Array.isArray(flowchart.steps) ? flowchart.steps : [];
     const layout = useMemo(() => createFlowchartLayout(flowchart), [flowchart]);
+    const canvasRef = useRef(null);
+    const dragRef = useRef(null);
+    const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+    const [viewport, setViewport] = useState({ x: 0, y: 0, zoom: 1 });
+
+    const fitView = useCallback(() => {
+        const width = canvasSize.width || canvasRef.current?.clientWidth || 0;
+        const height = canvasSize.height || canvasRef.current?.clientHeight || 0;
+        if (!width || !height || !layout.width || !layout.height) {
+            return;
+        }
+        const zoom = clamp(
+            Math.min((width - 64) / layout.width, (height - 64) / layout.height),
+            MIN_ZOOM,
+            1
+        );
+        setViewport({
+            x: Math.round((width - layout.width * zoom) / 2),
+            y: Math.round((height - layout.height * zoom) / 2),
+            zoom
+        });
+    }, [canvasSize.height, canvasSize.width, layout.height, layout.width]);
+
+    useEffect(() => {
+        const element = canvasRef.current;
+        if (!element) {
+            return undefined;
+        }
+        const updateSize = () =>
+            setCanvasSize({
+                width: element.clientWidth,
+                height: element.clientHeight
+            });
+        updateSize();
+        const resizeObserver = new ResizeObserver(updateSize);
+        resizeObserver.observe(element);
+        return () => resizeObserver.disconnect();
+    }, []);
+
+    useEffect(() => {
+        fitView();
+    }, [fitView]);
+
+    const zoomBy = useCallback((delta) => {
+        setViewport((current) => ({
+            ...current,
+            zoom: clamp(Number((current.zoom + delta).toFixed(2)), MIN_ZOOM, MAX_ZOOM)
+        }));
+    }, []);
+
+    const handlePointerDown = useCallback((event) => {
+        if (event.target.closest('button')) {
+            return;
+        }
+        event.currentTarget.setPointerCapture(event.pointerId);
+        dragRef.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startY: event.clientY,
+            viewport
+        };
+    }, [viewport]);
+
+    const handlePointerMove = useCallback((event) => {
+        const drag = dragRef.current;
+        if (!drag || drag.pointerId !== event.pointerId) {
+            return;
+        }
+        setViewport({
+            ...drag.viewport,
+            x: drag.viewport.x + event.clientX - drag.startX,
+            y: drag.viewport.y + event.clientY - drag.startY
+        });
+    }, []);
+
+    const handlePointerUp = useCallback((event) => {
+        const drag = dragRef.current;
+        if (drag?.pointerId === event.pointerId) {
+            dragRef.current = null;
+        }
+    }, []);
+
+    const minimap = useMemo(() => {
+        const width = 176;
+        const height = 116;
+        const scale = Math.min(width / Math.max(layout.width, 1), height / Math.max(layout.height, 1));
+        const diagramWidth = layout.width * scale;
+        const diagramHeight = layout.height * scale;
+        const offsetX = (width - diagramWidth) / 2;
+        const offsetY = (height - diagramHeight) / 2;
+        const visibleWidth = (canvasSize.width || 0) / viewport.zoom;
+        const visibleHeight = (canvasSize.height || 0) / viewport.zoom;
+        return {
+            width,
+            height,
+            scale,
+            offsetX,
+            offsetY,
+            nodes: layout.nodes.map((node) => ({
+                id: node.id,
+                x: offsetX + node.x * scale,
+                y: offsetY + node.y * scale,
+                width: Math.max(2, node.width * scale),
+                height: Math.max(2, node.height * scale)
+            })),
+            viewportRect: {
+                x: clamp(offsetX + (-viewport.x / viewport.zoom) * scale, 0, width),
+                y: clamp(offsetY + (-viewport.y / viewport.zoom) * scale, 0, height),
+                width: clamp(visibleWidth * scale, 8, width),
+                height: clamp(visibleHeight * scale, 8, height)
+            }
+        };
+    }, [canvasSize.height, canvasSize.width, layout.height, layout.nodes, layout.width, viewport.x, viewport.y, viewport.zoom]);
 
     if (!steps.length) {
         return (
@@ -132,13 +259,22 @@ const FlowchartRenderer = ({
     return (
         <div className="canvas-flowchart-view canvas-flowchart-diagram-view" aria-label="Flowchart">
             <div
+                ref={canvasRef}
                 className="canvas-flowchart-diagram-canvas"
                 role="group"
                 aria-label={`${flowchart.metadata?.step_count || steps.length} step flowchart with ${flowchart.metadata?.connector_count || 0} connector paths`}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerUp}
             >
                 <div
                     className="canvas-flowchart-diagram-stage"
-                    style={{ width: `${layout.width}px`, height: `${layout.height}px` }}
+                    style={{
+                        width: `${layout.width}px`,
+                        height: `${layout.height}px`,
+                        transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`
+                    }}
                 >
                     <svg
                         className="canvas-flowchart-diagram-svg"
@@ -201,6 +337,43 @@ const FlowchartRenderer = ({
                         />
                     ))}
                 </div>
+                <div className="canvas-flowchart-viewport-controls" aria-label="Flowchart zoom controls">
+                    <button type="button" onClick={() => zoomBy(0.12)} aria-label="Zoom in">
+                        <FiPlus aria-hidden="true" />
+                    </button>
+                    <button type="button" onClick={() => zoomBy(-0.12)} aria-label="Zoom out">
+                        <FiMinus aria-hidden="true" />
+                    </button>
+                    <button type="button" onClick={fitView} aria-label="Fit flowchart">
+                        <FiMaximize aria-hidden="true" />
+                    </button>
+                </div>
+                {layout.nodes.length >= 5 ? (
+                    <div className="canvas-flowchart-minimap" aria-hidden="true">
+                        <svg viewBox={`0 0 ${minimap.width} ${minimap.height}`} focusable="false">
+                            <rect className="canvas-flowchart-minimap-bg" x="0" y="0" width={minimap.width} height={minimap.height} rx="7" />
+                            {minimap.nodes.map((node) => (
+                                <rect
+                                    key={node.id}
+                                    className="canvas-flowchart-minimap-node"
+                                    x={node.x}
+                                    y={node.y}
+                                    width={node.width}
+                                    height={node.height}
+                                    rx="1.5"
+                                />
+                            ))}
+                            <rect
+                                className="canvas-flowchart-minimap-window"
+                                x={minimap.viewportRect.x}
+                                y={minimap.viewportRect.y}
+                                width={minimap.viewportRect.width}
+                                height={minimap.viewportRect.height}
+                                rx="3"
+                            />
+                        </svg>
+                    </div>
+                ) : null}
             </div>
             <aside className="canvas-flowchart-summary">
                 <strong>Flow signals</strong>

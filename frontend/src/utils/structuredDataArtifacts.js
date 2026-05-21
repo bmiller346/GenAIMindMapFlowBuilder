@@ -1,5 +1,7 @@
 const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 
+const cloneArray = (value) => (Array.isArray(value) ? structuredClone(value).filter(Boolean) : []);
+
 const firstText = (...values) =>
     values
         .map((value) => (typeof value === 'string' ? value.trim() : ''))
@@ -12,6 +14,211 @@ const artifactTypes = (artifacts = []) =>
 
 const metadataValue = (metadata = {}, sourceRefs = [], key) =>
     metadata?.[key] ?? sourceRefs.find((ref) => ref?.[key] !== undefined)?.[key] ?? '';
+
+const REPAIR_FIELD_KEYS = [
+    'source',
+    'target',
+    'from',
+    'to',
+    'value',
+    'weight',
+    'count',
+    'amount',
+    'metric',
+    'metric_label',
+    'stage',
+    'group',
+    'notes',
+    'confidence',
+    'review_state',
+    'source_refs',
+    'evidence_status',
+    'citation_status',
+    'source_policy',
+    'citation_query',
+    'evidence_input_hint',
+    'source_input_hint'
+];
+
+const repairPayload = (repair = {}) => {
+    if (!repair || typeof repair !== 'object') {
+        return {};
+    }
+    const explicit =
+        repair.fields ||
+        repair.row_fields ||
+        repair.corrected_fields ||
+        repair.corrected_row ||
+        repair.row ||
+        repair.item;
+    return explicit && typeof explicit === 'object' ? explicit : repair;
+};
+
+const repairPatchForRow = (repair = {}) => {
+    const payload = repairPayload(repair);
+    const patch = {};
+    REPAIR_FIELD_KEYS.forEach((key) => {
+        if (payload[key] !== undefined) {
+            patch[key] =
+                key === 'source_refs'
+                    ? cloneArray(payload[key])
+                    : structuredClone(payload[key]);
+        }
+    });
+    if (repair.source_refs !== undefined && patch.source_refs === undefined) {
+        patch.source_refs = cloneArray(repair.source_refs);
+    }
+    if (repair.review_state !== undefined && patch.review_state === undefined) {
+        patch.review_state = repair.review_state;
+    }
+    if (patch.source_refs !== undefined) {
+        const citationStatus = patch.source_refs.length ? 'source_backed' : 'needs_source';
+        patch.evidence_status = payload.evidence_status || repair.evidence_status || citationStatus;
+        patch.citation_status = payload.citation_status || repair.citation_status || citationStatus;
+        patch.source_policy =
+            payload.source_policy ||
+            repair.source_policy ||
+            (patch.source_refs.length ? 'cited' : 'reviewer_source_required');
+    }
+    if (patch.review_state === undefined && patch.source_refs !== undefined) {
+        patch.review_state = patch.source_refs.length ? 'source_backed' : 'needs_review';
+    }
+    return patch;
+};
+
+const targetValue = (target = {}, repair = {}, key) =>
+    target?.[key] ?? repair?.[key] ?? repairPayload(repair)?.[key];
+
+const targetRowIndexes = (target = {}, repair = {}) => [
+    ...(Array.isArray(target.rowIndexes) ? target.rowIndexes : []),
+    ...(Array.isArray(target.represented_row_indexes) ? target.represented_row_indexes : []),
+    ...(Array.isArray(repair.rowIndexes) ? repair.rowIndexes : []),
+    ...(Array.isArray(repair.represented_row_indexes) ? repair.represented_row_indexes : []),
+    ...(Array.isArray(repairPayload(repair).represented_row_indexes)
+        ? repairPayload(repair).represented_row_indexes
+        : [])
+]
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value >= 0);
+
+export const normalizeEvidenceRepairTarget = (target = {}, repair = {}) => ({
+    evidence_item_id: firstText(
+        targetValue(target, repair, 'evidence_item_id'),
+        targetValue(target, repair, 'evidenceItemId')
+    ),
+    row_id: firstText(targetValue(target, repair, 'row_id'), targetValue(target, repair, 'rowId')),
+    artifact_id: firstText(
+        targetValue(target, repair, 'artifact_id'),
+        targetValue(target, repair, 'artifactId')
+    ),
+    rowIndex: Number.isInteger(Number(targetValue(target, repair, 'rowIndex')))
+        ? Number(targetValue(target, repair, 'rowIndex'))
+        : null,
+    rowIndexes: Array.from(new Set(targetRowIndexes(target, repair))),
+    source: firstText(targetValue(target, repair, 'source')),
+    target: firstText(targetValue(target, repair, 'target')),
+    source_refs: cloneArray(targetValue(target, repair, 'source_refs')),
+    review_state: firstText(targetValue(target, repair, 'review_state'))
+});
+
+const rowMatchesRepairTarget = (row = {}, index, target = {}, repair = {}) => {
+    const normalizedTarget = normalizeEvidenceRepairTarget(target, repair);
+    if (Number.isInteger(normalizedTarget.rowIndex) && normalizedTarget.rowIndex === index) {
+        return true;
+    }
+    if (normalizedTarget.rowIndexes.includes(index)) {
+        return true;
+    }
+
+    const ids = [row.row_id, row.evidence_item_id, row.id]
+        .map((value) => String(value || ''))
+        .filter(Boolean);
+    const targetIds = [
+        normalizedTarget.row_id,
+        normalizedTarget.evidence_item_id,
+        targetValue(target, repair, 'id')
+    ]
+        .map((value) => String(value || ''))
+        .filter(Boolean);
+    if (ids.length && targetIds.some((id) => ids.includes(id))) {
+        return true;
+    }
+
+    const source = String(normalizedTarget.source || '').trim();
+    const targetLabel = String(normalizedTarget.target || '').trim();
+    return Boolean(
+        source &&
+            targetLabel &&
+            String(row.source || '').trim() === source &&
+            String(row.target || '').trim() === targetLabel
+    );
+};
+
+const patchRows = (rows = [], target = {}, repair = {}) => {
+    if (!Array.isArray(rows)) {
+        return { rows, applied: false, patchedIndexes: [] };
+    }
+    const patch = repairPatchForRow(repair);
+    if (!Object.keys(patch).length) {
+        return { rows, applied: false, patchedIndexes: [] };
+    }
+    const patchedIndexes = [];
+    const allowMultiple = normalizeEvidenceRepairTarget(target, repair).rowIndexes.length > 0;
+    const nextRows = rows.map((row, index) => {
+        if (!allowMultiple && patchedIndexes.length) {
+            return row;
+        }
+        if (!rowMatchesRepairTarget(row, index, target, repair)) {
+            return row;
+        }
+        patchedIndexes.push(index);
+        return {
+            ...row,
+            ...patch
+        };
+    });
+    return {
+        rows: patchedIndexes.length ? nextRows : rows,
+        applied: patchedIndexes.length > 0,
+        patchedIndexes
+    };
+};
+
+const patchArtifactRows = (artifact = {}, target = {}, repair = {}) => {
+    if (!artifact || typeof artifact !== 'object') {
+        return { artifact, applied: false };
+    }
+    const data = artifact.data && typeof artifact.data === 'object' ? artifact.data : {};
+    const rowKey =
+        Array.isArray(data.rows) &&
+        ['data_table', 'structured_data_analysis'].includes(artifact.artifact_type)
+            ? 'rows'
+            : Array.isArray(data.data_rows)
+              ? 'data_rows'
+              : '';
+    if (!rowKey) {
+        return { artifact, applied: false };
+    }
+    const result = patchRows(data[rowKey], target, repair);
+    if (!result.applied) {
+        return { artifact, applied: false };
+    }
+    const nextData = {
+        ...data,
+        [rowKey]: result.rows
+    };
+    if (rowKey === 'rows') {
+        nextData.row_count = result.rows.length;
+    }
+    return {
+        artifact: {
+            ...artifact,
+            data: nextData
+        },
+        applied: true,
+        patchedIndexes: result.patchedIndexes
+    };
+};
 
 export const getStructuredDataArtifactContext = (data = {}) => {
     const nestedData = data.data && typeof data.data === 'object' ? data.data : {};
@@ -100,6 +307,53 @@ export const getStructuredDataArtifactContext = (data = {}) => {
         accepted: asArray(data.local_preview_acceptances).some(
             (acceptance) => acceptance?.flow === 'structured_data_artifact' && acceptance.accepted
         )
+    };
+};
+
+export const applyStructuredEvidenceRepair = (data = {}, { target = {}, repair = {} } = {}) => {
+    const nestedData = data.data && typeof data.data === 'object' ? data.data : {};
+    const dfResult = patchRows(data.df, target, repair);
+    const nestedDfResult = patchRows(nestedData.df, target, repair);
+    const artifactResults = asArray(data.generated_artifacts || nestedData.generated_artifacts).map(
+        (artifact) => patchArtifactRows(artifact, target, repair)
+    );
+    const artifactsApplied = artifactResults.some((result) => result.applied);
+    const patchedArtifacts = artifactsApplied
+        ? artifactResults.map((result) => result.artifact)
+        : data.generated_artifacts || nestedData.generated_artifacts;
+    const applied = dfResult.applied || nestedDfResult.applied || artifactsApplied;
+
+    if (!applied) {
+        return {
+            data,
+            applied: false,
+            patchedRowIndexes: []
+        };
+    }
+
+    const patchedRowIndexes = Array.from(
+        new Set([
+            ...dfResult.patchedIndexes,
+            ...nestedDfResult.patchedIndexes,
+            ...artifactResults.flatMap((result) => result.patchedIndexes || [])
+        ])
+    );
+
+    const nextNestedData = {
+        ...nestedData,
+        ...(nestedDfResult.applied ? { df: nestedDfResult.rows } : {}),
+        generated_artifacts: patchedArtifacts
+    };
+
+    return {
+        data: {
+            ...data,
+            ...(dfResult.applied ? { df: dfResult.rows } : {}),
+            generated_artifacts: patchedArtifacts,
+            data: nextNestedData
+        },
+        applied: true,
+        patchedRowIndexes
     };
 };
 

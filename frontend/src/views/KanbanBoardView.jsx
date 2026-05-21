@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import TrustStateBadges from '../components/TrustStateBadges';
 
 const sourceLabel = (node) => {
     if (node.structured_evidence?.table_name || node.structured_evidence?.query_id) {
@@ -37,7 +38,6 @@ const evidenceChips = (row) => {
         return [];
     }
     return [
-        evidence.source_backed ? 'Source-backed' : 'Needs source review',
         evidence.table_name || '',
         evidence.row_count ? `${evidence.row_count} rows` : '',
         evidence.query_id || ''
@@ -145,6 +145,13 @@ const KanbanBoardView = ({ columns = [], onOpenNode, onMoveTask }) => {
                                     </div>
                                     {row.structured_evidence ? (
                                         <div className="canvas-kanban-evidence">
+                                            <TrustStateBadges
+                                                subject={{
+                                                    ...row,
+                                                    status: row.review_state || row.status,
+                                                    structured_evidence: row.structured_evidence
+                                                }}
+                                            />
                                             <div className="canvas-kanban-evidence-chips">
                                                 {evidenceChips(row).map((item) => (
                                                     <span key={item}>{item}</span>

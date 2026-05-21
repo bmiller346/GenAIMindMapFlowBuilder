@@ -646,19 +646,23 @@ export const buildLocalSankeyDraft = ({
     };
 };
 
-const outputShapeFromContext = ({ session = {}, revision = {}, outputShape = '', requestedVisual = '' } = {}) =>
-    [
+const outputShapeFromContext = ({ session = {}, revision = {}, outputShape = '', requestedVisual = '', requestedOutputs = [] } = {}) => {
+    const candidates = [
         outputShape,
         requestedVisual,
         revision.metadata?.output_shape,
         revision.metadata?.requested_visual,
         session.metadata?.output_shape,
         session.metadata?.requested_visual,
+        ...asArray(requestedOutputs),
         ...asArray(revision.metadata?.requested_output_shapes),
         ...asArray(session.metadata?.requested_output_shapes)
-    ]
-        .map((value) => String(value || '').trim())
-        .find(Boolean) || 'mind_map';
+    ].map((value) => String(value || '').trim());
+    if (candidates.includes('connected_picture_package')) {
+        return 'connected_picture_package';
+    }
+    return candidates.find(Boolean) || 'mind_map';
+};
 
 const starterNeedsContext = (prompt = '') =>
     /\b(source-backed|workspace|source context|selected pdf|selected source|this branch|this context|these requirements|these meeting notes|these standards files|this document context)\b/i.test(
@@ -699,6 +703,7 @@ const labelForOutput = (shape = '') =>
         software_overlap_report: 'Software overlap',
         missing_info_report: 'Missing information',
         implementation_handoff_package: 'Handoff package',
+        connected_picture_package: 'Connected package',
         executive_summary: 'Executive summary',
         news_article: 'News article',
         newsletter: 'Newsletter',
@@ -707,6 +712,14 @@ const labelForOutput = (shape = '') =>
 
 const branchDefinitionsForOutput = (shape = '', topic = '') => {
     const defaultTopic = topic || 'the request';
+    if (shape === 'connected_picture_package') {
+        return [
+            ['Code basis and phases', `Frame ${defaultTopic} across SD, DD, CD, permitting, CA, testing, and closeout.`, 'category'],
+            ['Requirement triggers and dependencies', 'Connect governing codes, standards, AHJ review, design decisions, and discipline handoffs.', 'concept'],
+            ['Evidence rows and citation repairs', 'List the public code claims, assumptions, source gaps, and URLs or uploaded sources needed for correction.', 'question'],
+            ['Review tasks and acceptance gates', 'Turn weak paths into review tasks before anything is treated as source-backed.', 'task']
+        ];
+    }
     if (['checklist', 'tasks', 'kanban'].includes(shape)) {
         return [
             ['Confirm scope and acceptance criteria', `Clarify what ${defaultTopic} must accomplish.`, 'task'],
@@ -762,6 +775,7 @@ export const buildLocalGuidedFallbackDraft = ({
     revision = {},
     outputShape = '',
     requestedVisual = '',
+    requestedOutputs = [],
     sourceRefs = [],
     now = Date.now()
 } = {}) => {
@@ -771,7 +785,7 @@ export const buildLocalGuidedFallbackDraft = ({
     }
 
     const topic = topicFromPrompt(prompt);
-    const shape = outputShapeFromContext({ session, revision, outputShape, requestedVisual });
+    const shape = outputShapeFromContext({ session, revision, outputShape, requestedVisual, requestedOutputs });
     if (!topic) {
         return starterNeedsContext(priorPrompt || prompt)
             ? {
@@ -828,6 +842,10 @@ export const buildLocalGuidedFallbackDraft = ({
             item_index: index + 1
         }
     }));
+    const generatedArtifacts =
+        shape === 'connected_picture_package'
+            ? [buildConnectedPackageArtifact({ rootNode, childNodes, topic, refs, now })]
+            : [];
 
     return {
         draftNodes: [rootNode, ...childNodes],
@@ -845,6 +863,237 @@ export const buildLocalGuidedFallbackDraft = ({
                     'This draft was created locally because model generation was unavailable. Treat it as structure to edit, cite, or replace with source-backed output.',
                 source_refs: refs
             }
-        ]
+        ],
+        generatedArtifacts
+    };
+};
+
+const packageCommon = ({ id, packageId, refs, reviewState, title, assumptions = [], metadata = {} }) => ({
+    id,
+    package_id: packageId,
+    package_item_id: id,
+    title,
+    status: reviewState,
+    review_state: reviewState,
+    needs_review: reviewState !== 'source_backed',
+    required_sibling_ids: [],
+    dependency_link_ids: [],
+    source_refs: refs,
+    assumptions,
+    metadata
+});
+
+const buildConnectedPackageArtifact = ({ rootNode, childNodes = [], topic = '', refs = [], now = Date.now() }) => {
+    const packageId = `connected-package-${now}`;
+    const reviewState = refs.length ? 'source_backed' : 'needs_review';
+    const assumptions = refs.length
+        ? []
+        : ['This is a local fallback package. Add uploaded sources or URL citations before treating code claims as evidence.'];
+    const primaryNodes = [rootNode, ...childNodes].map((node) => ({
+        ...packageCommon({
+            id: `pkg-node-${node.id}`,
+            packageId,
+            refs,
+            reviewState,
+            title: node.title,
+            assumptions,
+            metadata: {
+                local_fallback: 'connected_picture_package',
+                source_node_id: node.id
+            }
+        }),
+        node_id: node.id,
+        summary: node.summary || '',
+        node_type: node.node_type || 'concept'
+    }));
+    const relationshipEdges = childNodes.map((node, index) => ({
+        id: `pkg-edge-${rootNode.id}-${node.id}`,
+        package_id: packageId,
+        package_item_id: `pkg-edge-${rootNode.id}-${node.id}`,
+        source_node_id: rootNode.id,
+        target_node_id: node.id,
+        source_package_item_id: `pkg-node-${rootNode.id}`,
+        target_package_item_id: `pkg-node-${node.id}`,
+        relationship_type: index === 0 ? 'frames' : index === 1 ? 'depends_on' : index === 2 ? 'needs_evidence' : 'requires_review',
+        source_signal: 'local_fallback',
+        confidence: refs.length ? 'medium' : 'low',
+        rationale: node.summary || '',
+        review_state: reviewState,
+        needs_review: reviewState !== 'source_backed',
+        required_sibling_ids: [],
+        dependency_link_ids: [],
+        source_refs: refs,
+        assumptions,
+        metadata: {
+            local_fallback: 'connected_picture_package'
+        }
+    }));
+    const evidenceId = `pkg-evidence-${now}`;
+    const repairId = `pkg-repair-${now}`;
+    return {
+        id: packageId,
+        artifact_type: 'connected_picture_package',
+        title: `Connected package: ${topic || rootNode.title}`,
+        status: reviewState,
+        source_refs: refs,
+        assumptions,
+        data: {
+            package_id: packageId,
+            primary_nodes: primaryNodes,
+            relationship_edges: relationshipEdges,
+            view_lenses: [
+                {
+                    ...packageCommon({
+                        id: `pkg-lens-map-${now}`,
+                        packageId,
+                        refs,
+                        reviewState,
+                        title: 'Lifecycle map',
+                        assumptions,
+                        metadata: { local_fallback: 'connected_picture_package' }
+                    }),
+                    lens_type: 'map',
+                    description: 'Map the lifecycle phases, dependencies, evidence, and review tasks.',
+                    node_ids: [rootNode.id, ...childNodes.map((node) => node.id)],
+                    edge_ids: relationshipEdges.map((edge) => edge.id)
+                },
+                {
+                    ...packageCommon({
+                        id: `pkg-lens-flow-${now}`,
+                        packageId,
+                        refs,
+                        reviewState,
+                        title: 'Dependency flow',
+                        assumptions,
+                        metadata: { local_fallback: 'connected_picture_package' }
+                    }),
+                    lens_type: 'dependency_flow',
+                    description: 'Use this lens for flowchart, Sankey, or chart views once source-backed rows exist.',
+                    node_ids: [rootNode.id, ...childNodes.map((node) => node.id)],
+                    edge_ids: relationshipEdges.map((edge) => edge.id)
+                }
+            ],
+            structured_evidence: [
+                {
+                    ...packageCommon({
+                        id: evidenceId,
+                        packageId,
+                        refs,
+                        reviewState,
+                        title: 'Citation-ready evidence rows',
+                        assumptions,
+                        metadata: { local_fallback: 'connected_picture_package' }
+                    }),
+                    evidence_type: 'source_gap_table',
+                    summary: refs.length
+                        ? 'Review supplied source references against each lifecycle path.'
+                        : 'Add source URLs, uploaded excerpts, AHJ comments, or adopted-code references for each lifecycle path.'
+                }
+            ],
+            evidence_links: childNodes.map((node) => ({
+                id: `pkg-evidence-link-${node.id}`,
+                package_id: packageId,
+                package_item_id: `pkg-evidence-link-${node.id}`,
+                source_evidence_id: evidenceId,
+                target_type: 'primary_node',
+                target_id: node.id,
+                target_package_item_id: `pkg-node-${node.id}`,
+                relationship_type: 'supports_or_repairs',
+                rationale: 'Source support is required before accepting code or standards claims.',
+                review_state: reviewState,
+                needs_review: reviewState !== 'source_backed',
+                required_sibling_ids: [],
+                dependency_link_ids: [],
+                source_refs: refs,
+                assumptions,
+                metadata: { local_fallback: 'connected_picture_package' }
+            })),
+            tasks: [
+                {
+                    ...packageCommon({
+                        id: `pkg-task-source-pack-${now}`,
+                        packageId,
+                        refs,
+                        reviewState,
+                        title: 'Attach source pack and AHJ/code references',
+                        assumptions,
+                        metadata: { local_fallback: 'connected_picture_package' }
+                    }),
+                    description: 'Upload code excerpts, public URLs, project criteria, AHJ comments, or source documents and rerun/correct the weak paths.'
+                }
+            ],
+            risks: [
+                {
+                    ...packageCommon({
+                        id: `pkg-risk-unsourced-code-${now}`,
+                        packageId,
+                        refs,
+                        reviewState: 'needs_review',
+                        title: 'Unsourced public code guidance',
+                        assumptions,
+                        metadata: { local_fallback: 'connected_picture_package' }
+                    }),
+                    description: 'Public code and life-safety claims require citation and SME/AHJ review.'
+                }
+            ],
+            decisions: [],
+            repair_targets: [
+                {
+                    id: repairId,
+                    package_id: packageId,
+                    package_item_id: repairId,
+                    target_type: 'connected_picture_package',
+                    target_id: packageId,
+                    target_package_item_id: packageId,
+                    issue: refs.length ? 'Verify citation relevance.' : 'Missing source support for public code and lifecycle claims.',
+                    repair_action: 'Upload source excerpts or paste authoritative URLs, then ask AI to correct the specific package item.',
+                    status: 'needs_review',
+                    review_state: 'needs_review',
+                    needs_review: true,
+                    required_sibling_ids: [],
+                    dependency_link_ids: [],
+                    source_refs: refs,
+                    assumptions,
+                    metadata: { local_fallback: 'connected_picture_package' }
+                }
+            ],
+            source_refs: refs,
+            assumptions,
+            acceptance_groups: [
+                {
+                    id: `pkg-group-map-${now}`,
+                    package_id: packageId,
+                    title: 'Map and dependencies',
+                    description: 'Accept the lifecycle map nodes and relationship edges after review.',
+                    item_ids: [...primaryNodes.map((node) => node.id), ...relationshipEdges.map((edge) => edge.id)],
+                    required_sibling_ids: [],
+                    dependency_link_ids: [],
+                    status: reviewState,
+                    review_state: reviewState,
+                    needs_review: reviewState !== 'source_backed',
+                    source_refs: refs,
+                    assumptions,
+                    metadata: { local_fallback: 'connected_picture_package' }
+                },
+                {
+                    id: `pkg-group-repair-${now}`,
+                    package_id: packageId,
+                    title: 'Evidence repair',
+                    description: 'Accept repair targets and review tasks for weak or missing citations.',
+                    item_ids: [evidenceId, repairId, `pkg-task-source-pack-${now}`, `pkg-risk-unsourced-code-${now}`],
+                    required_sibling_ids: [],
+                    dependency_link_ids: [],
+                    status: 'needs_review',
+                    review_state: 'needs_review',
+                    needs_review: true,
+                    source_refs: refs,
+                    assumptions,
+                    metadata: { local_fallback: 'connected_picture_package' }
+                }
+            ]
+        },
+        metadata: {
+            local_fallback: 'connected_picture_package'
+        }
     };
 };

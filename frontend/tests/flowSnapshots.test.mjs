@@ -72,6 +72,48 @@ test('stringifyFlowSnapshot removes activity undo payloads at the snapshot bound
     assert.equal(Object.hasOwn(parsed.activity_events[0], 'undo'), false);
 });
 
+test('flow snapshots preserve accepted connected package artifact metadata while stripping undo handlers', () => {
+    const serialized = stringifyFlowSnapshot({
+        nodes: [createWorkspaceNode({ id: 'node-1' })],
+        edges: [],
+        activity_events: [
+            {
+                id: 'activity-connected-package',
+                title: 'Accepted package',
+                undo: () => {},
+                metadata: {
+                    undo_kind: 'react_flow_snapshot',
+                    accepted_artifacts: [
+                        {
+                            id: 'artifact-connected-package',
+                            artifact_type: 'connected_picture_package',
+                            metadata: {
+                                ai_draft_revision_id: 'revision-connected-package',
+                                accepted_at: '2026-05-20T23:00:00.000Z'
+                            },
+                            data: {
+                                package_id: 'connected-package-1',
+                                view_lenses: [{ id: 'lens-review', lens_type: 'review' }],
+                                source_refs: [{ document_id: 'doc-1' }]
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+    });
+    const snapshot = parseFlowSnapshot(serialized);
+    const [event] = snapshot.activity_events;
+    const [artifact] = event.metadata.accepted_artifacts;
+
+    assert.equal(Object.hasOwn(JSON.parse(serialized).activity_events[0], 'undo'), false);
+    assert.equal(event.metadata.undo_kind, 'react_flow_snapshot');
+    assert.equal(artifact.artifact_type, 'connected_picture_package');
+    assert.equal(artifact.metadata.ai_draft_revision_id, 'revision-connected-package');
+    assert.equal(artifact.data.view_lenses[0].id, 'lens-review');
+    assert.deepEqual(artifact.data.source_refs, [{ document_id: 'doc-1' }]);
+});
+
 test('flow snapshots preserve AI action run history', () => {
     const serialized = stringifyFlowSnapshot({
         nodes: [createWorkspaceNode({ id: 'node-1' })],

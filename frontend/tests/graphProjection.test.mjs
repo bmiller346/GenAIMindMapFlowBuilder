@@ -7,15 +7,23 @@ import {
     buildSankeyFlowMarkdown,
     buildRelationshipReviewMarkdown,
     getExecutiveOutputProjection,
+    getActionGraphProjection,
     getChecklistPreviewRows,
     getConnectionRows,
+    getConceptGraphProjection,
     getCrossLinkConnectionRows,
+    getDataGraphProjection,
+    getDependencyGraphProjection,
+    getEvidenceGraphProjection,
     getEnterpriseReadinessSummary,
     getEnterpriseScoreRows,
     getFlowchartProjection,
     getGraphConfidenceSummary,
     getKanbanColumns,
+    getPackageReadyProjection,
+    getProcessGraphProjection,
     getRelationshipFamilyReviewGroups,
+    getRelationshipGraphProjection,
     getSankeyFlowProjection,
     getSourceRepairPreviewRows,
     getTeamRoadmapProjection,
@@ -444,6 +452,91 @@ test('kanban task rows preserve structured data evidence metadata', () => {
     assert.equal(taskRow.structured_evidence.evidence_node_id, 'structured-evidence-1');
     assert.match(taskRow.structured_evidence.query, /SELECT category/);
     assert.equal(backlog.items[0].structured_evidence.table_name, 'software_inventory');
+});
+
+test('package layer projections expose accepted graphs with source review state', () => {
+    const projection = buildGraphProjection(
+        [
+            {
+                ...node('concept-accepted', 'concept', 'Accepted concept'),
+                data: {
+                    ...node('concept-accepted', 'concept').data,
+                    status: 'approved',
+                    source_refs: [{ document_id: 'doc-1', quote_snippet: 'Accepted source' }]
+                }
+            },
+            {
+                ...node('task-accepted', 'task', 'Accepted action'),
+                data: {
+                    ...node('task-accepted', 'task').data,
+                    status: 'approved'
+                }
+            },
+            {
+                ...node('workflow-accepted', 'workflow', 'Accepted workflow'),
+                data: {
+                    ...node('workflow-accepted', 'workflow').data,
+                    review_state: 'accepted',
+                    generated_artifacts: [
+                        {
+                            id: 'artifact-chart-accepted',
+                            artifact_type: 'chart',
+                            accepted: true,
+                            data: { chart_spec: { chart_type: 'sankey' } }
+                        }
+                    ]
+                }
+            }
+        ],
+        [
+            {
+                id: 'edge-concept-task',
+                source: 'concept-accepted',
+                target: 'task-accepted',
+                relationship_type: 'supports'
+            },
+            {
+                id: 'edge-task-workflow',
+                source: 'task-accepted',
+                target: 'workflow-accepted',
+                relationship_type: 'depends_on'
+            },
+            {
+                id: 'edge-workflow-concept',
+                source: 'workflow-accepted',
+                target: 'concept-accepted',
+                relationship_type: 'next'
+            }
+        ]
+    );
+
+    assert.equal(getPackageReadyProjection(projection).node_count, 3);
+    assert.equal(getPackageReadyProjection(projection).needs_review_count, 2);
+    assert.equal(getRelationshipGraphProjection(projection).edge_count, 3);
+    assert.deepEqual(getDependencyGraphProjection(projection).edges.map((edge) => edge.id), [
+        'edge-task-workflow'
+    ]);
+    assert.deepEqual(getProcessGraphProjection(projection).nodes.map((item) => item.id), [
+        'workflow-accepted'
+    ]);
+    assert.deepEqual(getActionGraphProjection(projection).nodes.map((item) => item.id), [
+        'task-accepted'
+    ]);
+    assert.deepEqual(getConceptGraphProjection(projection).nodes.map((item) => item.id), [
+        'concept-accepted',
+        'workflow-accepted'
+    ]);
+    assert.equal(getDataGraphProjection(projection).artifacts[0].id, 'artifact-chart-accepted');
+
+    const evidence = getEvidenceGraphProjection(projection);
+    assert.equal(
+        evidence.nodes.find((item) => item.id === 'task-accepted').evidence_state,
+        'needs_review'
+    );
+    assert.equal(
+        evidence.nodes.find((item) => item.id === 'concept-accepted').source_refs[0].document_id,
+        'doc-1'
+    );
 });
 
 test('sankey flow projection builds source target value paths from structured artifacts', () => {

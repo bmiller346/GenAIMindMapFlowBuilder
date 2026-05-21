@@ -1,10 +1,8 @@
-import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { FiGitBranch, FiMap } from 'react-icons/fi';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import useStore from '../stores/store';
 import flowStore from '../stores/flowStore';
 import useActivityStore from '../stores/activityStore';
 import FlowchartRenderer from './flowchart/FlowchartRenderer.jsx';
-import KanbanBoardView from './KanbanBoardView.jsx';
 import { getSavedTableViews, saveSavedTableViews } from '../config/localSettings.js';
 import { createWorkspaceEdge, createWorkspaceNode, reflowSiblingSubtrees } from '../utils/manualNodes.js';
 import {
@@ -19,8 +17,15 @@ import {
     getTaskRows
 } from './graphProjection.js';
 import { buildSankeyPlotlySpec } from '../utils/sankeyFlow.js';
-
-const Graph = lazy(() => import('../global-components/Graph'));
+import SankeyFlowPanel from './structured/SankeyFlowPanel.jsx';
+import {
+    ExecutiveViewSection,
+    KanbanViewSection,
+    ReadinessCallout,
+    TasksViewSection
+} from './structured/StructuredViewSections.jsx';
+import TableHierarchyActions from './structured/TableHierarchyActions.jsx';
+import TrustStateBadges from '../components/TrustStateBadges.jsx';
 
 const VIEW_LABELS = {
     executive: 'Executive',
@@ -53,19 +58,6 @@ const TABLE_MODES = [
     { id: 'density', label: 'Density' },
     { id: 'condensed', label: 'Condensed' }
 ];
-const FILTER_LABELS = {
-    'source-backed': 'Source-backed',
-    'needs-review': 'Needs review',
-    manual: 'Manual',
-    'ai-generated': 'AI-generated',
-    'tasks-only': 'Tasks only',
-    unassigned: 'Unassigned',
-    'missing-due-date': 'Missing due date',
-    'missing-source': 'Missing source',
-    'low-confidence': 'Low confidence',
-    'hidden-from-export': 'Hidden'
-};
-
 const safeDownloadSlug = (value = 'workspace') =>
     String(value || 'workspace')
         .toLowerCase()
@@ -133,9 +125,7 @@ const EvidenceCell = ({ row, onOpenSources }) => {
     const evidence = sourceEvidenceStatus(row);
     return (
         <div className="canvas-structured-evidence-cell">
-            <span className={`canvas-structured-evidence-badge is-${evidence.tone}`}>
-                {evidence.label}
-            </span>
+            <TrustStateBadges subject={row} />
             <small>{evidence.detail}</small>
             {evidence.tone === 'missing' || evidence.tone === 'low' ? (
                 <button type="button" onClick={onOpenSources}>
@@ -405,158 +395,6 @@ const executiveReadiness = (output = {}) => {
     };
 };
 
-const ReadinessCallout = ({ title, detail, issues = [], actionLabel, onAction }) => (
-    <section className="canvas-structured-readiness-callout" aria-label={title}>
-        <div>
-            <strong>{title}</strong>
-            <span>{detail}</span>
-        </div>
-        {issues.length ? (
-            <div className="canvas-structured-readiness-issues">
-                {issues.slice(0, 4).map((issue) => (
-                    <span key={issue}>{issue}</span>
-                ))}
-            </div>
-        ) : null}
-        {onAction ? (
-            <button type="button" onClick={onAction}>
-                {actionLabel}
-            </button>
-        ) : null}
-    </section>
-);
-
-const SankeyFlowPanel = ({
-    sankeyFlow,
-    sankeySpec,
-    onOpenNode,
-    onSelectPath,
-    selectedPathId = '',
-    selectedPath,
-    onClearPath,
-    onCopyMarkdown,
-    onDownloadMarkdown,
-    onDownloadJson,
-    exportStatus = ''
-}) => {
-    if (!sankeyFlow?.eligible || !sankeySpec) {
-        return null;
-    }
-    const topRows = sankeyFlow.rows.slice(0, 5);
-
-    return (
-        <section className="canvas-structured-sankey-panel" aria-label="Flow lens">
-            <div className="canvas-structured-sankey-summary">
-                <div>
-                    <strong>Flow lens</strong>
-                    <span>
-                        {[
-                            `${sankeyFlow.path_count} paths`,
-                            `${sankeyFlow.node_count} evidence node${sankeyFlow.node_count === 1 ? '' : 's'}`,
-                            sankeyFlow.metric_labels.join(', ')
-                        ]
-                            .filter(Boolean)
-                            .join(' | ')}
-                    </span>
-                </div>
-                <small>
-                    Source, target, and value rows from accepted structured evidence. Width shows the selected metric.
-                </small>
-                <div className="canvas-structured-sankey-actions">
-                    <button type="button" onClick={onCopyMarkdown}>
-                        Copy Markdown
-                    </button>
-                    <button type="button" onClick={onDownloadMarkdown}>
-                        Download MD
-                    </button>
-                    <button type="button" onClick={onDownloadJson}>
-                        Download JSON
-                    </button>
-                </div>
-                {exportStatus ? <em>{exportStatus}</em> : null}
-            </div>
-            <div className="canvas-structured-sankey-body">
-                <div className="canvas-structured-sankey-plot">
-                    <Suspense fallback={<div className="lazy-block">Loading flow...</div>}>
-                        <Graph data={sankeySpec} />
-                    </Suspense>
-                </div>
-                <div className="canvas-structured-sankey-paths">
-                    {topRows.map((row) => (
-                        <button
-                            type="button"
-                            key={row.id}
-                            className={selectedPathId === row.id ? 'active' : ''}
-                            onClick={() => onSelectPath?.(row)}
-                        >
-                            <span>{row.source}</span>
-                            <span>{row.target}</span>
-                            <strong>
-                                {row.metric_label}: {row.value.toLocaleString()}
-                            </strong>
-                        </button>
-                    ))}
-                </div>
-            </div>
-            {selectedPath ? (
-                <div className="canvas-structured-sankey-detail">
-                    <div className="canvas-structured-sankey-detail-header">
-                        <div>
-                            <strong>{`${selectedPath.source} -> ${selectedPath.target}`}</strong>
-                            <span>
-                                {`${selectedPath.metric_label}: ${Number(selectedPath.value || 0).toLocaleString()} - ${selectedPath.review_state || 'needs_review'}`}
-                            </span>
-                        </div>
-                        <div>
-                            <button type="button" onClick={() => onOpenNode?.(selectedPath.evidence_node_id)}>
-                                Open evidence node
-                            </button>
-                            <button type="button" onClick={onClearPath}>
-                                Clear
-                            </button>
-                        </div>
-                    </div>
-                    <div className="canvas-structured-sankey-detail-grid">
-                        <section>
-                            <strong>Represented rows</strong>
-                            {(selectedPath.represented_rows || []).slice(0, 6).map((row, index) => (
-                                <dl key={`${selectedPath.id}-represented-${index}`}>
-                                    {Object.entries(row || {})
-                                        .filter(([, value]) => value !== undefined && value !== null && value !== '')
-                                        .slice(0, 6)
-                                        .map(([key, value]) => (
-                                            <Fragment key={key}>
-                                                <dt>{key.replaceAll('_', ' ')}</dt>
-                                                <dd>{Array.isArray(value) ? `${value.length} item${value.length === 1 ? '' : 's'}` : String(value)}</dd>
-                                            </Fragment>
-                                        ))}
-                                </dl>
-                            ))}
-                        </section>
-                        <section>
-                            <strong>Sources</strong>
-                            {(selectedPath.source_refs || []).length ? (
-                                <ul>
-                                    {selectedPath.source_refs.slice(0, 5).map((sourceRef, index) => (
-                                        <li key={`${selectedPath.id}-source-${index}`}>
-                                            {sourceRef.title || sourceRef.document_title || sourceRef.document_id || sourceRef.source_id || `Source ${index + 1}`}
-                                        </li>
-                                    ))}
-                                </ul>
-                            ) : (
-                                <p>Needs source support before this path should be treated as evidence.</p>
-                            )}
-                            {selectedPath.evidence_repair_prompt || selectedPath.source_repair_prompt ? (
-                                <small>{selectedPath.evidence_repair_prompt || selectedPath.source_repair_prompt}</small>
-                            ) : null}
-                        </section>
-                    </div>
-                </div>
-            ) : null}
-        </section>
-    );
-};
-
 const childDetailRows = (children = []) =>
     children.map((child) => ({
         title: child.title || child.id,
@@ -707,54 +545,6 @@ const EmptyFilteredView = ({ label }) => (
     </div>
 );
 
-const ActiveFilterChips = ({ filters = [] }) => {
-    const activeFilters = Array.isArray(filters) ? filters.filter(Boolean) : [];
-    if (!activeFilters.length) {
-        return null;
-    }
-    return (
-        <div className="canvas-structured-filter-chips" aria-label="Active graph filters">
-            {activeFilters.map((filterId) => (
-                <span key={filterId}>{FILTER_LABELS[filterId] || filterId}</span>
-            ))}
-        </div>
-    );
-};
-
-const ExecutiveList = ({ title, items = [], empty = 'No items projected.' }) => (
-    <section className="canvas-structured-executive-section">
-        <div className="canvas-structured-section-header">
-            <strong>{title}</strong>
-            <span>{items.length}</span>
-        </div>
-        {items.length ? (
-            <div className="canvas-structured-executive-list">
-                {items.map((item) => (
-                    <article key={item.id} className="canvas-structured-executive-item">
-                        <strong>{item.title}</strong>
-                        {item.description ? <p>{item.description}</p> : null}
-                        <small>
-                            {[
-                                item.status,
-                                item.priority ? `priority: ${item.priority}` : '',
-                                item.owner_id ? `owner: ${item.owner_id}` : '',
-                                item.due_date ? `due: ${item.due_date}` : '',
-                                item.source_backed ? 'source-backed' : 'needs review'
-                            ]
-                                .filter(Boolean)
-                                .join(' | ')}
-                        </small>
-                    </article>
-                ))}
-            </div>
-        ) : (
-            <div className="canvas-structured-empty inline">
-                <strong>{empty}</strong>
-            </div>
-        )}
-    </section>
-);
-
 const CanvasStructuredView = ({
     view,
     nodes = [],
@@ -768,7 +558,6 @@ const CanvasStructuredView = ({
     onApplyFilters,
     onOpenSources,
     onAskAi,
-    onBackToMap,
     onStartManual,
     onGenerateTaskCandidates,
     onPrepareKanbanBoard,
@@ -2199,82 +1988,6 @@ const CanvasStructuredView = ({
 
     return (
         <section className={`canvas-structured-view canvas-structured-view-${view}`} aria-label={label}>
-            <header className="canvas-structured-header">
-                <div className="canvas-structured-header-main">
-                    <span>
-                        {view === 'table'
-                            ? selectedBranchId
-                                ? 'View selected branch as table'
-                                : 'View workspace as table'
-                            : 'Workspace view'}
-                    </span>
-                    <strong>
-                        {view === 'table' && selectedBranchId
-                            ? projection.nodeLookup.get(selectedBranchId)?.title || label
-                            : label}
-                    </strong>
-                </div>
-                <p>
-                    {projection.nodes.length} nodes, {projection.edges.length} links
-                    {activeGraphFilters.length ? `, ${activeGraphFilters.length} filters` : ''}
-                </p>
-                <ActiveFilterChips filters={activeGraphFilters} />
-                <div className="canvas-structured-header-actions">
-                    {view === 'flowchart' ? (
-                        <button
-                            type="button"
-                            className="canvas-structured-header-action"
-                            onClick={() =>
-                                onAskAi?.({
-                                    initialVisual: 'flow_chart',
-                                    initialPrompt: 'Improve this flowchart with clearer step order, decision paths, dependencies, handoffs, and source-backed review notes.'
-                                })
-                            }
-                        >
-                            <FiGitBranch aria-hidden="true" />
-                            Improve flow
-                        </button>
-                    ) : null}
-                    {view === 'table' ? (
-                        <button
-                            type="button"
-                            className="canvas-structured-header-action"
-                            onClick={onCreateStructuredTable}
-                        >
-                            Create structured table
-                        </button>
-                    ) : null}
-                    {view === 'executive' ? (
-                        <button
-                            type="button"
-                            className="canvas-structured-header-action"
-                            onClick={onCreateExecutiveOutput}
-                        >
-                            Make executive-ready
-                        </button>
-                    ) : null}
-                    {view === 'kanban' ? (
-                        <button
-                            type="button"
-                            className="canvas-structured-header-action"
-                            onClick={onPrepareKanbanBoard}
-                        >
-                            Prepare board
-                        </button>
-                    ) : null}
-                    {onBackToMap ? (
-                        <button
-                            type="button"
-                            className="canvas-structured-header-secondary"
-                            onClick={onBackToMap}
-                        >
-                            <FiMap aria-hidden="true" />
-                            Map
-                        </button>
-                    ) : null}
-                </div>
-            </header>
-
             {view === 'flowchart' ? (
                 <FlowchartRenderer
                     flowchart={flowchart}
@@ -2305,197 +2018,38 @@ const CanvasStructuredView = ({
             ) : null}
 
             {view === 'executive' ? (
-                <div className="canvas-structured-executive">
-                    {!executiveReadyState.ready ? (
-                        <ReadinessCallout
-                            title="Executive reconciliation needed"
-                            detail="This view is projected from the graph, but it needs stronger executive fields before it should be treated as final."
-                            issues={executiveReadyState.issues}
-                            actionLabel="Make executive-ready"
-                            onAction={onCreateExecutiveOutput}
-                        />
-                    ) : null}
-                    <section className="canvas-structured-executive-summary">
-                        <strong>Summary</strong>
-                        <p>{executiveOutput.summary}</p>
-                        <div>
-                            <span>{executiveOutput.metadata.source_backed_node_count} sourced</span>
-                            <span>{executiveOutput.metadata.task_count} actions</span>
-                            <span>{executiveOutput.metadata.needs_review_count} review</span>
-                        </div>
-                    </section>
-                    <ExecutiveList title="Key Findings" items={executiveOutput.key_findings} />
-                    <ExecutiveList title="Recommended Actions" items={executiveOutput.recommended_actions} />
-                    <ExecutiveList title="Risks" items={executiveOutput.risks} />
-                    <ExecutiveList title="Required Decisions" items={executiveOutput.required_decisions} />
-                    <ExecutiveList
-                        title="Source-backed Appendix"
-                        items={executiveOutput.source_backed_appendix}
-                    />
-                </div>
+                <ExecutiveViewSection
+                    executiveOutput={executiveOutput}
+                    executiveReadyState={executiveReadyState}
+                    onCreateExecutiveOutput={onCreateExecutiveOutput}
+                />
             ) : null}
 
             {view === 'tasks' ? (
-                <div className="canvas-structured-task-surface">
-                    <section className="canvas-structured-task-section">
-                        <div className="canvas-structured-section-header">
-                            <strong>Confirmed tasks</strong>
-                            <span>{taskRows.length}</span>
-                        </div>
-                        {taskRows.length > 0 ? (
-                            <div className="canvas-structured-table-wrap">
-                                <table className="canvas-structured-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Task</th>
-                                            <th>Type</th>
-                                            <th>Status</th>
-                                            <th>Priority</th>
-                                            <th>Owner</th>
-                                            <th>Due</th>
-                                            <th>Source</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {taskRows.map((row) => (
-                                            <tr key={row.id}>
-                                                <td>
-                                                    <button type="button" onClick={() => onOpenNode?.(row.id)}>
-                                                        {row.title}
-                                                    </button>
-                                                    {summaryText(row) ? <p>{summaryText(row)}</p> : null}
-                                                </td>
-                                                <td>{rowTypeLabel(row)}</td>
-                                                <td>
-                                                    <select
-                                                        className="canvas-structured-task-control"
-                                                        value={row.status || 'needs_review'}
-                                                        onChange={(event) =>
-                                                            updateTaskField(row.id, 'status', event.target.value)
-                                                        }
-                                                        aria-label={`Status for ${row.title}`}
-                                                    >
-                                                        {TASK_STATUS_OPTIONS.map((status) => (
-                                                            <option key={status} value={status}>
-                                                                {status}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </td>
-                                                <td>
-                                                    <select
-                                                        className="canvas-structured-task-control"
-                                                        value={row.priority || ''}
-                                                        onChange={(event) =>
-                                                            updateTaskField(row.id, 'priority', event.target.value)
-                                                        }
-                                                        aria-label={`Priority for ${row.title}`}
-                                                    >
-                                                        {TASK_PRIORITY_OPTIONS.map((priority) => (
-                                                            <option key={priority || 'none'} value={priority}>
-                                                                {priority || 'None'}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        className="canvas-structured-task-control"
-                                                        value={row.owner_id || ''}
-                                                        placeholder="Owner"
-                                                        onChange={(event) =>
-                                                            updateTaskField(row.id, 'owner_id', event.target.value, {
-                                                                record: false
-                                                            })
-                                                        }
-                                                        onBlur={(event) =>
-                                                            updateTaskField(row.id, 'owner_id', event.target.value)
-                                                        }
-                                                        aria-label={`Owner for ${row.title}`}
-                                                    />
-                                                </td>
-                                                <td>
-                                                    <input
-                                                        className="canvas-structured-task-control"
-                                                        value={row.due_date || ''}
-                                                        placeholder="Due"
-                                                        onChange={(event) =>
-                                                            updateTaskField(row.id, 'due_date', event.target.value, {
-                                                                record: false
-                                                            })
-                                                        }
-                                                        onBlur={(event) =>
-                                                            updateTaskField(row.id, 'due_date', event.target.value)
-                                                        }
-                                                        aria-label={`Due date for ${row.title}`}
-                                                    />
-                                                </td>
-                                                <td>{sourceLabel(row)}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        ) : (
-                            <div className="canvas-structured-empty inline">
-                                <strong>No tasks yet</strong>
-                                <span>Create task candidates from the graph, then accept the ones that should become canonical.</span>
-                                <button type="button" onClick={onGenerateTaskCandidates}>
-                                    Generate task candidates
-                                </button>
-                            </div>
-                        )}
-                    </section>
-                    {potentialTaskRows.length > 0 ? (
-                        <section className="canvas-structured-task-section">
-                            <div className="canvas-structured-section-header">
-                                <strong>Potential tasks</strong>
-                                <span>{potentialTaskRows.length}</span>
-                            </div>
-                            <div className="canvas-structured-potential-list">
-                                {potentialTaskRows.map((row) => (
-                                    <article
-                                        key={row.id}
-                                        className="canvas-structured-potential-item"
-                                    >
-                                        <button
-                                            type="button"
-                                            onClick={() => onOpenNode?.(row.id)}
-                                        >
-                                            <strong>{row.title}</strong>
-                                            <span>{rowTypeLabel(row)} · candidate</span>
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="canvas-structured-confirm-task"
-                                            onClick={() => confirmTaskCandidate(row)}
-                                        >
-                                            Confirm
-                                        </button>
-                                    </article>
-                                ))}
-                            </div>
-                        </section>
-                    ) : null}
-                </div>
+                <TasksViewSection
+                    taskRows={taskRows}
+                    potentialTaskRows={potentialTaskRows}
+                    statusOptions={TASK_STATUS_OPTIONS}
+                    priorityOptions={TASK_PRIORITY_OPTIONS}
+                    rowTypeLabel={rowTypeLabel}
+                    summaryText={summaryText}
+                    sourceLabel={sourceLabel}
+                    updateTaskField={updateTaskField}
+                    confirmTaskCandidate={confirmTaskCandidate}
+                    onOpenNode={onOpenNode}
+                    onGenerateTaskCandidates={onGenerateTaskCandidates}
+                />
             ) : null}
 
             {view === 'kanban' ? (
-                taskRows.length > 0 ? (
-                    <KanbanBoardView
-                        columns={kanbanColumns}
-                        onOpenNode={onOpenNode}
-                        onMoveTask={moveKanbanTask}
-                    />
-                ) : (
-                    <div className="canvas-structured-empty inline">
-                        <strong>No tasks on the board yet</strong>
-                        <span>Kanban needs task metadata first. Ask AI to supplement this workspace with board-ready cards, then review and accept them.</span>
-                        <button type="button" onClick={onPrepareKanbanBoard || onGenerateTaskCandidates}>
-                            Prepare Kanban board
-                        </button>
-                    </div>
-                )
+                <KanbanViewSection
+                    taskRows={taskRows}
+                    kanbanColumns={kanbanColumns}
+                    onOpenNode={onOpenNode}
+                    onMoveTask={moveKanbanTask}
+                    onPrepareKanbanBoard={onPrepareKanbanBoard}
+                    onGenerateTaskCandidates={onGenerateTaskCandidates}
+                />
             ) : null}
 
             {view === 'table' ? (
@@ -2858,81 +2412,21 @@ const CanvasStructuredView = ({
                                                 </div>
                                             </td>
                                             <td>
-                                                <div className="canvas-structured-row-actions">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => onSelectBranch?.(row.id)}
-                                                        disabled={selectedBranchId === row.id}
-                                                    >
-                                                        Scope
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => onFocusInMap?.(row.id)}
-                                                    >
-                                                        Map
-                                                    </button>
-                                                    {row.child_count > 0 ? (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => toggleTableRowCollapse(row.id)}
-                                                        >
-                                                            {row.collapsed ? 'Expand' : 'Collapse'}
-                                                        </button>
-                                                    ) : null}
-                                                    {row.child_count > 0 ? (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => condenseChildrenToTable(row)}
-                                                            title="Copy immediate children into detail rows and fold the branch"
-                                                        >
-                                                            Condense
-                                                        </button>
-                                                    ) : null}
-                                                    {row.child_count > 0 && row.table_rows?.some((detailRow) => detailRow?.source_node_id) ? (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => expandCondensedChildren(row)}
-                                                            title="Reveal child nodes that were copied into detail rows"
-                                                        >
-                                                            Reveal
-                                                        </button>
-                                                    ) : null}
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => promoteTableRow(row)}
-                                                        disabled={!row.parent_id}
-                                                    >
-                                                        Promote
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() =>
-                                                            demoteTableRow(row, rowIndex, displayedWorkBreakdownRows)
-                                                        }
-                                                        disabled={
-                                                            !displayedWorkBreakdownRows
-                                                                .slice(0, rowIndex)
-                                                                .some((candidate) => candidate.depth === row.depth)
-                                                        }
-                                                    >
-                                                        Demote
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => reorderTableRow(row, 'up')}
-                                                        disabled={!canReorderTableRow(row, 'up')}
-                                                    >
-                                                        Up
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => reorderTableRow(row, 'down')}
-                                                        disabled={!canReorderTableRow(row, 'down')}
-                                                    >
-                                                        Down
-                                                    </button>
-                                                </div>
+                                                <TableHierarchyActions
+                                                    row={row}
+                                                    rowIndex={rowIndex}
+                                                    rows={displayedWorkBreakdownRows}
+                                                    selectedBranchId={selectedBranchId}
+                                                    onSelectBranch={onSelectBranch}
+                                                    onFocusInMap={onFocusInMap}
+                                                    onToggleCollapse={toggleTableRowCollapse}
+                                                    onCondenseChildren={condenseChildrenToTable}
+                                                    onExpandCondensedChildren={expandCondensedChildren}
+                                                    onPromote={promoteTableRow}
+                                                    onDemote={demoteTableRow}
+                                                    onReorder={reorderTableRow}
+                                                    canReorder={canReorderTableRow}
+                                                />
                                             </td>
                                             <td>{row.parent_title || '-'}</td>
                                             {tableMode === 'breakdown' ? (

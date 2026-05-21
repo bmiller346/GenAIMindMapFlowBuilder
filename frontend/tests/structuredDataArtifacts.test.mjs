@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    applyStructuredEvidenceRepair,
     getStructuredDataArtifactContext,
     structuredDataAcceptance,
     structuredDataChildData
@@ -118,4 +119,138 @@ test('structuredDataChildData creates finding and task node data with source ref
     assert.equal(task.artifactType, 'tasks');
     assert.equal(task.metadata.query_id, 'query-1');
     assert.equal(task.metadata.evidence_node_id, 'structured-evidence-1');
+});
+
+test('applyStructuredEvidenceRepair patches one structured row across table views', () => {
+    const nodeData = {
+        ...structuredNodeData,
+        source_refs: [{ source_type: 'sql_query', query_id: 'query-1' }],
+        df: [
+            { row_id: 'row-a', category: 'PDF', count: 2, source_refs: [] },
+            { row_id: 'row-b', category: 'CAD', count: 1, source_refs: [] }
+        ],
+        data: {
+            ...structuredNodeData.data,
+            df: [
+                { row_id: 'row-a', category: 'PDF', count: 2, source_refs: [] },
+                { row_id: 'row-b', category: 'CAD', count: 1, source_refs: [] }
+            ]
+        },
+        generated_artifacts: [
+            structuredNodeData.generated_artifacts[0],
+            {
+                id: 'artifact-table-1',
+                artifact_type: 'data_table',
+                data: {
+                    rows: [
+                        { row_id: 'row-a', category: 'PDF', count: 2, source_refs: [] },
+                        { row_id: 'row-b', category: 'CAD', count: 1, source_refs: [] }
+                    ],
+                    columns: ['category', 'count', 'source_refs'],
+                    query_id: 'query-1'
+                }
+            },
+            {
+                id: 'artifact-summary-1',
+                artifact_type: 'data_summary',
+                data: { summary: 'Keep me exactly as-is.' }
+            }
+        ]
+    };
+    const repairedRefs = [{ document_id: 'doc-9', page: 8, quote_snippet: 'PDF inventory evidence.' }];
+    const result = applyStructuredEvidenceRepair(nodeData, {
+        target: { row_id: 'row-a' },
+        repair: {
+            fields: {
+                count: 3,
+                notes: 'Verified against source extract.',
+                source_refs: repairedRefs,
+                review_state: 'source_backed'
+            }
+        }
+    });
+
+    assert.equal(result.applied, true);
+    assert.deepEqual(result.patchedRowIndexes, [0]);
+    assert.equal(result.data.df[0].count, 3);
+    assert.equal(result.data.df[1].count, 1);
+    assert.deepEqual(result.data.generated_artifacts[1].data.rows[0].source_refs, repairedRefs);
+    assert.equal(result.data.generated_artifacts[1].data.rows[0].citation_status, 'source_backed');
+    assert.equal(result.data.generated_artifacts[1].data.rows[1], nodeData.generated_artifacts[1].data.rows[1]);
+    assert.equal(result.data.generated_artifacts[0], nodeData.generated_artifacts[0]);
+    assert.equal(result.data.generated_artifacts[2], nodeData.generated_artifacts[2]);
+    assert.deepEqual(result.data.source_refs, nodeData.source_refs);
+});
+
+test('applyStructuredEvidenceRepair patches a single Sankey row without rebuilding chart content', () => {
+    const chartSpec = {
+        chart_type: 'sankey',
+        source_column: 'source',
+        target_column: 'target',
+        value_column: 'value'
+    };
+    const sankeyRows = [
+        {
+            row_id: 'row-1-crm-reporting',
+            source: 'CRM',
+            target: 'Sales reporting',
+            value: 2,
+            metric: 'dependency',
+            review_state: 'needs_review',
+            source_refs: []
+        },
+        {
+            row_id: 'row-2-erp-close',
+            source: 'ERP',
+            target: 'Finance close',
+            value: 1,
+            metric: 'dependency',
+            review_state: 'source_backed',
+            source_refs: [{ document_id: 'doc-keep' }]
+        }
+    ];
+    const nodeData = {
+        artifact_type: 'structured_data_analysis',
+        df: sankeyRows,
+        data: { df: sankeyRows },
+        generated_artifacts: [
+            {
+                id: 'sankey-table',
+                artifact_type: 'data_table',
+                data: { rows: sankeyRows, row_count: 2 }
+            },
+            {
+                id: 'sankey-chart',
+                artifact_type: 'chart',
+                data: {
+                    chart_spec: chartSpec,
+                    data_rows: sankeyRows
+                }
+            }
+        ]
+    };
+    const repairedRefs = [{ document_id: 'doc-crm', section: 'A.1' }];
+    const result = applyStructuredEvidenceRepair(nodeData, {
+        target: { row_id: 'row-1-crm-reporting' },
+        repair: {
+            source: 'CRM',
+            target: 'Revenue reporting',
+            value: 4,
+            notes: 'Renamed from accepted process inventory.',
+            source_refs: repairedRefs,
+            review_state: 'source_backed'
+        }
+    });
+    const tableRows = result.data.generated_artifacts[0].data.rows;
+    const chartRows = result.data.generated_artifacts[1].data.data_rows;
+
+    assert.equal(result.applied, true);
+    assert.deepEqual(result.patchedRowIndexes, [0]);
+    assert.equal(tableRows[0].target, 'Revenue reporting');
+    assert.equal(tableRows[0].value, 4);
+    assert.equal(tableRows[0].review_state, 'source_backed');
+    assert.deepEqual(chartRows[0].source_refs, repairedRefs);
+    assert.deepEqual(tableRows[1], sankeyRows[1]);
+    assert.deepEqual(chartRows[1], sankeyRows[1]);
+    assert.equal(result.data.generated_artifacts[1].data.chart_spec, chartSpec);
 });

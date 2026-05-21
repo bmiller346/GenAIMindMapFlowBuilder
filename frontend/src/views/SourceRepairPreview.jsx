@@ -15,6 +15,7 @@ import {
     getChildPosition,
     getRootPosition
 } from '../utils/manualNodes';
+import TrustStateBadges from '../components/TrustStateBadges';
 
 const getNestedData = (data) => {
     if (data?.data && typeof data.data === 'object') {
@@ -650,6 +651,12 @@ const SourceRepairPreview = ({
                                         <span>
                                             <span>{chunk.page ? `p. ${chunk.page}` : `Section ${index + 1}`}</span>
                                             <strong>{title}</strong>
+                                            <TrustStateBadges
+                                                subject={{
+                                                    source_refs: [refFromSourceChunk(generatedPreview, chunk)],
+                                                    status: 'needs_review'
+                                                }}
+                                            />
                                             <p>{bodyFromSourceChunk(chunk)}</p>
                                         </span>
                                     </label>
@@ -696,6 +703,18 @@ const SourceRepairPreview = ({
                                         : sourceLabel(row.suggested_source_ref)}
                                 </td>
                                 <td>
+                                    <TrustStateBadges
+                                        subject={{
+                                            source_refs: row.suggested_source_ref
+                                                ? [row.suggested_source_ref]
+                                                : [],
+                                            confidence: row.suggested_confidence,
+                                            status:
+                                                row.repair_kind === 'confidence'
+                                                    ? 'source_backed'
+                                                    : 'needs_review'
+                                        }}
+                                    />
                                     {row.suggested_from_title
                                         ? `${row.suggestion_relationship}: ${row.suggested_from_title}`
                                         : row.repair_kind === 'confidence'
