@@ -17,6 +17,55 @@ export const EMPTY_FLOW_SNAPSHOT = {
     automations: []
 };
 
+const PERSIST_FULL_ACCEPTED_ARTIFACT_TYPES = new Set([
+    'executive_summary',
+    'executive_output',
+    'news_article',
+    'newsletter',
+    'team_roadmap',
+    'completeness_review'
+]);
+
+const summarizeAcceptedArtifactForPersistence = (artifact = {}) => {
+    const artifactType = artifact.artifact_type || artifact.artifactType || '';
+    if (PERSIST_FULL_ACCEPTED_ARTIFACT_TYPES.has(artifactType)) {
+        return artifact;
+    }
+
+    return {
+        id: artifact.id || '',
+        artifact_type: artifactType,
+        title: artifact.title || artifact.label || artifactType,
+        status: artifact.status || artifact.review_state || '',
+        review_state: artifact.review_state || artifact.status || '',
+        source_refs: Array.isArray(artifact.source_refs) ? artifact.source_refs : [],
+        assumptions: Array.isArray(artifact.assumptions) ? artifact.assumptions : [],
+        metadata: {
+            ...(artifact.metadata || {}),
+            persisted_summary_only: true
+        },
+        provenance: artifact.provenance || undefined
+    };
+};
+
+const sanitizeActivityEventForPersistence = (event = {}) => {
+    const metadata = event.metadata && typeof event.metadata === 'object'
+        ? { ...event.metadata }
+        : event.metadata;
+
+    if (metadata && Array.isArray(metadata.accepted_artifacts)) {
+        metadata.accepted_artifacts = metadata.accepted_artifacts.map(
+            summarizeAcceptedArtifactForPersistence
+        );
+    }
+
+    return {
+        ...event,
+        metadata,
+        undo: undefined
+    };
+};
+
 export const parseFlowSnapshot = (flowJson) => {
     if (!flowJson) {
         return EMPTY_FLOW_SNAPSHOT;
@@ -87,10 +136,7 @@ export const stringifyFlowSnapshot = (snapshot) =>
     JSON.stringify(
         (() => {
             const activityEvents = Array.isArray(snapshot?.activity_events)
-                ? snapshot.activity_events.map((event) => ({
-                      ...event,
-                      undo: undefined
-                  }))
+                ? snapshot.activity_events.map(sanitizeActivityEventForPersistence)
                 : [];
             const aiActionRuns = normalizeAIActionRuns(snapshot?.ai_action_runs);
             const automations = Array.isArray(snapshot?.automations)

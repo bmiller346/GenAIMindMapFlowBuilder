@@ -283,6 +283,13 @@ export const buildAIDraftPreviewDiff = (
         missingSourceRepairs: sourceStatusCounts.missing_required_source,
         updatedNodes
     });
+    const canonicalGraphMutated =
+        mode !== 'notes_only' &&
+        (nodes.length > 0 ||
+            addedEdges > 0 ||
+            updatedNodes > 0 ||
+            removals.removed_nodes > 0 ||
+            removals.removed_edges > 0);
     const diff = {
         mode,
         added_nodes: mode === 'merge' ? 0 : nodes.length,
@@ -315,7 +322,7 @@ export const buildAIDraftPreviewDiff = (
                 accept_mode_help: acceptModeDetail.help,
                 user_choice: acceptModeDetail.user_choice,
                 preserves_existing: mode !== 'replace',
-                canonical_graph_mutated: mode !== 'notes_only',
+                canonical_graph_mutated: canonicalGraphMutated,
                 selected_only: mode === 'selected',
                 adds_as_alternate: mode === 'append',
                 source_backed_only: mode === 'cited_only'

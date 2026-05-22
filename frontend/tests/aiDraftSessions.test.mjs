@@ -6,7 +6,9 @@ import {
     acceptModeForChangeIntent,
     buildAIDraftMemoryContext,
     buildAIDraftSessionRequestPayload,
+    buildPastedContextDraftPayload,
     buildSelectedSourceDraftPayload,
+    buildSelectedSourceIdsDraftPayload,
     buildSelectedSourcesDraftPayload,
     buildAIDraftPreviewDiff,
     createAIDraftRevision,
@@ -37,6 +39,7 @@ import {
 import { createWorkspaceEdge, createWorkspaceNode } from '../src/utils/manualNodes.js';
 import { buildLocalGuidedFallbackDraft, buildLocalSankeyDraft } from '../src/utils/localSankeyDraft.js';
 import { buildGraphProjection, getSankeyFlowProjection } from '../src/views/graphProjection.js';
+import { getAcceptedConnectedPackages } from '../src/connected-package/acceptedConnectedPackages.js';
 
 const draftNodes = () => [
     {
@@ -921,6 +924,8 @@ test('source scoped draft request sends selected source chunks to backend', () =
     });
     assert.equal(request.source_chunks.length, 1);
     assert.equal(request.source_chunks[0].source_ref.document_id, 'doc-general-mills');
+    assert.equal(request.model_policy, null);
+    assert.equal(request.model, null);
     assert.equal(
         request.metadata.source_context.selected_source_title,
         'General Mills source'
@@ -974,6 +979,27 @@ test('draft request carries strict versus exploratory expansion preference', () 
     assert.equal(defaultPayload.metadata.expansion_target, 'selected_node');
     assert.equal(defaultPayload.metadata.evidence_mode, 'workspace');
     assert.equal(defaultPayload.metadata.citation_policy, 'preferred');
+});
+
+test('draft request can leave evidence and citation policy for backend inference', () => {
+    const request = buildAIDraftSessionRequestPayload({
+        role: { id: 'workflow-mapper' },
+        action: { id: 'custom_prompt' },
+        scope: { type: 'workspace' },
+        prompt: 'Map NFPA 72 and AHJ code references for a fire alarm design workflow.',
+        evidenceMode: 'auto',
+        citationPolicy: 'auto',
+        metadata: {
+            evidence_mode: 'auto',
+            citation_policy: 'auto',
+            allowed_evidence_modes: ['auto']
+        }
+    });
+
+    assert.equal(request.metadata.evidence_mode, undefined);
+    assert.equal(request.metadata.citation_policy, undefined);
+    assert.deepEqual(request.metadata.allowed_evidence_modes, ['auto']);
+    assert.equal(request.metadata.source_policy_requires_citation, false);
 });
 
 test('inferAIDraftEvidencePreferences maps source intent to evidence gates', () => {
@@ -1634,6 +1660,54 @@ test('connected picture package items can be accepted selectively without dangli
     assert.deepEqual(taskPackage.relationship_edges, []);
 });
 
+test('accepted connected packages are discoverable from accept history and activity artifacts', () => {
+    const session = createAIDraftSession({
+        sessionId: 'session-connected-discovery',
+        revisionId: 'revision-connected-discovery',
+        prompt: 'Create a connected picture package.',
+        generatedArtifacts: [connectedPackageArtifact()]
+    });
+    const accepted = acceptAIDraftSession({
+        session,
+        nodes: [],
+        edges: [],
+        mode: 'append',
+        acceptedAt: '2026-05-21T12:00:00.000Z'
+    });
+    const activityArtifact = {
+        ...accepted.accept_result.accepted_artifacts[0],
+        id: 'connected-package-activity-artifact',
+        data: {
+            ...accepted.accept_result.accepted_artifacts[0].data,
+            package_id: 'connected-package-from-activity'
+        }
+    };
+
+    const packages = getAcceptedConnectedPackages({
+        sessions: [accepted.session],
+        activityEvents: [
+            {
+                id: 'activity-connected-discovery',
+                created_at: '2026-05-21T12:05:00.000Z',
+                metadata: {
+                    session_id: 'session-from-activity',
+                    revision_id: 'revision-from-activity',
+                    accepted_artifacts: [activityArtifact]
+                }
+            }
+        ]
+    });
+
+    assert.deepEqual(
+        packages.map((item) => item.package_id),
+        ['connected-package-1', 'connected-package-from-activity']
+    );
+    assert.equal(packages[0].provenance.source, 'session_accept_history');
+    assert.equal(packages[0].provenance.session_id, 'session-connected-discovery');
+    assert.equal(packages[1].provenance.source, 'activity.metadata.accepted_artifacts');
+    assert.equal(packages[1].provenance.activity_event_id, 'activity-connected-discovery');
+});
+
 test('selected package item ids stay review-only when no graph node is selected', () => {
     const session = createAIDraftSession({
         sessionId: 'session-selected-package',
@@ -1687,6 +1761,7 @@ test('selected package item ids stay review-only when no graph node is selected'
     assert.deepEqual(diff.accepted_item_ids, ['handoff-package-1']);
     assert.equal(diff.added_nodes, 0);
     assert.equal(diff.added_edges, 0);
+    assert.equal(diff.metadata.follow_up_semantics.canonical_graph_mutated, false);
     assert.deepEqual(accepted.accept_result.preview_diff.accepted_item_ids, ['handoff-package-1']);
     assert.deepEqual(accepted.session.accept_history[0].selected_item_ids, ['handoff-package-1']);
     assert.deepEqual(
@@ -1695,7 +1770,7 @@ test('selected package item ids stay review-only when no graph node is selected'
     );
     assert.equal(accepted.accept_result.undo.kind, 'react_flow_snapshot');
     assert.deepEqual(accepted.session.accept_history[0].undo.before_graph, { nodes: [], edges: [] });
-    assert.equal(accepted.accept_result.canonical_graph_mutated, true);
+    assert.equal(accepted.accept_result.canonical_graph_mutated, false);
     assert.equal(accepted.nodes.length, 0);
 });
 
@@ -2138,6 +2213,59 @@ test('multi-source draft payload bounds workspace request to selected chunks', (
         'doc-kellogg'
     ]);
     assert.equal(request.metadata.source_context.source_context_mode, 'bounded_multi_source');
+});
+
+test('compat draft payload carries pasted dump context through source chunks', () => {
+    const dumpPayload = buildPastedContextDraftPayload(
+        {
+            title: 'Console context dump',
+            text: 'Order intake -> estimate -> approval -> delivery',
+            source_ids: ['doc-process']
+        }
+    );
+    const request = buildAIDraftSessionRequestPayload({
+        role: { id: 'workflow-mapper', label: 'Workflow Mapper' },
+        action: { id: 'custom_prompt', label: 'Custom prompt' },
+        scope: { type: 'workspace' },
+        prompt: 'Turn this pasted dump into a reviewable flow.',
+        contextDump: dumpPayload.source_chunks[0].text,
+        selectedSourceIds: ['doc-process'],
+        evidenceMode: 'uploaded_sources',
+        citationPolicy: 'required'
+    });
+
+    assert.equal(dumpPayload.source_chunks[0].document_id, 'doc-process');
+    assert.equal(request.source_chunks.length, 2);
+    assert.equal(
+        request.source_chunks.find((chunk) => chunk.metadata.source_context_pasted_dump).text,
+        'Order intake -> estimate -> approval -> delivery'
+    );
+    assert.deepEqual(request.metadata.source_context.selected_source_ids, ['doc-process']);
+    assert.equal(request.metadata.source_context.pasted_context_attached, true);
+    assert.equal(request.source_refs.some((ref) => ref.source_type === 'pasted_context'), true);
+});
+
+test('compat draft payload preserves raw selected source IDs without a full source payload', () => {
+    const idPayload = buildSelectedSourceIdsDraftPayload(['doc-a', 'doc-b', 'doc-a']);
+    const request = buildAIDraftSessionRequestPayload({
+        role: { id: 'source-librarian', label: 'Source Librarian' },
+        action: { id: 'custom_prompt', label: 'Compare selected source IDs' },
+        scope: { type: 'workspace' },
+        prompt: 'Compare selected sources.',
+        selectedSourceIds: ['doc-a', 'doc-b']
+    });
+
+    assert.deepEqual(idPayload.metadata.selected_source_ids, ['doc-a', 'doc-b']);
+    assert.deepEqual(request.metadata.source_context.selected_source_ids, ['doc-a', 'doc-b']);
+    assert.equal(request.metadata.source_context.source_context_mode, 'selected_source_ids');
+    assert.deepEqual(
+        request.source_chunks.map((chunk) => chunk.document_id),
+        ['doc-a', 'doc-b']
+    );
+    assert.deepEqual(
+        request.source_refs.map((ref) => ref.document_id),
+        ['doc-a', 'doc-b']
+    );
 });
 
 test('pasted URL source refs are carried into correction draft requests', () => {

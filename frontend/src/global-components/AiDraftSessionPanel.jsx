@@ -41,6 +41,7 @@ import DraftRevisionTimeline from './aiDraftSession/DraftRevisionTimeline';
 import DraftSourceCoverage from './aiDraftSession/DraftSourceCoverage';
 import SoftwareOverlapReports from './aiDraftSession/SoftwareOverlapReports';
 import ConnectedPackagePreview from '../connected-package/ConnectedPackagePreview';
+import { normalizePackage } from '../connected-package/connectedPackageModel';
 
 const ACCEPT_MODE_LABELS = {
     append: getAIDraftAcceptModeDetail('append').label,
@@ -400,6 +401,25 @@ const sourceCoverage = (items = []) => {
     };
 };
 
+const buildPackageCitationRepairPrompt = (connectedPackage = {}) => {
+    const coverage = connectedPackage.source_coverage || {};
+    const targetLabels = asArray(connectedPackage.repair_targets)
+        .map((target) => target.label || target.issue || target.title)
+        .filter(Boolean)
+        .slice(0, 5);
+    const targetText = targetLabels.length
+        ? ` Prioritize these repair targets: ${targetLabels.join('; ')}.`
+        : '';
+    return [
+        'Repair the citations for this connected picture package.',
+        'Use web/current public sources where needed for public code, standards, AHJ, regulation, or lifecycle claims.',
+        'Preserve package ids, node ids, relationship edge ids, evidence links, acceptance groups, and repair target ids.',
+        'Attach source_refs only where the source directly supports the item; keep unsupported items needs_review with a repair_target.',
+        `Return an updated connected_picture_package with source-backed evidence rows and citation repair results for ${coverage.total_items || 'all'} package items.`,
+        targetText
+    ].join(' ');
+};
+
 const draftNodeId = (node = {}) => node.id || node.node_id || '';
 
 const draftEdgeSourceId = (edge = {}) => edge.source_node_id || edge.source || edge.parent_id || '';
@@ -545,6 +565,32 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         () => normalizePublishableDraftArtifacts(revision),
         [revision]
     );
+    const hasConnectedPackageArtifact = useMemo(
+        () => asArray(revision.generated_artifacts).some(
+            (artifact) => artifact?.artifact_type === 'connected_picture_package'
+        ),
+        [revision]
+    );
+    const hasConnectedPackageIntent = useMemo(() => {
+        const metadata = {
+            ...(session.metadata || {}),
+            ...(revision.metadata || {})
+        };
+        return (
+            hasConnectedPackageArtifact ||
+            Boolean(revision.connected_package_preview || revision.connected_package || revision.package_preview) ||
+            Boolean(metadata.connected_package_preview || metadata.connected_package || metadata.package_preview) ||
+            asArray(metadata.requested_output_shapes).includes('connected_picture_package') ||
+            asArray(metadata.desired_outputs).includes('connected_picture_package')
+        );
+    }, [hasConnectedPackageArtifact, revision, session]);
+    const connectedPackageReadinessGate = useMemo(
+        () =>
+            hasConnectedPackageIntent
+                ? normalizePackage({ session, revision }).readiness_gate || null
+                : null,
+        [hasConnectedPackageIntent, revision, session]
+    );
     const overlapReports = useMemo(() => normalizeSoftwareOverlapReports(revision), [revision]);
     const coverage = useMemo(() => sourceCoverage(items), [items]);
     const outlinePreview = useMemo(
@@ -620,14 +666,16 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         });
     };
 
-    const submitRevision = async () => {
-        if (!prompt.trim() || isRevising) {
+    const submitRevision = async (overridePrompt = '') => {
+        const revisionPrompt = typeof overridePrompt === 'string' && overridePrompt.trim()
+            ? overridePrompt.trim()
+            : prompt.trim();
+        if (!revisionPrompt || isRevising) {
             return;
         }
         setIsRevising(true);
         setMessage('');
         setProgressMessage('Sending revision to the AI model.');
-        const revisionPrompt = prompt.trim();
         const revisionSourceRefs = [
             ...asArray(session.source_refs),
             ...asArray(revision.draft_nodes).flatMap((node) => asArray(node.source_refs)),
@@ -635,6 +683,10 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             ...asArray(revision.draft_annotations).flatMap((annotation) => asArray(annotation.source_refs))
         ];
         const changeIntent = inferAIDraftChangeIntent(revisionPrompt, 'update');
+        const isCitationRepairRevision =
+            /\b(repair|citation|source_refs?|web\/current|public sources?|public code|standards?|regulations?)\b/i.test(
+                revisionPrompt
+            );
         const memoryContext = buildAIDraftMemoryContext({
             nodes,
             edges,
@@ -652,11 +704,23 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
             model: session.selected_model && session.selected_model !== 'auto' ? session.selected_model : null,
             change_intent: changeIntent,
             memory_context: memoryContext,
+            desired_outputs: hasConnectedPackageArtifact || isCitationRepairRevision
+                ? ['connected_picture_package']
+                : undefined,
             metadata: {
                 change_intent: changeIntent,
                 follow_up_memory: memoryContext,
                 prior_session_id: session.session_id,
-                prior_revision_id: revision.revision_id
+                prior_revision_id: revision.revision_id,
+                requested_output_shapes: hasConnectedPackageArtifact || isCitationRepairRevision
+                    ? ['connected_picture_package']
+                    : revision.metadata?.requested_output_shapes,
+                evidence_mode: isCitationRepairRevision
+                    ? 'web_sources'
+                    : revision.metadata?.evidence_mode,
+                citation_policy: isCitationRepairRevision
+                    ? 'required'
+                    : revision.metadata?.citation_policy
             }
         };
         const priorPrompt = visibleAIDraftPromptText(revision.prompt || '') || visiblePromptTitle;
@@ -799,6 +863,16 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         }
     };
 
+    const requestPackageCitationRepair = (connectedPackage) => {
+        const repairPrompt = buildPackageCitationRepairPrompt(connectedPackage);
+        setPrompt(repairPrompt);
+        setProgressMessage('Preparing citation repair request for this connected package.');
+        window.setTimeout(() => {
+            promptRef.current?.focus();
+            submitRevision(repairPrompt);
+        }, 0);
+    };
+
     const acceptDraft = async (modeOverride) => {
         const mode = modeOverride || acceptMode;
         const activeAcceptModeDetail = getAIDraftAcceptModeDetail(mode);
@@ -842,6 +916,16 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
         };
         if (mode === 'selected' && effectiveSelectedIds.length === 0) {
             setMessage('Select at least one draft item before accepting selected changes.');
+            return;
+        }
+        if (
+            connectedPackageReadinessGate?.bulk_accept_blocked &&
+            !['selected', 'notes_only'].includes(mode)
+        ) {
+            setAcceptMode('selected');
+            setMessage(
+                `Bulk package acceptance is blocked by ${connectedPackageReadinessGate.blocker_count} readiness issue${connectedPackageReadinessGate.blocker_count === 1 ? '' : 's'}. Select reviewed package items or repair the blockers first.`
+            );
             return;
         }
         setIsAccepting(true);
@@ -1209,7 +1293,11 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 />
             ) : null}
 
-            <ConnectedPackagePreview session={session} revision={revision} />
+            <ConnectedPackagePreview
+                session={session}
+                revision={revision}
+                onRequestSourceRepair={requestPackageCitationRepair}
+            />
 
             <DraftProjection
                 items={items}
@@ -1244,6 +1332,7 @@ const AiDraftSessionPanel = ({ session, onClose, onAccepted }) => {
                 isAccepting={isAccepting}
                 primaryAcceptText={primaryAcceptText}
                 itemCount={items.length}
+                readinessGate={connectedPackageReadinessGate}
                 onDiscard={discardDraft}
                 onAccept={acceptDraft}
             />

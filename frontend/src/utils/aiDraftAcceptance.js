@@ -270,6 +270,12 @@ export const acceptAIDraftSession = ({
         undo_kind: undo.kind,
         accepted_artifact_ids: acceptedArtifacts.map((artifact) => artifact.id)
     };
+    const canonicalGraphMutated =
+        mode !== 'notes_only' &&
+        (generatedIds.size > 0 ||
+            generatedEdges.length > 0 ||
+            baseGraph.removed_edge_ids.length > 0 ||
+            baseGraph.removed_node_ids.length > 0);
     const acceptHistoryEntry = {
         session_id: session.session_id,
         revision_id: revision.revision_id,
@@ -321,7 +327,7 @@ export const acceptAIDraftSession = ({
             ],
             undo,
             metadata: acceptMetadata,
-            canonical_graph_mutated: mode !== 'notes_only'
+            canonical_graph_mutated: canonicalGraphMutated
         }
     };
 };

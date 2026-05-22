@@ -1,3 +1,11 @@
+import {
+    getPackageGraphProjection,
+    getPackageConceptMapProjection,
+    getPackageProcessProjection,
+    getPackageRelationshipProjection,
+    hasConnectedPackageProjectionData
+} from '../../connected-package/connectedPackageProjections.js';
+
 const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
 
 const normalizeSignal = (value = '') =>
@@ -118,12 +126,18 @@ const graphProjection = (projection, type, nodes, edges, extra = {}) => ({
 });
 
 export const getPackageReadyProjection = (projection = {}) => {
+    if (hasConnectedPackageProjectionData(projection)) {
+        return getPackageGraphProjection(projection, { projectionType: 'package_ready' });
+    }
     const nodes = acceptedPackageNodes(projection);
     const edges = acceptedPackageEdges(projection, nodes);
     return graphProjection(projection, 'package_ready', nodes, edges);
 };
 
 export const getConceptGraphProjection = (projection = {}) => {
+    if (hasConnectedPackageProjectionData(projection)) {
+        return getPackageConceptMapProjection(projection);
+    }
     const nodes = acceptedPackageNodes(projection).filter(
         (node) => !ACTION_TYPES.has(normalizeSignal(node.node_type))
     );
@@ -131,6 +145,9 @@ export const getConceptGraphProjection = (projection = {}) => {
 };
 
 export const getRelationshipGraphProjection = (projection = {}) => {
+    if (hasConnectedPackageProjectionData(projection)) {
+        return getPackageRelationshipProjection(projection);
+    }
     const nodes = acceptedPackageNodes(projection);
     const edges = acceptedPackageEdges(projection, nodes).filter((edge) =>
         Boolean(edge.relationship_type)
@@ -139,6 +156,9 @@ export const getRelationshipGraphProjection = (projection = {}) => {
 };
 
 export const getProcessGraphProjection = (projection = {}) => {
+    if (hasConnectedPackageProjectionData(projection)) {
+        return getPackageProcessProjection(projection);
+    }
     const nodes = acceptedPackageNodes(projection).filter((node) =>
         PROCESS_TYPES.has(normalizeSignal(node.node_type))
     );

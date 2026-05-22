@@ -1,5 +1,7 @@
 export * from './projection/packageReady.js';
 export * from './projections/packageProjections.js';
+export * from '../connected-package/connectedPackageProjections.js';
+export * from '../connected-package/connectedPackageExports.js';
 export * from './projection/relationships.js';
 export * from './projection/graphConfidence.js';
 export * from './projection/flowchart.js';

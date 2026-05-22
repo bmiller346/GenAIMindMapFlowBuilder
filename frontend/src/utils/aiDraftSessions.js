@@ -395,6 +395,8 @@ const AI_DRAFT_MEMORY_NODE_LIMIT = 24;
 const AI_DRAFT_MEMORY_EDGE_LIMIT = 40;
 const AI_DRAFT_MEMORY_SOURCE_REF_LIMIT = 30;
 const AI_DRAFT_MEMORY_PROMPT_LIMIT = 3;
+const AI_DRAFT_CONTEXT_DUMP_TEXT_LIMIT = 12000;
+const AI_DRAFT_CONTEXT_DUMP_SNIPPET_LIMIT = 720;
 
 const truncateMemoryText = (value, limit = 480) => {
     const text = String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -425,9 +427,23 @@ const normalizeMemorySourceRefs = (...refLists) => {
         mergeSourceRefs(refLists[0] || [], refLists[1] || []),
         refLists.slice(2).flatMap((refsForList) => asArray(refsForList))
     );
-    return refs
+    const refsByLocator = new Map();
+    refs
         .map(normalizeMemorySourceRef)
         .filter((ref) => ref.document_id || ref.chunk_id || ref.quote_snippet)
+        .forEach((ref) => {
+            const key = JSON.stringify([
+                ref.document_id,
+                ref.chunk_id,
+                ref.page,
+                ref.section
+            ]);
+            const existing = refsByLocator.get(key);
+            if (!existing || (!existing.quote_snippet && ref.quote_snippet)) {
+                refsByLocator.set(key, ref);
+            }
+        });
+    return Array.from(refsByLocator.values())
         .slice(0, AI_DRAFT_MEMORY_SOURCE_REF_LIMIT);
 };
 
@@ -542,6 +558,10 @@ export const buildAIDraftMemoryContext = ({
     sourceRefs = [],
     adHocSourceRefs = [],
     selectedSourcePayload = null,
+    contextDump = '',
+    pastedContext = '',
+    selectedSourceIds = [],
+    sourceIds = [],
     activeDraftSession = null,
     prompt = '',
     changeIntent = '',
@@ -573,6 +593,14 @@ export const buildAIDraftMemoryContext = ({
     const normalizedChangeIntent = normalizeAIDraftChangeIntent(
         changeIntent || inferAIDraftChangeIntent(prompt)
     );
+    const compatibleSourcePayload = mergeAIDraftSourcePayloads(
+        selectedSourcePayload,
+        buildSelectedSourceIdsDraftPayload(normalizeSourceIdList(selectedSourceIds, sourceIds)),
+        buildPastedContextDraftPayload(contextDump || pastedContext, {
+            selectedSourceIds,
+            sourceIds
+        })
+    );
 
     return {
         schema_version: '1',
@@ -593,12 +621,12 @@ export const buildAIDraftMemoryContext = ({
         source_refs: normalizeMemorySourceRefs(
             sourceRefs,
             adHocSourceRefs,
-            selectedSourcePayload?.source_refs,
+            compatibleSourcePayload?.source_refs,
             nodeSourceRefs,
             revisionSourceRefs,
             sessionSourceRefs
         ),
-        source_context: selectedSourcePayload?.metadata || null,
+        source_context: compatibleSourcePayload?.metadata || null,
         prior_draft_session: activeDraftSession?.session_id
             ? {
                   session_id: activeDraftSession.session_id,
@@ -654,6 +682,191 @@ export const normalizeAIDraftSourceChunk = (chunk = {}, source = {}) => {
             source_title: firstText(source.title, source.filename, source.name),
             ...(chunk.metadata && typeof chunk.metadata === 'object' ? chunk.metadata : {})
         }
+    };
+};
+
+const normalizeSourceIdList = (...values) => {
+    const ids = [];
+    const seen = new Set();
+    values.flatMap((value) => asArray(Array.isArray(value) ? value : [value])).forEach((value) => {
+        const normalized = firstText(
+            typeof value === 'object' ? value.id : value,
+            typeof value === 'object' ? value.document_id : '',
+            typeof value === 'object' ? value.source_id : '',
+            typeof value === 'object' ? value.sourceId : ''
+        );
+        if (normalized && !seen.has(normalized)) {
+            ids.push(normalized);
+            seen.add(normalized);
+        }
+    });
+    return ids;
+};
+
+const truncateContextDumpText = (value = '', limit = AI_DRAFT_CONTEXT_DUMP_TEXT_LIMIT) => {
+    const text = String(value || '').trim();
+    if (!text || text.length <= limit) {
+        return text;
+    }
+    return `${text.slice(0, Math.max(0, limit - 3))}...`;
+};
+
+export const buildSelectedSourceIdsDraftPayload = (sourceIds = []) => {
+    const ids = normalizeSourceIdList(sourceIds);
+    if (!ids.length) {
+        return null;
+    }
+    const sourceChunks = ids.map((sourceId) =>
+        normalizeAIDraftSourceChunk(
+            {
+                id: `${sourceId}_selected_source`,
+                document_id: sourceId,
+                section: 'Selected source',
+                snippet: '',
+                source_ref: {
+                    document_id: sourceId,
+                    chunk_id: `${sourceId}_selected_source`,
+                    section: 'Selected source',
+                    quote_snippet: '',
+                    confidence: 'medium',
+                    source_type: 'selected_source'
+                },
+                metadata: {
+                    source_context_selected_id_only: true,
+                    source_context_preserve_refs_only: true
+                }
+            },
+            { id: sourceId, title: sourceId }
+        )
+    );
+    return {
+        scope: { type: 'workspace' },
+        source_chunks: sourceChunks,
+        source_refs: sourceChunks.flatMap((chunk) => asArray(chunk.source_refs)),
+        metadata: {
+            selected_source_ids: ids,
+            selected_source_count: ids.length,
+            selected_source_chunk_count: 0,
+            source_context_mode: 'selected_source_ids'
+        }
+    };
+};
+
+export const buildPastedContextDraftPayload = (contextDump = '', options = {}) => {
+    const source = contextDump && typeof contextDump === 'object' ? contextDump : {};
+    const text = truncateContextDumpText(
+        typeof contextDump === 'string'
+            ? contextDump
+            : firstText(
+                  source.text,
+                  source.content,
+                  source.body,
+                  source.context,
+                  source.pasted_context,
+                  source.dump_context
+              )
+    );
+    if (!text) {
+        return null;
+    }
+    const selectedSourceIds = normalizeSourceIdList(
+        options.selectedSourceIds,
+        options.sourceIds,
+        source.selected_source_ids,
+        source.source_ids,
+        source.document_ids,
+        source.document_id,
+        source.source_id
+    );
+    const documentId = firstText(
+        source.document_id,
+        source.source_id,
+        source.id,
+        selectedSourceIds[0],
+        'pasted-dump-context'
+    );
+    const title = firstText(source.title, source.label, source.name, 'Pasted dump context');
+    const chunkId = firstText(source.chunk_id, source.chunkId, `${documentId}_pasted_context`);
+    const snippet = truncateContextDumpText(text, AI_DRAFT_CONTEXT_DUMP_SNIPPET_LIMIT);
+    const chunk = normalizeAIDraftSourceChunk(
+        {
+            id: chunkId,
+            document_id: documentId,
+            heading: title,
+            text,
+            snippet,
+            source_ref: {
+                document_id: documentId,
+                chunk_id: chunkId,
+                section: title,
+                quote_snippet: snippet,
+                confidence: firstText(source.confidence, 'medium'),
+                source_type: firstText(source.source_type, 'pasted_context')
+            },
+            metadata: {
+                source_context_pasted_dump: true,
+                source_context_original_char_count: String(
+                    typeof contextDump === 'string'
+                        ? contextDump
+                        : firstText(source.text, source.content, source.body, source.context)
+                ).length,
+                ...(source.metadata && typeof source.metadata === 'object' ? source.metadata : {})
+            }
+        },
+        { id: documentId, title }
+    );
+    return {
+        scope: { type: 'workspace' },
+        source_chunks: [chunk],
+        source_refs: asArray(chunk.source_refs),
+        metadata: {
+            pasted_context_attached: true,
+            pasted_context_title: title,
+            pasted_context_document_id: documentId,
+            pasted_context_char_count: text.length,
+            selected_source_ids: selectedSourceIds,
+            selected_source_count: selectedSourceIds.length,
+            selected_source_chunk_count: 1,
+            source_context_mode: 'pasted_dump_context'
+        }
+    };
+};
+
+export const mergeAIDraftSourcePayloads = (...payloads) => {
+    const normalizedPayloads = payloads.filter((payload) => payload && typeof payload === 'object');
+    if (!normalizedPayloads.length) {
+        return null;
+    }
+    const sourceChunks = normalizedPayloads.flatMap((payload) => asArray(payload.source_chunks));
+    const sourceRefs = normalizedPayloads.reduce(
+        (refs, payload) => mergeSourceRefs(refs, asArray(payload.source_refs)),
+        []
+    );
+    const metadata = normalizedPayloads.reduce((merged, payload) => {
+        const current = payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+        const selectedSourceIds = normalizeSourceIdList(
+            merged.selected_source_ids,
+            merged.selected_source_id,
+            current.selected_source_ids,
+            current.selected_source_id
+        );
+        return {
+            ...merged,
+            ...current,
+            selected_source_ids: selectedSourceIds,
+            selected_source_count: selectedSourceIds.length || current.selected_source_count || merged.selected_source_count || 0,
+            selected_source_chunk_count: sourceChunks.length
+        };
+    }, {});
+    const preferredScope =
+        normalizedPayloads.find((payload) => payload.scope?.type === 'source')?.scope ||
+        normalizedPayloads[0]?.scope ||
+        { type: 'workspace' };
+    return {
+        scope: preferredScope,
+        source_chunks: sourceChunks,
+        source_refs: sourceRefs,
+        metadata
     };
 };
 
@@ -718,6 +931,10 @@ export const buildAIDraftSessionRequestPayload = ({
     createdBy = 'user',
     selectedModel = 'auto',
     selectedSourcePayload = null,
+    contextDump = '',
+    pastedContext = '',
+    selectedSourceIds = [],
+    sourceIds = [],
     adHocSourceRefs = [],
     desiredOutputs = [],
     workspaceBrief = {},
@@ -729,6 +946,38 @@ export const buildAIDraftSessionRequestPayload = ({
     evidenceMode = '',
     citationPolicy = ''
 } = {}) => {
+    const metadataSourceContext =
+        metadata.source_context && typeof metadata.source_context === 'object'
+            ? metadata.source_context
+            : {};
+    const compatibleSelectedSourceIds = normalizeSourceIdList(
+        selectedSourceIds,
+        sourceIds,
+        metadata.selected_source_ids,
+        metadata.source_ids,
+        metadataSourceContext.selected_source_ids,
+        metadataSourceContext.selected_source_id
+    );
+    const compatibleContextDump =
+        contextDump ||
+        pastedContext ||
+        metadata.context_dump ||
+        metadata.dump_context ||
+        metadata.pasted_context ||
+        metadataSourceContext.context_dump ||
+        metadataSourceContext.pasted_context ||
+        '';
+    const compatibleSourcePayload = mergeAIDraftSourcePayloads(
+        selectedSourcePayload,
+        buildSelectedSourceIdsDraftPayload(compatibleSelectedSourceIds),
+        buildPastedContextDraftPayload(compatibleContextDump, {
+            selectedSourceIds: compatibleSelectedSourceIds
+        })
+    );
+    const compatibleSourceContextPayload = mergeAIDraftSourcePayloads(
+        ...(Object.keys(metadataSourceContext).length ? [{ metadata: metadataSourceContext }] : []),
+        compatibleSourcePayload
+    );
     const normalizedMemory =
         memoryContext && typeof memoryContext === 'object' && Object.keys(memoryContext).length
             ? memoryContext
@@ -743,12 +992,36 @@ export const buildAIDraftSessionRequestPayload = ({
     const normalizedExpansionTarget = normalizeAIDraftExpansionTarget(
         expansionTarget || metadata.expansion_target || normalizedMemory?.expansion_target
     );
-    const normalizedEvidenceMode = normalizeAIDraftEvidenceMode(
-        evidenceMode || metadata.evidence_mode || normalizedMemory?.evidence_mode
-    );
-    const normalizedCitationPolicy = normalizeAIDraftCitationPolicy(
-        citationPolicy || metadata.citation_policy || normalizedMemory?.citation_policy
-    );
+    const rawEvidenceMode = String(
+        evidenceMode || metadata.evidence_mode || normalizedMemory?.evidence_mode || ''
+    ).trim().toLowerCase();
+    const rawCitationPolicy = String(
+        citationPolicy || metadata.citation_policy || normalizedMemory?.citation_policy || ''
+    ).trim().toLowerCase();
+    const normalizedEvidenceMode =
+        rawEvidenceMode === 'auto' ? '' : normalizeAIDraftEvidenceMode(rawEvidenceMode);
+    const normalizedCitationPolicy =
+        rawCitationPolicy === 'auto' ? '' : normalizeAIDraftCitationPolicy(rawCitationPolicy);
+    const normalizedMetadata = {
+        ...metadata,
+        change_intent: normalizedChangeIntent,
+        expansion_mode: normalizedExpansionMode,
+        expansion_target: normalizedExpansionTarget,
+        source_policy_requires_citation: normalizedCitationPolicy === 'required',
+        follow_up_memory: normalizedMemory || metadata.follow_up_memory,
+        workspace_brief: workspaceBrief && typeof workspaceBrief === 'object' ? workspaceBrief : {},
+        source_context: compatibleSourceContextPayload?.metadata
+    };
+    if (normalizedEvidenceMode) {
+        normalizedMetadata.evidence_mode = normalizedEvidenceMode;
+    } else {
+        delete normalizedMetadata.evidence_mode;
+    }
+    if (normalizedCitationPolicy) {
+        normalizedMetadata.citation_policy = normalizedCitationPolicy;
+    } else {
+        delete normalizedMetadata.citation_policy;
+    }
     return {
         role: role.id || role.role_id || role.label || 'ask-ai',
         role_id: role.id || role.role_id || '',
@@ -758,26 +1031,19 @@ export const buildAIDraftSessionRequestPayload = ({
         custom_prompt: prompt.trim() || null,
         prompt: prompt.trim() || action.label || action.id || 'Ask AI',
         created_by: createdBy,
-        model_policy: selectedModel === 'auto' ? 'balanced' : 'explicit',
+        model_policy: selectedModel === 'auto' ? null : 'explicit',
         model: selectedModel === 'auto' ? null : selectedModel,
-        source_chunks: selectedSourcePayload?.source_chunks || [],
+        source_chunks: compatibleSourcePayload?.source_chunks || [],
         desired_outputs: Array.isArray(desiredOutputs) ? desiredOutputs.filter(Boolean) : [],
         workspace_brief: workspaceBrief && typeof workspaceBrief === 'object' ? workspaceBrief : {},
         change_intent: normalizedChangeIntent,
         memory_context: normalizedMemory || undefined,
-        source_refs: normalizedMemory?.source_refs || normalizeMemorySourceRefs(selectedSourcePayload?.source_refs, adHocSourceRefs),
-        metadata: {
-            ...metadata,
-            change_intent: normalizedChangeIntent,
-            expansion_mode: normalizedExpansionMode,
-            expansion_target: normalizedExpansionTarget,
-            evidence_mode: normalizedEvidenceMode,
-            citation_policy: normalizedCitationPolicy,
-            source_policy_requires_citation: normalizedCitationPolicy === 'required',
-            follow_up_memory: normalizedMemory || metadata.follow_up_memory,
-            workspace_brief: workspaceBrief && typeof workspaceBrief === 'object' ? workspaceBrief : {},
-            source_context: selectedSourcePayload?.metadata
-        }
+        source_refs: normalizeMemorySourceRefs(
+            normalizedMemory?.source_refs,
+            compatibleSourcePayload?.source_refs,
+            adHocSourceRefs
+        ),
+        metadata: normalizedMetadata
     };
 };
 

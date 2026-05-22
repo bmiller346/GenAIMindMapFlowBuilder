@@ -1,297 +1,33 @@
 /* eslint-disable react/prop-types */
 import { useMemo, useState } from 'react';
-import { mockConnectedPackagePreview } from './mockConnectedPackagePreview';
+import { asArray, humanize, normalizePackage, percent, readinessTone } from './connectedPackageModel.js';
 import TrustStateBadges from '../components/TrustStateBadges';
 import './ConnectedPackagePreview.css';
 
 const TABS = ['Overview', 'Graph', 'Connections', 'Flow', 'Table', 'Chart', 'Evidence', 'Tasks', 'Review'];
 
-const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
-
-const firstText = (...values) =>
-    values.find((value) => typeof value === 'string' && value.trim()) || '';
-
-const humanize = (value = '') =>
-    String(value || '')
-        .replaceAll('_', ' ')
-        .replaceAll('-', ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .replace(/^\w/, (letter) => letter.toUpperCase());
-
-const percent = (value, fallback = 0) => {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) {
-        return fallback;
-    }
-    return numeric <= 1 ? Math.round(numeric * 100) : Math.round(numeric);
-};
-
-const readinessTone = (value = '') => {
-    const normalized = String(value || '').toLowerCase();
-    if (['ready', 'source_backed', 'accepted', 'complete'].includes(normalized)) {
-        return 'ready';
-    }
-    if (['blocked', 'needs_repair', 'missing', 'error'].includes(normalized)) {
-        return 'blocked';
-    }
-    return 'warning';
-};
-
-const sourceRefsFromPackage = (packageData = {}) => [
-    ...asArray(packageData.source_refs),
-    ...asArray(packageData.primary_nodes).flatMap((item) => asArray(item.source_refs)),
-    ...asArray(packageData.relationship_edges).flatMap((item) => asArray(item.source_refs)),
-    ...asArray(packageData.structured_evidence).flatMap((item) => asArray(item.source_refs))
-];
-
-const strictPackageToPreview = (packageData = {}, artifact = {}) => {
-    const nodes = asArray(packageData.primary_nodes);
-    const edges = asArray(packageData.relationship_edges);
-    const evidence = asArray(packageData.structured_evidence);
-    const repairs = asArray(packageData.repair_targets);
-    const tasks = asArray(packageData.tasks);
-    const sourceRefs = sourceRefsFromPackage(packageData);
-    const totalItems =
-        nodes.length +
-        edges.length +
-        evidence.length +
-        repairs.length +
-        tasks.length +
-        asArray(packageData.risks).length +
-        asArray(packageData.decisions).length;
-    const citedItems = [
-        ...nodes,
-        ...edges,
-        ...evidence,
-        ...repairs,
-        ...tasks,
-        ...asArray(packageData.risks),
-        ...asArray(packageData.decisions)
-    ].filter((item) => asArray(item.source_refs).length > 0).length;
-
-    return {
-        title: firstText(artifact.title, packageData.title, packageData.package_id, 'Connected package'),
-        summary: firstText(
-            artifact.summary,
-            packageData.summary,
-            'Connected package generated from the draft contract.'
-        ),
-        status: firstText(artifact.status, packageData.review_state, 'preview_only'),
-        graph: {
-            nodes: nodes.map((node) => ({
-                id: node.node_id || node.id,
-                label: node.title || node.node_id || node.id,
-                group: node.node_type || 'Package',
-                readiness: node.review_state || node.status,
-                source_refs: node.source_refs
-            })),
-            edges: edges.map((edge) => ({
-                id: edge.id,
-                source: edge.source_node_id,
-                target: edge.target_node_id,
-                relationship: edge.relationship_type,
-                confidence: edge.confidence || 0,
-                status: edge.review_state,
-                source_refs: edge.source_refs
-            }))
-        },
-        connections: edges.map((edge) => ({
-            id: edge.id,
-            from: edge.source_node_id,
-            to: edge.target_node_id,
-            relationship: edge.relationship_type,
-            confidence: edge.confidence || 0,
-            review_state: edge.review_state,
-            evidence_count: asArray(edge.source_refs).length,
-            source_refs: edge.source_refs
-        })),
-        flow: {
-            lenses: asArray(packageData.view_lenses).map((lens) => lens.title || humanize(lens.lens_type)),
-            stages: nodes.map((node) => ({
-                id: node.id,
-                label: node.title,
-                value: 1,
-                status: node.review_state || node.status
-            })),
-            sankey_rows: edges.map((edge) => ({
-                source: edge.source_node_id,
-                target: edge.target_node_id,
-                value: 1
-            }))
-        },
-        table: {
-            columns: ['item', 'type', 'review state', 'sources'],
-            rows: [
-                ...nodes.map((node) => [
-                    node.title,
-                    node.node_type || 'node',
-                    node.review_state || node.status || 'review',
-                    asArray(node.source_refs).length
-                ]),
-                ...evidence.map((item) => [
-                    item.title,
-                    item.evidence_type || 'evidence',
-                    item.review_state || 'review',
-                    asArray(item.source_refs).length
-                ])
-            ]
-        },
-        charts: [
-            { id: 'source-coverage', label: 'Source coverage', value: totalItems ? (citedItems / totalItems) * 100 : 0, tone: citedItems ? 'ready' : 'warning' },
-            { id: 'repair-targets', label: 'Repair targets', value: repairs.length * 10, tone: repairs.length ? 'warning' : 'ready' }
-        ],
-        evidence: evidence.map((item) => ({
-            id: item.id,
-            title: item.title,
-            source: asArray(item.source_refs)[0]?.title || asArray(item.source_refs)[0]?.document_id || 'No source yet',
-            coverage: item.review_state || 'needs_review',
-            status: item.review_state || item.status,
-            source_refs: item.source_refs
-        })),
-        tasks: [
-            ...tasks,
-            ...asArray(packageData.risks).map((risk) => ({
-                ...risk,
-                status: risk.review_state || risk.status,
-                owner: 'Reviewer'
-            }))
-        ],
-        repair_targets: repairs.map((target) => ({
-            id: target.id,
-            label: target.issue || target.title || target.id,
-            reason: target.repair_action || target.issue,
-            owner: target.metadata?.owner || 'Reviewer',
-            priority: target.metadata?.priority || 'review',
-            target_type: target.target_type,
-            review_state: target.review_state || target.status,
-            source_refs: target.source_refs
-        })),
-        acceptance_groups: asArray(packageData.acceptance_groups).map((group) => ({
-            id: group.id,
-            label: group.title || group.id,
-            summary: group.description || group.summary,
-            status: group.review_state || group.status,
-            item_count: asArray(group.item_ids).length,
-            accepted_count: 0,
-            source_refs: group.source_refs
-        })),
-        readiness: [
-            {
-                id: 'source-coverage',
-                label: 'Source coverage',
-                state: citedItems > 0 ? 'ready' : 'needs_review'
-            },
-            {
-                id: 'repair-targets',
-                label: 'Repair targets',
-                state: repairs.length ? 'needs_repair' : 'ready'
-            }
-        ],
-        source_coverage: {
-            total_items: totalItems,
-            cited_items: citedItems,
-            uncited_items: Math.max(0, totalItems - citedItems),
-            required_repairs: repairs.length,
-            sources: sourceRefs.length
-                ? [
-                      {
-                          id: sourceRefs[0].document_id || sourceRefs[0].url || 'source',
-                          title: sourceRefs[0].title || sourceRefs[0].document_id || sourceRefs[0].url || 'Source',
-                          coverage: totalItems ? citedItems / totalItems : 0,
-                          cited_items: citedItems
-                      }
-                  ]
-                : []
-        },
-        review: asArray(packageData.assumptions).map((assumption, index) => ({
-            id: `assumption-${index}`,
-            label: assumption,
-            tone: 'warning'
-        }))
-    };
-};
-
-const normalizePackage = ({ packagePreview, session = {}, revision = {} } = {}) => {
-    const metadata = {
-        ...(session.metadata || {}),
-        ...(revision.metadata || {})
-    };
-    const connectedArtifact = asArray(revision.generated_artifacts).find(
-        (artifact) => artifact?.artifact_type === 'connected_picture_package'
-    );
-    const connectedArtifactData =
-        connectedArtifact?.data && typeof connectedArtifact.data === 'object'
-            ? connectedArtifact.data
-            : connectedArtifact;
-    const candidate =
-        packagePreview ||
-        revision.connected_package_preview ||
-        revision.connected_package ||
-        revision.package_preview ||
-        metadata.connected_package_preview ||
-        metadata.connected_package ||
-        metadata.package_preview ||
-        (connectedArtifact ? strictPackageToPreview(connectedArtifactData, connectedArtifact) : null) ||
-        null;
-
-    if (candidate && typeof candidate === 'object') {
-        return {
-            ...mockConnectedPackagePreview,
-            ...candidate,
-            source: 'backend_or_session'
-        };
-    }
-
-    const draftNodes = asArray(revision.draft_nodes);
-    const draftItems = asArray(revision.draft_items);
-    const draftEdges = asArray(revision.draft_edges);
-    const sourceRefs = [
-        ...draftNodes.flatMap((node) => asArray(node.source_refs)),
-        ...draftItems.flatMap((item) => asArray(item.source_refs))
-    ];
-    const uncitedCount = [...draftNodes, ...draftItems].filter((item) => asArray(item.source_refs).length === 0).length;
-    const citedCount = Math.max(draftNodes.length + draftItems.length - uncitedCount, sourceRefs.length ? 1 : 0);
-    const packageTitle = firstText(
-        metadata.connected_package_title,
-        metadata.package_title,
-        revision.title,
-        revision.prompt,
-        mockConnectedPackagePreview.title
-    );
-
-    return {
-        ...mockConnectedPackagePreview,
-        title: packageTitle,
-        summary:
-            draftNodes.length || draftItems.length || draftEdges.length
-                ? 'Preview-only connected package assembled from the current draft revision and local mock package artifacts.'
-                : mockConnectedPackagePreview.summary,
-        source: 'mock',
-        source_coverage: {
-            ...mockConnectedPackagePreview.source_coverage,
-            total_items: Math.max(draftNodes.length + draftItems.length, mockConnectedPackagePreview.source_coverage.total_items),
-            cited_items: Math.max(citedCount, mockConnectedPackagePreview.source_coverage.cited_items),
-            uncited_items: Math.max(uncitedCount, mockConnectedPackagePreview.source_coverage.uncited_items),
-            required_repairs: Math.max(uncitedCount, mockConnectedPackagePreview.source_coverage.required_repairs)
-        }
-    };
-};
-
 const Chip = ({ children, tone = 'warning' }) => (
     <span className={`connected-package-preview__chip ${readinessTone(tone)}`}>{children}</span>
 );
 
-const ConnectedPackagePreview = ({ packagePreview, session, revision }) => {
+const ConnectedPackagePreview = ({ packagePreview, session, revision, onRequestSourceRepair }) => {
     const [activeTab, setActiveTab] = useState('Overview');
     const connectedPackage = useMemo(
         () => normalizePackage({ packagePreview, session, revision }),
         [packagePreview, revision, session]
     );
     const coverage = connectedPackage.source_coverage || {};
+    const evidenceMeta = connectedPackage.evidence_meta || {};
+    const readinessGate = connectedPackage.readiness_gate || {};
     const coveragePercent = coverage.total_items
         ? percent((Number(coverage.cited_items || 0) / Number(coverage.total_items || 1)) * 100)
         : 0;
+    const needsCitationRepair =
+        Number(coverage.total_items || 0) > 0 &&
+        Number(coverage.cited_items || 0) === 0 &&
+        (evidenceMeta.web_evidence_requested ||
+            evidenceMeta.citation_required ||
+            Number(coverage.required_repairs || 0) > 0);
 
     return (
         <section className="connected-package-preview" aria-label="Connected package preview">
@@ -308,11 +44,23 @@ const ConnectedPackagePreview = ({ packagePreview, session, revision }) => {
                 <span className="connected-package-preview__status">{humanize(connectedPackage.status || 'preview_only')}</span>
             </header>
 
-            <nav className="connected-package-preview__tabs" aria-label="Connected package tabs">
+            {needsCitationRepair ? (
+                <CitationRepairCallout
+                    connectedPackage={connectedPackage}
+                    onRequestSourceRepair={onRequestSourceRepair}
+                />
+            ) : null}
+            {!needsCitationRepair && readinessGate.bulk_accept_blocked ? (
+                <ReadinessGateCallout readinessGate={readinessGate} />
+            ) : null}
+
+            <nav className="connected-package-preview__tabs" role="tablist" aria-label="Connected package tabs">
                 {TABS.map((tab) => (
                     <button
                         key={tab}
                         type="button"
+                        role="tab"
+                        aria-selected={activeTab === tab}
                         className={activeTab === tab ? 'active' : ''}
                         onClick={() => setActiveTab(tab)}
                     >
@@ -336,11 +84,60 @@ const ConnectedPackagePreview = ({ packagePreview, session, revision }) => {
     );
 };
 
+const CitationRepairCallout = ({ connectedPackage, onRequestSourceRepair }) => {
+    const coverage = connectedPackage.source_coverage || {};
+    const evidenceMeta = connectedPackage.evidence_meta || {};
+    return (
+        <section className="connected-package-preview__callout" role="status">
+            <div>
+                <strong>No citations were attached to this package.</strong>
+                <p>
+                    {humanize(evidenceMeta.evidence_mode || 'web sources')} was allowed
+                    {evidenceMeta.citation_required ? ' and citations were required' : ''}, but all{' '}
+                    {coverage.total_items || 'package'} review items still need source repair.
+                </p>
+            </div>
+            <div className="connected-package-preview__callout-actions">
+                <Chip tone="blocked">{coverage.required_repairs || coverage.uncited_items || 0} repair targets</Chip>
+                {onRequestSourceRepair ? (
+                    <button type="button" onClick={() => onRequestSourceRepair(connectedPackage)}>
+                        Repair citations
+                    </button>
+                ) : null}
+            </div>
+        </section>
+    );
+};
+
+const ReadinessGateCallout = ({ readinessGate = {} }) => {
+    const issues = asArray(readinessGate.issues).slice(0, 4);
+    return (
+        <section className="connected-package-preview__callout" role="status">
+            <div>
+                <strong>Bulk acceptance needs readiness repair.</strong>
+                <p>
+                    Select specific package items to accept, or repair the blockers before accepting
+                    the whole connected package.
+                </p>
+            </div>
+            <div className="connected-package-preview__callout-actions">
+                <Chip tone="blocked">{readinessGate.blocker_count || issues.length} blockers</Chip>
+                {issues.map((issue) => (
+                    <Chip key={`${issue.code}-${issue.item_id || issue.title}`} tone="blocked">
+                        {issue.label}: {issue.title}
+                    </Chip>
+                ))}
+            </div>
+        </section>
+    );
+};
+
 const OverviewTab = ({ connectedPackage, coveragePercent }) => (
     <>
         <div className="connected-package-preview__grid">
             <Metric label="Acceptance groups" value={asArray(connectedPackage.acceptance_groups).length} />
             <Metric label="Repair targets" value={asArray(connectedPackage.repair_targets).length} />
+            <Metric label="Bulk blockers" value={connectedPackage.readiness_gate?.blocker_count || 0} />
             <Metric label="Readiness checks" value={asArray(connectedPackage.readiness).length} />
             <Metric label="Source coverage" value={`${coveragePercent}%`} />
         </div>
@@ -368,6 +165,11 @@ const OverviewTab = ({ connectedPackage, coveragePercent }) => (
             {asArray(connectedPackage.readiness).map((item) => (
                 <Chip key={item.id || item.label} tone={item.state}>
                     {item.label}: {humanize(item.state)}
+                </Chip>
+            ))}
+            {asArray(connectedPackage.readiness_gate?.issues).slice(0, 6).map((issue) => (
+                <Chip key={`${issue.code}-${issue.item_id || issue.title}`} tone={issue.severity}>
+                    {issue.label}
                 </Chip>
             ))}
         </div>

@@ -72,7 +72,7 @@ test('stringifyFlowSnapshot removes activity undo payloads at the snapshot bound
     assert.equal(Object.hasOwn(parsed.activity_events[0], 'undo'), false);
 });
 
-test('flow snapshots preserve accepted connected package artifact metadata while stripping undo handlers', () => {
+test('flow snapshots summarize heavy accepted connected package artifacts while stripping undo handlers', () => {
     const serialized = stringifyFlowSnapshot({
         nodes: [createWorkspaceNode({ id: 'node-1' })],
         edges: [],
@@ -110,8 +110,39 @@ test('flow snapshots preserve accepted connected package artifact metadata while
     assert.equal(event.metadata.undo_kind, 'react_flow_snapshot');
     assert.equal(artifact.artifact_type, 'connected_picture_package');
     assert.equal(artifact.metadata.ai_draft_revision_id, 'revision-connected-package');
-    assert.equal(artifact.data.view_lenses[0].id, 'lens-review');
-    assert.deepEqual(artifact.data.source_refs, [{ document_id: 'doc-1' }]);
+    assert.equal(artifact.metadata.persisted_summary_only, true);
+    assert.equal(Object.hasOwn(artifact, 'data'), false);
+});
+
+test('flow snapshots preserve publishable accepted artifact payloads for export', () => {
+    const serialized = stringifyFlowSnapshot({
+        nodes: [],
+        edges: [],
+        activity_events: [
+            {
+                id: 'activity-newsletter',
+                metadata: {
+                    accepted_artifacts: [
+                        {
+                            id: 'artifact-newsletter',
+                            artifact_type: 'newsletter',
+                            title: 'Monthly update',
+                            data: {
+                                markdown: '# Monthly update',
+                                sections: [{ title: 'Highlights' }]
+                            }
+                        }
+                    ]
+                }
+            }
+        ]
+    });
+    const snapshot = parseFlowSnapshot(serialized);
+    const [artifact] = snapshot.activity_events[0].metadata.accepted_artifacts;
+
+    assert.equal(artifact.artifact_type, 'newsletter');
+    assert.equal(artifact.data.markdown, '# Monthly update');
+    assert.equal(artifact.data.sections[0].title, 'Highlights');
 });
 
 test('flow snapshots preserve AI action run history', () => {

@@ -59,9 +59,13 @@ const DraftAcceptControls = ({
     isAccepting,
     primaryAcceptText,
     itemCount,
+    readinessGate,
     onDiscard,
     onAccept
-}) => (
+}) => {
+    const bulkBlocked = Boolean(readinessGate?.bulk_accept_blocked);
+    const blockCount = Number(readinessGate?.blocker_count || 0);
+    return (
     <>
         <div className="ai-draft-apply-mode" aria-label="Draft apply mode">
             <span>{CHANGE_INTENT_LABELS[sessionChangeIntent] || 'Supplement current workspace'}</span>
@@ -100,20 +104,31 @@ const DraftAcceptControls = ({
             </div>
         </div>
 
+        {bulkBlocked ? (
+            <div className="ai-draft-readiness-gate" role="status">
+                <strong>Package bulk accept blocked</strong>
+                <p>
+                    {blockCount} readiness blocker{blockCount === 1 ? '' : 's'} need repair.
+                    Selected package items can still be accepted after review.
+                </p>
+            </div>
+        ) : null}
+
         <div className="ai-draft-accept">
             <button type="button" className="secondary" onClick={onDiscard}>
                 Discard
             </button>
             {selectedItemIds.length ? (
                 <button type="button" onClick={() => onAccept('selected')} disabled={isAccepting}>
-                    Accept selected
+                Accept selected
                 </button>
             ) : null}
-            <button type="button" onClick={() => onAccept()} disabled={isAccepting || itemCount === 0}>
+            <button type="button" onClick={() => onAccept()} disabled={isAccepting || itemCount === 0 || bulkBlocked}>
                 {isAccepting ? 'Accepting' : primaryAcceptText}
             </button>
         </div>
     </>
-);
+    );
+};
 
 export default DraftAcceptControls;
