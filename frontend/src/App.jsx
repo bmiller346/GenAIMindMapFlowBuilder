@@ -50,6 +50,7 @@ import useShellLayoutState from './shell/useShellLayoutState.js';
 import useWorkspaceShellRouter from './shell/useWorkspaceShellRouter.js';
 import useShellStore, { SHELL_LOCAL_OUTPUT_TRAY_BY_VIEW } from './stores/shellStore.js';
 import {
+    FlowchartLensRibbonGroup,
     KnowledgeGraphRelationshipRibbonGroup,
     MindmapRelationshipRibbonGroup
 } from './ribbon/RelationshipRibbonGroups.jsx';
@@ -78,6 +79,8 @@ import { parseFlowSnapshot, stringifyFlowSnapshot } from './utils/flowSnapshots'
 import { rememberWorkspace, selectStartupWorkspace } from './utils/workspaceSession';
 import { ASK_AI_GENERATION_PROGRESS_EVENT } from './utils/askAiGenerationProgress';
 import { buildWorkspaceNextSteps } from './utils/workspaceNudges';
+import { FLOWCHART_DISPLAY_MODES } from './views/flowchart/flowchartDisplay.js';
+import { FLOWCHART_LENSES } from './views/flowchart/flowchartLens.js';
 import { createWorkspaceEdge, reflowSiblingSubtrees } from './utils/manualNodes';
 import {
     buildAIDraftMemoryContext,
@@ -490,10 +493,13 @@ const App = () => {
     const [aiUsageReviewStatus, setAIUsageReviewStatus] = useState('');
     const [nextStepsOpenToken, setNextStepsOpenToken] = useState(0);
     const [kgRelationshipTrayCollapsed, setKgRelationshipTrayCollapsed] = useState(false);
+    const [mindmapRelationshipTrayCollapsed, setMindmapRelationshipTrayCollapsed] = useState(true);
     const [kgRelationshipMode, setKgRelationshipMode] = useState(() =>
         getLastKgRelationshipMode()
     );
     const [mindmapRelationshipMode, setMindmapRelationshipMode] = useState(MINDMAP_RELATIONSHIP_MODES.OFF);
+    const [flowchartLens, setFlowchartLens] = useState(FLOWCHART_LENSES.PROCESS);
+    const [flowchartDisplayMode, setFlowchartDisplayMode] = useState(FLOWCHART_DISPLAY_MODES.CARDS);
     const kgRelationshipModeCounts = useMemo(
         () => buildProjectedKgRelationshipModeCounts(edges),
         [edges]
@@ -686,6 +692,8 @@ const App = () => {
             .slice(0, 10);
     }, [activeCanvasView, activeView, edges, nodes]);
     const isStructuredCanvasView = STRUCTURED_CANVAS_VIEWS.has(activeCanvasView);
+    const shouldShowCanvasLens =
+        CANVAS_VIEWS.has(activeView) || CANVAS_VIEWS.has(activeCanvasView);
     const isShellOutputSurfaceView =
         useWorkspaceShell && SHELL_OUTPUT_SURFACE_VIEWS.has(activeView);
     const renderedCanvasGraph = useMemo(() => {
@@ -1488,18 +1496,32 @@ const App = () => {
     }, [openWorkspaceDockTab, pushNode, shellActions, useWorkspaceShell]);
 
     const openEmptyCanvasAskAi = useCallback((options = {}) => {
+        const promptScope = options?.scope || 'workspace';
+        const promptNodeId = options?.nodeId || undefined;
+        const promptNodeIds = Array.isArray(options?.nodeIds) ? options.nodeIds.filter(Boolean) : [];
         setSelectedBranchId(undefined);
-        setInspectorNodeId(undefined);
+        setInspectorNodeId(promptScope === 'node' ? promptNodeId : undefined);
         setInspectorEdgeId(undefined);
         setIsAiHelpersOpen(false);
         shellActions.setRibbonTab('ai', { source: 'emptyCanvas' });
-        shellActions.setActiveScope({ type: 'workspace' });
+        shellActions.setActiveScope(
+            promptScope === 'node' && promptNodeId
+                ? { type: 'node', nodeId: promptNodeId }
+                : promptScope === 'nodes' && promptNodeIds.length
+                  ? { type: 'nodes', nodeIds: promptNodeIds }
+                  : { type: 'workspace' }
+        );
         pushNode(PromptModal, {
-            scope: 'workspace',
+            scope: promptScope,
+            nodeId: promptNodeId,
+            nodeIds: promptNodeIds,
             initialPrompt: options?.initialPrompt,
             initialVisual: options?.initialVisual || 'auto',
-            initialEvidenceMode: sourceLibrary.length ? 'uploaded_sources' : 'workspace',
-            initialCitationPolicy: sourceLibrary.length ? 'required' : 'preferred',
+            initialExpansionTarget: options?.initialExpansionTarget,
+            initialEvidenceMode: sourceLibrary.length ? 'uploaded_sources' : 'auto',
+            initialCitationPolicy: sourceLibrary.length ? 'required' : 'auto',
+            initialChangeIntent: options?.initialChangeIntent,
+            initialRequestMetadata: options?.initialRequestMetadata,
             initialPromptPlaceholder:
                 'Describe what you want TraceSpace to build, explain, connect, or turn into a reviewable package.'
         });
@@ -1510,8 +1532,11 @@ const App = () => {
                 ? 'Opened the freeform Ask AI composer from the empty canvas.'
                 : 'Opened preview-first AI actions from the empty canvas.',
             metadata: {
-                scope: 'workspace',
-                surface: useWorkspaceShell ? 'shell_prompt_modal' : 'modal'
+                scope: promptScope,
+                node_id: promptNodeId || null,
+                node_ids: promptNodeIds,
+                surface: useWorkspaceShell ? 'shell_prompt_modal' : 'modal',
+                ...(options?.initialRequestMetadata || {})
             }
         });
     }, [
@@ -1544,8 +1569,8 @@ const App = () => {
         pushNode(PromptModal, {
             scope: 'workspace',
             initialVisual: 'auto',
-            initialEvidenceMode: sourceLibrary.length ? 'uploaded_sources' : 'workspace',
-            initialCitationPolicy: sourceLibrary.length ? 'required' : 'preferred',
+            initialEvidenceMode: sourceLibrary.length ? 'uploaded_sources' : 'auto',
+            initialCitationPolicy: sourceLibrary.length ? 'required' : 'auto',
             initialPromptPlaceholder:
                 'Choose a guided start below, or describe what you want TraceSpace to build first.'
         });
@@ -2355,6 +2380,17 @@ const App = () => {
         },
         [setActiveView, shellActions]
     );
+    const handleShellRibbonTabChange = useCallback(
+        (tab, context = null) => {
+            if (tab === 'map') {
+                setActiveView('mindmap');
+                shellActions.setRibbonTab('map', context || { view: 'mindmap' });
+                return;
+            }
+            shellActions.setRibbonTab(tab, context);
+        },
+        [setActiveView, shellActions]
+    );
     const openSourceRepairAi = useCallback(() => {
         openEmptyCanvasAskAi({
             initialPrompt:
@@ -2452,8 +2488,12 @@ const App = () => {
                             offMode={MINDMAP_RELATIONSHIP_MODES.OFF}
                             branchLegend={mindmapBranchLegend}
                             selectedBranchId={selectedBranchId}
+                            collapsed={mindmapRelationshipTrayCollapsed}
                             onModeChange={setMindmapRelationshipMode}
                             onBranchFocus={handleBranchLensChange}
+                            onToggleCollapsed={() =>
+                                setMindmapRelationshipTrayCollapsed((current) => !current)
+                            }
                         />
                     ) : null}
                     {activeCanvasView === 'knowledgeGraph' && nodes.length > 0 ? (
@@ -2470,6 +2510,14 @@ const App = () => {
                             onOpenInsight={openEdgeInspector}
                         />
                     ) : null}
+                    {activeCanvasView === 'flowchart' && nodes.length > 0 ? (
+                        <FlowchartLensRibbonGroup
+                            mode={flowchartLens}
+                            displayMode={flowchartDisplayMode}
+                            onModeChange={setFlowchartLens}
+                            onDisplayModeChange={setFlowchartDisplayMode}
+                        />
+                    ) : null}
                 </div>
             ) : (
                 <div className="shell-ribbon__placeholder" aria-label="Ribbon command groups">
@@ -2482,6 +2530,8 @@ const App = () => {
             activeView,
             focusNodeForReview,
             flow_id,
+            flowchartDisplayMode,
+            flowchartLens,
             handleBranchLensChange,
             kgRelationshipMode,
             kgRelationshipModeCounts,
@@ -2489,6 +2539,7 @@ const App = () => {
             kgTopInsights,
             mindmapBranchLegend,
             mindmapRelationshipMode,
+            mindmapRelationshipTrayCollapsed,
             nodes.length,
             openEmptyCanvasAskAi,
             openEmptyCanvasSources,
@@ -2504,6 +2555,8 @@ const App = () => {
             selectKgRelationshipMode,
             selectedBranchId,
             setActiveView,
+            setFlowchartDisplayMode,
+            setFlowchartLens,
             shellActions,
             sourceLibrary.length
         ]
@@ -2778,6 +2831,8 @@ const App = () => {
                         onPrepareKanbanBoard={() => openStructuredAiPreset('kanban')}
                         onCreateStructuredTable={() => openStructuredAiPreset('table')}
                         onCreateExecutiveOutput={() => openStructuredAiPreset('executive')}
+                        flowchartLens={flowchartLens}
+                        flowchartDisplayMode={flowchartDisplayMode}
                     />
                 ) : null}
                 {!useWorkspaceShell && workspaceNavigator ? (
@@ -2883,14 +2938,14 @@ const App = () => {
                         </section>
                     </Panel>
                 ) : null}
-                {!useWorkspaceShell && !isFocusPanelOpen && CANVAS_VIEWS.has(activeView) ? (
+                {!useWorkspaceShell && shouldShowCanvasLens && (!isFocusPanelOpen || isStructuredCanvasView) ? (
                     <FloatingDock
                         id="canvasLens"
                         ariaLabel="Canvas lens toolbar"
                         className="canvas-lens-floating-dock"
                         defaultPlacement={{
-                            dock: CANVAS_VIEWS.has(activeView) ? 'top' : 'right',
-                            offset: CANVAS_VIEWS.has(activeView)
+                            dock: shouldShowCanvasLens ? 'top' : 'right',
+                            offset: shouldShowCanvasLens
                                 ? { x: 0, y: 0 }
                                 : { x: -12, y: 86 }
                         }}
@@ -3131,12 +3186,12 @@ const App = () => {
                 onWorkspaceAskAi={useWorkspaceShell ? openShellWorkspaceAskAi : undefined}
                 workspaceNavigationTabs={useWorkspaceShell ? DEFAULT_SHELL_RIBBON_TABS : []}
                 activeWorkspaceNavigationTab={shellActions.activeRibbonTab}
-                onWorkspaceNavigationChange={shellActions.setRibbonTab}
+                onWorkspaceNavigationChange={handleShellRibbonTabChange}
             />
             {useWorkspaceShell ? (
                 <WorkspaceShellAdapter
                     activeRibbonTab={shellActions.activeRibbonTab}
-                    onRibbonTabChange={shellActions.setRibbonTab}
+                    onRibbonTabChange={handleShellRibbonTabChange}
                     renderRibbonContent={renderShellRibbonContent}
                     leftWidth={workspaceShellLeftWidth}
                     leftPanel={shellLeftPanel}

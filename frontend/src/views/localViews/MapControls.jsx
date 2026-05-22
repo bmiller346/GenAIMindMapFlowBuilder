@@ -4,7 +4,6 @@ import FilterPopover from './FilterControls';
 import { NextActionPreview, OutputMenuButton, OutputWorkflowPopover } from './OutputWorkflowControls';
 
 export const MapControlPopovers = ({
-    panelRef,
     viewMenuOpen,
     viewMenuButtonRef,
     nodeViewMenuOpen,
@@ -20,6 +19,7 @@ export const MapControlPopovers = ({
     nodeDensityOptions,
     canvasNodeDensity,
     setCanvasNodeDensity,
+    canUseNodeDensity = true,
     canReflowCanvas,
     setNodeViewMenuOpen,
     graphFilters,
@@ -38,7 +38,6 @@ export const MapControlPopovers = ({
         <AnchoredPopover
             open={viewMenuOpen}
             anchorRef={viewMenuButtonRef}
-            avoidRef={panelRef}
             className={`local-view-popover ${popoverClassPrefix}local-canvas-popover-portal`}
             ariaLabel="Canvas views"
             dataAttribute="local-views-popover"
@@ -61,51 +60,51 @@ export const MapControlPopovers = ({
             ))}
         </AnchoredPopover>
 
-        <AnchoredPopover
-            open={nodeViewMenuOpen}
-            anchorRef={nodeViewMenuButtonRef}
-            avoidRef={panelRef}
-            className={`local-node-view-popover ${popoverClassPrefix}local-canvas-popover-portal`}
-            ariaLabel="Node display"
-            dataAttribute="local-views-popover"
-        >
-            <div className="local-node-view-options">
-                {nodeDensityOptions.map((option) => (
-                    <button
-                        key={option.id}
-                        type="button"
-                        className={canvasNodeDensity === option.id ? 'active' : ''}
-                        onClick={() => setCanvasNodeDensity(option.id)}
-                    >
-                        {option.label}
-                    </button>
-                ))}
-            </div>
-            <button
-                type="button"
-                className="local-node-view-reflow"
-                disabled={!canReflowCanvas}
-                title={
-                    canReflowCanvas
-                        ? 'Reflow the current map layout'
-                        : 'Map reflow is available in mind map and knowledge graph views'
-                }
-                onClick={() => {
-                    if (!canReflowCanvas) {
-                        return;
-                    }
-                    window.dispatchEvent(new CustomEvent('docmap:reflow-canvas'));
-                    setNodeViewMenuOpen(false);
-                }}
+        {canUseNodeDensity ? (
+            <AnchoredPopover
+                open={nodeViewMenuOpen && canUseNodeDensity}
+                anchorRef={nodeViewMenuButtonRef}
+                className={`local-node-view-popover ${popoverClassPrefix}local-canvas-popover-portal`}
+                ariaLabel="Node display"
+                dataAttribute="local-views-popover"
             >
-                Reflow map
-            </button>
-        </AnchoredPopover>
+                <div className="local-node-view-options">
+                    {nodeDensityOptions.map((option) => (
+                        <button
+                            key={option.id}
+                            type="button"
+                            className={canvasNodeDensity === option.id ? 'active' : ''}
+                            onClick={() => setCanvasNodeDensity(option.id)}
+                        >
+                            {option.label}
+                        </button>
+                    ))}
+                </div>
+                <button
+                    type="button"
+                    className="local-node-view-reflow"
+                    disabled={!canReflowCanvas}
+                    title={
+                        canReflowCanvas
+                            ? 'Reflow the current map layout'
+                            : 'Map reflow is available in mind map and knowledge graph views'
+                    }
+                    onClick={() => {
+                        if (!canReflowCanvas) {
+                            return;
+                        }
+                        window.dispatchEvent(new CustomEvent('docmap:reflow-canvas'));
+                        setNodeViewMenuOpen(false);
+                    }}
+                >
+                    Reflow map
+                </button>
+            </AnchoredPopover>
+        ) : null}
 
         <FilterPopover
             open={filtersOpen}
             anchorRef={filtersMenuButtonRef}
-            avoidRef={panelRef}
             className={`local-filter-popover ${popoverClassPrefix}local-canvas-popover-portal`}
             filters={graphFilters}
             activeFilterSet={activeFilterSet}
@@ -118,7 +117,6 @@ export const MapControlPopovers = ({
         <OutputWorkflowPopover
             open={outputMenuOpen}
             anchorRef={outputMenuButtonRef}
-            avoidRef={panelRef}
             className={`local-output-popover ${popoverClassPrefix}local-canvas-popover-portal`}
             outputGroups={outputGroups}
             activeView={activeView}
@@ -186,7 +184,7 @@ export const CompactMapControls = ({
                         Branch
                     </button>
                 </div>
-                {nodes.length > 0 ? (
+                {nodes.length > 0 && (constants.canUseNodeDensity ?? true) ? (
                     <button
                         ref={refs.nodeViewMenuButtonRef}
                         type="button"
@@ -255,6 +253,7 @@ export const CompactMapControls = ({
             nodeDensityOptions={constants.nodeDensityOptions}
             canvasNodeDensity={constants.canvasNodeDensity}
             setCanvasNodeDensity={setters.setCanvasNodeDensity}
+            canUseNodeDensity={constants.canUseNodeDensity ?? true}
             canReflowCanvas={constants.canReflowCanvas}
             setNodeViewMenuOpen={setters.setNodeViewMenuOpen}
             graphFilters={constants.graphFilters}

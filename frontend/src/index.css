@@ -546,9 +546,148 @@
   background: color-mix(in srgb, var(--modal-container-color) 84%, transparent);
 }
 
+.mindmap-relationship-controls--collapsed {
+  width: auto;
+  min-width: 9.5rem;
+}
+
 .mindmap-relationship-mode-buttons button small {
   min-width: 1.6rem;
   padding: 0 0.25rem;
+}
+
+.mindmap-relationship-more-button {
+  border-radius: 999px;
+}
+
+.mindmap-relationship-mode-popover {
+  position: fixed;
+  inset: 4.35rem auto auto 50%;
+  width: min(32rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  margin: 0;
+  border: 1px solid color-mix(in srgb, var(--question-border) 78%, transparent);
+  border-radius: 0.55rem;
+  background: color-mix(in srgb, var(--modal-container-color) 96%, #000);
+  color: var(--font-color);
+  box-shadow: 0 1rem 2.5rem rgba(0, 0, 0, 0.32);
+  padding: 0.65rem;
+  transform: translateX(-50%);
+}
+
+.mindmap-relationship-mode-popover::backdrop {
+  background: transparent;
+}
+
+.mindmap-relationship-mode-popover > span {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--input-color);
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.mindmap-relationship-mode-popover > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.mindmap-relationship-mode-popover button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 0.45rem;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--font-color);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 820;
+  padding: 0.38rem 0.55rem;
+}
+
+.mindmap-relationship-mode-popover button:hover,
+.mindmap-relationship-mode-popover button.active {
+  border-color: rgba(37, 99, 235, 0.5);
+  background: rgba(37, 99, 235, 0.14);
+  color: #93c5fd;
+}
+
+.mindmap-relationship-mode-popover small {
+  display: inline-grid;
+  min-width: 1.3rem;
+  height: 1.1rem;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--input-color);
+  font-size: 0.62rem;
+  font-weight: 900;
+}
+
+.mindmap-branch-popover button {
+  border-color: rgba(var(--canvas-branch-color-rgb), 0.38);
+  background: rgba(var(--canvas-branch-color-rgb), 0.1);
+}
+
+.mindmap-branch-popover button > span {
+  width: 0.58rem;
+  height: 0.58rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--canvas-branch-color);
+  box-shadow: 0 0 0 3px rgba(var(--canvas-branch-color-rgb), 0.14);
+}
+
+.mindmap-branch-popover button strong {
+  max-width: 14rem;
+  overflow: hidden;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mindmap-branch-popover button:hover,
+.mindmap-branch-popover button.active {
+  border-color: rgba(var(--canvas-branch-color-rgb), 0.72);
+  background: rgba(var(--canvas-branch-color-rgb), 0.2);
+  color: var(--font-color);
+}
+
+.flowchart-lens-ribbon-group {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.flowchart-lens-mode-buttons {
+  flex-wrap: wrap;
+  align-content: center;
+  gap: 0.3rem;
+}
+
+.flowchart-lens-mode-buttons button {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--input-bar-color) 72%, transparent);
+}
+
+.flowchart-lens-mode-buttons button:hover,
+.flowchart-lens-mode-buttons button.active {
+  border-color: color-mix(in srgb, #58a6ff 72%, var(--font-color));
+  background: color-mix(in srgb, #58a6ff 20%, var(--modal-container-color));
+}
+
+.flowchart-lens-mode-buttons .flowchart-display-menu-button {
+  border-style: dashed;
+  border-color: color-mix(in srgb, #42c89a 54%, var(--question-border));
+}
+
+.flowchart-display-popover {
+  width: min(18rem, calc(100vw - 2rem));
 }
 
 .mindmap-branch-legend {
@@ -1637,6 +1776,11 @@
   grid-template-columns: auto minmax(0, 1fr);
 }
 
+.shell-ribbon-command-stack--map .shell-ribbon-relationship-group.mindmap-relationship-controls--collapsed {
+  grid-template-columns: auto;
+  max-width: 13rem;
+}
+
 .shell-ribbon-relationship-group.mindmap-relationship-controls .mindmap-branch-legend {
   grid-column: auto;
   max-width: 18rem;
@@ -1652,6 +1796,11 @@
   gap: 0.28rem;
   max-height: 3.65rem;
   overflow: hidden;
+}
+
+.shell-ribbon-command-stack--map .mindmap-relationship-mode-buttons {
+  flex-wrap: nowrap;
+  overflow: visible;
 }
 
 .shell-ribbon-relationship-group .mindmap-branch-legend button {
@@ -3040,6 +3189,52 @@ h5 {
   color: var(--input-color);
   font-size: 0.76rem;
   font-weight: 750;
+}
+
+.source-context-dump {
+  display: grid;
+  gap: 0.6rem;
+  border-top: 1px solid var(--question-border);
+  padding-top: 0.75rem;
+}
+
+.source-context-dump h5 {
+  margin: 0;
+}
+
+.source-context-dump p {
+  margin: 0.2rem 0 0;
+  color: var(--input-color);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.2rem;
+}
+
+.source-context-dump textarea {
+  min-height: 8rem;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--question-border);
+  border-radius: 0.55rem;
+  background-color: var(--input-bar-color);
+  color: var(--font-color);
+  font: inherit;
+  font-size: 0.86rem;
+  line-height: 1.3rem;
+  padding: 0.75rem;
+}
+
+.source-context-dump button {
+  justify-self: flex-start;
+  min-height: 2.25rem;
+  border: 1px solid var(--question-border);
+  border-radius: 999px;
+  background-color: var(--font-color);
+  color: var(--main-color);
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 850;
+  padding: 0 0.9rem;
 }
 
 .source-context-actions {
@@ -4524,6 +4719,44 @@ input:focus {
   resize: vertical;
   padding: 0.85rem;
   line-height: 1.35rem;
+}
+
+.ai-action-evidence-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.ai-action-evidence-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  min-height: 2rem;
+  border: 1px solid var(--question-border);
+  border-radius: 999px;
+  background-color: var(--input-bar-color);
+  color: var(--font-color);
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 850;
+  padding: 0.26rem 0.58rem;
+  white-space: nowrap;
+}
+
+.ai-action-evidence-option input {
+  width: 0.86rem;
+  height: 0.86rem;
+  accent-color: #66c2a5;
+}
+
+.ai-action-evidence-option:has(input:checked) {
+  border-color: rgba(102, 194, 165, 0.72);
+  background-color: rgba(102, 194, 165, 0.13);
+}
+
+.ai-action-evidence-option.disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .ai-action-output-hint {
@@ -11557,6 +11790,31 @@ img:hover {
   opacity: 0.76;
 }
 
+.ai-draft-readiness-gate {
+  display: grid;
+  gap: 0.18rem;
+  border: 1px solid rgba(171, 69, 28, 0.34);
+  border-radius: 0.5rem;
+  background: rgba(255, 247, 237, 0.86);
+  color: #78350f;
+  padding: 0.58rem 0.68rem;
+}
+
+.ai-draft-readiness-gate strong,
+.ai-draft-readiness-gate p {
+  margin: 0;
+}
+
+.ai-draft-readiness-gate strong {
+  font-size: 0.78rem;
+  line-height: 1.05rem;
+}
+
+.ai-draft-readiness-gate p {
+  font-size: 0.74rem;
+  line-height: 1.08rem;
+}
+
 .ai-draft-accept {
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -12618,6 +12876,27 @@ img:hover {
   overflow: auto;
 }
 
+.local-package-projection-status {
+  align-items: center;
+  border-top: 1px solid var(--question-border);
+  color: var(--font-color);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.55rem 0 0.1rem;
+}
+
+.local-package-projection-status strong,
+.local-package-projection-status span {
+  border: 1px solid rgba(102, 194, 165, 0.38);
+  border-radius: 999px;
+  background-color: rgba(102, 194, 165, 0.1);
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0.25rem 0.55rem;
+}
+
 .local-views-panel:not(.local-views-panel-compact) .local-view-content-surface {
   flex: 1;
   max-height: none;
@@ -12762,6 +13041,12 @@ img:hover {
   background-color: var(--modal-container-color);
   box-shadow: var(--border-box-shadow);
   padding: 0.75rem;
+}
+
+.anchored-popover-portal.local-canvas-popover-portal,
+.anchored-popover-portal.local-output-popover {
+  position: fixed;
+  z-index: 220;
 }
 
 .local-output-popover-header {

@@ -6,6 +6,7 @@ import {
     buildSankeyFlowExport,
     buildSankeyFlowMarkdown,
     buildRelationshipReviewMarkdown,
+    getConnectedPackageProjectionBundle,
     getExecutiveOutputProjection,
     getActionGraphProjection,
     getChecklistPreviewRows,
@@ -28,7 +29,8 @@ import {
     getSourceRepairPreviewRows,
     getTeamRoadmapProjection,
     getTaskCandidateRows,
-    getTaskRows
+    getTaskRows,
+    withPackageProjectionFallback
 } from '../src/views/graphProjection.js';
 
 const node = (id, nodeType, title = id) => ({
@@ -52,6 +54,13 @@ const supportedNode = (id, nodeType = 'definition', data = {}) => ({
         ...data
     }
 });
+
+const packageSourceRef = {
+    document_id: 'doc-package',
+    section: 'Closeout package',
+    quote_snippet: 'Owner decisions feed the approval gate and task package.',
+    confidence: 0.91
+};
 
 const repairById = (summary, id) => summary.repair_items.find((item) => item.id === id);
 
@@ -537,6 +546,169 @@ test('package layer projections expose accepted graphs with source review state'
         evidence.nodes.find((item) => item.id === 'concept-accepted').source_refs[0].document_id,
         'doc-1'
     );
+});
+
+test('package-first projection bundle uses strict package metadata while legacy projections remain fallback', () => {
+    const strictPackage = {
+        package_id: 'permit-closeout-package',
+        title: 'Permit closeout package',
+        primary_nodes: [
+            {
+                item_id: 'pkg-root-item',
+                node_id: 'pkg-root',
+                title: 'Permit closeout package',
+                node_type: 'workflow',
+                review_state: 'source_backed',
+                source_refs: [packageSourceRef]
+            },
+            {
+                item_id: 'pkg-decision-item',
+                node_id: 'pkg-decision',
+                title: 'Approval gate',
+                node_type: 'decision',
+                review_state: 'source_backed',
+                source_refs: [packageSourceRef]
+            }
+        ],
+        relationship_edges: [
+            {
+                item_id: 'pkg-edge-item',
+                edge_id: 'pkg-edge-root-decision',
+                source_node_id: 'pkg-root',
+                target_node_id: 'pkg-decision',
+                relationship_type: 'sequence',
+                label: 'Package sequence',
+                source_refs: [packageSourceRef]
+            }
+        ],
+        view_lenses: [
+            {
+                item_id: 'pkg-sankey-lens-item',
+                lens_id: 'pkg-sankey-lens',
+                lens_type: 'sankey',
+                title: 'Package Sankey',
+                metric_label: 'Items',
+                source_refs: [packageSourceRef],
+                rows: [
+                    {
+                        item_id: 'pkg-sankey-row-1',
+                        source: 'Owner decisions',
+                        target: 'Approval gate',
+                        value: 3,
+                        source_refs: [packageSourceRef]
+                    },
+                    {
+                        item_id: 'pkg-sankey-row-2',
+                        source: 'Approval gate',
+                        target: 'Task package',
+                        value: 4,
+                        source_refs: [packageSourceRef]
+                    }
+                ]
+            }
+        ],
+        structured_evidence: [
+            {
+                item_id: 'pkg-evidence-item',
+                id: 'pkg-evidence',
+                title: 'Package evidence table',
+                evidence_type: 'data_table',
+                source_refs: [packageSourceRef]
+            }
+        ],
+        evidence_links: [
+            {
+                item_id: 'pkg-evidence-link-item',
+                source_item_id: 'pkg-evidence-item',
+                target_item_id: 'pkg-decision-item',
+                source_refs: [packageSourceRef]
+            }
+        ],
+        tasks: [
+            {
+                item_id: 'pkg-task-item',
+                id: 'pkg-task',
+                title: 'Prepare task package',
+                status: 'done',
+                priority: 'high',
+                owner_id: 'Package author',
+                due_date: '2026-06-05',
+                source_refs: [packageSourceRef]
+            }
+        ],
+        repair_targets: [
+            {
+                item_id: 'pkg-repair-item',
+                target_id: 'pkg-repair',
+                target_item_id: 'pkg-edge-item',
+                target_type: 'relationship_edge',
+                issue: 'Confirm package sequence',
+                repair_action: 'Review source quote'
+            }
+        ],
+        acceptance_groups: [
+            {
+                item_id: 'pkg-acceptance-item',
+                group_id: 'pkg-acceptance',
+                title: 'Core package',
+                item_ids: ['pkg-root-item', 'pkg-edge-item'],
+                source_refs: [packageSourceRef]
+            }
+        ]
+    };
+    const legacyProjection = buildGraphProjection(
+        [
+            node('legacy-task', 'task', 'Legacy non-package task'),
+            node('legacy-context', 'concept', 'Legacy context')
+        ],
+        [{ id: 'legacy-edge', source: 'legacy-context', target: 'legacy-task' }]
+    );
+
+    const bundle = getConnectedPackageProjectionBundle(strictPackage);
+    const packageTaskRows = withPackageProjectionFallback({
+        packageCandidate: strictPackage,
+        packageProjector: (candidate) => getConnectedPackageProjectionBundle(candidate).task_rows,
+        fallbackProjector: getTaskRows,
+        fallbackArgs: [legacyProjection]
+    });
+    const legacyTaskRows = withPackageProjectionFallback({
+        packageCandidate: null,
+        packageProjector: (candidate) => getConnectedPackageProjectionBundle(candidate).task_rows,
+        fallbackProjector: getTaskRows,
+        fallbackArgs: [legacyProjection]
+    });
+
+    assert.deepEqual(bundle.graph.nodes.map((item) => item.item_id), [
+        'pkg-root-item',
+        'pkg-decision-item'
+    ]);
+    assert.deepEqual(bundle.relationships.edges.map((item) => item.item_id), ['pkg-edge-item']);
+    assert.deepEqual(bundle.flowchart.steps.map((step) => step.id), ['pkg-root', 'pkg-decision']);
+    assert.deepEqual(
+        bundle.table_rows.map((row) => row.item_id),
+        [
+            'pkg-root-item',
+            'pkg-decision-item',
+            'pkg-edge-item',
+            'pkg-evidence-item',
+            'pkg-sankey-lens-item',
+            'pkg-task-item',
+            'pkg-repair-item',
+            'pkg-acceptance-item'
+        ]
+    );
+    assert.deepEqual(
+        bundle.sankey.rows.map((row) => `${row.source}->${row.target}:${row.value}`),
+        ['Owner decisions->Approval gate:3', 'Approval gate->Task package:4']
+    );
+    assert.deepEqual(bundle.evidence_review.map((row) => row.item_id), [
+        'pkg-evidence-item',
+        'pkg-evidence-link-item'
+    ]);
+    assert.deepEqual(bundle.task_rows.map((row) => row.item_id), ['pkg-task-item']);
+    assert.deepEqual(bundle.repair_targets.map((row) => row.target_item_id), ['pkg-edge-item']);
+    assert.deepEqual(packageTaskRows.map((row) => row.item_id), ['pkg-task-item']);
+    assert.deepEqual(legacyTaskRows.map((row) => row.id), ['legacy-task']);
 });
 
 test('sankey flow projection builds source target value paths from structured artifacts', () => {

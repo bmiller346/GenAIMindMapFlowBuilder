@@ -12,8 +12,10 @@ import { CompactMapControls, ExpandedMapControls } from './localViews/MapControl
 import { OutputWorkflowPopover } from './localViews/OutputWorkflowControls';
 import OutputPanel from './OutputPanel';
 import {
+    buildGraphProjection,
     buildRelationshipReviewMarkdown,
     buildFilteredGraphProjection,
+    getConnectedPackageProjectionBundle,
     getConnectionRows,
     getCrossLinkConnectionRows,
     getExecutiveOutputProjection,
@@ -23,6 +25,7 @@ import {
     getTaskPreviewRows,
     getTaskRows
 } from './graphProjection';
+import { getPrimaryConnectedPackage } from '../connected-package/acceptedConnectedPackages';
 import { isNudgeCategoryEnabled } from '../config/localSettings';
 import { withLocalPreviewAcceptance } from './localPreviewMetadata';
 import { makePreviewDiffSummary } from './previewDiffSummary';
@@ -289,6 +292,98 @@ const mergeGeneratedTaskPreviewRows = (rows, generatedPreview) => {
     });
 };
 
+const packageExecutiveItem = (row = {}, itemType = 'finding') => ({
+    id: `${itemType}-${row.item_id || row.id || row.title || 'item'}`,
+    title: row.title || row.label || row.reason || row.repair_action || row.item_id || 'Package item',
+    description:
+        row.summary ||
+        row.description ||
+        row.reason ||
+        row.repair_action ||
+        row.relationship ||
+        row.relationship_type ||
+        '',
+    status: row.status || row.review_state || '',
+    priority: row.priority || '',
+    owner_id: row.owner_id || row.owner || '',
+    due_date: row.due_date || row.deadline || '',
+    source_refs: Array.isArray(row.source_refs) ? row.source_refs : [],
+    source_backed: Array.isArray(row.source_refs) && row.source_refs.length > 0,
+    needs_review: row.needs_review || row.review_state === 'needs_review',
+    metadata: {
+        source: 'connected_package_projection',
+        scope: 'accepted_package',
+        artifact_type: 'executive_output',
+        layout_hint: itemType,
+        rationale: `Projected from accepted connected package ${row.package_item_type || 'item'}.`,
+        review_reason: row.needs_review ? 'Confirm package source support before executive use.' : '',
+        source_signal:
+            Array.isArray(row.source_refs) && row.source_refs.length > 0
+                ? 'package_source_ref'
+                : 'package_projection'
+    }
+});
+
+const packageExecutiveOutput = (connectedPackage, bundle = {}) => {
+    const overview = bundle.overview || {};
+    const graphNodes = Array.isArray(bundle.graph?.nodes) ? bundle.graph.nodes : [];
+    const tasks = Array.isArray(bundle.task_rows) ? bundle.task_rows : [];
+    const evidenceRows = Array.isArray(bundle.evidence_review) ? bundle.evidence_review : [];
+    const repairTargets = Array.isArray(bundle.repair_targets) ? bundle.repair_targets : [];
+    const acceptanceGroups = Array.isArray(overview.acceptance_groups) ? overview.acceptance_groups : [];
+
+    return {
+        contract_version: 'connected-package-v1',
+        title: overview.title || connectedPackage?.title || 'Connected package',
+        summary: `${overview.item_count || 0} accepted package item${
+            overview.item_count === 1 ? '' : 's'
+        }, ${overview.cited_item_count || 0} source-backed, ${tasks.length} action${
+            tasks.length === 1 ? '' : 's'
+        }, and ${overview.needs_review_count || 0} review item${
+            overview.needs_review_count === 1 ? '' : 's'
+        }.`,
+        key_findings: [...acceptanceGroups, ...graphNodes].slice(0, 8).map((row) =>
+            packageExecutiveItem(row, 'finding')
+        ),
+        recommended_actions: tasks.slice(0, 8).map((row) =>
+            packageExecutiveItem(row, 'recommended_action')
+        ),
+        risks: repairTargets.slice(0, 8).map((row) => packageExecutiveItem(row, 'risk')),
+        required_decisions: repairTargets.slice(0, 8).map((row) =>
+            packageExecutiveItem(row, 'required_decision')
+        ),
+        source_backed_appendix: evidenceRows.slice(0, 12).map((row) =>
+            packageExecutiveItem(row, 'source_appendix')
+        ),
+        assumptions: [
+            ...(overview.needs_review_count
+                ? [`${overview.needs_review_count} package item(s) require review.`]
+                : [])
+        ],
+        metadata: {
+            node_count: graphNodes.length,
+            source_backed_node_count: overview.cited_item_count || 0,
+            needs_review_count: overview.needs_review_count || 0,
+            task_count: tasks.length
+        }
+    };
+};
+
+const PackageProjectionStatus = ({ connectedPackage, bundle }) => {
+    if (!connectedPackage) {
+        return null;
+    }
+    const overview = bundle?.overview || {};
+    return (
+        <div className="local-package-projection-status" aria-label="Accepted connected package projection">
+            <strong>Package-backed</strong>
+            <span>{overview.title || connectedPackage.title || connectedPackage.package_id || 'Connected package'}</span>
+            <span>{overview.collection_counts?.relationship_edges || 0} relationships</span>
+            <span>{overview.collection_counts?.tasks || 0} tasks</span>
+        </div>
+    );
+};
+
 const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdge }) => {
     const selector = (state) => ({
         nodes: state.nodes,
@@ -308,7 +403,8 @@ const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdg
         canvasNodeDensity: state.canvasNodeDensity,
         setCanvasNodeDensity: state.setCanvasNodeDensity,
         nudgePreferences: state.nudgePreferences,
-        sourceLibrary: state.sourceLibrary
+        sourceLibrary: state.sourceLibrary,
+        activeAIDraftSession: state.activeAIDraftSession
     });
     const {
         nodes,
@@ -328,7 +424,8 @@ const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdg
         canvasNodeDensity,
         setCanvasNodeDensity,
         nudgePreferences,
-        sourceLibrary
+        sourceLibrary,
+        activeAIDraftSession
     } = useStore(useShallow(selector));
     const [acceptedPreviewIds, setAcceptedPreviewIds] = useState(new Set());
     const [filtersOpen, setFiltersOpen] = useState(false);
@@ -344,6 +441,7 @@ const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdg
     const filtersMenuButtonRef = useRef(null);
     const addActivity = useActivityStore((s) => s.addActivity);
     const recordActivity = useActivityStore((s) => s.recordActivity);
+    const activityEvents = useActivityStore((s) => s.activities);
     const flowId = flowStore((s) => s.flow_id);
     const setSaveStatus = flowStore((s) => s.setSaveStatus);
     const pushNode = modalStore((s) => s.pushNode);
@@ -357,26 +455,74 @@ const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdg
             }),
         [activeGraphFilters, nodes, edges, selectedBranchId]
     );
+    const primaryConnectedPackage = useMemo(
+        () =>
+            getPrimaryConnectedPackage({
+                nodes,
+                activityEvents,
+                activeSession: activeAIDraftSession
+            }),
+        [activeAIDraftSession, activityEvents, nodes]
+    );
+    const connectedPackageBundle = useMemo(
+        () =>
+            primaryConnectedPackage
+                ? getConnectedPackageProjectionBundle(primaryConnectedPackage)
+                : null,
+        [primaryConnectedPackage]
+    );
+    const packageProjection = useMemo(() => {
+        if (!connectedPackageBundle?.graph) {
+            return null;
+        }
+        const packageBranchId = (connectedPackageBundle.graph.nodes || []).some(
+            (node) => node.id === selectedBranchId
+        )
+            ? selectedBranchId
+            : undefined;
+        return buildGraphProjection(
+            connectedPackageBundle.graph.nodes || [],
+            connectedPackageBundle.graph.edges || [],
+            packageBranchId
+        );
+    }, [connectedPackageBundle, selectedBranchId]);
+    const outputProjection = packageProjection || projection;
+    const outputNodes = packageProjection?.nodes?.length ? packageProjection.nodes : nodes;
     const activeFilterSet = useMemo(
         () => new Set(activeGraphFilters),
         [activeGraphFilters]
     );
-    const taskRows = useMemo(() => getTaskRows(projection), [projection]);
-    const knowledgeGraphRows = useMemo(() => getKnowledgeGraphRows(projection), [projection]);
-    const connectionRows = useMemo(() => getConnectionRows(projection), [projection]);
-    const crossLinkRows = useMemo(() => getCrossLinkConnectionRows(projection), [projection]);
+    const taskRows = useMemo(
+        () => connectedPackageBundle?.task_rows || getTaskRows(projection),
+        [connectedPackageBundle, projection]
+    );
+    const knowledgeGraphRows = useMemo(() => getKnowledgeGraphRows(outputProjection), [outputProjection]);
+    const connectionRows = useMemo(
+        () => connectedPackageBundle?.connections || getConnectionRows(projection),
+        [connectedPackageBundle, projection]
+    );
+    const crossLinkRows = useMemo(
+        () =>
+            connectedPackageBundle?.connections
+                ? connectedPackageBundle.connections.filter((row) => row.connection_kind === 'Cross-link')
+                : getCrossLinkConnectionRows(projection),
+        [connectedPackageBundle, projection]
+    );
     const relationshipReviewGroups = useMemo(
-        () => getRelationshipFamilyReviewGroups(projection),
-        [projection]
+        () => getRelationshipFamilyReviewGroups(outputProjection),
+        [outputProjection]
     );
     const relationshipReviewRows = useMemo(
         () => relationshipReviewGroups.flatMap((group) => group.rows),
         [relationshipReviewGroups]
     );
-    const graphConfidence = useMemo(() => getGraphConfidenceSummary(projection), [projection]);
+    const graphConfidence = useMemo(() => getGraphConfidenceSummary(outputProjection), [outputProjection]);
     const executiveOutput = useMemo(
-        () => getExecutiveOutputProjection(projection, { title: 'Executive Output' }),
-        [projection]
+        () =>
+            connectedPackageBundle
+                ? packageExecutiveOutput(primaryConnectedPackage, connectedPackageBundle)
+                : getExecutiveOutputProjection(projection, { title: 'Executive Output' }),
+        [connectedPackageBundle, primaryConnectedPackage, projection]
     );
     const generatedTaskPreview = generatedHelperPreviews.projectPlannerTasks;
     const generatedChecklistPreview = generatedHelperPreviews.projectPlannerChecklist;
@@ -492,7 +638,8 @@ const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdg
     const activeNextActionDetail = NEXT_ACTION_DETAILS[outputModeValue];
     const isCanvasView = CANVAS_VIEW_IDS.has(activeView);
     const activeCanvasOption = CORE_VIEWS.find((view) => view.id === activeCanvasView);
-    const canReflowCanvas = activeCanvasView === 'mindmap' || activeCanvasView === 'knowledgeGraph';
+    const canUseNodeDensity = activeCanvasView === 'mindmap' || activeCanvasView === 'knowledgeGraph';
+    const canReflowCanvas = canUseNodeDensity;
     const followUpActions = useMemo(
         () => [
             ...FOLLOW_UP_ACTIONS,
@@ -504,6 +651,12 @@ const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdg
     );
     const showCanvasNudges = isNudgeCategoryEnabled(nudgePreferences, 'canvas');
     const showTaskNudges = isNudgeCategoryEnabled(nudgePreferences, 'tasks');
+    useEffect(() => {
+        if (!canUseNodeDensity) {
+            setNodeViewMenuOpen(false);
+        }
+    }, [canUseNodeDensity]);
+
     useEffect(() => {
         if (!filtersOpen && !outputMenuOpen && !viewMenuOpen && !nodeViewMenuOpen) {
             return undefined;
@@ -655,7 +808,7 @@ const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdg
 
     const buildCurrentRelationshipReviewMarkdown = () =>
         buildRelationshipReviewMarkdown({
-            projection,
+            projection: outputProjection,
             scopeLabel: selectedBranchId
                 ? `Selected branch: ${selectedBranchTitle || selectedBranchId}`
                 : 'Whole workspace'
@@ -833,11 +986,16 @@ const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdg
     }
 
     const outputPanel = (
-        <OutputPanel
+        <>
+            <PackageProjectionStatus
+                connectedPackage={primaryConnectedPackage}
+                bundle={connectedPackageBundle}
+            />
+            <OutputPanel
             activeView={activeView}
-            nodes={nodes}
+            nodes={outputNodes}
             edges={edges}
-            projection={projection}
+            projection={outputProjection}
             graphConfidence={graphConfidence}
             flowId={flowId}
             showCanvasNudges={showCanvasNudges}
@@ -879,7 +1037,8 @@ const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdg
             onDownloadRelationshipReview={downloadRelationshipReviewMarkdown}
             onAcceptTaskPreview={acceptTaskPreview}
             onTogglePreviewRow={togglePreviewRow}
-        />
+            />
+        </>
     );
 
     if (outputOnly) {
@@ -940,6 +1099,7 @@ const LocalViewsPanel = ({ hidden, outputOnly = false, onSelectNode, onSelectEdg
                         coreViews: CORE_VIEWS,
                         nodeDensityOptions: NODE_DENSITY_OPTIONS,
                         canvasNodeDensity,
+                        canUseNodeDensity,
                         canReflowCanvas,
                         graphFilters: GRAPH_FILTERS,
                         activeFilterSet,

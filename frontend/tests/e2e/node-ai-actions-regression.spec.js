@@ -1018,10 +1018,7 @@ test('Ask AI flowchart request without sources does not stall on source selectio
     expect(draftSessionRequests[0].requestBody.source_chunks).toHaveLength(0);
     await expect(page.locator('.ai-action-modal')).toHaveCount(0);
     await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
-    await page
-        .locator('.node-inspector .ai-draft-accept')
-        .getByRole('button', { name: 'Accept 1 item' })
-        .click();
+    await page.locator('.ai-draft-accept').getByRole('button', { name: 'Accept 1 item' }).click();
     await expect(page.locator('.canvas-structured-view-flowchart')).toBeVisible();
 });
 
@@ -1054,24 +1051,38 @@ test('empty workspace Ask AI flowchart request advances past source selection', 
     await expect(page.locator('.ai-action-modal')).toHaveCount(0);
     await expect(page.locator('.ai-draft-session-panel')).toContainText('Draft preview');
 
-    await page
-        .locator('.node-inspector .ai-draft-accept')
-        .getByRole('button', { name: 'Accept 1 item' })
-        .click();
+    await page.locator('.ai-draft-accept').getByRole('button', { name: 'Accept 1 item' }).click();
     await expect(page.locator('.canvas-structured-view-flowchart')).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Ask a Question' })).toHaveCount(0);
     await expect(page.locator('.selection-action-bar')).toHaveCount(0);
     await expect(page.locator('.ai-helpers-panel')).toHaveCount(0);
-    const nodeDisplayMenu = page.locator('.local-canvas-command-main').getByRole('button', { name: /Nodes/ });
-    await nodeDisplayMenu.click();
-    await expect(page.getByRole('button', { name: 'Reflow map' })).toBeDisabled();
-    await nodeDisplayMenu.click();
-    await page.getByRole('button', { name: /Actions/ }).click();
-    await expect(page.getByRole('button', { name: /Prepare Kanban/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Create knowledge graph/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Create table/ })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Create executive view/ })).toBeVisible();
-    await page.getByRole('button', { name: /Actions/ }).click();
+    await page.getByRole('tab', { name: 'Map', exact: true }).click();
+    await page.getByRole('button', { name: 'TraceSpace Map' }).click();
+    await page.getByLabel('Canvas views').getByRole('button', { name: /Flowchart/ }).click();
+    await expect(page.locator('.canvas-structured-view-flowchart')).toBeVisible();
+    await expect(page.locator('.local-canvas-command-main').getByRole('button', { name: /Nodes/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Cards' })).toBeVisible();
+    await page.getByRole('button', { name: 'Cards' }).click();
+    await page.getByRole('button', { name: 'Compact' }).click();
+    await expect(page.locator('.canvas-flowchart-diagram-canvas')).toHaveClass(/canvas-flowchart-display-compact/);
+    await expect(page.locator('.canvas-flowchart-summary')).toContainText('View: Compact');
+    await page.getByRole('button', { name: 'Compact' }).click();
+    await page.getByRole('button', { name: 'Symbols' }).click();
+    await expect(page.locator('.canvas-flowchart-diagram-canvas')).toHaveClass(/canvas-flowchart-display-symbols/);
+    await expect(page.locator('.canvas-flowchart-summary')).toContainText('View: Symbols');
+    await page.getByRole('button', { name: 'Symbols' }).click();
+    await page.getByRole('button', { name: 'Cards' }).click();
+    await expect(page.locator('.canvas-flowchart-diagram-canvas')).toHaveClass(/canvas-flowchart-display-cards/);
+    await page.locator('.canvas-flowchart-summary').getByRole('button', { name: 'Enhance paths' }).click();
+    await expect(page.locator('.ai-action-modal')).toBeVisible();
+    await expect(promptTextarea(page)).toHaveValue(/Enhance this flowchart only/);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.ai-action-modal')).toHaveCount(0);
+    await page.locator('.canvas-flowchart-diagram-node-actions').first().getByRole('button', { name: /Improve .* with AI/ }).click();
+    await expect(page.locator('.ai-action-modal')).toBeVisible();
+    await expect(promptTextarea(page)).toHaveValue(/Improve the flowchart around/);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.ai-action-modal')).toHaveCount(0);
 
     await page.locator('.canvas-flowchart-summary').getByRole('button', { name: 'Add decision' }).click();
     await waitForSavedSnapshot(savedRequests, (snapshot) =>
@@ -1102,6 +1113,26 @@ test('empty workspace Ask AI flowchart request advances past source selection', 
                 edge.metadata?.exception_path === true
         )
     );
+
+    const decisionNode = latestSnapshot(savedRequests).nodes.find(
+        (node) => node.data?.title === 'New decision'
+    );
+    expect(decisionNode?.id).toBeTruthy();
+    const priorDraftRequestCount = draftSessionRequests.length;
+    await page.locator('.canvas-flowchart-summary').getByRole('button', { name: 'Enhance paths' }).click();
+    await expect(page.locator('.ai-action-modal')).toBeVisible();
+    await previewChanges(page);
+    await expect.poll(() => draftSessionRequests.length, { timeout: 7000 }).toBe(priorDraftRequestCount + 1);
+    const enhanceRequest = draftSessionRequests.at(-1).requestBody;
+    expect(enhanceRequest.scope.type).toBe('nodes');
+    expect(enhanceRequest.scope.node_ids).toContain(decisionNode.id);
+    expect(enhanceRequest.metadata).toMatchObject({
+        surface: 'flowchart',
+        flowchart_action: 'enhance_decision_paths',
+        requested_visual: 'flow_chart',
+        change_intent: 'update',
+        expansion_target: 'whole_branch'
+    });
 });
 
 test('node Ask AI draft stays non-canonical until selected accept, then persists on reopen', async ({

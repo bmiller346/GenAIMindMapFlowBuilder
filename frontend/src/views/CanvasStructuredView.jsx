@@ -14,8 +14,10 @@ import {
     getKanbanColumns,
     getSankeyFlowProjection,
     getTaskCandidateRows,
-    getTaskRows
+    getTaskRows,
+    getConnectedPackageProjectionBundle
 } from './graphProjection.js';
+import { getPrimaryConnectedPackage } from '../connected-package/acceptedConnectedPackages.js';
 import { buildSankeyPlotlySpec } from '../utils/sankeyFlow.js';
 import SankeyFlowPanel from './structured/SankeyFlowPanel.jsx';
 import {
@@ -92,9 +94,109 @@ const isHierarchyEdge = (edge = {}) =>
             .toLowerCase()
     );
 
+const asArray = (value) => (Array.isArray(value) ? value.filter(Boolean) : []);
+
+const packageDataFor = (candidate = {}) =>
+    candidate?.data && typeof candidate.data === 'object'
+        ? candidate.data
+        : candidate?.artifact?.data && typeof candidate.artifact.data === 'object'
+          ? candidate.artifact.data
+          : candidate || {};
+
+const hasRichPackageSurface = (candidate = {}) => {
+    const packageData = packageDataFor(candidate);
+    return [
+        'relationship_edges',
+        'view_lenses',
+        'structured_evidence',
+        'tasks',
+        'repair_targets',
+        'acceptance_groups'
+    ].some((key) => asArray(packageData[key]).length > 0);
+};
+
+const packageTablePriority = (row = {}) => {
+    const type = row.package_item_type || row.item_type || '';
+    if (type === 'structured_evidence') return 0;
+    if (type === 'view_lens') return 1;
+    if (type === 'task') return 2;
+    if (type === 'repair_target') return 3;
+    if (type === 'relationship_edge') return 4;
+    if (type === 'primary_node') return 5;
+    return 6;
+};
+
+const packageRowsForCanvasTable = (rows = []) =>
+    rows
+        .map((row, index) => {
+            const sourceRefs = asArray(row.source_refs);
+            const sourceRef = row.source_ref || sourceRefs[0] || {};
+            const type = row.package_item_type || row.item_type || row.node_type || row.target_type || 'package_item';
+            return {
+                ...row,
+                id: row.id || row.item_id || `package-row-${index}`,
+                title: row.title || row.label || row.issue || row.item_id || `Package item ${index + 1}`,
+                node_type: row.node_type || type,
+                status: row.status || row.review_state || row.citation_status || 'needs_review',
+                review_state: row.review_state || row.status || row.citation_status || 'needs_review',
+                source_refs: sourceRefs,
+                source_ref: sourceRef,
+                confidence: row.confidence || sourceRef.confidence || '',
+                summary: row.summary || row.description || row.reason || row.repair_action || '',
+                owner_id: row.owner_id || row.owner || row.assignee || '',
+                priority: row.priority || row.metadata?.priority || '',
+                due_date: row.due_date || row.deadline || '',
+                depth: 0,
+                child_count: 0,
+                parent_id: '',
+                parent_title: '',
+                package_table_row: true
+            };
+        })
+        .sort((left, right) => packageTablePriority(left) - packageTablePriority(right));
+
+const PACKAGE_KANBAN_COLUMN_META = {
+    backlog: { label: 'Backlog', status: 'needs_review' },
+    in_progress: { label: 'In Progress', status: 'in_progress' },
+    blocked: { label: 'Blocked', status: 'blocked' },
+    done: { label: 'Done', status: 'approved' },
+    archived: { label: 'Archived', status: 'rejected' }
+};
+
+const packageKanbanColumnsForCanvas = (columns = []) =>
+    columns.map((column) => ({
+        ...PACKAGE_KANBAN_COLUMN_META[column.id],
+        ...column,
+        items: packageRowsForCanvasTable(column.items || [])
+    }));
+
+const flowchartStructureScore = (flowchart = {}) => {
+    const steps = asArray(flowchart.steps);
+    const connectors = asArray(flowchart.connectors);
+    const decisions = asArray(flowchart.decisions);
+    return connectors.length * 4 + decisions.length * 3 + steps.length;
+};
+
+const selectFlowchartProjection = (packageFlowchart, graphFlowchart) => {
+    const packageSteps = asArray(packageFlowchart?.steps);
+    const packageConnectors = asArray(packageFlowchart?.connectors);
+    if (!packageSteps.length && !packageConnectors.length) {
+        return graphFlowchart;
+    }
+
+    const graphConnectors = asArray(graphFlowchart?.connectors);
+    if (graphConnectors.length && !packageConnectors.length) {
+        return graphFlowchart;
+    }
+
+    return flowchartStructureScore(packageFlowchart) >= flowchartStructureScore(graphFlowchart)
+        ? packageFlowchart
+        : graphFlowchart;
+};
+
 const sourceLabel = (node) => {
-    const ref = node.source_ref || {};
-    return [ref.document_id, ref.page ? `p. ${ref.page}` : '', ref.section]
+    const ref = node.source_ref || asArray(node.source_refs)[0] || {};
+    return [ref.document_id || ref.table_name || ref.source_id, ref.page ? `p. ${ref.page}` : '', ref.section || ref.query_id]
         .filter(Boolean)
         .join(' | ') || 'No source';
 };
@@ -562,8 +664,11 @@ const CanvasStructuredView = ({
     onGenerateTaskCandidates,
     onPrepareKanbanBoard,
     onCreateStructuredTable,
-    onCreateExecutiveOutput
+    onCreateExecutiveOutput,
+    flowchartLens,
+    flowchartDisplayMode
 }) => {
+    const activityEvents = useActivityStore((state) => state.activities);
     const projection = useMemo(
         () =>
             buildFilteredGraphProjection(nodes, edges, {
@@ -572,16 +677,45 @@ const CanvasStructuredView = ({
             }),
         [activeGraphFilters, edges, nodes, selectedBranchId]
     );
-    const taskRows = useMemo(() => getTaskRows(projection), [projection]);
+    const primaryConnectedPackage = useMemo(
+        () => getPrimaryConnectedPackage({ nodes, activityEvents }),
+        [activityEvents, nodes]
+    );
+    const usePackageProjection = useMemo(
+        () => hasRichPackageSurface(primaryConnectedPackage),
+        [primaryConnectedPackage]
+    );
+    const packageProjectionBundle = useMemo(
+        () =>
+            usePackageProjection
+                ? getConnectedPackageProjectionBundle(primaryConnectedPackage)
+                : null,
+        [primaryConnectedPackage, usePackageProjection]
+    );
+    const packageTableRows = useMemo(
+        () => packageRowsForCanvasTable(packageProjectionBundle?.table_rows || []),
+        [packageProjectionBundle]
+    );
+    const graphTaskRows = useMemo(() => getTaskRows(projection), [projection]);
+    const taskRows = useMemo(
+        () =>
+            packageProjectionBundle?.task_rows?.length
+                ? packageRowsForCanvasTable(packageProjectionBundle.task_rows)
+                : graphTaskRows,
+        [graphTaskRows, packageProjectionBundle]
+    );
     const [collapsedTableRowIds, setCollapsedTableRowIds] = useState([]);
     const collapsedTableRows = useMemo(
         () => new Set(collapsedTableRowIds),
         [collapsedTableRowIds]
     );
-    const allWorkBreakdownRows = useMemo(() => branchTableRows(projection), [projection]);
+    const allWorkBreakdownRows = useMemo(
+        () => (packageTableRows.length ? packageTableRows : branchTableRows(projection)),
+        [packageTableRows, projection]
+    );
     const workBreakdownRows = useMemo(
-        () => branchTableRows(projection, collapsedTableRows),
-        [collapsedTableRows, projection]
+        () => (packageTableRows.length ? packageTableRows : branchTableRows(projection, collapsedTableRows)),
+        [collapsedTableRows, packageTableRows, projection]
     );
     const workBreakdownSummary = useMemo(
         () => branchTableSummary(allWorkBreakdownRows),
@@ -591,8 +725,18 @@ const CanvasStructuredView = ({
         () => tableReadiness(workBreakdownSummary),
         [workBreakdownSummary]
     );
-    const kanbanColumns = useMemo(() => getKanbanColumns(projection), [projection]);
-    const flowchart = useMemo(() => getFlowchartProjection(projection), [projection]);
+    const kanbanColumns = useMemo(
+        () =>
+            packageProjectionBundle?.task_rows?.length
+                ? packageKanbanColumnsForCanvas(packageProjectionBundle.kanban)
+                : getKanbanColumns(projection),
+        [packageProjectionBundle, projection]
+    );
+    const graphFlowchart = useMemo(() => getFlowchartProjection(projection), [projection]);
+    const flowchart = useMemo(
+        () => selectFlowchartProjection(packageProjectionBundle?.flowchart, graphFlowchart),
+        [graphFlowchart, packageProjectionBundle]
+    );
     const executiveOutput = useMemo(
         () => getExecutiveOutputProjection(projection, { title: 'Executive Output' }),
         [projection]
@@ -601,7 +745,13 @@ const CanvasStructuredView = ({
         () => executiveReadiness(executiveOutput),
         [executiveOutput]
     );
-    const sankeyFlow = useMemo(() => getSankeyFlowProjection(projection), [projection]);
+    const sankeyFlow = useMemo(
+        () =>
+            packageProjectionBundle?.sankey?.eligible
+                ? packageProjectionBundle.sankey
+                : getSankeyFlowProjection(projection),
+        [packageProjectionBundle, projection]
+    );
     const sankeySpec = useMemo(
         () =>
             sankeyFlow.eligible
@@ -623,8 +773,8 @@ const CanvasStructuredView = ({
         [sankeyFlow]
     );
     const potentialTaskRows = useMemo(
-        () => getTaskCandidateRows(projection).slice(0, 24),
-        [projection]
+        () => (packageProjectionBundle?.task_rows?.length ? [] : getTaskCandidateRows(projection).slice(0, 24)),
+        [packageProjectionBundle, projection]
     );
     const setNodes = useStore((state) => state.setNodes);
     const setEdges = useStore((state) => state.setEdges);
@@ -1972,7 +2122,14 @@ const CanvasStructuredView = ({
         updateTaskField(nodeId, 'status', status);
     };
 
-    if (nodes.length === 0) {
+    const hasStructuredContent =
+        nodes.length > 0 ||
+        allWorkBreakdownRows.length > 0 ||
+        taskRows.length > 0 ||
+        flowchart.steps?.length > 0 ||
+        sankeyFlow.eligible;
+
+    if (!hasStructuredContent) {
         return (
             <section className={`canvas-structured-view canvas-structured-view-${view}`} aria-label={label}>
                 <EmptyStructuredView
@@ -1996,6 +2153,8 @@ const CanvasStructuredView = ({
                     onAddStep={addFlowchartStep}
                     onAddDecisionBranch={addFlowchartDecisionBranch}
                     onAskAi={onAskAi}
+                    flowchartLens={flowchartLens}
+                    flowchartDisplayMode={flowchartDisplayMode}
                 />
             ) : null}
 
@@ -2053,7 +2212,7 @@ const CanvasStructuredView = ({
             ) : null}
 
             {view === 'table' ? (
-                projection.nodes.length > 0 ? (
+                allWorkBreakdownRows.length > 0 ? (
                     <div className="canvas-structured-table-surface">
                         {!tableReadyState.ready ? (
                             <ReadinessCallout

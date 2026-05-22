@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import {
+    FLOWCHART_LENSES,
+    flowchartConnectorLensState,
+    flowchartNodeLensState
+} from '../src/views/flowchart/flowchartLens.js';
 import { createFlowchartLayout, shapeForStep } from '../src/views/flowchart/flowchartLayout.js';
+import { wheelDeltaMultiplier, zoomViewportAroundPoint } from '../src/views/flowchart/flowchartViewport.js';
 
 test('flowchart renderer layout preserves standard node shapes and branch paths', () => {
     const layout = createFlowchartLayout({
@@ -83,4 +89,60 @@ test('flowchart layout keeps branch labels out of node bounds', () => {
             `Label ${label.id} should not overlap a node`
         );
     });
+});
+
+test('flowchart wheel zoom keeps the cursor anchored on the same diagram point', () => {
+    const viewport = { x: 20, y: -30, zoom: 1 };
+    const pointerX = 320;
+    const pointerY = 180;
+    const diagramX = (pointerX - viewport.x) / viewport.zoom;
+    const diagramY = (pointerY - viewport.y) / viewport.zoom;
+
+    const nextViewport = zoomViewportAroundPoint({
+        viewport,
+        pointerX,
+        pointerY,
+        wheelDelta: -120
+    });
+
+    assert.ok(nextViewport.zoom > viewport.zoom);
+    assert.equal(Number(((pointerX - nextViewport.x) / nextViewport.zoom).toFixed(6)), diagramX);
+    assert.equal(Number(((pointerY - nextViewport.y) / nextViewport.zoom).toFixed(6)), diagramY);
+});
+
+test('flowchart wheel zoom normalizes line and page wheel deltas', () => {
+    assert.equal(wheelDeltaMultiplier(0, 720), 1);
+    assert.equal(wheelDeltaMultiplier(1, 720), 16);
+    assert.equal(wheelDeltaMultiplier(2, 720), 720);
+});
+
+test('flowchart lenses classify decision, handoff, exception, and evidence emphasis', () => {
+    assert.equal(
+        flowchartNodeLensState({ flow_kind: 'decision' }, FLOWCHART_LENSES.DECISIONS),
+        'focus'
+    );
+    assert.equal(
+        flowchartNodeLensState({ flow_kind: 'step' }, FLOWCHART_LENSES.DECISIONS),
+        'muted'
+    );
+    assert.equal(
+        flowchartNodeLensState({ flow_kind: 'handoff' }, FLOWCHART_LENSES.HANDOFFS),
+        'focus'
+    );
+    assert.equal(
+        flowchartNodeLensState({ flow_kind: 'dependency', needs_review: true }, FLOWCHART_LENSES.EXCEPTIONS),
+        'focus'
+    );
+    assert.equal(
+        flowchartNodeLensState({ source_backed: false }, FLOWCHART_LENSES.EVIDENCE),
+        'needs-evidence'
+    );
+    assert.equal(
+        flowchartConnectorLensState({ source_flow_kind: 'decision', branch_kind: 'yes' }, FLOWCHART_LENSES.DECISIONS),
+        'focus'
+    );
+    assert.equal(
+        flowchartConnectorLensState({ exception_path: true }, FLOWCHART_LENSES.EXCEPTIONS),
+        'focus'
+    );
 });

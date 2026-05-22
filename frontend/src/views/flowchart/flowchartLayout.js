@@ -136,6 +136,7 @@ export const createFlowchartLayout = (flowchart = {}) => {
 
             return {
                 id: edgeId,
+                connector,
                 points: layoutEdge.points,
                 branchKind: connector.branch_kind || 'default',
                 exceptionPath: connector.exception_path === true

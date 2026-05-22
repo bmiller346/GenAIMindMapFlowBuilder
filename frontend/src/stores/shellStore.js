@@ -219,14 +219,12 @@ const useShellStore = create((set, get) => ({
             };
             if (
                 sameRightPanel(state.rightPanel, nextRightPanel) &&
-                state.bottomTray === null &&
                 isClosedOverlay(state.overlay)
             ) {
                 return state;
             }
             return {
                 rightPanel: nextRightPanel,
-                bottomTray: null,
                 overlay: closedOverlay()
             };
         });
@@ -264,14 +262,12 @@ const useShellStore = create((set, get) => ({
             };
             if (
                 sameBottomTray(state.bottomTray, nextBottomTray) &&
-                isClosedRightPanel(state.rightPanel) &&
                 isClosedOverlay(state.overlay)
             ) {
                 return state;
             }
             return {
                 bottomTray: nextBottomTray,
-                rightPanel: closedRightPanel(),
                 overlay: closedOverlay()
             };
         });

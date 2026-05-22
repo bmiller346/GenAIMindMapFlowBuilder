@@ -74,7 +74,14 @@ const MapRibbonHost = () => {
         ? activeView
         : '';
     const activeOutputOption = WORKSPACE_OUTPUT_OPTIONS.find((view) => view.id === outputModeValue);
-    const canReflowCanvas = activeCanvasView === 'mindmap' || activeCanvasView === 'knowledgeGraph';
+    const canUseNodeDensity = activeCanvasView === 'mindmap' || activeCanvasView === 'knowledgeGraph';
+    const canReflowCanvas = canUseNodeDensity;
+
+    useEffect(() => {
+        if (!canUseNodeDensity) {
+            setNodeViewMenuOpen(false);
+        }
+    }, [canUseNodeDensity]);
 
     useEffect(() => {
         if (!filtersOpen && !outputMenuOpen && !viewMenuOpen && !nodeViewMenuOpen) {
@@ -153,6 +160,7 @@ const MapRibbonHost = () => {
                     coreViews: CORE_VIEWS,
                     nodeDensityOptions: NODE_DENSITY_OPTIONS,
                     canvasNodeDensity,
+                    canUseNodeDensity,
                     canReflowCanvas,
                     graphFilters: GRAPH_FILTERS,
                     activeFilterSet,

@@ -103,6 +103,8 @@ export const getFlowchartProjection = (projection) => {
                 target: edge.target,
                 source_title: projection.nodeLookup.get(edge.source)?.title || edge.source,
                 target_title: projection.nodeLookup.get(edge.target)?.title || edge.target,
+                source_flow_kind: sourceStep?.flow_kind || '',
+                target_flow_kind: baseStepLookup.get(edge.target)?.flow_kind || '',
                 relationship_type: relationshipType,
                 label: flowBranchLabel(edge, sourceStep),
                 branch_kind: branchKind,
