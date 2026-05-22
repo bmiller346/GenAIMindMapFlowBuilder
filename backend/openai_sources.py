@@ -35,7 +35,7 @@ from graph.schemas import GraphSchemaError
 
 
 OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
-DEFAULT_MODEL = "gpt-5.5"
+DEFAULT_MODEL = "gpt-5.4"
 DEFAULT_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
 MAX_VIDEO_FRAMES = 6
 VIDEO_AUDIO_SAMPLE_SECONDS = 600

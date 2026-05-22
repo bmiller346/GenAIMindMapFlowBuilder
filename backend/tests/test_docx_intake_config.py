@@ -82,7 +82,8 @@ def test_docx_intake_rejects_unknown_role():
 
 
 def test_legacy_assistants_model_resolver_no_longer_downshifts_to_gpt_4_1():
-    assert app.resolve_assistants_model(None) == "gpt-5.5"
+    assert app.resolve_assistants_model(None) == "gpt-5.4"
+    assert app.resolve_assistants_model("gpt-5.4-mini") == "gpt-5.4-mini"
     assert app.resolve_assistants_model("gpt-5.4") == "gpt-5.4"
 
 

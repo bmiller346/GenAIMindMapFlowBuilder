@@ -197,7 +197,7 @@ class ComponentFollowUpQueryRequest(BaseModel):
     temperature: float
     top_p : float
     instructions: str
-    model_name : Literal["gpt-5.4", "gpt-5.5"]
+    model_name : Literal["gpt-5.4-mini", "gpt-5.4", "gpt-5.5"]
 
 class ComponentFollowUpQueryResponse(BaseModel):
     id : str

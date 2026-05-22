@@ -116,7 +116,7 @@ def test_web_search_uses_model_policy_when_model_is_not_explicit(monkeypatch):
         flow_id="flow-1",
     )
 
-    assert requests[0][0]["model"] == "gpt-5.5"
+    assert requests[0][0]["model"] == "gpt-5.4"
     assert graph["metadata"]["ai_provider"]["model_tier"] == "deep"
     assert graph["metadata"]["ai_provider"]["tool_policy"] == "responses_tools"
 

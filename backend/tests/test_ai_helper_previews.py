@@ -805,7 +805,7 @@ def test_generate_ai_action_preview_returns_contract_shape_for_node_scope():
     assert preview["metadata"]["ai_action_preview_contract_version"] == (
         AI_ACTION_PREVIEW_CONTRACT_VERSION
     )
-    assert preview["metadata"]["model"] in {"gpt-5.4", "gpt-5.5"}
+    assert preview["metadata"]["model"] in {"gpt-5.4-mini", "gpt-5.4", "gpt-5.5"}
     assert preview["metadata"]["preview_mode"] == "deterministic_draft"
     assert preview["draft_nodes"][0]["parent_id"] == "child"
     assert preview["draft_nodes"][0]["status"] == "needs_review"

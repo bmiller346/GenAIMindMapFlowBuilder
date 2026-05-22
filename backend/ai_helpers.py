@@ -4730,7 +4730,7 @@ def generate_node_info_message_with_provider(
         include_source_library=include_library_sources,
     )
     source_refs = source_context["source_refs"]
-    policy = normalize_model_policy(model_policy or "balanced", requested_model=model)
+    policy = normalize_model_policy(model_policy or "context", requested_model=model)
     decision = choose_openai_model(
         requested_model=model,
         model_policy=policy,

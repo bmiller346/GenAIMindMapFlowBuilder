@@ -100,7 +100,8 @@ def test_node_info_message_answers_without_draft_contract():
 
     assert message["answer"].startswith("This node is a concise overview")
     assert message["scope"] == {"type": "node", "node_id": "root"}
-    assert message["selected_model"]
+    assert message["selected_model"] == "gpt-5.4-mini"
+    assert message["metadata"]["model_policy"] == "context"
     assert message["metadata"]["history_messages"] == 1
     assert provider.requests[0].response_schema is None
     assert provider.requests[0].metadata["feature"] == "node_info_message"

@@ -208,7 +208,7 @@ bucket_name = os.getenv("bucket_name")
 gcp_service_account_file = os.getenv(
     "gcp_service_account_file", "./ai-interview-poc-2b5cf8540f16.json"
 )
-OPENAI_DEFAULT_MODEL = os.getenv("openai_default_model", "gpt-5.5")
+OPENAI_DEFAULT_MODEL = os.getenv("openai_default_model", "gpt-5.4")
 OPENAI_REASONING_MODEL = os.getenv("openai_reasoning_model", "gpt-5.4")
 OPENAI_EMBEDDING_MODEL = os.getenv(
     "openai_embedding_model", "text-embedding-3-large"

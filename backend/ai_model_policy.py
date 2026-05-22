@@ -6,13 +6,28 @@ from dataclasses import dataclass
 from typing import Any
 
 
-DEFAULT_FAST_MODEL = os.getenv("openai_fast_model", "gpt-5.4")
-DEFAULT_BALANCED_MODEL = os.getenv("openai_balanced_model", DEFAULT_FAST_MODEL)
-DEFAULT_DEEP_MODEL = os.getenv("openai_default_model", "gpt-5.5")
-SUPPORTED_MODELS = frozenset({DEFAULT_FAST_MODEL, DEFAULT_BALANCED_MODEL, DEFAULT_DEEP_MODEL})
+DEFAULT_FAST_MODEL = os.getenv("openai_fast_model", "gpt-5.4-mini")
+DEFAULT_CONTEXT_MODEL = os.getenv("openai_context_model", DEFAULT_FAST_MODEL)
+DEFAULT_BALANCED_MODEL = os.getenv("openai_balanced_model", "gpt-5.4")
+DEFAULT_DEEP_MODEL = os.getenv("openai_default_model", "gpt-5.4")
+SUPPORTED_MODELS = frozenset(
+    {
+        DEFAULT_FAST_MODEL,
+        DEFAULT_CONTEXT_MODEL,
+        DEFAULT_BALANCED_MODEL,
+        DEFAULT_DEEP_MODEL,
+        "gpt-5.4-mini",
+        "gpt-5.4",
+        "gpt-5.5",
+    }
+)
 MODEL_POLICY_ALIASES = {
     "speed": "speed",
     "fast": "speed",
+    "context": "context",
+    "context_only": "context",
+    "read_only": "context",
+    "lookup": "context",
     "balanced": "balanced",
     "auto": "balanced",
     "deep": "deep_review",
@@ -109,6 +124,14 @@ def choose_openai_model(
             model=DEFAULT_FAST_MODEL,
             tier="speed",
             reason="Speed policy selected the fast draft model.",
+            tool_policy="responses_tools" if requires_tools else "none",
+            policy=policy,
+        )
+    if policy == "context":
+        return ModelDecision(
+            model=DEFAULT_CONTEXT_MODEL,
+            tier="context",
+            reason="Context policy selected the lightweight read-only model.",
             tool_policy="responses_tools" if requires_tools else "none",
             policy=policy,
         )
