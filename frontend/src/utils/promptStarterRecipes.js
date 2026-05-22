@@ -19,6 +19,9 @@ export const VISUAL_OPTIONS = [
     { id: 'no_visual', label: 'Text only' }
 ];
 
+export const MESSY_CONTEXT_STARTER_ID = 'messy_context_to_best_view';
+export const CONTEXT_DUMP_OUTPUT_VISUAL = 'connected_picture_package';
+
 export const visualLabel = (visualId) =>
     VISUAL_OPTIONS.find((option) => option.id === visualId)?.label || visualId;
 
@@ -127,7 +130,7 @@ export const starterSurfaceLabel = (starter = {}) => {
 };
 
 export const starterSortKey = (starter = {}) => {
-    if (starter.id === 'messy_context_to_best_view') {
+    if (starter.id === MESSY_CONTEXT_STARTER_ID) {
         return '000';
     }
     if (starter.id === 'aec_code_lifecycle_package') {
@@ -141,3 +144,19 @@ export const starterSortKey = (starter = {}) => {
 
 export const sortStarterRecipes = (starters = []) =>
     [...starters].sort((left, right) => starterSortKey(left).localeCompare(starterSortKey(right)));
+
+export const starterById = (starters = [], starterId = '') =>
+    starters.find((starter) => starter?.id === starterId);
+
+export const contextDumpStarterDefaults = (starters = []) => {
+    const starter = starterById(starters, MESSY_CONTEXT_STARTER_ID) || {};
+    return {
+        starterId: MESSY_CONTEXT_STARTER_ID,
+        prompt: starter.prompt || '',
+        visual: CONTEXT_DUMP_OUTPUT_VISUAL,
+        roleId: starter.roleId || 'workflow-mapper',
+        actionId: starter.actionId || 'custom_prompt',
+        evidenceMode: 'auto',
+        citationPolicy: 'auto'
+    };
+};

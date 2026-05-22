@@ -64,7 +64,7 @@ export const OUTPUT_SHAPE_ROUTE = {
 };
 
 const MULTI_VIEW_INTENT_PATTERN =
-    /\b(messy context|best (view|shape|output)|most useful|multi[- ]?view|multiple views|several views|choose the best|tracespace output|workspace output|something i can review and build from|turn this into something|connected picture|full picture)\b/;
+    /\b(messy context|context dump|dumped context|pasted context|best (view|shape|output)|most useful|multi[- ]?view|multiple views|several views|choose the best|tracespace output|workspace output|something i can review and build from|turn this into something|connected picture|full picture)\b/;
 
 const CODE_DEPENDENCY_INTENT_PATTERN =
     /\b(code|codes|standard|standards|regulation|regulations|nfpa|nec|njac|ibc|ahj|fire alarm|life safety|permit|permitting|submittal|acceptance testing|closeout)\b.*\b(connect|depends?|dependencies|requirements?|design|review|build from|map|matrix|workflow|process|triggers?|lifecycle|phase|phases|sd|dd|cd|construction administration|ca|closeout)\b|\b(connect|depends?|dependencies|requirements?|design|review|build from|map|matrix|workflow|process|triggers?|lifecycle|phase|phases|sd|dd|cd|construction administration|ca|closeout)\b.*\b(code|codes|standard|standards|regulation|regulations|nfpa|nec|njac|ibc|ahj|fire alarm|life safety|permit|permitting|submittal|acceptance testing|closeout)\b/;

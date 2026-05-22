@@ -29,8 +29,6 @@ import {
     inferAIDraftChangeIntent,
     inferAIDraftEvidencePreferences,
     inferAIDraftExpansionPreferences,
-    normalizeAIDraftCitationPolicy,
-    normalizeAIDraftEvidenceMode,
     normalizeAIDraftExpansionTarget
 } from "../utils/aiDraftSessions";
 import { createAIActionRun } from "../utils/aiActionRuns";
@@ -44,6 +42,7 @@ import {
     viewForOutputShape as viewForOutputShapeRoute
 } from "../utils/promptRouting";
 import {
+    contextDumpStarterDefaults,
     STARTER_GROUPS,
     VISUAL_OPTIONS,
     sortStarterRecipes,
@@ -97,6 +96,34 @@ const EXPANSION_TARGET_OPTIONS = [
 const defaultExpansionTargetForScope = (scope = '') =>
     scope === 'branch' ? 'leaves' : 'selected_node';
 
+const initialEvidenceModesFor = (mode = '', scope = '') => {
+    const normalized = mode || (scope === 'source' ? 'uploaded_sources' : 'auto');
+    return normalized === 'auto' ? ['auto'] : [normalized];
+};
+
+const resolvePrimaryEvidenceMode = (modes = [], { hasSources = false } = {}) => {
+    const values = Array.isArray(modes) ? modes.filter(Boolean) : [];
+    if (!values.length || values.includes('auto')) {
+        return 'auto';
+    }
+    if (hasSources && values.includes('uploaded_sources')) {
+        return 'uploaded_sources';
+    }
+    if (values.includes('web_sources')) {
+        return 'web_sources';
+    }
+    if (values.includes('uploaded_sources')) {
+        return 'uploaded_sources';
+    }
+    if (values.includes('general_knowledge')) {
+        return 'general_knowledge';
+    }
+    if (values.includes('sharepoint')) {
+        return 'sharepoint';
+    }
+    return values.includes('workspace') ? 'workspace' : 'auto';
+};
+
 const expansionTargetLabel = (target = '') =>
     EXPANSION_TARGET_OPTIONS.find((option) => option.id === target)?.label || 'Selected node';
 
@@ -108,24 +135,38 @@ const expansionTargetSummary = (target = '') => ({
 }[target] || 'Selected node anchor');
 
 const EVIDENCE_MODE_OPTIONS = [
-    { id: 'workspace', label: 'Workspace only' },
+    { id: 'auto', label: 'Auto' },
+    { id: 'workspace', label: 'Workspace' },
     { id: 'uploaded_sources', label: 'Uploaded sources' },
+    { id: 'web_sources', label: 'Web/current' },
     { id: 'general_knowledge', label: 'General knowledge' },
-    { id: 'web_sources', label: 'Web/current sources' },
     { id: 'sharepoint', label: 'SharePoint/internal' }
 ];
 
 const CITATION_POLICY_OPTIONS = [
+    { id: 'auto', label: 'Auto' },
     { id: 'required', label: 'Required' },
     { id: 'preferred', label: 'Preferred' },
     { id: 'not_required', label: 'Not required' }
 ];
 
 const evidenceModeLabel = (mode = '') =>
-    EVIDENCE_MODE_OPTIONS.find((option) => option.id === mode)?.label || 'Workspace only';
+    mode === 'auto'
+        ? 'Auto evidence'
+        : EVIDENCE_MODE_OPTIONS.find((option) => option.id === mode)?.label || 'Workspace only';
+
+const evidenceModesLabel = (modes = []) => {
+    const values = Array.isArray(modes) ? modes.filter(Boolean) : [];
+    if (!values.length || values.includes('auto')) {
+        return 'Auto evidence';
+    }
+    return values.map(evidenceModeLabel).join(' + ');
+};
 
 const citationPolicyLabel = (policy = '') =>
-    CITATION_POLICY_OPTIONS.find((option) => option.id === policy)?.label || 'Preferred';
+    policy === 'auto'
+        ? 'Auto citations'
+        : CITATION_POLICY_OPTIONS.find((option) => option.id === policy)?.label || 'Preferred';
 
 const viewForOutputShape = (shape, actionId) =>
     viewForOutputShapeRoute(shape, actionId, viewForAction);
@@ -630,6 +671,52 @@ const hasWorkspaceBriefContext = (brief = {}) =>
                 brief.desired_outputs.some((output) => output !== 'mind_map'))
     );
 
+const buildContextDumpPrompt = ({ initialPrompt = '', contextDumpText = '', starterPrompt = '' } = {}) => {
+    const promptText = String(initialPrompt || '').trim() || starterPrompt;
+    const dumpText = String(contextDumpText || '').trim();
+    if (!dumpText) {
+        return promptText;
+    }
+    if (promptText.includes(dumpText)) {
+        return promptText;
+    }
+    return `${promptText}\n\nContext dump:\n${dumpText}`;
+};
+
+const sourceRefKey = (ref = {}) =>
+    [
+        ref.source_ref_id,
+        ref.sourceRefId,
+        ref.id,
+        ref.document_id,
+        ref.documentId,
+        ref.url,
+        ref.uri,
+        ref.title
+    ]
+        .map((value) => String(value || '').trim())
+        .find(Boolean) || '';
+
+const mergeSourceRefs = (...refLists) => {
+    const seen = new Set();
+    return refLists
+        .flatMap((refs) => (Array.isArray(refs) ? refs : []))
+        .filter((ref) => {
+            if (!ref || typeof ref !== 'object') {
+                return false;
+            }
+            const key = sourceRefKey(ref);
+            if (!key) {
+                return true;
+            }
+            if (seen.has(key)) {
+                return false;
+            }
+            seen.add(key);
+            return true;
+        });
+};
+
 const PromptModal = ({
     scope,
     nodeId,
@@ -644,12 +731,25 @@ const PromptModal = ({
     initialExpansionMode = 'exploratory',
     initialExpansionTarget = '',
     initialEvidenceMode = '',
+    initialAllowedEvidenceModes,
     initialCitationPolicy = '',
     initialChangeIntent = '',
     initialSourceRefs = [],
     initialPromptPlaceholder = '',
+    initialRequestMetadata = {},
     initialContextSourceId = '',
     initialContextSourceIds,
+    contextDump = false,
+    contextDumpMode = false,
+    contextDumpText = '',
+    contextDumpSourceRefs = [],
+    pastedSourceRefs = [],
+    adHocContextRefs = [],
+    initialContextDumpMode = false,
+    initialContextDumpText = '',
+    initialContextDumpSourceRefs = [],
+    initialPastedSourceRefs = [],
+    initialAdHocContextRefs = [],
     onGenerationProgress
 }) => {
     const selector = (state) => ({
@@ -699,28 +799,64 @@ const PromptModal = ({
     const initialLegacyAgent = legacyAgents.includes(targetNode?.data?.prompt)
         ? targetNode.data.prompt
         : '';
+    const rawRequestMetadata =
+        initialRequestMetadata && typeof initialRequestMetadata === 'object'
+            ? initialRequestMetadata
+            : {};
+    const isContextDumpMode = Boolean(
+        initialContextDumpMode ||
+            contextDumpMode ||
+            contextDump ||
+            rawRequestMetadata.context_dump_mode ||
+            rawRequestMetadata.contextDumpMode ||
+            rawRequestMetadata.context_dump ||
+            rawRequestMetadata.launch_mode === 'context_dump' ||
+            rawRequestMetadata.intent === 'context_dump'
+    );
+    const resolvedContextDumpText =
+        initialContextDumpText || contextDumpText || rawRequestMetadata.context_dump_text || '';
+    const contextDumpDefaults = contextDumpStarterDefaults(starterTransformations);
+    const resolvedInitialVisual =
+        isContextDumpMode && (!initialVisual || initialVisual === 'auto')
+            ? contextDumpDefaults.visual
+            : initialVisual || 'auto';
+    const resolvedInitialRoleId =
+        initialRoleId || (isContextDumpMode ? contextDumpDefaults.roleId : '');
+    const resolvedInitialActionId =
+        initialActionId || (isContextDumpMode ? contextDumpDefaults.actionId : '');
+    const resolvedInitialCitationPolicy =
+        initialCitationPolicy || (isContextDumpMode ? contextDumpDefaults.citationPolicy : '');
+    const combinedInitialSourceRefs = mergeSourceRefs(
+        initialSourceRefs,
+        contextDumpSourceRefs,
+        pastedSourceRefs,
+        adHocContextRefs,
+        initialContextDumpSourceRefs,
+        initialPastedSourceRefs,
+        initialAdHocContextRefs
+    );
     const [activeAgent, setActiveAgent] = useState(initialLegacyAgent);
     const [selectedModel, setSelectedModel] = useState(
         targetNode?.data?.model_name || (scope ? 'auto' : defaultOpenAIModel)
     );
-    const [selectedRoleId, setSelectedRoleId] = useState(initialRoleId || '');
-    const [selectedActionId, setSelectedActionId] = useState(initialActionId || '');
-    const [selectedVisual, setSelectedVisual] = useState(initialVisual || 'auto');
+    const [selectedRoleId, setSelectedRoleId] = useState(resolvedInitialRoleId);
+    const [selectedActionId, setSelectedActionId] = useState(resolvedInitialActionId);
+    const [selectedVisual, setSelectedVisual] = useState(resolvedInitialVisual);
     const [selectedExpansionMode, setSelectedExpansionMode] = useState(initialExpansionMode || 'exploratory');
     const [selectedExpansionTarget, setSelectedExpansionTarget] = useState(
         normalizeAIDraftExpansionTarget(
             initialExpansionTarget || defaultExpansionTargetForScope(scope)
         )
     );
-    const [selectedEvidenceMode, setSelectedEvidenceMode] = useState(
-        normalizeAIDraftEvidenceMode(
-            initialEvidenceMode || (scope === 'source' ? 'uploaded_sources' : 'workspace')
-        )
+    const [allowedEvidenceModes, setAllowedEvidenceModes] = useState(
+        Array.isArray(initialAllowedEvidenceModes) && initialAllowedEvidenceModes.length
+            ? initialAllowedEvidenceModes
+            : isContextDumpMode
+              ? ['auto']
+              : initialEvidenceModesFor(initialEvidenceMode, scope)
     );
     const [selectedCitationPolicy, setSelectedCitationPolicy] = useState(
-        normalizeAIDraftCitationPolicy(
-            initialCitationPolicy || (scope === 'source' ? 'required' : 'preferred')
-        )
+        resolvedInitialCitationPolicy || (scope === 'source' ? 'required' : 'auto')
     );
     const [selectedContextSourceIds, setSelectedContextSourceIds] = useState(() => {
         const hasExplicitContextSelection = Array.isArray(initialContextSourceIds);
@@ -736,7 +872,15 @@ const PromptModal = ({
             ].filter(Boolean))
         );
     });
-    const [customPrompt, setCustomPrompt] = useState(initialPrompt || '');
+    const [customPrompt, setCustomPrompt] = useState(() =>
+        isContextDumpMode
+            ? buildContextDumpPrompt({
+                  initialPrompt,
+                  contextDumpText: resolvedContextDumpText,
+                  starterPrompt: contextDumpDefaults.prompt
+              })
+            : initialPrompt || ''
+    );
     const [stageMessage, setStageMessage] = useState('');
     const [generationStage, setGenerationStage] = useState('');
     const [generationStageDetail, setGenerationStageDetail] = useState('');
@@ -753,6 +897,17 @@ const PromptModal = ({
     const didManuallySetEvidenceModeRef = useRef(Boolean(initialEvidenceMode));
     const didManuallySetCitationPolicyRef = useRef(Boolean(initialCitationPolicy));
     const promptScope = scope === 'nodes' ? 'node' : scope || 'node';
+    const requestMetadata = {
+        ...rawRequestMetadata,
+        ...(isContextDumpMode
+            ? {
+                  context_dump_mode: true,
+                  context_dump_starter_id: contextDumpDefaults.starterId,
+                  context_dump_has_text: Boolean(String(resolvedContextDumpText || '').trim()),
+                  context_dump_text_length: String(resolvedContextDumpText || '').trim().length
+              }
+            : {})
+    };
 
     const isPreviewFlow = Boolean(scope);
     const targetData = targetNode ? getWorkspaceNodeData(targetNode) : {};
@@ -766,9 +921,39 @@ const PromptModal = ({
     const selectedContextSources = loadedSources.filter((source) =>
         selectedContextSourceIds.includes(source.id)
     );
-    const adHocSourceRefs = Array.isArray(initialSourceRefs)
-        ? initialSourceRefs.filter((ref) => ref && typeof ref === 'object')
-        : [];
+    const hasWorkspaceEvidenceContext =
+        nodes.length > 0 ||
+        selectedNodeIds.length > 0 ||
+        Boolean(targetNodeId) ||
+        hasWorkspaceBriefContext(workspaceBrief);
+    const hasUploadedEvidenceContext =
+        scope === 'source' ||
+        selectedContextSources.length > 0 ||
+        loadedSources.length > 0;
+    const evidenceAvailability = useMemo(
+        () => ({
+            auto: { disabled: false, reason: '' },
+            workspace: {
+                disabled: !hasWorkspaceEvidenceContext,
+                reason: 'No workspace graph, selected node, or brief context is available yet.'
+            },
+            uploaded_sources: {
+                disabled: !hasUploadedEvidenceContext,
+                reason: 'Add or select sources before using uploaded-source evidence.'
+            },
+            web_sources: { disabled: false, reason: '' },
+            general_knowledge: { disabled: false, reason: '' },
+            sharepoint: {
+                disabled: true,
+                reason: 'SharePoint is not connected in this workspace.'
+            }
+        }),
+        [hasUploadedEvidenceContext, hasWorkspaceEvidenceContext]
+    );
+    const selectedEvidenceMode = resolvePrimaryEvidenceMode(allowedEvidenceModes, {
+        hasSources: hasUploadedEvidenceContext
+    });
+    const adHocSourceRefs = combinedInitialSourceRefs;
     const selectedSourcePayload =
         scope === 'source'
             ? Array.isArray(sources) && sources.length > 1
@@ -825,7 +1010,7 @@ const PromptModal = ({
         return options.length ? options : EXPANSION_TARGET_OPTIONS.slice(0, 1);
     }, [promptScope]);
     const expansionPlanLabel = `${selectedExpansionMode === 'strict' ? 'Strict' : 'Exploratory'} / ${expansionTargetLabel(selectedExpansionTarget)}`;
-    const evidencePlanLabel = `${evidenceModeLabel(selectedEvidenceMode)} / ${citationPolicyLabel(selectedCitationPolicy)}`;
+    const evidencePlanLabel = `${evidenceModesLabel(allowedEvidenceModes)} / ${citationPolicyLabel(selectedCitationPolicy)}`;
     const scopedStarterTransformations = useMemo(
         () =>
             starterTransformations.filter((starter) =>
@@ -1121,11 +1306,16 @@ const PromptModal = ({
                 initialExpansionMode: selectedExpansionMode,
                 initialExpansionTarget: selectedExpansionTarget,
                 initialEvidenceMode: selectedEvidenceMode,
+                initialAllowedEvidenceModes: allowedEvidenceModes,
                 initialCitationPolicy: selectedCitationPolicy,
                 initialChangeIntent,
                 initialSourceRefs: adHocSourceRefs,
+                initialRequestMetadata: requestMetadata,
                 initialContextSourceIds: selectedContextSourceIds,
                 initialContextSourceId: selectedContextSourceIds[0] || '',
+                initialContextDumpMode: isContextDumpMode,
+                initialContextDumpText: resolvedContextDumpText,
+                initialContextDumpSourceRefs: adHocSourceRefs,
                 onGenerationProgress
             }
         });
@@ -1152,7 +1342,7 @@ const PromptModal = ({
             fallbackEvidenceMode: starter.evidenceMode,
             fallbackCitationPolicy: starter.citationPolicy
         });
-        setSelectedEvidenceMode(inferredEvidence.evidenceMode);
+        setAllowedEvidenceModes([inferredEvidence.evidenceMode]);
         setSelectedCitationPolicy(inferredEvidence.citationPolicy);
         setSelectedRoleId(starter.roleId || selectedRoleId);
         setSelectedActionId(starter.actionId || selectedActionId);
@@ -1192,10 +1382,38 @@ const PromptModal = ({
             fallbackCitationPolicy: selectedCitationPolicy
         });
         if (!didManuallySetEvidenceModeRef.current) {
-            setSelectedEvidenceMode(inferredPreferences.evidenceMode);
+            setAllowedEvidenceModes([inferredPreferences.evidenceMode]);
         }
         if (!didManuallySetCitationPolicyRef.current) {
             setSelectedCitationPolicy(inferredPreferences.citationPolicy);
+        }
+    };
+
+    const toggleEvidenceMode = (mode) => {
+        const optionState = evidenceAvailability[mode] || {};
+        if (optionState.disabled) {
+            return;
+        }
+        didManuallySetEvidenceModeRef.current = true;
+        setAllowedEvidenceModes((current) => {
+            const currentValues = Array.isArray(current) && current.length ? current : ['auto'];
+            if (mode === 'auto') {
+                return ['auto'];
+            }
+            const withoutAuto = currentValues.filter((value) => value !== 'auto');
+            const next = withoutAuto.includes(mode)
+                ? withoutAuto.filter((value) => value !== mode)
+                : [...withoutAuto, mode];
+            return next.length ? next : ['auto'];
+        });
+        if (!didManuallySetCitationPolicyRef.current) {
+            if (['uploaded_sources', 'web_sources', 'sharepoint'].includes(mode)) {
+                setSelectedCitationPolicy('required');
+            } else if (mode === 'general_knowledge') {
+                setSelectedCitationPolicy('not_required');
+            } else if (mode === 'auto') {
+                setSelectedCitationPolicy('auto');
+            }
         }
     };
 
@@ -1423,6 +1641,7 @@ const PromptModal = ({
                     ? 'Backend unavailable; model would be selected by intent.'
                     : 'User selected the model explicitly.',
             metadata: {
+                ...requestMetadata,
                 role_id: role.id,
                 routed_role_id: effectiveRole.id,
                 action_label: effectiveAction.label,
@@ -1432,6 +1651,7 @@ const PromptModal = ({
                 expansion_mode: selectedExpansionMode,
                 expansion_target: selectedExpansionTarget,
                 evidence_mode: selectedEvidenceMode,
+                allowed_evidence_modes: allowedEvidenceModes,
                 citation_policy: selectedCitationPolicy,
                 source_policy_requires_citation: selectedCitationPolicy === 'required',
                 preview_mode: 'local_fallback',
@@ -1480,6 +1700,7 @@ const PromptModal = ({
                 ? [`User instruction: ${localPrompt}`]
                 : [],
             metadata: {
+                ...requestMetadata,
                 preview_mode: 'local_fallback',
                 output_shape: inferredShape,
                 requested_output_shapes: desiredOutputs,
@@ -1487,6 +1708,7 @@ const PromptModal = ({
                 expansion_mode: selectedExpansionMode,
                 expansion_target: selectedExpansionTarget,
                 evidence_mode: selectedEvidenceMode,
+                allowed_evidence_modes: allowedEvidenceModes,
                 citation_policy: selectedCitationPolicy,
                 source_policy_requires_citation: selectedCitationPolicy === 'required',
                 change_intent: changeIntent,
@@ -1567,6 +1789,7 @@ const PromptModal = ({
                     expansion_target: selectedExpansionTarget,
                     expansion_plan: expansionPlanLabel,
                     evidence_mode: selectedEvidenceMode,
+                    allowed_evidence_modes: allowedEvidenceModes,
                     citation_policy: selectedCitationPolicy,
                     evidence_plan: evidencePlanLabel,
                     model: selectedModel
@@ -1662,12 +1885,14 @@ const PromptModal = ({
                 evidenceMode: selectedEvidenceMode,
                 citationPolicy: selectedCitationPolicy,
                 metadata: {
+                    ...requestMetadata,
                     requested_visual: selectedVisual,
                     output_shape: inferredShape,
                     requested_output_shapes: desiredOutputs,
                     expansion_mode: selectedExpansionMode,
                     expansion_target: selectedExpansionTarget,
                     evidence_mode: selectedEvidenceMode,
+                    allowed_evidence_modes: allowedEvidenceModes,
                     citation_policy: selectedCitationPolicy,
                     source_policy_requires_citation: selectedCitationPolicy === 'required',
                     routed_role_id: effectiveRole.id,
@@ -1740,12 +1965,14 @@ const PromptModal = ({
                 evidenceMode: selectedEvidenceMode,
                 citationPolicy: selectedCitationPolicy,
                 metadata: {
+                    ...requestMetadata,
                     requested_visual: selectedVisual,
                     output_shape: inferredShape,
                     requested_output_shapes: desiredOutputs,
                     expansion_mode: selectedExpansionMode,
                     expansion_target: selectedExpansionTarget,
                     evidence_mode: selectedEvidenceMode,
+                    allowed_evidence_modes: allowedEvidenceModes,
                     citation_policy: selectedCitationPolicy,
                     source_policy_requires_citation: selectedCitationPolicy === 'required',
                     routed_role_id: effectiveRole.id,
@@ -1932,7 +2159,7 @@ const PromptModal = ({
                 </div>
                 <div>
                     <span>Evidence mode</span>
-                    <strong>{evidenceModeLabel(selectedEvidenceMode)}</strong>
+                    <strong>{evidenceModesLabel(allowedEvidenceModes)}</strong>
                 </div>
                 <div>
                     <span>Citations</span>
@@ -2054,30 +2281,29 @@ const PromptModal = ({
                     </select>
                 </label>
                 <label>
-                    Evidence mode
-                    <select
-                        value={selectedEvidenceMode}
-                        onChange={(event) => {
-                            didManuallySetEvidenceModeRef.current = true;
-                            const nextMode = event.target.value;
-                            setSelectedEvidenceMode(nextMode);
-                            if (!didManuallySetCitationPolicyRef.current) {
-                                setSelectedCitationPolicy(
-                                    ['uploaded_sources', 'web_sources', 'sharepoint'].includes(nextMode)
-                                        ? 'required'
-                                        : nextMode === 'general_knowledge'
-                                          ? 'not_required'
-                                          : 'preferred'
-                                );
-                            }
-                        }}
-                    >
+                    Evidence source
+                    <div className="ai-action-evidence-options" role="group" aria-label="Allowed evidence sources">
                         {EVIDENCE_MODE_OPTIONS.map((option) => (
-                            <option key={option.id} value={option.id}>
-                                {option.label}
-                            </option>
+                            <label
+                                key={option.id}
+                                className={`ai-action-evidence-option${evidenceAvailability[option.id]?.disabled ? ' disabled' : ''}`}
+                                title={evidenceAvailability[option.id]?.disabled ? evidenceAvailability[option.id].reason : ''}
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={allowedEvidenceModes.includes(option.id)}
+                                    disabled={evidenceAvailability[option.id]?.disabled}
+                                    onChange={() => toggleEvidenceMode(option.id)}
+                                />
+                                <span>{option.label}</span>
+                            </label>
                         ))}
-                    </select>
+                    </div>
+                    {allowedEvidenceModes.includes('auto') ? (
+                        <small className="ai-action-output-hint">
+                            Auto can use workspace context, uploaded sources, web/current sources, or general knowledge based on the prompt.
+                        </small>
+                    ) : null}
                 </label>
                 <label>
                     Citations

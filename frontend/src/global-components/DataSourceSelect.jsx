@@ -25,6 +25,25 @@ const WORKSPACE_SOURCES = [
 	{ img: PROMPTSvg, content: "Start from workspace brief", name: "brief", mode: "No-source draft", detail: "Creates reviewable assumption nodes." },
 ];
 
+const CONTEXT_DUMP_PROMPT =
+	"Turn this messy context into a connected picture package I can review and build from. Create the map, relationships, evidence links, tasks, decisions, risks, acceptance groups, and repair targets. Keep source-backed items cited, mark assumptions needs_review, and include repair prompts for weak or missing evidence.";
+
+const CONTEXT_DUMP_SOURCE = {
+	img: PROMPTSvg,
+	content: "Dump messy context",
+	name: "context_dump",
+	mode: "Ask AI package",
+	detail: "Paste rough notes and create a connected package for review."
+};
+
+const buildContextDumpPrompt = (dumpText = "") => {
+	const trimmedDump = String(dumpText || "").trim();
+	if (!trimmedDump) {
+		return CONTEXT_DUMP_PROMPT;
+	}
+	return `${CONTEXT_DUMP_PROMPT}\n\nMessy context:\n${trimmedDump}`;
+};
+
 const DOCUMENT_SOURCES = [
 	{ img: DRAWERSvg, content: "Review folder / file set", name: "source_set", mode: "Multi-source", detail: "Batch upload PDF, DOCX, Markdown, and TXT with paths preserved." },
 	{ img: PDFSvg, content: "Upload one PDF", name: "pdf", mode: "Single source", detail: "For multiple PDFs, use source set above." },
@@ -62,7 +81,8 @@ const DataSourceSelect = ({
 	returnModal,
 	returnProps = {},
 	selectedSourceIds = [],
-	uploadedSourceId = ""
+	uploadedSourceId = "",
+	contextDumpText = ""
 }) => {
 	const pushNode = modalStore((s) => s.pushNode);
 	const popNode = modalStore((s) => s.popNode);
@@ -96,6 +116,9 @@ const DataSourceSelect = ({
 		]
 	);
 	const [activeSourceIds, setActiveSourceIds] = useState(initialSourceIds);
+	const [activeContextDumpText, setActiveContextDumpText] = useState(
+		contextDumpText || returnProps.initialContextDumpText || ""
+	);
 	const loadedSources = useMemo(
 		() =>
 			buildSourceLibraryProjection(nodes, edges, workspaceBrief, sourceLibrary, {
@@ -142,7 +165,7 @@ const DataSourceSelect = ({
 		);
 	};
 
-	const returnToAskAI = () => {
+	const returnToAskAI = (extraProps = {}) => {
 		if (!returnModal) {
 			if (onClose) {
 				onClose();
@@ -154,8 +177,59 @@ const DataSourceSelect = ({
 		pushNode(returnModal, {
 			...returnProps,
 			initialContextSourceIds: activeSourceIds,
-			initialContextSourceId: activeSourceIds[0] || ""
+			initialContextSourceId: activeSourceIds[0] || "",
+			...extraProps
 		});
+	};
+
+	const openContextDump = async () => {
+		const hasDumpText = Boolean(activeContextDumpText.trim());
+		const promptProps = {
+			...returnProps,
+			scope: returnProps.scope || "workspace",
+			initialPrompt: hasDumpText
+				? buildContextDumpPrompt(activeContextDumpText)
+				: returnProps.initialPrompt || CONTEXT_DUMP_PROMPT,
+			initialVisual: "connected_picture_package",
+			initialRoleId: returnProps.initialRoleId || "workflow-mapper",
+			initialActionId: returnProps.initialActionId || "custom_prompt",
+			initialExpansionMode: returnProps.initialExpansionMode || "exploratory",
+			initialEvidenceMode: activeSourceIds.length
+				? "uploaded_sources"
+				: returnProps.initialEvidenceMode || "auto",
+			initialAllowedEvidenceModes:
+				activeSourceIds.length ? ["uploaded_sources"] : returnProps.initialAllowedEvidenceModes || ["auto"],
+			initialCitationPolicy: activeSourceIds.length
+				? "required"
+				: returnProps.initialCitationPolicy || "auto",
+			initialContextSourceIds: activeSourceIds,
+			initialContextSourceId: activeSourceIds[0] || "",
+			initialRequestMetadata: {
+				...(returnProps.initialRequestMetadata || {}),
+				entry_point: "context_dump",
+				context_dump_has_text: hasDumpText,
+				context_dump_source_count: activeSourceIds.length,
+				requested_package_mode: "connected_picture_package"
+			},
+			initialPromptPlaceholder:
+				returnProps.initialPromptPlaceholder ||
+				"Paste rough notes, requirements, source excerpts, decisions, open questions, or half-formed context."
+		};
+
+		if (returnModal) {
+			pushNode(returnModal, promptProps);
+			return;
+		}
+
+		const { default: PromptModal } = await import("../modals/PromptModal.jsx");
+		pushNode(PromptModal, promptProps);
+	};
+
+	const handleSourceSelect = (source) => {
+		if (source.name === "context_dump") {
+			openContextDump();
+			return;
+		}
 	};
 
 	return (
@@ -213,8 +287,42 @@ const DataSourceSelect = ({
 							No loaded sources yet. Add a PDF or DOCX below, then verify it here before returning to Ask AI.
 						</p>
 					)}
+					<div className="source-context-dump">
+						<div>
+							<h5>CONTEXT DUMP</h5>
+							<p>Paste rough notes, transcript chunks, copied emails, URLs, table fragments, or mixed source excerpts here. This stays draft-first and returns to Ask AI as package context.</p>
+						</div>
+						<textarea
+							value={activeContextDumpText}
+							onChange={(event) => setActiveContextDumpText(event.target.value)}
+							placeholder="Paste messy context for a connected package..."
+							aria-label="Messy context dump"
+							rows={8}
+						/>
+						<button
+							type="button"
+							onClick={openContextDump}
+						>
+							Use dump in Ask AI
+						</button>
+					</div>
 				</div>
 			) : null}
+			<div>
+				<h5>{isAskAIContext ? "DUMP CONTEXT" : "ASK AI"}</h5>
+				<p className="data-source-group-note">
+					{isAskAIContext
+						? "Skip single-document drafting and return to Ask AI package mode with the selected source context."
+						: "Paste loose notes, excerpts, requirements, or questions into Ask AI and generate a connected package instead of adding a single document source."}
+				</p>
+				<div className="data-source-select-container">
+					<DataSourceSet
+						data={CONTEXT_DUMP_SOURCE}
+						modalProps={modalProps}
+						onSelect={handleSourceSelect}
+					/>
+				</div>
+			</div>
 			{sourceGroups.map((group) => (
 				<div key={group.title}>
 				<h5>{isAskAIContext && group.title === "DOCUMENTS" ? "ADD SOURCE CONTEXT" : group.title}</h5>
@@ -234,7 +342,7 @@ const DataSourceSelect = ({
 			))}
 			{isAskAIContext ? (
 				<div className="source-context-actions">
-					<button type="button" onClick={returnToAskAI}>
+					<button type="button" onClick={() => returnToAskAI()}>
 						Use selected sources
 					</button>
 				</div>

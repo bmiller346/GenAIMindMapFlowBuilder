@@ -6,6 +6,7 @@ import {
     inferOutputShape
 } from '../src/utils/promptRouting.js';
 import {
+    contextDumpStarterDefaults,
     sortStarterRecipes,
     starterGroupId,
     starterSurfaceLabel,
@@ -52,6 +53,32 @@ test('connected package can be selected as an explicit output mode', () => {
         desiredOutputsForPrompt({
             inferredShape: 'connected_picture_package',
             prompt: 'Build the full review package.'
+        }),
+        ['connected_picture_package']
+    );
+});
+
+test('context dump defaults use messy context and explicit connected package output', () => {
+    const defaults = contextDumpStarterDefaults([
+        {
+            id: 'messy_context_to_best_view',
+            prompt: 'Turn this messy context into the most useful reviewable TraceSpace output.',
+            visual: 'auto',
+            roleId: 'workflow-mapper',
+            actionId: 'custom_prompt'
+        }
+    ]);
+
+    assert.equal(defaults.starterId, 'messy_context_to_best_view');
+    assert.equal(defaults.visual, 'connected_picture_package');
+    assert.equal(defaults.evidenceMode, 'auto');
+    assert.equal(defaults.citationPolicy, 'auto');
+    assert.match(defaults.prompt, /messy context/i);
+    assert.equal(inferOutputShape('Context dump: permit closeout notes and owner approvals need one view.'), 'graph_draft');
+    assert.deepEqual(
+        desiredOutputsForPrompt({
+            inferredShape: inferOutputShape('Context dump: permit closeout notes and owner approvals need one view.'),
+            prompt: 'Context dump: permit closeout notes and owner approvals need one view.'
         }),
         ['connected_picture_package']
     );

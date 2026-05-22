@@ -111,7 +111,7 @@ const recommendDocxIntakeProfile = ({
     return '';
 };
 
-const DOCX_INTAKE_MODELS = ['auto', 'gpt-5.5', 'gpt-5.4'];
+const DOCX_INTAKE_MODELS = ['auto', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.5'];
 
 const DocxModal = ({
     sourcePickerMode = 'workspace_intake',

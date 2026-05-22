@@ -1,5 +1,5 @@
-export const supportedOpenAIModels = ['gpt-5.4', 'gpt-5.5'];
-export const defaultOpenAIModel = 'gpt-5.5';
+export const supportedOpenAIModels = ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.5'];
+export const defaultOpenAIModel = 'gpt-5.4';
 
 export const AI_ACTION_SCOPES = {
     node: 'node',
@@ -193,8 +193,8 @@ export const starterTransformations = [
     {
         id: 'messy_context_to_best_view',
         label: 'Messy context to view',
-        description: 'Let TraceSpace choose graph, table, chart, task, or review shape.',
-        prompt: 'Turn this messy context into the most useful reviewable TraceSpace output. Choose the best shape from graph, flowchart, table, chart, checklist, tasks, Kanban, executive output, or source review. Keep source-backed items cited, mark assumptions needs_review, and include repair prompts for any weak or missing evidence.',
+        description: 'Dump raw context and let TraceSpace package the useful views.',
+        prompt: 'Turn this messy context into the most useful reviewable TraceSpace output. Choose the best shape for the material; when multiple views are useful, create a connected picture package with Overview, Graph, Connections, Flow, Table, Chart, Evidence, Tasks, and Review views. Keep source-backed items cited, mark assumptions needs_review, preserve repair targets, include repair prompts for weak or missing evidence, and treat Sankey as one possible lens only when source-target-value rows are supported.',
         visual: 'auto',
         roleId: 'workflow-mapper',
         actionId: 'custom_prompt',

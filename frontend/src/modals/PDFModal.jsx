@@ -115,7 +115,7 @@ const PDF_INTAKE_PROFILES = [
     }
 ];
 
-const PDF_INTAKE_MODELS = ['auto', 'gpt-5.5', 'gpt-5.4'];
+const PDF_INTAKE_MODELS = ['auto', 'gpt-5.4-mini', 'gpt-5.4', 'gpt-5.5'];
 
 const recommendPdfProcessingType = ({ isAskAIContextMode = false, fileName = '' }) => {
     const text = String(fileName || '').toLowerCase();
