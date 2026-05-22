@@ -159,6 +159,7 @@ const Header = ({
         setSourceLibrary: s.setSourceLibrary,
         setSelectedBranchId: s.setSelectedBranchId,
         setInspectorNodeId: s.setInspectorNodeId,
+        clearWorkspaceAIState: s.clearWorkspaceAIState,
         viewport: s.viewport,
         workspaceBrief: s.workspaceBrief,
         mapStyle: s.mapStyle,
@@ -182,6 +183,7 @@ const Header = ({
         setSourceLibrary,
         setSelectedBranchId,
         setInspectorNodeId,
+        clearWorkspaceAIState,
         viewport,
         workspaceBrief,
         mapStyle,
@@ -1182,12 +1184,18 @@ const Header = ({
         if (!flow_id) {
             return;
         }
-        const normalizedNextName = String(nextName || '').trim();
-        const normalizedCurrentName = String(flow_name || '').trim();
-        if (normalizedNextName === normalizedCurrentName) {
+        const normalizedNextName = String(nextName || '').trim() || 'Untitled workspace';
+        const previousPersistedName = String(lastPersistedFlowName || flow_name || '').trim();
+        if (normalizedNextName === previousPersistedName) {
+            if (normalizedNextName !== flow_name) {
+                setFlowName(normalizedNextName);
+                syncActiveFlowName(normalizedNextName);
+            }
             return;
         }
 
+        setFlowName(normalizedNextName);
+        syncActiveFlowName(normalizedNextName);
         setSaveStatus('saving');
         try {
             recordActivity({
@@ -1195,7 +1203,7 @@ const Header = ({
                 title: 'Renamed workspace',
                 summary: `Workspace name changed to ${normalizedNextName || 'Untitled workspace'}.`,
                 metadata: {
-                    previous_name: flow_name,
+                    previous_name: previousPersistedName,
                     next_name: normalizedNextName
                 }
             });
@@ -1244,6 +1252,40 @@ const Header = ({
         );
     };
 
+    const restoreSnapshotAndPersist = async ({
+        snapshot,
+        name,
+        type,
+        restoredFrom
+    }) => {
+        setFlowType(type || 'manual');
+        syncActiveFlowType(type || 'manual');
+        applySnapshotToWorkspace(snapshot, name);
+        recordActivity({
+            type: 'revert_snapshot_restored',
+            title: 'Reverted workspace',
+            summary:
+                restoredFrom === 'local_checkpoint'
+                    ? 'Restored the last manual save checkpoint. The revert was kept in activity.'
+                    : 'Restored the last persisted workspace snapshot. The revert was kept in activity.',
+            metadata: {
+                restored_from: restoredFrom
+            }
+        });
+        const revertedSnapshot = {
+            ...snapshot,
+            activity_events: useActivityStore.getState().activities,
+            automations: useAutomationStore.getState().automations
+        };
+        await saveFlowCall(name, revertedSnapshot);
+        setSavedSnapshot(
+            revertedSnapshot,
+            stringifyFlowSnapshot(revertedSnapshot),
+            name,
+            type || 'manual'
+        );
+    };
+
     const revertFlow = async () => {
         if (!lastSavedSnapshot || !flow_id) {
             return;
@@ -1251,58 +1293,124 @@ const Header = ({
 
         clearTimeout(autosaveTimerRef.current);
         setSaveStatus('saving');
+        if (
+            lastSavedFingerprint &&
+            lastPersistedFingerprint &&
+            lastSavedFingerprint !== lastPersistedFingerprint
+        ) {
+            try {
+                await restoreSnapshotAndPersist({
+                    snapshot: lastSavedSnapshot,
+                    name: lastSavedFlowName,
+                    type: lastSavedFlowType,
+                    restoredFrom: 'local_checkpoint'
+                });
+                return;
+            } catch (err) {
+                setSaveError(err?.message || 'Revert failed');
+                manageErrors(err);
+                return;
+            }
+        }
+
         try {
             const response = await axios.get(`http://localhost:8000/flows/${flow_id}`);
             const snapshot = parseFlowSnapshot(response.data.flow_json);
-            const name = response.data.flow_name;
-            setFlowType(response.data.flow_type || 'manual');
-            syncActiveFlowType(response.data.flow_type || 'manual');
-            applySnapshotToWorkspace(snapshot, name);
-            recordActivity({
-                type: 'revert_snapshot_restored',
-                title: 'Reverted workspace',
-                summary:
-                    'Restored the last persisted workspace snapshot. The revert was kept in activity.',
-                metadata: {
-                    restored_from: 'backend'
-                }
+            await restoreSnapshotAndPersist({
+                snapshot,
+                name: response.data.flow_name,
+                type: response.data.flow_type || 'manual',
+                restoredFrom: 'backend'
             });
-            const revertedSnapshot = {
-                ...snapshot,
-                activity_events: useActivityStore.getState().activities,
-                automations: useAutomationStore.getState().automations
-            };
-            await saveFlowCall(name, revertedSnapshot);
-            setSavedSnapshot(
-                revertedSnapshot,
-                stringifyFlowSnapshot(revertedSnapshot),
-                name,
-                response.data.flow_type || 'manual'
-            );
             return;
         } catch (err) {
-            applySnapshotToWorkspace(lastSavedSnapshot, lastSavedFlowName);
-            recordActivity({
-                type: 'revert_snapshot_restored',
-                title: 'Reverted workspace',
-                summary:
-                    'Restored the last local saved snapshot. The revert was kept in activity.',
-                metadata: {
-                    restored_from: 'local'
-                }
+            await restoreSnapshotAndPersist({
+                snapshot: lastSavedSnapshot,
+                name: lastSavedFlowName,
+                type: lastSavedFlowType,
+                restoredFrom: 'local'
             });
-            const revertedSnapshot = {
-                ...lastSavedSnapshot,
-                activity_events: useActivityStore.getState().activities,
+        }
+    };
+
+    const clearWorkspace = async () => {
+        if (!flow_id || saveStatus === 'saving') {
+            return;
+        }
+
+        const hasWorkspaceContent =
+            nodes.length > 0 ||
+            edges.length > 0 ||
+            sourceLibrary.length > 0 ||
+            aiActionRuns.length > 0 ||
+            activityEvents.length > 0;
+        if (!hasWorkspaceContent) {
+            setIsUtilityMenuOpen(false);
+            return;
+        }
+
+        const confirmed = window.confirm(
+            'Clear this workspace? This removes the map, sources, AI draft history, activity history, and package metadata from this workspace. The workspace name and automations stay.'
+        );
+        if (!confirmed) {
+            return;
+        }
+
+        clearTimeout(autosaveTimerRef.current);
+        setIsUtilityMenuOpen(false);
+        setSaveStatus('saving');
+        pushNode(LoadingModal);
+
+        const resetEvent = {
+            type: 'workspace_reset',
+            title: 'Cleared workspace',
+            summary: 'Cleared workspace content, sources, AI history, and activity history.',
+            detail: 'Cleared workspace content, sources, AI history, and activity history.',
+            context: 'Cleared workspace content, sources, AI history, and activity history.',
+            metadata: {
+                previous_nodes: nodes.length,
+                previous_edges: edges.length,
+                previous_sources: sourceLibrary.length,
+                previous_ai_action_runs: aiActionRuns.length,
+                previous_activity_events: activityEvents.length
+            }
+        };
+
+        try {
+            setNodes([]);
+            setEdges([]);
+            setWorkspaceBrief({});
+            setSourceLibrary([]);
+            clearWorkspaceAIState();
+            setSelectedBranchId(undefined);
+            setInspectorNodeId(undefined);
+            setActivityEvents([], flow_id);
+            recordActivity(resetEvent);
+            const resetSnapshot = createFlowSnapshot({
+                flowObject: { viewport: {}, nodes: [], edges: [] },
+                nodes: [],
+                edges: [],
+                viewport: {},
+                mapStyle,
+                workspaceBrief: {},
+                sourceLibrary: [],
+                activityEvents: useActivityStore.getState().activities,
+                aiActionRuns: [],
                 automations: useAutomationStore.getState().automations
-            };
-            await saveFlowCall(lastSavedFlowName, revertedSnapshot);
+            });
+            await saveFlowCall(flow_name, resetSnapshot);
             setSavedSnapshot(
-                revertedSnapshot,
-                stringifyFlowSnapshot(revertedSnapshot),
-                lastSavedFlowName,
-                lastSavedFlowType
+                resetSnapshot,
+                stringifyFlowSnapshot(resetSnapshot),
+                flow_name,
+                flow_type,
+                { checkpoint: false }
             );
+        } catch (err) {
+            setSaveError(err?.message || 'Clear workspace failed');
+            manageErrors(err);
+        } finally {
+            popNode();
         }
     };
 
@@ -1560,6 +1668,14 @@ const Header = ({
                                 disabled={!canRevert}
                             >
                                 Revert
+                            </button>
+                            <button
+                                type="button"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={clearWorkspace}
+                                disabled={!hasWorkspace || saveStatus === 'saving'}
+                            >
+                                Clear workspace
                             </button>
                             <button type="button" onClick={openHelp}>
                                 Help

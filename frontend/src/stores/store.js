@@ -378,6 +378,9 @@ const useStore = create((set, get) => ({
         delete next[key];
         set({ generatedHelperPreviews: next });
     },
+    clearGeneratedHelperPreviews: () => {
+        set({ generatedHelperPreviews: {} });
+    },
     setActiveAIActionPreview: (preview) => {
         set({
             activeAIActionPreview: preview || undefined,
@@ -405,6 +408,15 @@ const useStore = create((set, get) => ({
     },
     clearActiveAIDraftSession: () => {
         set({ activeAIDraftSession: undefined });
+    },
+    clearWorkspaceAIState: () => {
+        set({
+            pendingSourceDraft: undefined,
+            generatedHelperPreviews: {},
+            activeAIActionPreview: undefined,
+            activeAIDraftSession: undefined,
+            aiActionRuns: []
+        });
     },
     setAIActionRuns: (runs = []) => {
         set({ aiActionRuns: normalizeAIActionRuns(runs) });
