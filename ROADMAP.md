@@ -653,6 +653,24 @@ Projection and graph work:
 - [x] Add package projection helpers that build the following from accepted
   nodes/artifacts: dependency graph, process graph, evidence graph, data graph,
   and action graph.
+- [x] Promote Connected Picture Packages from preview artifacts to a
+  first-class frontend projection input after accept. Package-capable views
+  must prefer strict package metadata (`relationship_edges`, `view_lenses`,
+  `structured_evidence`, `repair_targets`, `acceptance_groups`) before
+  reconstructing meaning from accepted nodes, edges, or generated artifacts.
+- [x] Extract a canonical frontend package normalizer from
+  `ConnectedPackagePreview.jsx` into `frontend/src/connected-package/`, then
+  reuse it for preview, accepted-package discovery, projections, and tests.
+- [x] Add accepted-package discovery selectors that bridge existing storage
+  before any backend persistence migration: accepted draft artifacts,
+  node-attached `generated_artifacts`, session/activity metadata, and any
+  already accepted package artifact metadata.
+- [x] Add package-first projection helpers for table, flow, chart/Sankey,
+  evidence, tasks, review, and relationship surfaces, with legacy node/artifact
+  projections retained as fallback paths.
+- [x] Wire `LocalViewsPanel` and `CanvasStructuredView` to prefer active
+  accepted package projections, proving the package-first pattern before
+  broadening it to every downstream view.
 - [x] Expand Sankey projection beyond structured rows to support:
   source-to-claim, source-to-node, node-to-output, dependency, handoff,
   owner/status, risk/mitigation, and evidence-flow paths.
@@ -674,10 +692,14 @@ Acceptance criteria:
   public/code/reference claim is either web-cited or marked `needs_review`.
 - [x] A package can be accepted partially without losing source refs or
   package/lens metadata.
-- [ ] Accepted package content appears coherently in Map, Connections,
+- [x] Accepted package content appears coherently in Map, Connections,
   Flowchart, Table, Chart/Sankey, Evidence/Review, and Tasks where applicable.
-  Projection helpers and e2e coverage exist; final view consumption polish
-  remains.
+  Projection helpers and connected package e2e coverage verify the package-first
+  path with legacy fallback retained.
+- [x] Accepted package views do not flatten the package back into generic graph
+  content when a strict package artifact exists; package metadata is the first
+  projection source and legacy graph/node/artifact projections are compatibility
+  fallbacks.
 - [x] Correcting one evidence item can attach an uploaded source, selected
   source, pasted URL, or web/current citation without regenerating unrelated
   package parts.

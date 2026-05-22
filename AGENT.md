@@ -43,9 +43,10 @@ review package, roadmap, source coverage report, and controlled handoff output.
 - Support import/sync only after internal node IDs and external refs are stable
 
 ## OpenAI Direction
-- Preferred user-selectable models: `gpt-5.4`, `gpt-5.5`
-- Default generation model: `gpt-5.5`
+- Preferred user-selectable models: `gpt-5.4-mini`, `gpt-5.4`, `gpt-5.5`
+- Default generation model: `gpt-5.4`
 - Default reasoning/support model: `gpt-5.4`
+- Default context/speed model: `gpt-5.4-mini`
 - Target API direction: migrate legacy assistant-style flows toward modern OpenAI Responses-based patterns incrementally, not in a destabilizing rewrite
 
 ## Context Discipline

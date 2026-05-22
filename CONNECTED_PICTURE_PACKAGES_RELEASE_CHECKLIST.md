@@ -26,8 +26,9 @@ and block bulk readiness when required.
 | Backend artifact schema | `backend/ai/schemas.py`, `backend/tests/test_ai_artifact_outputs.py` | `connected_picture_package` is a registered artifact type with strict fields, source refs, assumptions, review state, and no extra shape drift. | Implemented in active worktree; targeted backend schema tests passed in handoff. |
 | AI draft session normalization | `frontend/src/utils/aiDraftSessions.js`, `frontend/src/utils/aiDraftArtifacts.js`, `frontend/tests/aiDraftSessions.test.mjs` | Package artifacts become selectable draft items and selected package item acceptance stays review-first. | Implemented in active worktree; frontend draft-session package tests passed in handoff. |
 | Review UI surface | `frontend/src/global-components/AiDraftSessionPanel.jsx`, `frontend/src/connected-package/ConnectedPackagePreview.jsx` | Draft revisions can show the connected package preview with overview, graph, connections, flow, table, chart, evidence, tasks, and review tabs. | Implemented. It supports backend/session package payloads and clearly needs visual signoff where mock fallback is used. |
+| First-class package projection input | `frontend/src/connected-package/`, `frontend/src/views/projections/`, `frontend/src/views/CanvasStructuredView.jsx`, `frontend/src/views/LocalViewsPanel.jsx` | After accept, package-capable views prefer strict connected package metadata over reconstructing meaning from accepted nodes/edges/artifacts. | Implemented in frontend bridge. Canonical model, accepted selectors, projection helpers, and LocalViewsPanel/CanvasStructuredView wiring are covered by unit and connected Playwright gates. |
 | Source and repair review | Source draft review, source reconciliation, review tray routes | Missing refs, inferred relationships, owner gaps, and repair targets remain explicit before acceptance. | Implemented for targeted item repair and trust badges; Playwright visual pass still open. |
-| Map and lens readability | Map readability, relationship lenses, Sankey/chart lens lanes | Package graph, relationship labels, table, chart, and Sankey-style flow lenses do not compete with the canonical mind map. | Projection helpers and Sankey expansions implemented; final UI consumption and screenshot signoff remain open. |
+| Map and lens readability | Map readability, relationship lenses, Sankey/chart lens lanes | Package graph, relationship labels, table, chart, and Sankey-style flow lenses do not compete with the canonical mind map. | Package-first UI consumption is implemented for the main post-accept views; screenshot signoff remains open. |
 | Export and handoff readiness | Structured outputs, Miro/monday handoff lanes | Accepted package artifacts can feed implementation handoff candidates without bypassing review state. | Backend package projection helpers exist; export/handoff release verification remains open. |
 | Release documentation | This checklist | Open risks, tests, manual QA, screenshots, and merge readiness are explicit. | Updated after A-E handoffs. |
 
@@ -41,10 +42,17 @@ and block bulk readiness when required.
 | Bulk readiness rules are not yet proven end to end. | Repair targets or uncited items could be accepted without visible gating. | Add or identify browser coverage for repair-target blocking, or keep bulk accept gated/manual. |
 | Screenshot coverage for the new package tabs is not yet committed. | Layout regressions could ship in the review tray, narrow shell, or desktop viewport. | Capture package preview screenshots at desktop and narrow widths before merge. |
 | Export/handoff path is not verified for accepted packages. | Users could accept a package but fail to export or hand it off consistently. | Run accepted-artifact persistence/export checks or mark export/handoff as deferred. |
+| Backend direct `connected_packages: []` persistence is not yet decided. | The frontend bridge discovers accepted packages from artifacts and metadata; a later backend schema migration may still be useful for simpler persistence and export APIs. | Defer until export/handoff requirements are settled. Do not block the current frontend package-first release gate on this migration. |
 
 ## Automated Verification
 
 Run these commands from `C:\Users\brmiller\source\repos\bmiller346\MindMapWizard\GenAIMindMapFlowBuilder` unless noted.
+
+### P6 Regression Evidence - 2026-05-21
+
+- `cd frontend; node --test tests/aiDraftSessions.test.mjs tests/graphProjection.test.mjs tests/acceptedConnectedPackages.test.mjs tests/connectedPackageModel.test.mjs tests/connectedPackageProjections.test.mjs` - Passed, 93 tests. Covers canonical package draft item normalization, accepted package discovery from node-attached and accept/activity artifacts, package projection bundle helpers, package-first table/flowchart/Sankey/relationship/evidence/task rows, and legacy non-package fallback.
+- `cd frontend; npm run build` - Passed. Vite reported the existing large chunk warning for `plotly-DSp4kEVb.js`.
+- `cd frontend; CI=1 PLAYWRIGHT_DEV_PORT=5191 npx playwright test tests/e2e/connected-picture-package-integration.spec.js --workers=1` - Passed. The fixture now persists a strict accepted connected package artifact through activity metadata and node-attached artifacts, then verifies Map, Flowchart, Table/Sankey lens, Evidence, and Tasks after acceptance.
 
 ### Required Before Merge
 
@@ -90,6 +98,9 @@ edges, and at least one item with missing source support.
   nodes/edges appear only after acceptance.
 - Save and reopen the workspace; confirm accepted package artifacts, accepted
   graph nodes/edges, activity history, and review state persist.
+- After accept, open Map, Connections, Flowchart, Table, Chart/Sankey,
+  Evidence/Review, and Tasks. Confirm package-backed views use strict package
+  metadata where available rather than only node-derived projections.
 - Reject or close a package draft; confirm canonical nodes, edges, and accepted
   artifacts do not change.
 - Verify the shell bottom review tray/right rail behavior remains consistent:
@@ -130,8 +141,9 @@ Visual checks:
 | Mock fallback policy | Mock preview state is clearly labeled and not used as release proof for backend/session payloads. | Needs visual confirmation. |
 | Source/review safety | Missing citations, assumptions, repair targets, and review states are visible before acceptance. | Ready from targeted trust/source tests; Playwright visual pass still open. |
 | Persistence | Accepted package artifacts and any accepted graph changes survive save/reopen. | Ready from E handoff; rerun connected e2e before merge. |
+| Package-first post-accept views | `LocalViewsPanel` and `CanvasStructuredView` prefer accepted connected package projections and keep legacy node/artifact projections as fallback. | Ready. Unit projection gates and connected Playwright pass after the structured-view dock fix. |
 | Screenshots | Required desktop, narrow, and shell review screenshots are captured and reviewed. | Open |
-| Build and smoke | Required commands pass on the release branch after active feature lanes land. | Targeted handoff commands passed; final combined rerun still open. |
+| Build and smoke | Required commands pass on the release branch after active feature lanes land. | Unit, build, and connected package Playwright passed on 2026-05-21. |
 | Release notes | Notes distinguish preview-only behavior, deferred export/handoff work, and unverified live provider paths. | Open |
 
 ## Release Notes Draft Points
@@ -144,3 +156,6 @@ Visual checks:
   unless export/handoff persistence is verified in the same merge.
 - Sankey/chart/table/package tabs are lenses over accepted or reviewable package
   data; the canonical workspace graph remains the source of truth.
+- After acceptance, package-capable views should use connected package metadata
+  first. Node, edge, and generated-artifact projections remain compatibility
+  fallbacks for older drafts and non-package Ask AI flows.
